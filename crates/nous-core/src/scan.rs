@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 use crate::frontmatter;
 use crate::link::{LinkKind, LinkRecord};
+use crate::search_text::{SourceMap, TextKind};
 use crate::tag;
 
 fn wiki_regex() -> &'static Regex {
@@ -45,6 +46,8 @@ pub(crate) struct ScannedMarkdown {
     /// 全文索引用正文纯文本：frontmatter、HTML、数学与链接 URL 除外，
     /// 代码块内容计入（对齐 Obsidian 的搜索范围）。
     pub body_text: String,
+    /// 正文到原始源码的范围与章节边界，跟随正文在同一次解析中生成。
+    pub source_map: SourceMap,
     /// frontmatter 与行内标签合并后的规范化标签（小写、无 `#`、去重）。
     pub tags: Vec<String>,
     /// frontmatter 属性行 `(key, value)`；key 保留原文大小写。
@@ -58,6 +61,7 @@ impl ScannedMarkdown {
             links: Vec::new(),
             headings: Vec::new(),
             body_text: String::new(),
+            source_map: SourceMap::default(),
             tags: Vec::new(),
             attributes: Vec::new(),
         }
@@ -98,7 +102,10 @@ pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
     collect_wiki(from_path, source, &excluded, &mut links);
     links.sort_by_key(|link| link.start_byte);
 
-    let mut structure = Structure::default();
+    let mut structure = Structure {
+        source_map: SourceMap::new(source),
+        ..Structure::default()
+    };
     collect_structure(&tree, source, &mut structure);
     let wiki_ranges: Vec<Range<usize>> = links
         .iter()
@@ -130,6 +137,7 @@ pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
         links,
         headings: structure.headings,
         body_text: structure.body,
+        source_map: structure.source_map,
         tags,
         attributes,
     }
@@ -140,6 +148,7 @@ pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
 struct Structure {
     headings: Vec<HeadingScan>,
     body: String,
+    source_map: SourceMap,
     frontmatter: Option<String>,
     /// `Text` 节点的源字节区间；行内标签按原文提取，实体转义不会被误解码。
     text_ranges: Vec<Range<usize>>,
@@ -165,16 +174,17 @@ fn collect_structure(node: &Node, source: &str, out: &mut Structure) {
         | Node::Image(_)
         | Node::ImageReference(_) => return,
         Node::Code(code) => {
-            out.body.push_str(&code.value);
+            append_search_text(node, &code.value, source, TextKind::Code, out);
             out.body.push('\n');
             return;
         }
         Node::InlineCode(code) => {
-            out.body.push_str(&code.value);
+            let value = code.value.replace("\r\n", " ").replace(['\r', '\n'], " ");
+            append_search_text(node, &value, source, TextKind::InlineCode, out);
             return;
         }
         Node::Text(text) => {
-            out.body.push_str(&text.value);
+            append_search_text(node, &text.value, source, TextKind::Text, out);
             if let Some(position) = &text.position {
                 let start = position.start.offset.min(source.len());
                 let end = position.end.offset.min(source.len()).max(start);
@@ -183,6 +193,7 @@ fn collect_structure(node: &Node, source: &str, out: &mut Structure) {
             return;
         }
         Node::Heading(heading) => {
+            out.source_map.sections.push(out.body.len());
             if let Some(record) = heading_record(heading) {
                 out.headings.push(record);
             }
@@ -208,6 +219,20 @@ fn collect_structure(node: &Node, source: &str, out: &mut Structure) {
                 _ => {}
             }
         }
+    }
+}
+
+fn append_search_text(node: &Node, value: &str, source: &str, kind: TextKind, out: &mut Structure) {
+    if let Some(position) = node.position() {
+        out.source_map.append(
+            &mut out.body,
+            value,
+            source,
+            position.start.offset..position.end.offset,
+            kind,
+        );
+    } else {
+        out.body.push_str(value);
     }
 }
 

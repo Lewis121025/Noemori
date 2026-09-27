@@ -1,4 +1,5 @@
 import { HISTORY_LIMIT, type HistoryEntry, type SessionHistory } from "../../shared/session";
+import { parseReadingBookmark } from "../../shared/reading-position";
 
 /** 会话内的阅读栈条目：持久化形态加上滚动位置（只对本次运行有意义）。 */
 export type ReadingStep = HistoryEntry & { scrollTop: number | null };
@@ -7,25 +8,29 @@ export type ReadingStep = HistoryEntry & { scrollTop: number | null };
 export type ScrollBridge = {
   /** 离开文档前记录滚动位置；容器缺席时返回 null。 */
   capture: () => number | null;
-  /** 回到文档后恢复滚动位置。 */
-  apply: (top: number) => void;
+  /** 新导航提交后、挂载目标前归零，随后显式标题或搜索定位可以覆盖起点。 */
+  reset: () => void;
+  /** 回到文档后恢复滚动位置；异步布局完成后才结束导航门禁。 */
+  apply: (top: number) => void | Promise<void>;
 };
 
 /**
  * 阅读栈：文档导航的后退/前进双栈。
  *
  * 语义与浏览器一致：新导航清空前进栈；后退把当前位置压入前进栈。
- * 滚动位置只在会话内恢复，持久化形态只保留路径与锚点（重启后布局
- * 与滚动值不再可靠，锚点是稳定的落点）。
+ * 正文锚点跨视图与重启恢复；无文本锚点的表面仅在当前会话保留像素滚动。
  */
 export class ReaderHistory {
   private backward = $state<ReadingStep[]>([]);
   private forward = $state<ReadingStep[]>([]);
   private scroll: ScrollBridge | null = null;
 
-  /** 绑定滚动容器；未绑定时条目不携带滚动位置。 */
-  attachScroll(scroll: ScrollBridge): void {
+  /** 绑定滚动容器；返回的解绑函数只释放本次绑定，未绑定时不捕获位置。 */
+  attachScroll(scroll: ScrollBridge): () => void {
     this.scroll = scroll;
+    return () => {
+      if (this.scroll === scroll) this.scroll = null;
+    };
   }
 
   /** 是否可后退。 */
@@ -40,6 +45,11 @@ export class ReaderHistory {
   /** 捕获当前位置为完整条目（含滚动）。 */
   captureStep(entry: HistoryEntry): ReadingStep {
     return { ...entry, scrollTop: this.scroll?.capture() ?? null };
+  }
+
+  /** 新文档从开头展示；只在加载成功后的新导航中调用，重载与改名保留原位置。 */
+  resetScroll(): void {
+    this.scroll?.reset();
   }
 
   /** 新导航入栈：清空前进栈，超限丢最旧。 */
@@ -70,9 +80,11 @@ export class ReaderHistory {
     this.backward = [...this.backward, current].slice(-HISTORY_LIMIT);
   }
 
-  /** 按当前滚动位置恢复条目；无值时不动滚动。 */
-  applyScroll(step: ReadingStep): void {
-    if (step.scrollTop !== null) this.scroll?.apply(step.scrollTop);
+  /** 恢复离开时的阅读位置；没有现场记录或滚动容器时返回 false，供导航回退到锚点。 */
+  async applyScroll(step: ReadingStep): Promise<boolean> {
+    if (step.scrollTop === null || this.scroll === null) return false;
+    await this.scroll.apply(step.scrollTop);
+    return true;
   }
 
   /**
@@ -101,10 +113,13 @@ export class ReaderHistory {
     this.forward = [];
   }
 
-  /** 持久化快照：剥离滚动位置。 */
+  /** 持久化快照：剥离像素滚动，并将响应式正文锚点复制为可跨 IPC 的普通数据。 */
   snapshot(): SessionHistory {
     const strip = (steps: ReadingStep[]): HistoryEntry[] =>
-      steps.map(({ path, anchor }) => ({ path, anchor }));
+      steps.map(({ path, anchor, position }) => {
+        const saved = parseReadingBookmark(position);
+        return { path, anchor, ...(saved === null ? {} : { position: saved }) };
+      });
     return { back: strip(this.backward), forward: strip(this.forward) };
   }
 

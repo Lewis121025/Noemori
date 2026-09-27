@@ -1,6 +1,44 @@
 import { decodeString } from "micromark-util-decode-string";
 
 /**
+ * 逐字验证代码正文到源码的映射；代码里的实体和转义必须保持字面。
+ * @param raw 解析器给出的完整代码范围，可能包含围栏、缩进和引用前缀。
+ * @param value 解析器确认的代码正文。
+ * @param inline 是否为行内代码；其换行在显示文本中折为空格。
+ * @returns UTF-16 文本边界对应的源码偏移；无法验证时返回 null。
+ */
+export function sourceCodeOffsets(
+  raw: string,
+  value: string,
+  inline: boolean,
+): Array<number | null> | null {
+  let input = 0;
+  if (inline) input = /^`+/.exec(raw)?.[0].length ?? 0;
+  else if (/^(?:`{3,}|~{3,})/.test(raw)) input = raw.search(/[\r\n]/) + 1;
+  const direct = raw.indexOf(value, input);
+  if (direct >= 0 && value !== "")
+    return Array.from({ length: value.length + 1 }, (_, index) => direct + index);
+  const offsets: Array<number | null> = [];
+  let output = 0;
+  let lineStart = true;
+  while (input < raw.length && output < value.length) {
+    const token = raw.startsWith("\r\n", input) ? "\r\n" : raw[input];
+    if (token === undefined) return null;
+    const decoded = /[\r\n]/.test(token) ? (inline ? " " : "\n") : token;
+    if (value.startsWith(decoded, output)) {
+      offsets[output] = input;
+      input += token.length;
+      output += decoded.length;
+      offsets[output] = input;
+      lineStart = decoded === "\n";
+    } else if ((lineStart && /[ \t>]/.test(token)) || (inline && output === 0 && decoded === " "))
+      input += token.length;
+    else return null;
+  }
+  return output === value.length ? offsets : null;
+}
+
+/**
  * 取得节点首行之前的语法前缀，供嵌套结构生成续行。
  * @param source 包含 BOM 的完整源码。
  * @param at 已由解析器确认的节点起点，采用 UTF-16。

@@ -94,7 +94,7 @@ async function start(): Promise<void> {
   await vi.waitFor(() => {
     flushSync();
     expect(target.querySelector(".ProseMirror")).not.toBeNull();
-    expect(target.querySelector(".panes")?.hasAttribute("inert")).toBe(false);
+    expect(target.querySelector("section[data-pane]")?.hasAttribute("inert")).toBe(false);
   });
 }
 

@@ -85,6 +85,7 @@ beforeEach(() => {
     sessionSetDocuments: vi.fn(async () => {}),
     sessionSetViewModes: vi.fn(async () => {}),
     sessionSetRecentFiles: vi.fn(async () => {}),
+    sessionSetFileTree: vi.fn(async () => {}),
     sessionGetPanes: vi.fn(async () => ({ ...emptyReaderSession })),
     sessionSetPanes: vi.fn(async () => {}),
     linksResolve: vi.fn(async () => ({ status: "dead" as const })),
@@ -93,7 +94,8 @@ beforeEach(() => {
     indexLinksFrom: vi.fn(async () => []),
     indexMentionsTo: vi.fn(async () => ({ linked: [], unlinked: [] })),
     mentionsLinkify: vi.fn(async () => ({ warning: null })),
-    searchQuery: vi.fn(async () => []),
+    searchQuery: vi.fn(async () => ({ hits: [], nextCursor: null })),
+    searchCancel: vi.fn(async () => {}),
     indexHeadings: vi.fn(async () => []),
     indexTags: vi.fn(async () => []),
     indexNoteKeys: vi.fn(async () => []),
@@ -151,7 +153,7 @@ async function start(): Promise<void> {
   await vi.waitFor(() => {
     flushSync();
     expect(target.querySelector(".ProseMirror")).not.toBeNull();
-    expect(target.querySelector(".panes")?.hasAttribute("inert")).toBe(false);
+    expect(target.querySelector("section[data-pane]")?.hasAttribute("inert")).toBe(false);
   });
 }
 
@@ -1158,7 +1160,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     remembered.resolve();
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector(".panes")?.hasAttribute("inert")).toBe(false);
+      expect(target.querySelector("section[data-pane]")?.hasAttribute("inert")).toBe(false);
     });
   });
 });

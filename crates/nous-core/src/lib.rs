@@ -22,6 +22,9 @@ mod rewrite;
 mod save;
 mod scan;
 mod search;
+mod search_control;
+mod search_index;
+mod search_text;
 mod tag;
 mod vault;
 mod watch;
@@ -29,7 +32,7 @@ mod wiki;
 
 pub use attachments::{ImportedAttachment, MAX_ATTACHMENT_BYTES};
 pub use bookmarks::Bookmark;
-pub use entries::{EntryKind, VaultEntry};
+pub use entries::{EntryKind, EntryMutation, VaultEntry};
 pub use error::Error;
 pub use graph::{Graph, GraphEdge, GraphNode};
 pub use identity::NoteKeys;
@@ -38,8 +41,12 @@ pub use link::{LinkKind, LinkRecord, LinkResolution, LinkTarget};
 pub use mention::{MentionKind, MentionRecord, Mentions};
 pub use pathutil::path_to_slashes;
 pub use recovery::Draft;
-pub use rename::RenameOutcome;
+pub use rename::{RenameBatchIssue, RenameBatchOutcome, RenameOutcome};
 pub use save::{FileSnapshot, SavedCopy, WriteOutcome};
-pub use search::{SearchExpr, SearchHit, SearchQuery, SNIPPET_END, SNIPPET_START};
+pub use search::{
+    SearchExpr, SearchHit, SearchLocation, SearchMatch, SearchMatchesPage, SearchPage, SearchQuery,
+    SNIPPET_END, SNIPPET_START,
+};
+pub use search_control::SearchCancellation;
 pub use vault::Vault;
 pub use watch::{start_watch, WatchHandle};

@@ -62,10 +62,10 @@ export class SourceNodeView implements NodeView {
     this.dom.dataset[this.sourceKey] = this.source;
     this.dom.dataset[`${preview.kind}Display`] = String(this.display);
     this.dom.contentEditable = "false";
-    this.dom.title = "双击或选中后按 Enter 编辑，Esc 返回正文";
     if (decorations.some((decoration) => decoration.spec["sourceEditing"] === true))
       this.startEditing();
     else this.render();
+    this.syncAccess();
   }
 
   selectNode(): void {
@@ -78,7 +78,7 @@ export class SourceNodeView implements NodeView {
   }
 
   private startEditing(): void {
-    if (this.sourceEl !== null) return;
+    if (this.sourceEl !== null || !this.view.editable) return;
     // 块级预览切换为源码时保留原占位，避免后续正文突然向上跳动。
     if (this.display) this.dom.style.minHeight = `${this.dom.getBoundingClientRect().height}px`;
     this.cancelPreview();
@@ -129,7 +129,15 @@ export class SourceNodeView implements NodeView {
       this.sizeField();
     } else if (this.sourceEl !== null) this.stopEditing();
     else if (changed) this.render();
+    this.syncAccess();
     return true;
+  }
+
+  private syncAccess(): void {
+    if (this.view.editable) this.dom.title = "双击或选中后按 Enter 编辑，Esc 返回正文";
+    else this.dom.removeAttribute("title");
+    const empty = this.dom.querySelector<HTMLButtonElement>(".source-empty");
+    if (empty !== null) empty.disabled = !this.view.editable;
   }
 
   private sizeField(): void {
@@ -164,7 +172,7 @@ export class SourceNodeView implements NodeView {
       button.textContent = `补充${SOURCE_LABEL[this.preview.kind]}`;
       button.onclick = () => {
         const pos = this.getPos();
-        if (pos === undefined || this.view.isDestroyed) return;
+        if (pos === undefined || this.view.isDestroyed || !this.view.editable) return;
         this.view.dispatch(
           this.view.state.tr
             .setSelection(NodeSelection.create(this.view.state.doc, pos))

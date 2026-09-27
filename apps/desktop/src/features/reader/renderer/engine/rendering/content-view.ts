@@ -1,5 +1,5 @@
 /**
- * 笔记嵌入：只读渲染目标笔记或其中一节，不把对方正文写进当前文档。
+ * 正文、笔记嵌入与悬停预览共享节点渲染；嵌入不把目标内容写入宿主文档。
  *
  * 嵌套控制在这一层执行（解析层始终产出完整结构）：
  *
@@ -8,16 +8,61 @@
  *
  * 两种情况都渲染占位说明而不是静默截断，标题按钮始终可以打开原文。
  * 编辑器视图在确认节点仍挂载后才创建，卸载发生在读取期间就不会留下游离视图。
- * 嵌套内容只注册嵌入视图：图片、公式等按 schema 的 DOM 回退渲染，
- * 与嵌入功能引入前的行为一致。
  */
 
 import type { Node as PmNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { EditorView, type NodeViewConstructor } from "prosemirror-view";
-import type { MediaIo } from "../media/media";
+import { resolveMediaUrl, type MediaIo } from "../media/media";
 import { parseMarkdown } from "../markdown/parse";
 import { sliceEmbed } from "../navigation/block-anchor";
+import { documentAccess } from "../editing/read-only";
+import { linkInteraction, type OpenContentLink } from "../editing/link-interaction";
+import { mathNodeViews } from "./math-view";
+import { createHtmlNodeViews } from "./html-view";
+import { createImageNodeViews } from "./image-view";
+import { createPdfNodeViews } from "./pdf-view";
+import { createPlayerNodeViews } from "./media-view";
+import { taskItemView } from "./task-view";
+import {
+  calloutNodeViews,
+  calloutRevealPlugin,
+  commentNodeViews,
+  createCodeBlockViews,
+  footnoteNavigation,
+} from "./dialect-view";
+import "../../styles/content.css";
+
+/**
+ * 装配完整内容渲染器；资源与链接始终以该表面的笔记路径为基准。
+ * @param from 当前内容所属的库内路径。
+ * @param openLink 带来源路径的导航回调，保留宿主的死链、歧义与版本检查。
+ * @param io 库内媒体访问能力；节点负责释放资源和取消过期渲染。
+ * @param depth 嵌入深度，正文为 0。
+ * @param chain 已展开路径，用于循环检测。
+ * @returns 正文与只读预览共用的节点视图集合。
+ */
+export function createContentNodeViews(
+  from: string,
+  openLink: OpenContentLink,
+  io: MediaIo,
+  depth = 0,
+  chain: readonly string[] = [from],
+): Record<string, NodeViewConstructor> {
+  const open = (kind: "wiki" | "md", raw: string) => openLink(kind, raw, from);
+  return {
+    list_item: taskItemView,
+    ...mathNodeViews,
+    ...commentNodeViews,
+    ...calloutNodeViews,
+    ...createCodeBlockViews(),
+    ...createHtmlNodeViews((src) => resolveMediaUrl(from, src, "md", io)),
+    ...createImageNodeViews((src, kind) => resolveMediaUrl(from, src, kind, io)),
+    ...createPdfNodeViews(from, open, io),
+    ...createPlayerNodeViews(from, io),
+    ...createNoteEmbedViews(from, openLink, io, depth, chain),
+  };
+}
 
 /** 嵌入嵌套上限（宿主文档的直接嵌入算第 1 层）。 */
 export const EMBED_DEPTH_LIMIT = 3;
@@ -36,8 +81,8 @@ export type NotePreviewRequest = {
   /** 标题或 `^块` 锚点；整篇为 null。 */
   anchor: string | null;
   /** 打开嵌套嵌入标题时沿用工作区的链接处理。 */
-  openLink: (kind: "wiki" | "md", raw: string) => void;
-  io: Pick<MediaIo, "resolveLink" | "readFile">;
+  openLink: OpenContentLink;
+  io: MediaIo;
   /** 宿主视图自身的嵌套深度。 */
   depth: number;
   /** 已解析的祖先路径链（含宿主），用于环检测。 */
@@ -53,7 +98,7 @@ export function mountNotePreview(
   body: HTMLElement,
   request: NotePreviewRequest,
 ): { destroy: () => void } {
-  const nested: { view: EditorView | null } = { view: null };
+  let view: EditorView | null = null;
   let cancelled = false;
   void loadEmbed(request, () => cancelled).then((loaded) => {
     if (loaded === null || cancelled) return;
@@ -62,10 +107,19 @@ export function mountNotePreview(
       return;
     }
     body.textContent = "";
-    nested.view = new EditorView(body, {
-      state: EditorState.create({ doc: loaded.doc }),
-      editable: () => false,
-      nodeViews: createNoteEmbedViews(
+    view = new EditorView(body, {
+      // 悬停事件会冒泡到宿主；路径归属必须留在各自的内容根节点上。
+      attributes: { "data-content-path": loaded.path },
+      state: EditorState.create({
+        doc: loaded.doc,
+        plugins: [
+          documentAccess(true),
+          linkInteraction((kind, raw) => request.openLink(kind, raw, loaded.path)),
+          calloutRevealPlugin(),
+          footnoteNavigation(),
+        ],
+      }),
+      nodeViews: createContentNodeViews(
         loaded.path,
         request.openLink,
         request.io,
@@ -77,8 +131,8 @@ export function mountNotePreview(
   return {
     destroy() {
       cancelled = true;
-      nested.view?.destroy();
-      nested.view = null;
+      view?.destroy();
+      view = null;
     },
   };
 }
@@ -93,12 +147,12 @@ export function mountNotePreview(
  * @param chain 已解析的祖先路径链（含宿主），用于环检测。
  * @returns 不修改宿主文档的节点视图。
  */
-export function createNoteEmbedViews(
+function createNoteEmbedViews(
   from: string,
-  openLink: (kind: "wiki" | "md", raw: string) => void,
-  io: Pick<MediaIo, "resolveLink" | "readFile">,
-  depth: number = 0,
-  chain: readonly string[] = [from],
+  openLink: OpenContentLink,
+  io: MediaIo,
+  depth: number,
+  chain: readonly string[],
 ): Record<string, NodeViewConstructor> {
   return {
     note_embed(node) {
@@ -116,7 +170,7 @@ export function createNoteEmbedViews(
       header.type = "button";
       header.className = "reader-button";
       header.textContent = alias !== "" ? alias : raw;
-      header.addEventListener("click", () => openLink("wiki", raw));
+      header.addEventListener("click", () => openLink("wiki", raw, from));
       const body = document.createElement("div");
       body.style.marginTop = "0.35rem";
       body.textContent = "正在嵌入…";

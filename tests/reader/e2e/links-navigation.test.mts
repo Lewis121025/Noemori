@@ -17,7 +17,10 @@ test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与�
   await Promise.all([mkdir(vault, { recursive: true }), mkdir(userData, { recursive: true })]);
   await Promise.all([mkdir(join(vault, "a")), mkdir(join(vault, "b"))]);
   await Promise.all([
-    writeFile(join(vault, "a/foo.md"), "# A Foo\n\n## 深入小节\n\n深入小节的内容。\n"),
+    writeFile(
+      join(vault, "a/foo.md"),
+      "# A Foo\n\n> [!note]- 外层\n>\n> > [!tip]- 内层\n> > ## 深入小节\n> >\n> > 深入小节的内容。\n",
+    ),
     writeFile(join(vault, "b/foo.md"), "# B Foo\n\n乙的内容。\n"),
     writeFile(
       join(vault, "ref.md"),
@@ -68,14 +71,14 @@ test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与�
       page.waitForFunction(
         (expected) =>
           document.querySelector(".document-name")?.textContent === expected &&
-          !document.querySelector(".panes")?.hasAttribute("inert"),
+          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
 
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "ref.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
     // 跨文件锚点：打开目标并把光标定位到标题。
@@ -85,6 +88,9 @@ test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与�
     await page.waitForFunction(() =>
       (document.getSelection()?.anchorNode?.parentElement?.textContent ?? "").includes("深入小节"),
     );
+    expect(await editor.locator(".callout").count()).toBe(2);
+    expect(await editor.locator(".callout.collapsed").count()).toBe(0);
+    expect(await editor.getByRole("heading", { name: "深入小节" }).isVisible()).toBe(true);
 
     // 阅读栈：菜单快捷键后退回到引用页，前进再次回到锚点目标。
     await page.keyboard.press("ControlOrMeta+[");

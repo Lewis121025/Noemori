@@ -61,14 +61,14 @@ export class CoreClient {
   call<C extends CoreCommand>(
     command: C,
     ...args: Parameters<CoreService[C]>
-  ): Promise<ReturnType<CoreService[C]>> {
+  ): Promise<Awaited<ReturnType<CoreService[C]>>> {
     if (this.failure !== null) return Promise.reject(this.failure);
     if (this.stopping !== null) return Promise.reject(new Error("内核正在关闭"));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       this.pending.set(id, {
         // 编号只对应这一条命令，结果类型与调用签名一致。
-        resolve: (value) => resolve(value as ReturnType<CoreService[C]>),
+        resolve: (value) => resolve(value as Awaited<ReturnType<CoreService[C]>>),
         reject,
       });
       const request: CoreRequest<C> = { type: "call", id, command, args };

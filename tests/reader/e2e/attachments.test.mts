@@ -68,7 +68,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       await page.waitForFunction(
         (path) =>
           document.querySelector(".file.active")?.textContent?.trim() === path &&
-          !document.querySelector(".panes")?.hasAttribute("inert"),
+          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
     };

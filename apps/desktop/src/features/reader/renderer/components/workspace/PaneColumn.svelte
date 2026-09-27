@@ -39,12 +39,15 @@
   onMount(() => {
     // 阅读栈的滚动捕获/恢复绑定到本栏滚动区；恢复等待新文档渲染完成，
     // 避免滚动值先被旧内容高度钳制。
-    pane.history.attachScroll({
+    return pane.history.attachScroll({
       capture: () => scrollElement?.scrollTop ?? null,
-      apply: (top) => {
-        void tick().then(() => {
-          if (scrollElement) scrollElement.scrollTop = top;
-        });
+      reset: () => {
+        if (scrollElement) scrollElement.scrollTop = 0;
+      },
+      apply: async (top) => {
+        const epoch = doc.epoch;
+        await tick();
+        if (scrollElement?.isConnected && doc.epoch === epoch) scrollElement.scrollTop = top;
       },
     });
   });
@@ -60,6 +63,7 @@
   data-pane={pane.id}
   onpointerdown={() => workspace.activatePane(pane.id)}
   onfocusin={() => workspace.activatePane(pane.id)}
+  onscrollend={pane.rememberReadingPosition}
 >
   {#if workspace.split}
     <button
@@ -74,12 +78,7 @@
     {#if doc.path !== null}
       <DocumentSurface {workspace} {pane} {mediaIo} />
       {#if scrollElement !== undefined}
-        <HoverPreview
-          host={scrollElement}
-          from={doc.path}
-          io={mediaIo}
-          openLink={(kind, raw) => void pane.openLink(kind, raw)}
-        />
+        <HoverPreview host={scrollElement} from={doc.path} io={mediaIo} openLink={pane.openLink} />
       {/if}
     {:else}
       <div class="welcome">

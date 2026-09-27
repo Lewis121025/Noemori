@@ -1,5 +1,6 @@
 use nous_core::{Error, Vault};
 use rusqlite::{params, Connection};
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -114,6 +115,64 @@ fn folder_failure_at_each_step_or_commit_restores_files_links_and_empty_director
 }
 
 #[test]
+fn failure_across_multiple_staging_groups_restores_every_file_and_directory() {
+    // 八个目标、一个入链更新和八个源删除跨越多组暂存；每个子目录也需要独立同步。
+    for failed_step in 0..=17 {
+        let root = TempDir::new().unwrap();
+        let state = TempDir::new().unwrap();
+        fs::create_dir_all(root.path().join("old/empty/deep")).unwrap();
+        let mut backlinks = String::new();
+        for note in 0..8 {
+            let directory = root.path().join(format!("old/{note}"));
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("note.md"), format!("note {note}\n")).unwrap();
+            writeln!(backlinks, "[{note}](old/{note}/note.md)").unwrap();
+        }
+        fs::write(root.path().join("index.md"), &backlinks).unwrap();
+        let vault = Vault::open(root.path(), state.path()).unwrap();
+        let trigger = if failed_step < 17 {
+            format!("CREATE TRIGGER reject_step BEFORE UPDATE OF started ON rename_steps WHEN NEW.ordinal = {failed_step} AND NEW.started = 1 BEGIN SELECT RAISE(ABORT, 'injected group failure'); END;")
+        } else {
+            "CREATE TRIGGER reject_commit BEFORE UPDATE OF committed ON rename_operation BEGIN SELECT RAISE(ABORT, 'injected group failure'); END;".to_string()
+        };
+        recovery(&state).execute_batch(&trigger).unwrap();
+
+        let error = vault.rename("old", "parent/new").unwrap_err();
+        assert!(error.to_string().contains("injected group failure"));
+        for note in 0..8 {
+            let path = format!("old/{note}/note.md");
+            assert_eq!(
+                vault.read(&path).unwrap(),
+                format!("note {note}\n").as_bytes()
+            );
+            assert_eq!(
+                fs::read_dir(root.path().join(format!("old/{note}")))
+                    .unwrap()
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(vault.read("index.md").unwrap(), backlinks.as_bytes());
+        assert!(root.path().join("old/empty/deep").is_dir());
+        assert!(!root.path().join("parent").exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(root.path().join("old")).unwrap().count(), 9);
+        assert_journal_cleared(&state);
+        drop(vault);
+        let reopened = Vault::open(root.path(), state.path()).unwrap();
+        for note in 0..8 {
+            assert_eq!(
+                reopened
+                    .links_to(&format!("old/{note}/note.md"))
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
 fn index_failure_keeps_a_committed_rename_and_reports_a_warning() {
     let (root, state, vault) = setup();
     let index = Connection::open(state.path().join("index.sqlite")).unwrap();
@@ -199,6 +258,35 @@ fn reopening_recovers_every_interruption_boundary() {
             assert_eq!(reopened.links_to("B.md").unwrap().len(), 2);
             assert_journal_cleared(&state);
         }
+    }
+}
+
+#[test]
+fn reopening_recovers_any_uncommitted_subset_before_directory_sync() {
+    // 同一事务在提交前合并目录同步；断电后可见的文件替换不一定构成执行顺序的前缀。
+    let before: [(&str, Option<&[u8]>); 4] = [
+        ("C.md", None),
+        ("A.md", Some(b"[[B]]\n")),
+        ("D.md", Some(b"[B](./B.md)\n")),
+        ("B.md", Some(b"note\n")),
+    ];
+    for visible in 0_u8..16 {
+        let (root, state, vault) = setup();
+        drop(vault);
+        interrupted(root.path(), &state, 4, false);
+        for (ordinal, (path, bytes)) in before.iter().enumerate() {
+            if visible & (1 << ordinal) != 0 {
+                continue;
+            }
+            match bytes {
+                Some(bytes) => fs::write(root.path().join(path), bytes).unwrap(),
+                None => fs::remove_file(root.path().join(path)).unwrap(),
+            }
+        }
+        let reopened = Vault::open(root.path(), state.path()).unwrap();
+        assert_original(root.path());
+        assert_eq!(reopened.links_to("B.md").unwrap().len(), 2);
+        assert_journal_cleared(&state);
     }
 }
 
@@ -367,28 +455,37 @@ fn pending_drafts_prevent_renaming_their_link_targets() {
 fn source_permissions_survive_both_commit_and_rollback() {
     use std::os::unix::fs::PermissionsExt;
     let (root, state, vault) = setup();
-    fs::set_permissions(root.path().join("B.md"), fs::Permissions::from_mode(0o640)).unwrap();
+    // 同时覆盖移动源、只读入链及私有入链；恢复必须使用各自的权限而非父目录权限。
+    for (path, mode) in [("B.md", 0o4640), ("A.md", 0o440), ("D.md", 0o2600)] {
+        fs::set_permissions(root.path().join(path), fs::Permissions::from_mode(mode)).unwrap();
+    }
     let conn = recovery(&state);
     conn.execute_batch("CREATE TRIGGER reject_commit BEFORE UPDATE OF committed ON rename_operation BEGIN SELECT RAISE(ABORT, 'commit failure'); END;").unwrap();
     assert!(vault.rename("B.md", "C.md").is_err());
-    assert_eq!(
-        fs::metadata(root.path().join("B.md"))
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o640
-    );
+    assert_original(root.path());
+    for (path, mode) in [("B.md", 0o4640), ("A.md", 0o440), ("D.md", 0o2600)] {
+        assert_eq!(
+            fs::metadata(root.path().join(path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            mode
+        );
+    }
     conn.execute_batch("DROP TRIGGER reject_commit;").unwrap();
     vault.rename("B.md", "C.md").unwrap();
-    assert_eq!(
-        fs::metadata(root.path().join("C.md"))
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o640
-    );
+    assert_committed(root.path());
+    for (path, mode) in [("C.md", 0o4640), ("A.md", 0o440), ("D.md", 0o2600)] {
+        assert_eq!(
+            fs::metadata(root.path().join(path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            mode
+        );
+    }
 }
 
 #[cfg(unix)]

@@ -120,7 +120,7 @@ $$
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "阅读记录.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
     expect(await page.locator(".ProseMirror").innerText()).toContain("今天重读了");
     await page
@@ -130,7 +130,7 @@ $$
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "设计随想.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
     expect(await page.locator(".references details").getAttribute("open")).toBeNull();
 
@@ -159,10 +159,10 @@ $$
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "安静写作.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
     expect(await readFile(join(vault, "阅读记录.md"), "utf8")).toContain("[[安静写作]]");
-    expect(await page.locator(".entry-dialog").isVisible()).toBe(false);
+    await expect.poll(() => page.locator(".entry-dialog").isVisible()).toBe(false);
 
     const paragraph = page.locator(".ProseMirror > p").last();
     await paragraph.click();
@@ -285,7 +285,7 @@ $$
     await page.waitForFunction(
       () =>
         document.querySelectorAll("mjx-container").length === 0 &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
     await page
       .getByRole("navigation", { name: "文件列表" })

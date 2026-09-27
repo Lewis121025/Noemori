@@ -1,6 +1,7 @@
 import { ipcRenderer } from "electron";
 import type { ReaderApi, VaultEvent } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
+import { parseEntryBatchProgress, parseEntryBatchResult } from "../shared/entry-batch";
 import { parseAttachmentReply } from "../shared/attachments";
 import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
 import {
@@ -17,7 +18,8 @@ import {
   parseNullablePath,
   parsePaneLayoutMessage,
   parseSavedCopy,
-  parseSearchHits,
+  parseSearchPage,
+  parseSearchMatchesPage,
   parseTagCounts,
   parseVaultEntries,
   parseVaultList,
@@ -27,6 +29,7 @@ import {
 
 /** 创建阅读器受限桥接；只开放已知命令与订阅，错误由对应 Promise 返回。 */
 export function createReaderApi(): ReaderApi {
+  let batch: { id: string; root: string } | null = null;
   return {
     openExternal: async (url) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.links.openExternal", url)),
@@ -38,6 +41,8 @@ export function createReaderApi(): ReaderApi {
       parseEmptyReply(await ipcRenderer.invoke("reader.session.setViewModes", modes)),
     sessionSetRecentFiles: async (paths) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.session.setRecentFiles", paths)),
+    sessionSetFileTree: async (root, state) =>
+      parseEmptyReply(await ipcRenderer.invoke("reader.session.setFileTree", root, state)),
     sessionGetPanes: async () =>
       parsePaneLayoutMessage(await ipcRenderer.invoke("reader.session.getPanes")),
     sessionSetPanes: async (panes) =>
@@ -51,6 +56,40 @@ export function createReaderApi(): ReaderApi {
       ),
     entryTrash: async (path) =>
       parseEntryOutcome(await ipcRenderer.invoke("reader.entry.trash", path)),
+    entryBatch: async (request, onProgress) => {
+      if (batch !== null) throw new Error("正在处理批量操作，请等待当前批次结束");
+      const id = crypto.randomUUID();
+      batch = { id, root: request.root };
+      let progressWarning: string | null = null;
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        eventId: unknown,
+        value: unknown,
+      ): void => {
+        if (eventId !== id || batch?.id !== id || onProgress === undefined) return;
+        try {
+          onProgress(parseEntryBatchProgress(value));
+        } catch (error) {
+          progressWarning = `进度通知异常：${error instanceof Error ? error.message : String(error)}`;
+        }
+      };
+      ipcRenderer.on("reader.entry.batch.progress", listener);
+      try {
+        const result = parseEntryBatchResult(
+          await ipcRenderer.invoke("reader.entry.batch", request, id),
+        );
+        if (progressWarning !== null)
+          result.warning = [result.warning, progressWarning].filter(Boolean).join("；");
+        return result;
+      } finally {
+        ipcRenderer.removeListener("reader.entry.batch.progress", listener);
+        batch = null;
+      }
+    },
+    entryBatchStop: async (root) => {
+      if (batch?.root === root)
+        parseEmptyReply(await ipcRenderer.invoke("reader.entry.batch.stop", root, batch.id));
+    },
     entryReveal: async (path) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.entry.reveal", path)),
     attachmentImport: async (root, from, name, bytes) =>
@@ -87,8 +126,11 @@ export function createReaderApi(): ReaderApi {
       ),
     indexLinksFrom: async (path) =>
       parseLinkRecords(await ipcRenderer.invoke("reader.index.linksFrom", path)),
-    searchQuery: async (query) =>
-      parseSearchHits(await ipcRenderer.invoke("reader.search.query", query)),
+    searchQuery: async (query, id, cursor) =>
+      parseSearchPage(await ipcRenderer.invoke("reader.search.query", query, id, cursor)),
+    searchCancel: async (id) => ipcRenderer.invoke("reader.search.cancel", id),
+    searchMatches: async (query, id, cursor) =>
+      parseSearchMatchesPage(await ipcRenderer.invoke("reader.search.matches", query, id, cursor)),
     indexHeadings: async (path) =>
       parseHeadingRecords(await ipcRenderer.invoke("reader.index.headings", path)),
     indexTags: async () => parseTagCounts(await ipcRenderer.invoke("reader.index.tags")),

@@ -1,3 +1,4 @@
+import { tick } from "svelte";
 import type {
   HistoryAction,
   HistoryAvailability,
@@ -5,18 +6,36 @@ import type {
   MentionRecord,
   Mentions,
   ReaderApi,
+  SearchHit,
+  SearchMatch,
 } from "../../shared/api";
-import type { CodeEditorApi, MarkdownEditorApi } from "../engine/editing/editor-api";
+import type { CodeEditorApi, MarkdownEditorApi, TextEditorApi } from "../engine/editing/editor-api";
 import { mentionOccurrenceIndex } from "../engine/navigation/backlinks";
 import { normalizeHeadingText } from "../engine/navigation/heading-anchor";
 import { buildOutlineTree, outlineEquals, type OutlineItem } from "../engine/navigation/outline";
 import type { ReaderDocument } from "./document.svelte";
 import type { EditorSnapshot } from "../engine/markdown/source-session";
+import { verifySearchSnapshot } from "../engine/search/locate";
+import type { EditorPosition } from "../engine/editing/editor-position";
 
-/** 等待编辑器挂载后兑现的定位；提及按记录定位，搜索命中按词定位，锚点按标题定位。 */
+/** 位置恢复只属于发起时的文档代次；挂载等待与布局等待共用同一个取消条件。 */
+type PositionRestore = {
+  epoch: number;
+  revision: number;
+  generation: number;
+  position: EditorPosition;
+  task: Promise<void> | null;
+};
+
+/** 等待编辑器挂载后兑现的定位；搜索范围必须属于当前内容版本。 */
 type PendingJump =
   | { kind: "mention"; mention: MentionRecord; all: MentionRecord[] }
-  | { kind: "text"; path: string; needle: string }
+  | {
+      kind: "search";
+      hit: SearchHit;
+      match: SearchMatch | undefined;
+      onError: (message: string) => void;
+    }
   | { kind: "heading"; path: string; anchor: string; onMissing: () => void };
 
 /** 阅读上下文：目录折叠、引用查询及等待编辑器挂载后的定位，不参与文件写入。 */
@@ -27,9 +46,15 @@ export class ReaderNavigation {
   private references = $state<Mentions>({ linked: [], unlinked: [] });
   private outgoing = $state<LinkRecord[]>([]);
   private mentionGeneration = 0;
-  private pending: PendingJump | null = null;
+  private pending: { target: PendingJump; generation: number } | null = null;
+  /** 同一目标的连续点击共用在途切换，不能因文档路径已更新而提前定位。 */
+  private opening: { path: string; task: Promise<void> } | null = null;
+  private jumpGeneration = 0;
   private markdown = $state.raw<MarkdownEditorApi | null>(null);
   private code = $state.raw<CodeEditorApi | null>(null);
+  private markdownEpoch = -1;
+  private codeEpoch = -1;
+  private restoring: PositionRestore | null = null;
 
   /** @param document 用于判断查询、定位与编辑器所属文档的唯一状态。 */
   constructor(private readonly document: ReaderDocument) {}
@@ -87,6 +112,9 @@ export class ReaderNavigation {
     this.resetReferences();
     this.headings = [];
     this.pending = null;
+    this.opening = null;
+    this.restoring = null;
+    this.jumpGeneration += 1;
   }
 
   /**
@@ -147,6 +175,7 @@ export class ReaderNavigation {
 
   /** @param pos 当前 Markdown 文档中的标题位置。 */
   jumpOutline(pos: number): void {
+    this.jumpGeneration += 1;
     this.markdown?.jumpTo(pos);
   }
 
@@ -159,7 +188,10 @@ export class ReaderNavigation {
    */
   jumpToHeadingText(anchor: string): boolean {
     if (this.document.content?.kind !== "markdown" || this.markdown === null) return false;
-    if (anchor.startsWith("^")) return this.markdown.jumpToHeading(anchor);
+    if (anchor.startsWith("^")) {
+      this.jumpGeneration += 1;
+      return this.markdown.jumpToHeading(anchor);
+    }
     const target = normalizeHeadingText(anchor);
     const item = this.headings.find((heading) => normalizeHeadingText(heading.text) === target);
     if (item === undefined) return false;
@@ -191,14 +223,72 @@ export class ReaderNavigation {
   /** 注册与注销时不清目录，目录清理由编辑器 onOutline 负责，避免挂载时状态竞争。 */
   registerMarkdown = (api: MarkdownEditorApi | null): void => {
     this.markdown = api;
-    if (api !== null) this.applyPendingJump();
+    this.markdownEpoch = this.document.epoch;
+    if (api !== null) {
+      this.applyPendingJump();
+      void this.applyPosition();
+    }
   };
 
   /** @param api 当前文本编辑器；挂载完成后兑现等待定位，卸载时传 null。 */
   registerCode = (api: CodeEditorApi | null): void => {
     this.code = api;
-    if (api !== null) this.applyPendingJump();
+    this.codeEpoch = this.document.epoch;
+    if (api !== null) {
+      this.applyPendingJump();
+      void this.applyPosition();
+    }
   };
+
+  /** 读取当前表面的源码位置；挂载尚未完成时保留待恢复锚点，不用旧表面覆盖它。 */
+  capturePosition(): EditorPosition | null {
+    if (this.restoring !== null && this.positionIsCurrent(this.restoring))
+      return this.restoring.position;
+    return this.currentEditor()?.capturePosition() ?? null;
+  }
+
+  /**
+   * 交接阅读锚点与可选选区；先等 Svelte 换面，再等编辑器布局，显式导航会取消旧恢复。
+   * 编辑器尚未挂载时保留请求，由注册入口兑现；内容与正文历史均不改动。
+   */
+  async restorePosition(position: EditorPosition): Promise<void> {
+    const restoring: PositionRestore = {
+      epoch: this.document.epoch,
+      revision: this.document.editRevision,
+      generation: ++this.jumpGeneration,
+      position,
+      task: null,
+    };
+    this.restoring = restoring;
+    await tick();
+    await (restoring.task ?? this.applyPosition());
+  }
+
+  private positionIsCurrent(restoring: PositionRestore): boolean {
+    return (
+      this.restoring === restoring &&
+      restoring.epoch === this.document.epoch &&
+      restoring.revision === this.document.editRevision &&
+      restoring.generation === this.jumpGeneration
+    );
+  }
+
+  private applyPosition(): Promise<void> | null {
+    const restoring = this.restoring;
+    if (restoring === null || !this.positionIsCurrent(restoring)) return null;
+    if (restoring.task !== null) return restoring.task;
+    const editor = this.currentEditor();
+    if (editor === null) return null;
+    restoring.task = editor
+      .restorePosition(
+        restoring.position,
+        () => this.positionIsCurrent(restoring) && editor === this.currentEditor(),
+      )
+      .finally(() => {
+        if (this.restoring === restoring) this.restoring = null;
+      });
+    return restoring.task;
+  }
 
   /**
    * @returns 当前已挂载表面的内容快照；Markdown 源码视图走代码通道。
@@ -221,37 +311,27 @@ export class ReaderNavigation {
     mention: MentionRecord,
     openFile: (path: string) => Promise<void>,
   ): Promise<void> {
-    this.pending = {
-      kind: "mention",
-      mention,
-      all: [...this.references.linked, ...this.references.unlinked],
-    };
-    try {
-      if (mention.fromPath === this.document.path) this.applyPendingJump();
-      else await openFile(mention.fromPath);
-    } finally {
-      if (this.document.path !== mention.fromPath) this.pending = null;
-    }
+    await this.openJump(
+      mention.fromPath,
+      { kind: "mention", mention, all: [...this.references.linked, ...this.references.unlinked] },
+      openFile,
+    );
   }
 
   /**
-   * 打开搜索命中并等待其编辑器挂载后定位命中词；门禁阻止时取消定位。
-   * @param path 命中文件。
-   * @param needle 命中词；空串（纯谓词检索）只打开文件不定位。
+   * 打开指定的真实命中，挂载后核对内容版本；纯谓词命中只打开文件。
+   * @param hit 命中文件及索引版本。
+   * @param match 用户选择的具体命中；未提供时只打开文件。
    * @param openFile 工作区提供的受保存门禁保护的文件切换。
+   * @param onError 过期或不可定位结果的可见反馈。
    */
-  async openTextMatch(
-    path: string,
-    needle: string,
+  async openSearchMatch(
+    hit: SearchHit,
+    match: SearchMatch | undefined,
     openFile: (path: string) => Promise<void>,
+    onError: (message: string) => void,
   ): Promise<void> {
-    this.pending = { kind: "text", path, needle };
-    try {
-      if (path === this.document.path) this.applyPendingJump();
-      else await openFile(path);
-    } finally {
-      if (this.document.path !== path) this.pending = null;
-    }
+    await this.openJump(hit.path, { kind: "search", hit, match, onError }, openFile);
   }
 
   /**
@@ -267,51 +347,98 @@ export class ReaderNavigation {
     openFile: (path: string) => Promise<void>,
     onMissing: () => void,
   ): Promise<void> {
-    this.pending = { kind: "heading", path, anchor, onMissing };
-    try {
-      if (path === this.document.path) this.applyPendingJump();
-      else await openFile(path);
-    } finally {
-      if (this.document.path !== path) this.pending = null;
+    await this.openJump(path, { kind: "heading", path, anchor, onMissing }, openFile);
+  }
+
+  /** 挂载可以早于切换门禁释放；等文件切换与 DOM 解锁后，才允许定位交接焦点。 */
+  private async openJump(
+    path: string,
+    pending: PendingJump,
+    openFile: (path: string) => Promise<void>,
+  ): Promise<void> {
+    const generation = ++this.jumpGeneration;
+    this.pending = null;
+    if (this.opening?.path === path) await this.opening.task;
+    else if (path !== this.document.path) {
+      const opening = { path, task: openFile(path) };
+      this.opening = opening;
+      try {
+        await opening.task;
+      } finally {
+        if (this.opening === opening) this.opening = null;
+      }
     }
+    await tick();
+    if (generation !== this.jumpGeneration || path !== this.document.path) return;
+    this.pending = { target: pending, generation };
+    this.applyPendingJump();
   }
 
   private applyPendingJump(): void {
-    const pending = this.pending;
-    if (pending === null) return;
-    if (pending.kind === "text") {
-      if (pending.path !== this.document.path) return;
-      // 全文索引只覆盖 Markdown；其余类型与空命中词都只打开文件。
-      if (
-        this.document.content?.kind === "markdown" &&
-        this.markdown !== null &&
-        pending.needle !== ""
-      )
-        this.markdown.jumpToText(pending.needle);
+    const request = this.pending;
+    if (request === null) return;
+    if (request.generation !== this.jumpGeneration) {
       this.pending = null;
+      return;
+    }
+    const pending = request.target;
+    if (pending.kind === "search") {
+      if (pending.hit.path !== this.document.path) return;
+      const editor = this.currentEditor();
+      if (editor === null) return;
+      this.pending = null;
+      void this.applySearchJump(pending, editor);
       return;
     }
     if (pending.kind === "heading") {
       if (pending.path !== this.document.path) return;
       // 锚点只对 Markdown 有意义；其余类型只打开文件，不提示。
-      if (this.document.content?.kind === "markdown" && this.markdown !== null) {
-        if (!this.markdown.jumpToHeading(pending.anchor)) pending.onMissing();
+      if (this.document.content?.kind === "markdown") {
+        const editor = this.currentEditor();
+        if (editor === null) return;
+        if ("jumpToHeading" in editor && !editor.jumpToHeading(pending.anchor)) pending.onMissing();
       }
       this.pending = null;
       return;
     }
     if (pending.mention.fromPath !== this.document.path) return;
-    if (this.markdown !== null) {
-      this.markdown.jumpToMention(
-        pending.mention,
-        mentionOccurrenceIndex(pending.all, pending.mention),
-      );
+    const editor = this.currentEditor();
+    if (editor === null) return;
+    if ("jumpToMention" in editor) {
+      editor.jumpToMention(pending.mention, mentionOccurrenceIndex(pending.all, pending.mention));
       // Markdown 源码视图注册在代码通道：字节区间对原始源文本同样有效。
-    } else if (this.code !== null) {
-      this.code.jumpToByte(pending.mention.startByte);
     } else {
-      return;
+      editor.jumpToByte(pending.mention.startByte);
     }
     this.pending = null;
+  }
+
+  private async applySearchJump(
+    pending: Extract<PendingJump, { kind: "search" }>,
+    editor: TextEditorApi,
+  ): Promise<void> {
+    if (pending.match === undefined) return;
+    const generation = this.jumpGeneration;
+    const epoch = this.document.epoch;
+    const current = () =>
+      generation === this.jumpGeneration &&
+      epoch === this.document.epoch &&
+      pending.hit.path === this.document.path &&
+      editor === this.currentEditor();
+    try {
+      const location = pending.match.location;
+      if (location === null) throw new Error("此处暂无可靠的原文位置，可通过上下文查看命中内容。");
+      const snapshot = editor.snapshot();
+      await verifySearchSnapshot(snapshot, pending.hit.contentHash, location);
+      if (current()) editor.jumpToSearch(location, snapshot);
+    } catch (error) {
+      if (current()) pending.onError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** 文件状态先更新、组件后挂载；不能把旧表面当成新文件的编辑器。 */
+  private currentEditor(): MarkdownEditorApi | CodeEditorApi | null {
+    if (this.markdown !== null && this.markdownEpoch === this.document.epoch) return this.markdown;
+    return this.codeEpoch === this.document.epoch ? this.code : null;
   }
 }

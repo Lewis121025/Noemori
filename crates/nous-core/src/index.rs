@@ -3,7 +3,7 @@
 //! 所有表都是磁盘 Markdown 的派生物，可随时全量重建；`user_version`
 //! 记录扫描器版本，落后即重扫。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 
@@ -53,8 +53,10 @@ pub(crate) struct DerivedRows {
     pub tags: Vec<String>,
     /// frontmatter 属性行 `(key, value)`。
     pub attributes: Vec<(String, String)>,
-    /// 全文行 `(title, body)`；非 Markdown 或不可解码文件为 `None`，不进全文索引。
+    /// 全文行 `(title, body)`；非 Markdown 为 `None`，正文不可解码时仅索引文件名标题。
     pub text: Option<(String, String)>,
+    /// 与正文同版本的位置映射；写入时与全文行共同提交。
+    pub source_map: crate::search_text::SourceMap,
 }
 
 /// 打开或创建索引库并建表。
@@ -66,9 +68,45 @@ pub fn open_connection(path: &std::path::Path) -> Result<Connection, Error> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    register_search_functions(&conn)?;
+    // 长词倒排移入版本化排名目录；旧 FTS 正文副本不再参与读取或写入。
+    let old_search: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'search_index')",
+        [],
+        |row| row.get(0),
+    )?;
+    if old_search {
+        conn.execute_batch("DROP TABLE search_index; PRAGMA user_version = 0;")?;
+    }
+    initialize_tables(conn)
+}
+
+/// 搜索使用独立只读连接，不能执行迁移或占用保存连接；打开或注册函数失败时传播错误。
+pub(crate) fn open_search_reader(path: &std::path::Path) -> Result<Connection, Error> {
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    register_search_functions(&conn)?;
+    Ok(conn)
+}
+
+fn register_search_functions(conn: &Connection) -> Result<(), Error> {
+    conn.create_scalar_function(
+        "nous_fold",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            Ok(context
+                .get::<Option<String>>(0)?
+                .map(|text| crate::search_text::fold(&text)))
+        },
+    )?;
+    Ok(())
+}
+
+fn initialize_tables(conn: Connection) -> Result<Connection, Error> {
     let tables: i64 = conn.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table'
-          AND name IN ('files', 'links', 'headings', 'tags', 'attributes', 'search_index')",
+          AND name IN ('files', 'links', 'headings', 'tags', 'attributes', 'search_sources', 'search_short', 'search_pending', 'search_state')",
         [],
         |row| row.get(0),
     )?;
@@ -114,20 +152,54 @@ pub fn open_connection(path: &std::path::Path) -> Result<Connection, Error> {
             value TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS attributes_path ON attributes(path);
-        CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
-            path UNINDEXED,
-            title,
-            body,
-            tokenize = 'trigram'
-        );
         ",
     )?;
-    if tables != 6 {
+    ensure_search_tables(&conn)?;
+    if tables != 9 {
         // 派生表被移除后，新建空表必须同时失效旧扫描版本；恢复库始终独立保留。
         conn.pragma_update(None, "user_version", 0)?;
+        // 缺失来源表时旧 rowid 不再可信；短词索引随本次全量重扫重建。
+        conn.execute("DELETE FROM search_short", [])?;
+        conn.execute("UPDATE search_state SET epoch = lower(hex(randomblob(16))), revision = 0 WHERE id = 1", [])?;
     }
     ensure_link_resolution(&conn)?;
     Ok(conn)
+}
+
+/// 来源、短词倒排与同步记录共同建表；触发器保证每次来源变更都会推进排名版本。
+fn ensure_search_tables(conn: &Connection) -> Result<(), Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS search_sources (
+            path TEXT PRIMARY KEY,
+            body TEXT NOT NULL,
+            source_map TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_short USING fts5(
+            terms, content = '', contentless_delete = 1, detail = none, tokenize = 'ascii'
+        );
+        CREATE TABLE IF NOT EXISTS search_pending (path TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS search_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            epoch TEXT NOT NULL,
+            revision INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO search_state VALUES (1, lower(hex(randomblob(16))), 0);
+        CREATE TRIGGER IF NOT EXISTS search_source_insert AFTER INSERT ON search_sources BEGIN
+            INSERT OR IGNORE INTO search_pending VALUES (new.path);
+            UPDATE search_state SET revision = revision + 1 WHERE id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS search_source_delete AFTER DELETE ON search_sources BEGIN
+            INSERT OR IGNORE INTO search_pending VALUES (old.path);
+            UPDATE search_state SET revision = revision + 1 WHERE id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS search_source_update AFTER UPDATE ON search_sources BEGIN
+            INSERT OR IGNORE INTO search_pending VALUES (old.path), (new.path);
+            UPDATE search_state SET revision = revision + 1 WHERE id = 1;
+        END;
+        ",
+    )?;
+    Ok(())
 }
 
 /// 旧库的 `links` 没有解析状态列；补上默认值后由扫描版本触发全量重绑。
@@ -147,7 +219,7 @@ fn ensure_link_resolution(conn: &Connection) -> Result<(), Error> {
 }
 
 /// 扫描器/解析输出格式。区间或目标解析变了必须加一，已打开的库才会重扫而不是复用旧行。
-pub(crate) const SCAN_VERSION: i32 = 9;
+pub(crate) const SCAN_VERSION: i32 = 13;
 
 /// 当前索引里记录的扫描器版本；从未写过则为 0。
 pub(crate) fn scan_version(conn: &Connection) -> Result<i32, Error> {
@@ -250,24 +322,26 @@ pub(crate) fn replace_all(
         }
     }
     insert_link_rows(&tx, links)?;
-    for path in removals {
-        delete_derived(&tx, path)?;
-    }
+    let changed: Vec<&str> = removals
+        .iter()
+        .chain(derived.iter().map(|(path, _)| path))
+        .map(String::as_str)
+        .collect();
+    delete_derived(&tx, &changed)?;
     for (path, rows) in derived {
-        replace_derived(&tx, path, rows)?;
+        insert_derived(&tx, path, rows)?;
     }
     tx.commit()?;
     conn.pragma_update(None, "user_version", SCAN_VERSION)?;
     Ok(())
 }
 
-/// 重建一篇文件的派生行；调用方保证事务语义。
-fn replace_derived(
+/// 写入一篇文件的派生行；调用方须在同一事务中先清理本批次全部旧行。
+fn insert_derived(
     tx: &rusqlite::Transaction<'_>,
     path: &str,
     rows: &DerivedRows,
 ) -> Result<(), Error> {
-    delete_derived(tx, path)?;
     {
         let mut insert = tx.prepare(
             "INSERT INTO headings(path, idx, level, text, start_byte, end_byte)
@@ -300,20 +374,37 @@ fn replace_derived(
         }
     }
     if let Some((title, body)) = &rows.text {
+        let source_map = serde_json::to_string(&rows.source_map).map_err(std::io::Error::other)?;
         tx.execute(
-            "INSERT INTO search_index(path, title, body) VALUES (?1, ?2, ?3)",
-            params![path, title, body],
+            "INSERT INTO search_sources(path, body, source_map) VALUES (?1, ?2, ?3)",
+            params![path, body, source_map],
+        )?;
+        tx.execute(
+            "INSERT INTO search_short(rowid, terms) SELECT rowid, ?2 FROM search_sources WHERE path = ?1",
+            params![path, crate::search_text::short_terms(title, body)],
         )?;
     }
     Ok(())
 }
 
-/// 删除一篇文件在全部派生表里的行。
-fn delete_derived(conn: &Connection, path: &str) -> Result<(), Error> {
-    conn.execute("DELETE FROM headings WHERE path = ?1", params![path])?;
-    conn.execute("DELETE FROM tags WHERE path = ?1", params![path])?;
-    conn.execute("DELETE FROM attributes WHERE path = ?1", params![path])?;
-    conn.execute("DELETE FROM search_index WHERE path = ?1", params![path])?;
+/// 只清理本批次路径；来源删除触发待同步记录，避免为单篇更新扫描整个全文库。
+fn delete_derived(conn: &Connection, paths: &[&str]) -> Result<(), Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let paths: HashSet<&str> = paths.iter().copied().collect();
+    {
+        let mut delete = conn.prepare("DELETE FROM search_short WHERE rowid IN (SELECT rowid FROM search_sources WHERE path = ?1)")?;
+        for path in &paths {
+            delete.execute(params![path])?;
+        }
+    }
+    for table in ["headings", "tags", "attributes", "search_sources"] {
+        let mut delete = conn.prepare(&format!("DELETE FROM {table} WHERE path = ?1"))?;
+        for path in &paths {
+            delete.execute(params![path])?;
+        }
+    }
     Ok(())
 }
 
@@ -402,7 +493,8 @@ pub(crate) fn upsert_file(
         ],
     )?;
     insert_link_rows(&tx, outgoing)?;
-    replace_derived(&tx, &file.path, derived)?;
+    delete_derived(&tx, &[&file.path])?;
+    insert_derived(&tx, &file.path, derived)?;
     tx.commit()?;
     Ok(())
 }
@@ -413,9 +505,11 @@ pub(crate) fn upsert_file(
 ///
 /// `SQLite` 失败时返回错误。
 pub(crate) fn delete_file(conn: &Connection, path: &str) -> Result<(), Error> {
-    conn.execute("DELETE FROM links WHERE from_path = ?1", params![path])?;
-    conn.execute("DELETE FROM files WHERE path = ?1", params![path])?;
-    delete_derived(conn, path)?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM links WHERE from_path = ?1", params![path])?;
+    tx.execute("DELETE FROM files WHERE path = ?1", params![path])?;
+    delete_derived(&tx, &[path])?;
+    tx.commit()?;
     Ok(())
 }
 

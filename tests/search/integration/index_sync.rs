@@ -95,6 +95,79 @@ fn refresh_after_external_edit_updates_search() {
 }
 
 #[test]
+fn batch_refresh_replaces_changed_search_rows_and_preserves_unchanged_rows() {
+    let (root, index, vault) = vault_with(&[
+        ("edit.md", "oldword\n"),
+        ("delete.md", "removedword\n"),
+        ("keep.md", "untouchedword\n"),
+    ]);
+    let probe = open_index(&index);
+    let kept_rowid: i64 = probe
+        .query_row(
+            "SELECT rowid FROM search_sources WHERE path = 'keep.md'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    fs::write(root.path().join("edit.md"), "newword and new content\n").unwrap();
+    fs::remove_file(root.path().join("delete.md")).unwrap();
+    fs::write(root.path().join("add.md"), "addedword\n").unwrap();
+
+    assert!(vault.refresh_index().unwrap());
+    assert_eq!(search_paths(&vault, &["newword"]), ["edit.md"]);
+    assert_eq!(search_paths(&vault, &["addedword"]), ["add.md"]);
+    for term in ["oldword", "removedword"] {
+        assert!(search_paths(&vault, &[term]).is_empty(), "{term}");
+    }
+    assert_eq!(count_rows(&probe, "search_sources", "edit.md"), 1);
+    assert_eq!(count_rows(&probe, "search_sources", "delete.md"), 0);
+    let after: i64 = probe
+        .query_row(
+            "SELECT rowid FROM search_sources WHERE path = 'keep.md'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(after, kept_rowid);
+    assert_eq!(search_paths(&vault, &["untouchedword"]), ["keep.md"]);
+}
+
+#[test]
+fn batch_refresh_failure_rolls_back_search_cleanup() {
+    let (root, index, vault) = vault_with(&[("a.md", "originalword\n"), ("b.md", "keptword\n")]);
+    let probe = open_index(&index);
+    probe
+        .execute_batch(
+            "CREATE TRIGGER reject_heading BEFORE INSERT ON headings
+         BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    fs::write(
+        root.path().join("a.md"),
+        "# New heading\n\nreplacementword\n",
+    )
+    .unwrap();
+    fs::remove_file(root.path().join("b.md")).unwrap();
+
+    assert!(vault.refresh_index().is_err());
+    assert_eq!(count_rows(&probe, "search_sources", "a.md"), 1);
+    assert_eq!(count_rows(&probe, "search_sources", "b.md"), 1);
+    let original: String = probe
+        .query_row(
+            "SELECT body FROM search_sources WHERE path = 'a.md'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(original.contains("originalword"));
+    probe.execute_batch("DROP TRIGGER reject_heading").unwrap();
+    assert!(vault.refresh_index().unwrap());
+    assert_eq!(search_paths(&vault, &["replacementword"]), ["a.md"]);
+    assert!(search_paths(&vault, &["originalword"]).is_empty());
+    assert_eq!(count_rows(&probe, "search_sources", "b.md"), 0);
+}
+
+#[test]
 fn deleted_file_derived_rows_are_removed() {
     let (root, index, vault) = vault_with(&[
         ("a.md", "keeper\n"),
@@ -110,7 +183,7 @@ fn deleted_file_derived_rows_are_removed() {
     assert_eq!(count_rows(&probe, "tags", "b.md"), 0);
     assert_eq!(count_rows(&probe, "headings", "b.md"), 0);
     assert_eq!(count_rows(&probe, "attributes", "b.md"), 0);
-    assert_eq!(count_rows(&probe, "search_index", "b.md"), 0);
+    assert_eq!(count_rows(&probe, "search_sources", "b.md"), 0);
     assert_eq!(search_paths(&vault, &["keeper"]), ["a.md"]);
 }
 
@@ -163,4 +236,53 @@ fn refresh_without_disk_change_does_not_rewrite_sqlite() {
         .query_row("PRAGMA data_version", [], |row| row.get(0))
         .expect("data_version");
     assert_eq!(before, after, "磁盘没变就不该改索引");
+}
+
+#[test]
+fn search_locations_and_short_terms_follow_writes_deletes_and_rebuilds() {
+    let (root, index, vault) = vault_with(&[("a.md", "量子\n"), ("b.md", "保留\n")]);
+    let original = vault
+        .search(&query(SearchExpr::Term("量子".into())))
+        .unwrap();
+    vault
+        .write("a.md", "\n\n预算\n".as_bytes(), Some("量子\n".as_bytes()))
+        .unwrap();
+    assert!(search_paths(&vault, &["量子"]).is_empty());
+    let changed = vault
+        .search(&query(SearchExpr::Term("预算".into())))
+        .unwrap();
+    assert_ne!(original[0].content_hash, changed[0].content_hash);
+    assert_eq!(changed[0].matches[0].location.as_ref().unwrap().line, 3);
+    fs::remove_file(root.path().join("a.md")).unwrap();
+    vault.refresh_index().unwrap();
+    assert!(search_paths(&vault, &["预算"]).is_empty());
+    let probe = open_index(&index);
+    assert_eq!(count_rows(&probe, "search_sources", "a.md"), 0);
+    assert_eq!(
+        probe
+            .query_row("SELECT count(*) FROM search_short", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(vault);
+    probe.execute("DROP TABLE search_sources", []).unwrap();
+    let vault = Vault::open(root.path(), index.path()).unwrap();
+    assert_eq!(search_paths(&vault, &["保留"]), ["b.md"]);
+    assert!(search_paths(&vault, &["预算"]).is_empty());
+}
+
+#[test]
+fn legacy_fulltext_migrates_without_leaking_normalized_text_into_snippets() {
+    let (root, index, vault) = vault_with(&[("a.md", "ÉCLAIR 量子\n")]);
+    drop(vault);
+    let probe = open_index(&index);
+    probe.execute_batch("CREATE VIRTUAL TABLE search_index USING fts5(path UNINDEXED, title, body, tokenize = 'trigram');").unwrap();
+    let vault = Vault::open(root.path(), index.path()).unwrap();
+    let hits = vault
+        .search(&query(SearchExpr::Term("éclair".into())))
+        .unwrap();
+    assert!(hits[0].snippet.contains("ÉCLAIR"));
+    assert!(hits[0].matches[0].location.is_some());
+    assert_eq!(search_paths(&vault, &["量子"]), ["a.md"]);
 }

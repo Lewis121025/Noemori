@@ -310,8 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { vaultOpen, vaultClose, vaultList, vaultEntries, entryCreate, attachmentImport, entryTrash, entryPath, fileRead, fileSnapshot, filePreserveDraft, fileWrite, fileWriteCopy, linksResolve, indexLinksTo, indexLinksFrom, indexMentionsTo, mentionsLinkify, searchQuery, indexTags, bookmarksList, bookmarksSet, indexNoteKeys, indexGraph, indexHeadings, entryRename } = nativeBinding
+const { entryRenameBatch, searchQuery, searchMatches, searchCancel, vaultOpen, vaultClose, vaultList, vaultEntries, entryCreate, attachmentImport, entryTrash, entryCheckBatch, entryPath, fileRead, fileSnapshot, filePreserveDraft, fileWrite, fileWriteCopy, linksResolve, indexLinksTo, indexLinksFrom, indexMentionsTo, mentionsLinkify, indexTags, bookmarksList, bookmarksSet, indexNoteKeys, indexGraph, indexHeadings, entryRename } = nativeBinding
 
+module.exports.entryRenameBatch = entryRenameBatch
+module.exports.searchQuery = searchQuery
+module.exports.searchMatches = searchMatches
+module.exports.searchCancel = searchCancel
 module.exports.vaultOpen = vaultOpen
 module.exports.vaultClose = vaultClose
 module.exports.vaultList = vaultList
@@ -319,6 +323,7 @@ module.exports.vaultEntries = vaultEntries
 module.exports.entryCreate = entryCreate
 module.exports.attachmentImport = attachmentImport
 module.exports.entryTrash = entryTrash
+module.exports.entryCheckBatch = entryCheckBatch
 module.exports.entryPath = entryPath
 module.exports.fileRead = fileRead
 module.exports.fileSnapshot = fileSnapshot
@@ -330,7 +335,6 @@ module.exports.indexLinksTo = indexLinksTo
 module.exports.indexLinksFrom = indexLinksFrom
 module.exports.indexMentionsTo = indexMentionsTo
 module.exports.mentionsLinkify = mentionsLinkify
-module.exports.searchQuery = searchQuery
 module.exports.indexTags = indexTags
 module.exports.bookmarksList = bookmarksList
 module.exports.bookmarksSet = bookmarksSet

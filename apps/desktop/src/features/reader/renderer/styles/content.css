@@ -1,0 +1,411 @@
+/* 正文、嵌入与悬浮预览共享排版；最小编辑高度由宿主表面负责。 */
+
+.markdown-content {
+  outline: none;
+  padding: 0.5rem;
+  font-size: var(--font-reading);
+  line-height: var(--line-reading);
+}
+
+.markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 1.8em 0 0.65em;
+}
+
+.markdown-content h1 {
+  font-size: 30px;
+}
+.markdown-content h2 {
+  font-size: 24px;
+}
+.markdown-content h3 {
+  font-size: 20px;
+}
+.markdown-content :is(h4, h5, h6) {
+  font-size: 17px;
+}
+.markdown-content > :first-child {
+  margin-top: 0.5rem;
+}
+.markdown-content p {
+  margin: 0.85em 0;
+}
+.markdown-content :is(ul, ol) {
+  padding-left: 1.6em;
+  margin: 1em 0;
+}
+.markdown-content li + li {
+  margin-top: 0.3em;
+}
+.markdown-content :is(ul, ol) :is(ul, ol) {
+  margin: 0.3em 0;
+}
+
+.markdown-content blockquote {
+  margin: 1.2em 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.markdown-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--sidebar);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.3em;
+}
+
+.markdown-content pre {
+  padding: 1rem;
+  background: var(--sidebar);
+  border-radius: 0.6rem;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-content .wiki-link {
+  text-decoration: underline;
+  cursor: text;
+}
+
+.markdown-content a {
+  color: inherit;
+  cursor: text;
+}
+
+.markdown-content .math-inline {
+  display: inline-block;
+  vertical-align: middle;
+  cursor: text;
+}
+
+.markdown-content .math-block {
+  display: block;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  cursor: text;
+}
+
+.markdown-content .html-inline {
+  display: inline;
+  cursor: text;
+}
+
+.markdown-content .html-block {
+  display: block;
+  margin: 0.5rem 0;
+  cursor: text;
+}
+
+.markdown-content .media-embed {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.markdown-content .media-audio {
+  width: min(100%, 28rem);
+}
+.markdown-content .media-audio audio {
+  width: 100%;
+}
+.markdown-content .media-video video {
+  max-width: 100%;
+  border-radius: 0.4rem;
+}
+
+.markdown-content .note-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 1.25em 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.75rem;
+  min-width: 7em;
+  max-width: 24em;
+  vertical-align: top;
+}
+
+.markdown-content li[data-checked] {
+  list-style: none;
+  position: relative;
+}
+.markdown-content .task-checkbox {
+  position: absolute;
+  right: calc(100% + 0.15rem);
+  top: -1px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 0.25em;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.markdown-content .task-checkbox::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+}
+.markdown-content .task-checkbox:disabled {
+  cursor: default;
+}
+.markdown-content .task-checkbox[aria-checked="true"]::before {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+.markdown-content .task-checkbox[aria-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 10px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--accent-text);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.markdown-content .list-item-content > p:first-child {
+  margin-top: 0;
+}
+.markdown-content .ProseMirror-search-match {
+  background: light-dark(#fff0a8, #625018);
+}
+.markdown-content .ProseMirror-active-search-match {
+  outline: 2px solid var(--accent);
+}
+
+.markdown-content .math-source,
+.markdown-content .html-source {
+  display: block;
+  max-width: 100%;
+  padding: 0.4rem 0.6rem;
+  color: var(--fg);
+  background: var(--sidebar);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  line-height: 1.5;
+  outline: none;
+}
+
+.markdown-content textarea.math-source,
+.markdown-content textarea.html-source {
+  width: 100%;
+  resize: vertical;
+}
+
+.markdown-content .ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 0.2rem;
+}
+
+.markdown-content .source-editing {
+  outline: none;
+}
+
+.markdown-content .source-editing:is(.math-inline, .html-inline) {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.markdown-content .math-error {
+  color: #b00020;
+}
+
+.markdown-content mark {
+  color: inherit;
+  background: light-dark(#fff3a3, #5c4a12);
+  border-radius: 0.15em;
+  padding: 0 0.05em;
+}
+
+.markdown-content :is(.comment-inline, .comment-block) {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  opacity: 0.8;
+  cursor: text;
+}
+.markdown-content .comment-block {
+  display: block;
+  margin: 0.85em 0;
+  white-space: pre-wrap;
+}
+.markdown-content .comment-source {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  color: var(--fg);
+  background: var(--sidebar);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  outline: none;
+}
+
+.markdown-content .callout {
+  --callout: var(--accent);
+  margin: 1.2em 0;
+  padding: 0.6rem 0.9rem;
+  border-left: 3px solid var(--callout);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--callout) 8%, transparent);
+}
+.markdown-content
+  .callout:is([data-callout="warning"], [data-callout="caution"], [data-callout="attention"]) {
+  --callout: light-dark(#b8660b, #f0b060);
+}
+.markdown-content
+  .callout:is(
+    [data-callout="danger"],
+    [data-callout="error"],
+    [data-callout="bug"],
+    [data-callout="failure"],
+    [data-callout="fail"]
+  ) {
+  --callout: var(--danger);
+}
+.markdown-content
+  .callout:is(
+    [data-callout="tip"],
+    [data-callout="hint"],
+    [data-callout="success"],
+    [data-callout="check"],
+    [data-callout="done"]
+  ) {
+  --callout: light-dark(#1f7a4a, #6fd39c);
+}
+.markdown-content
+  .callout:is([data-callout="quote"], [data-callout="cite"], [data-callout="example"]) {
+  --callout: var(--muted);
+}
+.markdown-content .callout-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.markdown-content .callout-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--callout);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  outline: none;
+}
+.markdown-content .callout-title::placeholder {
+  color: var(--callout);
+  opacity: 1;
+}
+.markdown-content .callout-fold {
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--callout);
+  cursor: pointer;
+}
+.markdown-content .callout-fold::before {
+  content: "▾";
+}
+.markdown-content .callout.collapsed .callout-fold::before {
+  content: "▸";
+}
+.markdown-content .callout.collapsed > .callout-content {
+  display: none;
+}
+.markdown-content .callout-content > :first-child {
+  margin-top: 0.4em;
+}
+.markdown-content .callout-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content .footnote-ref {
+  color: var(--accent);
+  font-size: 0.75em;
+  cursor: pointer;
+}
+.markdown-content .footnote-def {
+  position: relative;
+  margin: 0.6em 0;
+  padding-left: 2.2em;
+  font-size: 0.92em;
+  color: var(--muted);
+}
+.markdown-content .footnote-def::before {
+  content: "[" attr(data-footnote-def) "]";
+  position: absolute;
+  left: 0;
+  top: 0.85em;
+  line-height: inherit;
+  color: var(--accent);
+  font-size: 0.85em;
+}
+
+.markdown-content .mermaid-block {
+  margin: 1em 0;
+}
+.markdown-content .mermaid-preview {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  cursor: pointer;
+}
+.markdown-content .mermaid-preview.mermaid-error {
+  justify-content: flex-start;
+  color: var(--danger);
+  font-size: 0.85em;
+}
+.markdown-content .mermaid-block:not(.code-active) .mermaid-source {
+  display: none;
+}
+
+/* 阅读视图：隐藏注释，链接可单击打开，标注标题只读。 */
+.markdown-content.reading :is(.comment-inline, .comment-block) {
+  display: none;
+}
+.markdown-content.reading :is(.wiki-link, a) {
+  cursor: pointer;
+}
+.markdown-content.reading .callout-title {
+  pointer-events: none;
+}
+.markdown-content.reading .mermaid-preview {
+  cursor: default;
+}
+
+.markdown-content.reading .mermaid-source {
+  display: none;
+}

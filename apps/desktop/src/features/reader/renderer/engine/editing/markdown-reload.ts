@@ -3,6 +3,7 @@ import type { Node as PmNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
 import { linkSelectionKey } from "./link-editing";
 import { markdownReloadMapping, textReloadChanges } from "./reload-mapping";
+import { focusDocument } from "./read-only";
 import {
   captureReadingPosition,
   restoreReadingPosition,
@@ -71,7 +72,7 @@ export function prepareMarkdownReload(previous: MarkdownReloadContext, doc: PmNo
     sourceEditing,
     restore(view: EditorView): () => void {
       let disposed = false;
-      if (previous.focused) view.focus();
+      if (previous.focused) focusDocument(view);
       queueMicrotask(() => {
         if (disposed || !sourceEditing || previous.source === null) return;
         const field = view.dom.querySelector(".math-source, .html-source");

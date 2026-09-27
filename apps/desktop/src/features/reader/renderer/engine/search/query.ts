@@ -10,11 +10,12 @@
  *   且值不以 `/` 开头，`https://example.com` 这类 URL 保持字面；
  * - `line:( … )`、`section:( … )` 要求条件落在同一行或同一标题段；也可只跟一个词。
  *
- * 解析是全函数：括号不配对、孤立运算符都按字面或忽略降级，不抛错。
+ * 括号不配对、孤立运算符按字面或忽略降级；超过共享复杂度上限时明确拒绝。
  * 大小写与 `#` 前缀的规范化由内核统一执行，这里保留用户原文。
  */
 
-import type { SearchExpr, SearchHit, SearchQuery } from "../../../shared/api";
+import type { SearchExpr, SearchQuery } from "../../../shared/api";
+import { parseSearchQueryArgument, SEARCH_DEPTH_LIMIT } from "../../../shared/reader-protocol";
 
 /** 结果上限；与内核默认一致，界面不提供调项。 */
 export const SEARCH_LIMIT = 100;
@@ -37,10 +38,11 @@ const EMPTY: SearchExpr = { kind: "and", children: [] };
  *
  * @param text 搜索框原文，允许为空。
  * @returns 检索条件；空文本得到空表达式（调用方据 `isEmptyQuery` 退出结果模式）。
+ * @throws 语法嵌套或生成的表达式超过共享深度、节点数上限时抛出查询错误。
  */
 export function parseSearchQuery(text: string): SearchQuery {
   const parser = new Parser(tokenize(text));
-  return { expr: parser.parse(), limit: SEARCH_LIMIT };
+  return parseSearchQueryArgument({ expr: parser.parse(), limit: SEARCH_LIMIT });
 }
 
 /** 条件是否为空：没有任何条件时不应发起检索。 */
@@ -155,7 +157,7 @@ class Parser {
     const parts: SearchExpr[] = [];
     // 顶层多余的右括号直接跳过，剩余部分继续解析。
     while (this.index < this.tokens.length) {
-      parts.push(this.parseOr());
+      parts.push(this.parseOr(0));
       if (this.peek()?.type === "close") this.index += 1;
     }
     return and(parts);
@@ -165,45 +167,47 @@ class Parser {
     return this.tokens[this.index];
   }
 
-  private parseOr(): SearchExpr {
-    const options = [this.parseAnd()];
+  private parseOr(depth: number): SearchExpr {
+    const options = [this.parseAnd(depth)];
     while (this.peek()?.type === "or") {
       this.index += 1;
-      options.push(this.parseAnd());
+      options.push(this.parseAnd(depth));
     }
     return or(options);
   }
 
-  private parseAnd(): SearchExpr {
+  private parseAnd(depth: number): SearchExpr {
     const items: SearchExpr[] = [];
     for (let token = this.peek(); token !== undefined; token = this.peek()) {
       if (token.type === "close" || token.type === "or") break;
-      const item = this.parseUnary();
+      const item = this.parseUnary(depth);
       if (item !== null) items.push(item);
     }
     return and(items);
   }
 
-  private parseUnary(): SearchExpr | null {
+  private parseUnary(depth: number): SearchExpr | null {
+    // 必须在递归前限深；生成表达式后的校验无法阻止解析阶段的栈溢出。
+    if (depth > SEARCH_DEPTH_LIMIT) throw new Error("检索条件嵌套过深");
     if (this.peek()?.type === "not") {
       this.index += 1;
-      const inner = this.parseUnary();
+      const inner = this.parseUnary(depth + 1);
       return inner === null || isEmpty(inner) ? null : { kind: "not", child: inner };
     }
-    return this.parsePrimary();
+    return this.parsePrimary(depth);
   }
 
-  private parsePrimary(): SearchExpr | null {
+  private parsePrimary(depth: number): SearchExpr | null {
     const token = this.peek();
     if (token === undefined) return null;
     this.index += 1;
     switch (token.type) {
       case "open":
-        return this.group();
+        return this.group(depth + 1);
       case "scope": {
         if (this.peek()?.type !== "open") return null;
         this.index += 1;
-        const inner = this.group();
+        const inner = this.group(depth + 1);
         return isEmpty(inner) ? null : { kind: token.kind, child: inner };
       }
       case "regex":
@@ -218,8 +222,8 @@ class Parser {
   }
 
   /** 括号内的表达式；缺少右括号时一直读到末尾。 */
-  private group(): SearchExpr {
-    const inner = this.parseOr();
+  private group(depth: number): SearchExpr {
+    const inner = this.parseOr(depth);
     if (this.peek()?.type === "close") this.index += 1;
     return inner;
   }
@@ -303,37 +307,4 @@ export function snippetParts(snippet: string): SnippetPart[] {
   }
   if (current !== "") parts.push({ text: current, mark: marked });
   return parts;
-}
-
-/** 表达式里第一个不在取反之下的全文词。 */
-function firstPositiveTerm(expr: SearchExpr, negated = false): string | null {
-  switch (expr.kind) {
-    case "and":
-    case "or":
-      for (const child of expr.children) {
-        const found = firstPositiveTerm(child, negated);
-        if (found !== null) return found;
-      }
-      return null;
-    case "not":
-      return firstPositiveTerm(expr.child, !negated);
-    case "line":
-    case "section":
-      return firstPositiveTerm(expr.child, negated);
-    case "term":
-      return negated ? null : expr.value;
-    default:
-      return null;
-  }
-}
-
-/**
- * 提取跳转定位用的命中词：优先摘要中第一个高亮片段，其次是第一个正向全文词。
- *
- * 纯谓词查询没有可定位文本，返回空串，调用方只打开文件不定位。
- */
-export function matchNeedle(hit: SearchHit, query: SearchQuery): string {
-  const marked = snippetParts(hit.snippet).find((part) => part.mark && part.text.trim() !== "");
-  if (marked !== undefined) return marked.text;
-  return firstPositiveTerm(query.expr) ?? "";
 }

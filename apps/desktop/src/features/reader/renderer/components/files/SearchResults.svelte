@@ -1,7 +1,8 @@
 <script lang="ts">
   /** 侧栏全文检索结果：命中列表、状态与键盘导航；查询执行由 ReaderSearch 负责。 */
-  import type { SearchHit } from "../../../shared/api";
-  import { SEARCH_LIMIT, snippetParts } from "../../engine/search/query";
+  import type { SearchHit, SearchMatch } from "../../../shared/api";
+  import { tick } from "svelte";
+  import { snippetParts } from "../../engine/search/query";
   import type { ReaderSearch } from "../../state/search.svelte";
 
   let {
@@ -14,24 +15,25 @@
     search: ReaderSearch;
     /** 当前打开的文件路径，用于命中标记。 */
     activePath: string | null;
-    /** 打开命中文件并定位命中词。 */
-    onActivate: (hit: SearchHit) => void;
+    /** 打开用户选择的具体命中；省略时进入文件第一处命中。 */
+    onActivate: (hit: SearchHit, match?: SearchMatch) => void;
     /** 退出结果模式（Escape），焦点交回搜索框。 */
     onExit: () => void;
   } = $props();
 
   let listElement: HTMLElement | undefined = $state();
   let focusedIndex = $state(0);
+  let expanded = $state<Record<string, boolean>>({});
   const hits = $derived(search.hits);
-  const limit = $derived(search.query?.limit ?? SEARCH_LIMIT);
+  const matchCount = $derived(hits.reduce((total, hit) => total + hit.matchCount, 0));
   const status = $derived(
     search.busy
       ? "正在搜索…"
       : search.error !== null
         ? search.error
-        : hits.length >= limit
-          ? `共 ${hits.length} 条结果，仅显示前 ${limit} 条`
-          : `共 ${hits.length} 条结果`,
+        : search.hasMore
+          ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
+          : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
   );
 
   /** 提交检索后键盘从列表第一项继续。 */
@@ -40,21 +42,61 @@
     listElement?.querySelector<HTMLButtonElement>("[data-index='0']")?.focus();
   }
 
-  function keydown(event: KeyboardEvent, index: number): void {
+  async function loadMore(event: MouseEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
+    const button = event.currentTarget;
+    const ownedFocus = document.activeElement === button;
+    const query = search.query;
+    const firstNew = hits.length;
+    await search.loadMore();
+    await tick();
+    // 仅延续发起按钮的焦点；加载期间用户已回到旧命中或编辑器时不抢回。
+    if (
+      search.query === query &&
+      hits.length > firstNew &&
+      ownedFocus &&
+      (document.activeElement === button || document.activeElement === document.body)
+    ) {
+      listElement?.querySelector<HTMLButtonElement>(`[data-index='${firstNew}']`)?.focus();
+    }
+  }
+
+  function keydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
       onExit();
       return;
     }
+    const buttons = Array.from(listElement?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    const index = buttons.findIndex((button) => button === event.currentTarget);
     let next = index;
-    if (event.key === "ArrowDown") next = Math.min(index + 1, hits.length - 1);
+    if (event.key === "ArrowDown") next = Math.min(index + 1, buttons.length - 1);
     else if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = hits.length - 1;
+    else if (event.key === "End") next = buttons.length - 1;
     else return;
     event.preventDefault();
-    focusedIndex = next;
-    listElement?.querySelector<HTMLButtonElement>(`[data-index='${next}']`)?.focus();
+    buttons[next]?.focus();
+  }
+
+  async function loadMatches(
+    hit: SearchHit,
+    event: MouseEvent & { currentTarget: HTMLButtonElement },
+  ): Promise<void> {
+    const button = event.currentTarget;
+    const ownedFocus = document.activeElement === button;
+    const group = button.closest("[data-search-result]");
+    const query = search.query;
+    const firstNew = hit.matches.length;
+    const published = await search.loadMatches(hit.path);
+    await tick();
+    if (
+      published &&
+      search.query === query &&
+      expanded[hit.path] &&
+      ownedFocus &&
+      (document.activeElement === button || document.activeElement === document.body)
+    )
+      group?.querySelector<HTMLButtonElement>(`[data-occurrence='${firstNew}']`)?.focus();
   }
 </script>
 
@@ -67,10 +109,10 @@
       <strong>没有匹配的笔记</strong>
       <p>换个关键词，或用 OR、-排除、tag:标签、path:路径、[属性:值]、line:( ) 调整范围。</p>
     </div>
-  {:else if search.error === null}
+  {:else if hits.length > 0}
     <ul>
       {#each hits as hit, index (hit.path)}
-        <li>
+        <li data-search-result>
           <button
             type="button"
             class="hit"
@@ -80,11 +122,11 @@
             title={hit.path}
             onclick={() => onActivate(hit)}
             onfocus={() => (focusedIndex = index)}
-            onkeydown={(event) => keydown(event, index)}
+            onkeydown={keydown}
           >
             <span class="title">{hit.title}</span>
             <span class="path">{hit.path}</span>
-            {#if hit.snippet !== ""}
+            {#if hit.snippet !== "" && !expanded[hit.path]}
               <span class="snippet">
                 {#each snippetParts(hit.snippet) as part, partIndex (partIndex)}
                   {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
@@ -92,9 +134,70 @@
               </span>
             {/if}
           </button>
+          {#if hit.matchCount > 0}
+            <button
+              class="expand"
+              aria-label={`${expanded[hit.path] ? "收起" : "展开"} ${hit.title} 的 ${hit.matchCount} 处命中`}
+              aria-expanded={expanded[hit.path] ?? false}
+              onclick={() => (expanded[hit.path] = !expanded[hit.path])}
+              onkeydown={keydown}
+            >
+              <span aria-hidden="true">{expanded[hit.path] ? "⌄" : "›"}</span>
+              {hit.matchCount} 处命中
+            </button>
+            {#if expanded[hit.path]}
+              <ol class="occurrences">
+                {#each hit.matches as match, matchIndex (matchIndex)}
+                  <li>
+                    <button
+                      class="occurrence"
+                      data-occurrence={matchIndex}
+                      onclick={() => onActivate(hit, match)}
+                      onkeydown={keydown}
+                    >
+                      <span class="line"
+                        >{match.location === null ? "上下文" : `第 ${match.location.line} 行`}</span
+                      >
+                      <span class="snippet">
+                        {#each snippetParts(match.snippet) as part, partIndex (partIndex)}
+                          {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                        {/each}
+                      </span>
+                    </button>
+                  </li>
+                {/each}
+              </ol>
+              {#if search.matchError(hit.path) !== null}
+                <p class="match-error" role="alert">{search.matchError(hit.path)}</p>
+                <button class="expand" onclick={() => void search.refresh()} onkeydown={keydown}
+                  >重新搜索</button
+                >
+              {:else if hit.matchesCursor !== null}
+                <button
+                  class="expand"
+                  aria-disabled={search.loadingMatches(hit.path)}
+                  onclick={(event) => loadMatches(hit, event)}
+                  onkeydown={keydown}
+                >
+                  {search.loadingMatches(hit.path)
+                    ? "正在加载命中…"
+                    : `显示更多 · 还有 ${hit.matchCount - hit.matches.length} 处`}
+                </button>
+              {/if}
+            {/if}
+          {/if}
         </li>
       {/each}
     </ul>
+  {/if}
+  {#if !search.busy && search.error !== null}
+    <button class="expand" onclick={() => void search.refresh()} onkeydown={keydown}
+      >重新搜索</button
+    >
+  {:else if search.hasMore}
+    <button class="expand" aria-disabled={search.loadingMore} onclick={loadMore} onkeydown={keydown}
+      >{search.loadingMore ? "正在加载…" : "加载更多结果"}</button
+    >
   {/if}
 </section>
 
@@ -110,12 +213,19 @@
     font-size: 0.75rem;
     padding: 0 0.25rem 0.45rem;
   }
-  ul {
+  .match-error {
+    color: var(--muted);
+    font-size: 0.75rem;
+    padding: 0 0.5rem;
+  }
+  ul,
+  ol {
     margin: 0;
     padding: 0;
     list-style: none;
   }
-  .hit {
+  .hit,
+  .occurrence {
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
@@ -130,15 +240,40 @@
     text-align: left;
     cursor: pointer;
   }
-  .hit:hover {
+  .hit:hover,
+  .occurrence:hover,
+  .expand:hover {
     background: var(--selected);
   }
-  .hit:focus-visible {
+  button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
   .hit.active {
     background: var(--selected);
+  }
+  .expand {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 0;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.7rem;
+    padding: 0.3rem 0.5rem;
+    margin: 0 0 0.35rem;
+    cursor: pointer;
+  }
+  .occurrences {
+    margin: 0 0 0.4rem 0.65rem;
+    border-left: 1px solid var(--border);
+  }
+  .line {
+    color: var(--muted);
+    font-size: 0.65rem;
+    font-variant-numeric: tabular-nums;
   }
   .title {
     font-size: 0.85rem;

@@ -12,7 +12,7 @@ import { checkBudget } from "./budget";
 const desktop = new URL("../../../apps/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("一万文件目录的搜索与键盘响应基准", async (t) => {
+test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nous-files-bench-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -35,6 +35,7 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
   const environment: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && name !== "ELECTRON_RENDERER_URL") environment[name] = value;
+  const openingAt = performance.now();
   const app = await electron.launch({
     executablePath: executable,
     args: [
@@ -46,11 +47,16 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
   });
   try {
     const page = await app.firstWindow();
+    page.setDefaultTimeout(15_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     // 在页面内测量输入到下一次绘制，避免把自动化通信与查找断言计入响应耗时。
     const latency = await page.evaluateHandle(() => {
-      const samples = { search: [] as number[], navigation: [] as number[] };
+      const samples = {
+        search: [] as number[],
+        navigation: [] as number[],
+        selection: [] as number[],
+      };
       function record(target: number[]): void {
         const start = performance.now();
         requestAnimationFrame(() =>
@@ -62,7 +68,7 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
         (event) => {
           if (
             event.target instanceof HTMLInputElement &&
-            event.target.type === "search" &&
+            event.target.getAttribute("role") === "searchbox" &&
             event.target.value === "笔记"
           )
             record(samples.search);
@@ -73,13 +79,23 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
         "keydown",
         (event) => {
           if (event.key === "End") record(samples.navigation);
+          if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey))
+            record(samples.selection);
         },
         true,
       );
       return samples;
     });
     const files = page.getByRole("navigation", { name: "文件列表" });
-    await files.getByRole("treeitem", { name: "目录0", exact: true }).waitFor();
+    // 首次建立一万篇笔记的索引属于准备阶段，不计入输入到绘制的响应预算。
+    await files.getByRole("treeitem", { name: "目录0", exact: true }).waitFor({ timeout: 120000 });
+    console.info(
+      JSON.stringify({
+        scenario: "file-cold-open",
+        files: 10000,
+        milliseconds: performance.now() - openingAt,
+      }),
+    );
     const search = files.getByRole("searchbox");
     for (let index = 0; index < 35; index++) {
       await search.fill("笔记");
@@ -137,6 +153,18 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
             requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
           ),
       );
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+a" : "Control+a");
+      expect(await files.getByRole("toolbar", { name: "批量文件操作" }).innerText()).toContain(
+        "10100",
+      );
+      expect(await files.getByRole("treeitem").count()).toBeLessThan(100);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await page.keyboard.press("Escape");
       await search.fill("");
       expect(await files.getByRole("treeitem").count()).toBe(folderCount);
     }
@@ -144,7 +172,11 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
     for (const [name, values] of Object.entries(measured)) {
       expect(values).toHaveLength(35);
       await checkBudget(
-        name === "search" ? "file-filter" : "file-navigation",
+        name === "search"
+          ? "file-filter"
+          : name === "navigation"
+            ? "file-navigation"
+            : "file-selection",
         values.slice(5),
         100,
       );
@@ -170,6 +202,7 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
     const middle = files.locator('[data-path="目录50/笔记0.md"]');
     await middle.waitFor();
     const transfer = await page.evaluateHandle(() => new DataTransfer());
+    await middle.focus();
     await middle.dispatchEvent("dragstart", { dataTransfer: transfer });
     await tree.evaluate((node) => {
       node.scrollTop = 0;
@@ -181,11 +214,12 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
     expect(await files.getByRole("treeitem").count()).toBeLessThan(100);
     await middle.dispatchEvent("dragend", { dataTransfer: transfer });
     await transfer.dispose();
-    await middle.waitFor({ state: "detached" });
+    expect(await middle.getAttribute("class")).not.toContain("dragging");
+    expect(await middle.evaluate((node) => node === document.activeElement)).toBe(true);
     await page.keyboard.press("ArrowDown");
     expect(
       await files
-        .locator('[data-path="目录0/笔记46.md"]')
+        .locator('[data-path="目录50/笔记1.md"]')
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
@@ -232,4 +266,4 @@ test("一万文件目录的搜索与键盘响应基准", async (t) => {
   } finally {
     await app.close();
   }
-}, 90_000);
+});

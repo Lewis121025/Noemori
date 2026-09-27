@@ -6,7 +6,8 @@
    * 按下都会立即关闭，预览不会挡住正在进行的编辑。
    */
   import type { MediaIo } from "../../engine/media/media";
-  import { mountNotePreview } from "../../engine/rendering/note-embed-view";
+  import { mountNotePreview } from "../../engine/rendering/content-view";
+  import type { OpenContentLink } from "../../engine/editing/link-interaction";
   import {
     createHoverController,
     previewRequestOf,
@@ -24,12 +25,12 @@
     host: HTMLElement;
     /** 宿主笔记路径；没有打开文档时不预览。 */
     from: string | null;
-    io: Pick<MediaIo, "resolveLink" | "readFile">;
+    io: MediaIo;
     /** 点击弹层标题时按普通链接打开。 */
-    openLink: (kind: "wiki" | "md", raw: string) => void;
+    openLink: OpenContentLink;
   } = $props();
 
-  type Hit = { element: Element; target: PreviewTarget };
+  type Hit = { element: Element; target: PreviewTarget; from: string };
   type Shown = Hit & { rect: DOMRect };
 
   /** 弹层尺寸上限（像素），用于决定放在链接上方还是下方。 */
@@ -66,7 +67,11 @@
     const over = (event: PointerEvent) => {
       if (!(event.target instanceof Element) || from === null) return;
       const hit = previewTargetOf(event.target);
-      if (hit !== null) hover.enterLink(hit);
+      if (hit !== null) {
+        const origin =
+          hit.element.closest<HTMLElement>("[data-content-path]")?.dataset["contentPath"] ?? from;
+        hover.enterLink({ ...hit, from: origin });
+      }
     };
     const out = (event: PointerEvent) => {
       if (!(event.target instanceof Element)) return;
@@ -104,8 +109,8 @@
   $effect(() => {
     const current = shown;
     const container = body;
-    const path = from;
-    if (current === null || container === undefined || path === null) return;
+    if (current === null || container === undefined) return;
+    const path = current.from;
     container.textContent = "正在载入…";
     const request = previewRequestOf(current.target, path);
     // 预览本身是第一层：宿主不进祖先链，纯锚点预览宿主自身不算循环。
@@ -134,9 +139,9 @@
       type="button"
       class="reader-button title"
       onclick={() => {
-        const target = shown?.target;
+        const current = shown;
         hover.dismiss();
-        if (target !== undefined) openLink(target.kind, target.raw);
+        if (current !== null) openLink(current.target.kind, current.target.raw, current.from);
       }}>{shown.target.raw}</button
     >
     <div class="body" bind:this={body}></div>

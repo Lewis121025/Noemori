@@ -1,6 +1,6 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { Nodes } from "mdast";
-import { sourceTextOffsets } from "./source-text";
+import { sourceCodeOffsets, sourceTextOffsets } from "./source-text";
 
 /** 原始语法与编辑器节点的只读范围；位置统一采用 UTF-16。 */
 export type SourceNode = {
@@ -10,6 +10,15 @@ export type SourceNode = {
   children: SourceNode[];
   text: Array<{ from: number; to: number; start: number; end: number; value: string }>;
   inline: Array<{ from: number; to: number; start: number; end: number }>;
+  /** 仅供精确导航使用；不参与保真保存的文本替换。 */
+  navigation?: Array<{
+    from: number;
+    to: number;
+    start: number;
+    end: number;
+    kind: "code" | "inlineCode" | "atom";
+    value: string;
+  }>;
   /** 列表 schema 补入的空首段没有原始字节，但必须占据文档位置。 */
   implicit?: boolean;
 };
@@ -51,6 +60,7 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
   }
   const text: SourceNode["text"] = [];
   const phrases: SourceNode["inline"] = [];
+  const navigation: NonNullable<SourceNode["navigation"]> = [];
   let position = 0;
   function inline(item: Nodes): void {
     if (item.type === "text") {
@@ -65,9 +75,45 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
           value: item.value,
         });
       position += item.value.length;
-    } else if (item.type === "inlineCode") position += item.value.length;
-    else if ("children" in item) item.children.forEach(inline);
-    else position += 1;
+    } else if (item.type === "inlineCode") {
+      const start = item.position?.start.offset;
+      const end = item.position?.end.offset;
+      if (start !== undefined && end !== undefined)
+        navigation.push({
+          from: position,
+          to: position + item.value.length,
+          start: start + offset,
+          end: end + offset,
+          kind: "inlineCode",
+          value: item.value,
+        });
+      position += item.value.length;
+    } else if ("children" in item) item.children.forEach(inline);
+    else {
+      const start = item.position?.start.offset;
+      const end = item.position?.end.offset;
+      if (start !== undefined && end !== undefined)
+        navigation.push({
+          from: position,
+          to: position + 1,
+          start: start + offset,
+          end: end + offset,
+          kind: "atom",
+          value: "",
+        });
+      position += 1;
+    }
+  }
+  if (ast.type === "code" && node.type.name === "code_block") {
+    position = node.content.size;
+    navigation.push({
+      from: 0,
+      to: position,
+      start: start + offset,
+      end: end + offset,
+      kind: "code",
+      value: ast.value,
+    });
   }
   if (node.isTextblock && "children" in ast) {
     for (const item of ast.children) {
@@ -86,7 +132,54 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
     children,
     text: position === node.content.size ? text : [],
     inline: position === node.content.size ? phrases : [],
+    navigation: position === node.content.size ? navigation : [],
   };
+}
+
+/**
+ * 将同一快照中的源码范围精确映射为文档选区；无法验证的语法边界返回 null。
+ * @param tree 与 source 对应的解析树。
+ * @param source 完整原文；start/end 使用 UTF-16，终点不含。
+ * @returns 文本或原子节点的完整选区；不会降级到段落开头。
+ */
+export function rangeInTree(
+  tree: SourceNode,
+  source: string,
+  start: number,
+  end: number,
+): { from: number; to: number } | null {
+  const from = exactPosition(tree, source, start, -1, false);
+  const to = exactPosition(tree, source, end, -1, true);
+  return from !== null && to !== null && from < to ? { from, to } : null;
+}
+
+function exactPosition(
+  tree: SourceNode,
+  source: string,
+  offset: number,
+  position: number,
+  end: boolean,
+): number | null {
+  let childPosition = position + 1;
+  for (const child of tree.children) {
+    if (!child.implicit && offset >= child.start && offset <= child.end) {
+      const found = exactPosition(child, source, offset, childPosition, end);
+      if (found !== null) return found;
+    }
+    childPosition += child.node.nodeSize;
+  }
+  for (const item of [...tree.text, ...(tree.navigation ?? [])]) {
+    if (offset < item.start || offset > item.end) continue;
+    if ("kind" in item && item.kind === "atom") return position + 1 + (end ? item.to : item.from);
+    const raw = source.slice(item.start, item.end);
+    const offsets =
+      "kind" in item
+        ? sourceCodeOffsets(raw, item.value, item.kind === "inlineCode")
+        : sourceTextOffsets(raw, item.value);
+    const index = offsets?.indexOf(offset - item.start) ?? -1;
+    if (index >= 0) return position + 1 + item.from + index;
+  }
+  return null;
 }
 
 /** 按有序且互不相交的 UTF-16 区间替换源码；重叠或越界时抛错。 */
@@ -115,9 +208,16 @@ export function positionInTree(
       return positionInTree(child, source, offset, childPosition);
     childPosition += child.node.nodeSize;
   }
-  const text = tree.text.find((item) => offset >= item.start && offset <= item.end);
+  const text = [...tree.text, ...(tree.navigation ?? [])].find(
+    (item) => offset >= item.start && offset <= item.end,
+  );
   if (text !== undefined) {
-    const offsets = sourceTextOffsets(source.slice(text.start, text.end), text.value);
+    if ("kind" in text && text.kind === "atom") return position + 1 + text.from;
+    const raw = source.slice(text.start, text.end);
+    const offsets =
+      "kind" in text
+        ? sourceCodeOffsets(raw, text.value, text.kind === "inlineCode")
+        : sourceTextOffsets(raw, text.value);
     if (offsets !== null) {
       let relative = 0;
       for (const [index, raw] of offsets.entries()) {
@@ -129,4 +229,39 @@ export function positionInTree(
     }
   }
   return Math.max(0, position + (tree.node.isTextblock ? 1 : 0));
+}
+
+/**
+ * 将同一快照的排版位置反向映射到 UTF-16 源码；不透明语法落在所属块边界。
+ * @param target 当前树中的 ProseMirror 位置；调用方负责检查快照版本与范围。
+ * @returns 源码偏移，供视图交接与阅读锚点使用，不用于改写源文件。
+ */
+export function sourceOffsetInTree(
+  tree: SourceNode,
+  source: string,
+  target: number,
+  position = -1,
+): number {
+  let childPosition = position + 1;
+  for (const child of tree.children) {
+    if (target >= childPosition && target < childPosition + child.node.nodeSize)
+      return sourceOffsetInTree(child, source, target, childPosition);
+    childPosition += child.node.nodeSize;
+  }
+  const relative = target - position - 1;
+  const parts = [...tree.text, ...(tree.navigation ?? [])];
+  const part =
+    parts.find((item) => relative >= item.from && relative < item.to) ??
+    parts.find((item) => relative === item.to);
+  if (part !== undefined) {
+    if ("kind" in part && part.kind === "atom") return relative === part.to ? part.end : part.start;
+    const raw = source.slice(part.start, part.end);
+    const offsets =
+      "kind" in part
+        ? sourceCodeOffsets(raw, part.value, part.kind === "inlineCode")
+        : sourceTextOffsets(raw, part.value);
+    const offset = offsets?.[relative - part.from];
+    if (offset !== undefined && offset !== null) return part.start + offset;
+  }
+  return relative >= tree.node.content.size ? tree.end : tree.start;
 }

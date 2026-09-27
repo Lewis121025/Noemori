@@ -28,5 +28,21 @@ export function utf8ByteToJsIndex(source: string, byteOffset: number): number {
  */
 export function utf8ByteToCodeIndex(source: string, byteOffset: number): number {
   const end = utf8ByteToJsIndex(source, byteOffset);
-  return source.slice(0, end).replace(/\r\n?/g, "\n").length;
+  return sourceOffsetToCodeIndex(source, end);
+}
+
+/** UTF-16 原文偏移转为 CodeMirror 位置；CRLF 在编辑器里只占一位，越界夹到边界。 */
+export function sourceOffsetToCodeIndex(source: string, offset: number): number {
+  if (!Number.isSafeInteger(offset)) throw new RangeError("源码位置必须是安全整数");
+  return source.slice(0, Math.max(0, offset)).replace(/\r\n?/g, "\n").length;
+}
+
+/** 将 CodeMirror 位置映射回保留原始换行的 UTF-16 源码偏移；非法数值抛出 RangeError。 */
+export function codeIndexToSourceOffset(source: string, index: number): number {
+  if (!Number.isSafeInteger(index)) throw new RangeError("文本位置必须是安全整数");
+  let offset = 0;
+  for (let position = 0; position < index && offset < source.length; position++, offset++) {
+    if (source[offset] === "\r" && source[offset + 1] === "\n") offset++;
+  }
+  return offset;
 }

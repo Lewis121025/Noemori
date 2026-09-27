@@ -24,6 +24,7 @@ const ready: CommandContext = {
   vaultOpen: true,
   hasDocument: true,
   canEdit: true,
+  reading: false,
   markdown: true,
   canBack: true,
   canForward: true,
@@ -79,11 +80,18 @@ describe("按键映射", () => {
 });
 
 describe("可用性门禁", () => {
+  it("阅读态保留保存此前编辑的入口，但不提供附件写入命令", () => {
+    const reading = { ...ready, reading: true };
+    expect(commandAvailable("insert-attachment", reading)).toBe(false);
+    expect(commandAvailable("save", reading)).toBe(true);
+    expect(commandAvailable("find", reading)).toBe(true);
+  });
   it("未打开库时只允许与库无关的命令", () => {
     const closed: CommandContext = {
       vaultOpen: false,
       hasDocument: false,
       canEdit: false,
+      reading: false,
       markdown: false,
       canBack: false,
       canForward: false,

@@ -4,6 +4,8 @@ import type { PaneLayout } from "../shared/api";
 import { parseAttachmentRequest, type AttachmentReply } from "../shared/attachments";
 import { parseDraftRequest, type DraftReply } from "../shared/editor-recovery";
 import { parseRecentFiles, parseViewModes } from "../shared/session";
+import { parseFileTreeMessage } from "../shared/file-browser";
+import { registerEntryBatchIpc } from "./entry-batch-ipc";
 import type { ReaderService } from "./service";
 import {
   parseBookmarks,
@@ -16,6 +18,9 @@ import {
   parsePathArgument,
   parseSessionDocumentsMessage,
   parseSearchQueryArgument,
+  parseSearchId,
+  parseSearchCursor,
+  parseSearchMatchesCursor,
   parseWriteRequest,
 } from "../shared/reader-protocol";
 
@@ -62,6 +67,9 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.session.setRecentFiles", (_event, paths: unknown) =>
     core.call("readerSessionPatch", { recentFiles: parseRecentFiles(paths) }),
   );
+  ipcMain.handle("reader.session.setFileTree", (_event, root: unknown, state: unknown) =>
+    core.call("readerFileTreeSave", parsePathArgument(root), parseFileTreeMessage(state)),
+  );
 
   ipcMain.handle("reader.session.getPanes", async (): Promise<PaneLayout> => {
     const session = await core.call("readerSessionLoad");
@@ -87,6 +95,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.entry.trash", (_event, path: unknown) =>
     core.call("entryTrash", parsePathArgument(path)),
   );
+  registerEntryBatchIpc(core);
   ipcMain.handle(
     "reader.attachment.import",
     async (
@@ -197,8 +206,24 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
         parsePathArgument(target),
       ),
   );
-  ipcMain.handle("reader.search.query", (_event, query: unknown) =>
-    core.call("searchQuery", parseSearchQueryArgument(query)),
+  ipcMain.handle("reader.search.query", (_event, query: unknown, id: unknown, cursor: unknown) =>
+    core.call(
+      "searchQuery",
+      parseSearchQueryArgument(query),
+      parseSearchId(id),
+      parseSearchCursor(cursor),
+    ),
+  );
+  ipcMain.handle("reader.search.cancel", (_event, id: unknown) =>
+    core.call("searchCancel", parseSearchId(id)),
+  );
+  ipcMain.handle("reader.search.matches", (_event, query: unknown, id: unknown, cursor: unknown) =>
+    core.call(
+      "searchMatches",
+      parseSearchQueryArgument(query),
+      parseSearchId(id),
+      parseSearchMatchesCursor(cursor),
+    ),
   );
   ipcMain.handle("reader.index.headings", (_event, path: unknown) =>
     core.call("indexHeadings", parsePathArgument(path)),

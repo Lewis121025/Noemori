@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VaultEvent } from "@reader/shared/api";
 import { createReaderService } from "@reader/main/service";
+import { emptyReaderSession, type ReaderSession } from "@reader/shared/session";
 
 const { native, session } = vi.hoisted(() => ({
   native: {
@@ -11,13 +12,18 @@ const { native, session } = vi.hoisted(() => ({
     fileWrite: vi.fn(),
     indexMentionsTo: vi.fn(),
     searchQuery: vi.fn(),
+    searchCancel: vi.fn(),
+    searchMatches: vi.fn(),
     indexHeadings: vi.fn(),
     indexNoteKeys: vi.fn(),
     bookmarksList: vi.fn(),
     bookmarksSet: vi.fn(),
     entryRename: vi.fn(),
+    entryRenameBatch: vi.fn(),
     entryTrash: vi.fn(),
     entryCreate: vi.fn(),
+    entryCheckBatch: vi.fn(),
+    vaultEntries: vi.fn(),
     attachmentImport: vi.fn(),
   },
   session: {
@@ -54,6 +60,114 @@ beforeEach(() => {
 });
 
 describe("文件操作与会话提交", () => {
+  it("批量请求先核对库归属与整批磁盘条件，成功项逐项迁移目录会话，只发一次通知", () => {
+    const changed = vi.fn();
+    let state: ReaderSession = {
+      ...emptyReaderSession,
+      vaultRoot: "/first",
+      documents: documents("a.md"),
+      viewModes: {},
+      recentFiles: ["a.md", "b.md"],
+      fileTree: {
+        expanded: ["target"],
+        selected: ["a.md", "b.md"],
+        focused: "a.md",
+        scroll: { path: "a.md", offset: 5 },
+      },
+    };
+    const service = createReaderService("/state", changed, {
+      load: () => state,
+      save: (next) => {
+        state = next;
+      },
+    });
+    service.vaultOpen("/first");
+    state = {
+      ...state,
+      documents: documents("a.md"),
+      recentFiles: ["a.md", "b.md"],
+      fileTree: {
+        expanded: ["target"],
+        selected: ["a.md", "b.md"],
+        focused: "a.md",
+        scroll: { path: "a.md", offset: 5 },
+      },
+    };
+    native.vaultEntries.mockReturnValue([
+      { path: "a.md", kind: "file" },
+      { path: "b.md", kind: "file" },
+      { path: "target", kind: "directory" },
+    ]);
+    const request = {
+      root: "/first",
+      action: "move" as const,
+      paths: ["a.md", "b.md"],
+      destination: "target",
+    };
+    expect(() => service.entryBatch({ ...request, root: "/other" })).toThrow("笔记库已切换");
+    expect(native.entryRenameBatch).not.toHaveBeenCalled();
+    native.entryRenameBatch.mockImplementationOnce(() => {
+      throw new Error("未保存草稿");
+    });
+    expect(service.entryBatch(request).issues[0]?.message).toBe("未保存草稿");
+    expect(native.entryRename).not.toHaveBeenCalled();
+    native.entryRenameBatch.mockImplementationOnce(
+      (_changes, progress: (completed: number) => boolean) => {
+        expect(progress(0)).toBe(true);
+        expect(progress(1)).toBe(true);
+        expect(state.fileTree?.selected).toEqual(["target/a.md", "b.md"]);
+        expect(state.documents.panes[0]?.currentPath).toBe("target/a.md");
+        return { completed: 1, issue: { path: "b.md", message: "外部冲突" } };
+      },
+    );
+    const result = service.entryBatch(request);
+    expect(native.entryRenameBatch).toHaveBeenLastCalledWith(
+      [
+        { from: "a.md", to: "target/a.md" },
+        { from: "b.md", to: "target/b.md" },
+      ],
+      expect.any(Function),
+    );
+    expect(result.completed).toEqual([{ from: "a.md", to: "target/a.md" }]);
+    expect(result.remaining).toEqual(["b.md"]);
+    expect(state.fileTree?.selected).toEqual(["target/a.md", "b.md"]);
+    expect(state.fileTree?.scroll?.path).toBe("target/a.md");
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(() => service.readerFileTreeSave("/other", state.fileTree!)).toThrow("笔记库已切换");
+  });
+
+  it("批量废纸篓继续使用整批预检和逐项系统操作，失败后只重试未完成项", () => {
+    const changed = vi.fn();
+    const service = createReaderService("/state", changed, {
+      load: session.loadSession,
+      save: session.saveSession,
+    });
+    service.vaultOpen("/first");
+    native.vaultEntries.mockReturnValueOnce([
+      { path: "a.md", kind: "file" },
+      { path: "b.md", kind: "file" },
+    ]);
+    native.entryTrash.mockReturnValueOnce({ warning: "索引待刷新" }).mockImplementationOnce(() => {
+      throw new Error("废纸篓不可用");
+    });
+    const result = service.entryBatch({ root: "/first", action: "trash", paths: ["a.md", "b.md"] });
+    expect(native.entryCheckBatch).toHaveBeenCalledExactlyOnceWith([
+      { from: "a.md" },
+      { from: "b.md" },
+    ]);
+    expect(native.entryRenameBatch).not.toHaveBeenCalled();
+    expect(result.completed).toEqual([{ from: "a.md", to: null }]);
+    expect(result.remaining).toEqual(["b.md"]);
+    expect(result.issues).toEqual([{ path: "b.md", message: "废纸篓不可用" }]);
+    expect(result.warning).toContain("索引待刷新");
+    expect(session.saveSession.mock.lastCall?.[0].documents.panes[0].currentPath).toBeNull();
+    expect(changed).toHaveBeenCalledExactlyOnceWith({
+      status: "changed",
+      paths: [],
+      healthy: false,
+    });
+  });
+
   it("附件导入核对笔记库归属，返回实际路径并传播提交后的索引警告", () => {
     const changed = vi.fn();
     const service = createReaderService("/state", changed, {
@@ -199,7 +313,7 @@ it("工作线程返回已链接与未链接提及，未知种类作为索引错�
   expect(() => service.indexMentionsTo("target.md")).toThrow("提及索引包含无效");
 });
 
-it("检索条件与结果在工作线程边界结构化校验，损坏行不冒充空结果", () => {
+it("检索条件与结果在工作线程边界结构化校验，损坏行不冒充空结果", async () => {
   const service = createReaderService("/state", vi.fn(), {
     load: session.loadSession,
     save: session.saveSession,
@@ -215,29 +329,83 @@ it("检索条件与结果在工作线程边界结构化校验，损坏行不冒�
     },
     limit: 10,
   };
-  native.searchQuery.mockReturnValue([
-    { path: "notes/a.md", title: "A", snippet: "命中\u{1}全文\u{2}词" },
-  ]);
-  expect(service.searchQuery(query)).toEqual([
-    { path: "notes/a.md", title: "A", snippet: "命中\u{1}全文\u{2}词" },
-  ]);
-  // 单子条件转为 children 列表；属性值为 null 时省略 value 键。
-  expect(native.searchQuery).toHaveBeenCalledWith({
-    expr: {
-      kind: "and",
-      children: [
-        { kind: "term", value: "全文" },
-        { kind: "line", children: [{ kind: "tag", value: "标签" }] },
-        { kind: "attr", key: "status" },
-      ],
-    },
-    limit: 10,
+  native.searchQuery.mockResolvedValue({
+    hits: [
+      {
+        path: "notes/a.md",
+        title: "A",
+        contentHash: "a".repeat(64),
+        matches: [],
+        snippet: "命中\u{1}全文\u{2}词",
+        matchCount: 0,
+        matchesCursor: null,
+      },
+    ],
+    nextCursor: null,
   });
-  native.searchQuery.mockReturnValue([{ path: "../逃逸.md", title: "A", snippet: "" }]);
-  expect(() => service.searchQuery(query)).toThrow("检索命中");
-  expect(() =>
-    service.searchQuery({ expr: { kind: "term", value: 1 }, limit: 10 } as never),
-  ).toThrow("文本");
+  expect(await service.searchQuery(query, "search-id", null)).toEqual({
+    hits: [
+      {
+        path: "notes/a.md",
+        title: "A",
+        contentHash: "a".repeat(64),
+        matches: [],
+        snippet: "命中\u{1}全文\u{2}词",
+        matchCount: 0,
+        matchesCursor: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  // 单子条件转为 children 列表；属性值为 null 时省略 value 键。
+  expect(native.searchQuery).toHaveBeenCalledWith(
+    {
+      expr: {
+        kind: "and",
+        children: [
+          { kind: "term", value: "全文" },
+          { kind: "line", children: [{ kind: "tag", value: "标签" }] },
+          { kind: "attr", key: "status" },
+        ],
+      },
+      limit: 10,
+    },
+    "search-id",
+    null,
+  );
+  const matchPage = {
+    matches: [{ snippet: "全文", location: { startByte: 0, endByte: 6, line: 1 } }],
+    nextCursor: null,
+  };
+  native.searchMatches.mockResolvedValue(matchPage);
+  expect(await service.searchMatches(query, "search-id", "matches-cursor")).toEqual(matchPage);
+  expect(native.searchMatches).toHaveBeenCalledWith(
+    native.searchQuery.mock.calls[0]?.[0],
+    "search-id",
+    "matches-cursor",
+  );
+  native.searchQuery.mockResolvedValue({
+    hits: [
+      {
+        path: "../逃逸.md",
+        title: "A",
+        contentHash: "a".repeat(64),
+        matches: [],
+        snippet: "",
+        matchCount: 0,
+        matchesCursor: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  await expect(service.searchQuery(query, "search-id", null)).rejects.toThrow("检索命中");
+  await expect(
+    service.searchQuery(
+      { expr: { kind: "term", value: 1 }, limit: 10 } as never,
+      "search-id",
+      null,
+    ),
+  ).rejects.toThrow("文本");
   native.indexHeadings.mockReturnValue([
     { path: "a.md", level: 2, text: "标题", startByte: 0, endByte: 9 },
   ]);

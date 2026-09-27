@@ -1,8 +1,9 @@
 import type { Command, EditorState } from "prosemirror-state";
-import { findNext, getSearchState, type SearchResult } from "prosemirror-search";
+import { getSearchState } from "prosemirror-search";
 import { closeHistory } from "prosemirror-history";
+import { findNextMatch, searchMatches, type SearchMatch } from "./search-navigation";
 
-function textMatch(state: EditorState, match: SearchResult): boolean {
+function textMatch(state: EditorState, match: SearchMatch): boolean {
   let textOnly = true;
   state.doc.nodesBetween(match.from, match.to, (node) => {
     if (node.isLeaf && !node.isText) textOnly = false;
@@ -19,18 +20,12 @@ export function replaceSearch(all: boolean): Command {
   return (state, dispatch, view) => {
     const query = getSearchState(state)?.query;
     if (!query?.valid) return false;
-    const matches: SearchResult[] = [];
-    let from = all ? 0 : state.selection.from;
-    while (from <= state.doc.content.size) {
-      const match = query.findNext(state, from);
-      if (!match) break;
-      if (!all && (match.from !== state.selection.from || match.to !== state.selection.to))
-        return findNext(state, dispatch, view);
-      if (textMatch(state, match)) matches.push(match);
-      if (!all) break;
-      from = Math.max(match.to, match.from + 1);
-    }
-    if (matches.length === 0) return all ? false : findNext(state, dispatch, view);
+    const matches = searchMatches(state).filter(
+      (match) =>
+        (all || (match.from === state.selection.from && match.to === state.selection.to)) &&
+        textMatch(state, match),
+    );
+    if (matches.length === 0) return all ? false : findNextMatch(state, dispatch, view);
     if (dispatch) {
       const tr = closeHistory(state.tr);
       for (const match of matches.reverse()) {
@@ -39,7 +34,7 @@ export function replaceSearch(all: boolean): Command {
         else tr.replaceWith(match.from, match.to, state.schema.text(query.replace, marks));
       }
       dispatch(tr.scrollIntoView());
-      if (!all && view) findNext(view.state, view.dispatch, view);
+      if (!all && view) findNextMatch(view.state, view.dispatch, view);
     }
     return true;
   };

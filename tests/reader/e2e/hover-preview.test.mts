@@ -14,12 +14,20 @@ test("悬停预览：链接停留后弹出目标小节，移入弹层保持，�
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
-  await Promise.all([mkdir(vault), mkdir(userData)]);
+  await Promise.all([mkdir(join(vault, "notes"), { recursive: true }), mkdir(userData)]);
   await Promise.all([
     writeFile(join(vault, "入口.md"), "# 入口\n\n参见 [[目标#第二节]] 与 [[不存在]]。\n"),
     writeFile(
-      join(vault, "目标.md"),
-      "# 目标\n\n## 第一节\n\n不该出现。\n\n## 第二节\n\n预览里的正文。\n",
+      join(vault, "notes/目标.md"),
+      "# 目标\n\n## 第一节\n\n不该出现。\n\n## 第二节\n\n预览里的正文 $E=mc^2$。%%隐藏注释%%\n\n[继续阅读](./关联.md)\n\n![示意图](image.png)\n\n- [ ] 任务\n",
+    ),
+    writeFile(join(vault, "notes/关联.md"), "# 关联\n"),
+    writeFile(
+      join(vault, "notes/image.png"),
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        "base64",
+      ),
     ),
     writeFile(
       join(userData, "session.json"),
@@ -50,11 +58,14 @@ test("悬停预览：链接停留后弹出目标小节，移入弹层保持，�
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.waitForFunction(
-      () =>
-        document.querySelector(".document-name")?.textContent === "入口.md" &&
-        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
-    );
+    const ready = (name: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.querySelector(".document-name")?.textContent === expected &&
+          document.querySelector("section[data-pane]")?.hasAttribute("inert") === false,
+        name,
+      );
+    await ready("入口.md");
     const popover = page.locator(".hover-preview");
 
     await page.locator('.wiki-link[data-wiki-target="目标#第二节"]').hover();
@@ -63,6 +74,22 @@ test("悬停预览：链接停留后弹出目标小节，移入弹层保持，�
       .poll(() => popover.locator(".ProseMirror").textContent())
       .toContain("预览里的正文");
     expect(await popover.textContent()).not.toContain("不该出现");
+    await popover.locator("mjx-container").waitFor();
+    await expect
+      .poll(() =>
+        popover.locator(".note-image").evaluate((image: HTMLImageElement) => image.naturalWidth),
+      )
+      .toBe(1);
+    expect(await popover.locator(".task-checkbox").isDisabled()).toBe(true);
+    expect(await popover.locator(".comment-inline").isVisible()).toBe(false);
+
+    // 预览内的相对链接以目标笔记所在目录解析，普通单击可继续阅读。
+    await popover.getByRole("link", { name: "继续阅读" }).click();
+    await ready("关联.md");
+    await page.keyboard.press("ControlOrMeta+[");
+    await ready("入口.md");
+    await page.locator('.wiki-link[data-wiki-target="目标#第二节"]').hover();
+    await popover.waitFor();
 
     // 移入弹层保持打开，移到正文空白处关闭。
     await popover.hover();

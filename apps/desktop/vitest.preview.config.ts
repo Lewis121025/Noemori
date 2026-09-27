@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 // 使用生产构建验证浏览器 API、工作线程与离线资源；Linux 运行时需要显示服务器。
 export default defineConfig({
   test: {
+    setupFiles: ["../../tests/desktop/support/window-mode.ts"],
     include: [
       "../../tests/reader/e2e/attachments.test.mts",
       "../../tests/reader/e2e/attachment-import.test.mts",

@@ -2,6 +2,9 @@ import { Plugin } from "prosemirror-state";
 import type { LinkKind } from "../../../shared/api";
 import { hasUrlScheme } from "../../../shared/link-target";
 
+/** 内容导航回调；from 是产生链接的笔记路径，省略时使用当前打开的文档。 */
+export type OpenContentLink = (kind: LinkKind, raw: string, from?: string) => void;
+
 /**
  * 编辑表面保留普通点击的光标与选区语义，仅修饰键点击打开链接或本地图片；
  * 只读（阅读视图）没有光标可放，普通点击直接打开。

@@ -83,6 +83,7 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
     documents,
     viewModes: {},
     recentFiles: [],
+    fileTree: null,
   });
   // 阅读栈与源码视图记忆随恢复响应归一化；损坏条目丢弃而不是拒绝整个恢复。
   expect(
@@ -225,14 +226,79 @@ it("检索表达式逐节点校验，超界上限收敛到内核对 i32 的表�
 });
 
 it("检索命中与标题记录逐项校验，损坏数据整体拒绝", () => {
-  expect(parseSearchHits([{ path: "a.md", title: "A", snippet: "前\u{1}命中\u{2}后" }])).toEqual([
-    { path: "a.md", title: "A", snippet: "前\u{1}命中\u{2}后" },
+  const hit = {
+    path: "a.md",
+    title: "A",
+    snippet: "正文",
+    contentHash: "a".repeat(64),
+    matches: [{ snippet: "命中", location: { startByte: 0, endByte: 3, line: 1 } }],
+    matchCount: 1,
+    matchesCursor: null,
+  };
+  expect(parseSearchHits([hit])).toEqual([hit]);
+  for (const location of [
+    { startByte: -1, endByte: 3, line: 1 },
+    { startByte: 3, endByte: 3, line: 1 },
+    { startByte: 0, endByte: 3, line: 0 },
+    { startByte: 0.5, endByte: 3, line: 1 },
+  ]) {
+    expect(() => parseSearchHits([{ ...hit, matches: [{ snippet: "命中", location }] }])).toThrow(
+      "位置",
+    );
+  }
+  expect(() => parseSearchHits([{ ...hit, contentHash: "过期" }])).toThrow("检索命中");
+  expect(
+    parseSearchHits([
+      {
+        path: "a.md",
+        title: "A",
+        contentHash: "a".repeat(64),
+        matches: [],
+        snippet: "前\u{1}命中\u{2}后",
+        matchCount: 0,
+        matchesCursor: null,
+      },
+    ]),
+  ).toEqual([
+    {
+      path: "a.md",
+      title: "A",
+      contentHash: "a".repeat(64),
+      matches: [],
+      snippet: "前\u{1}命中\u{2}后",
+      matchCount: 0,
+      matchesCursor: null,
+    },
   ]);
   for (const invalid of [
     {},
-    { path: "../逃逸.md", title: "A", snippet: "" },
-    { path: "a.md", title: 1, snippet: "" },
-    { path: "a.md", title: "A", snippet: null },
+    {
+      path: "../逃逸.md",
+      title: "A",
+      contentHash: "a".repeat(64),
+      matches: [],
+      snippet: "",
+      matchCount: 0,
+      matchesCursor: null,
+    },
+    {
+      path: "a.md",
+      title: 1,
+      contentHash: "a".repeat(64),
+      matches: [],
+      snippet: "",
+      matchCount: 0,
+      matchesCursor: null,
+    },
+    {
+      path: "a.md",
+      title: "A",
+      contentHash: "a".repeat(64),
+      matches: [],
+      snippet: null,
+      matchCount: 0,
+      matchesCursor: null,
+    },
   ])
     expect(() => parseSearchHits([invalid])).toThrow("检索命中");
   expect(() => parseSearchHits({})).toThrow("检索响应");

@@ -26,6 +26,12 @@ let target: HTMLDivElement;
 let component: ReturnType<typeof mount>;
 
 beforeEach(() => {
+  // jsdom 不提供系统外观监听；图谱主题的实际变化由 Electron 用例覆盖。
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   vi.stubGlobal(
     "ResizeObserver",
     class {

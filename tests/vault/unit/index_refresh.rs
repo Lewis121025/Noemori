@@ -176,3 +176,43 @@ fn write_existing_file_does_not_rebuild_sibling_row() {
         .expect("写 A");
     assert_eq!(file_rowid(&probe, "B.md"), sibling);
 }
+
+#[test]
+fn large_refresh_resolves_links_across_chunks_and_reopens_without_writes() {
+    let root = TempDir::new().unwrap();
+    let index = TempDir::new().unwrap();
+    for note in 0..256 {
+        fs::write(
+            root.path().join(format!("{note:03}.md")),
+            format!("# Note {note}\n[[alias{}]]\n", (note + 129) % 256),
+        )
+        .unwrap();
+    }
+    let vault = Vault::open(root.path(), index.path()).unwrap();
+    for note in 0..256 {
+        fs::write(
+            root.path().join(format!("{note:03}.md")),
+            format!(
+                "---\naliases: [alias{note}]\n---\n# Note {note}\n[[alias{}]]\n",
+                (note + 129) % 256
+            ),
+        )
+        .unwrap();
+    }
+    assert!(vault.refresh_index().unwrap());
+    for note in 0..256 {
+        let links = vault.links_from(&format!("{note:03}.md")).unwrap();
+        assert_eq!(
+            links[0].to_path,
+            Some(format!("{:03}.md", (note + 129) % 256))
+        );
+    }
+    vault.search(&nous_core::SearchQuery::default()).unwrap();
+    drop(vault);
+    let probe = open_index(&index);
+    let before = sqlite_data_version(&probe);
+    let reopened = Vault::open(root.path(), index.path()).unwrap();
+    assert_eq!(reopened.list_files().unwrap().len(), 256);
+    assert!(!reopened.refresh_index().unwrap());
+    assert_eq!(sqlite_data_version(&probe), before);
+}

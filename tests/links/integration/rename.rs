@@ -135,6 +135,143 @@ fn rename_uses_current_source_instead_of_stale_index_offsets() {
 }
 
 #[test]
+fn rename_validates_content_even_when_mtime_and_length_match_index() {
+    let (root, _index, vault) = vault_with(&[
+        ("source.md", "前文 [[Old]]\n"),
+        ("target.md", "---\naliases: [Old]\n---\n# Target\n"),
+    ]);
+    // 外部工具可保留时间戳；正文哈希才足以证明链接区间和别名仍属同一版本。
+    for (path, text) in [
+        ("source.md", "后文 [[New]]\n"),
+        ("target.md", "---\naliases: [New]\n---\n# Target\n"),
+    ] {
+        let path = root.path().join(path);
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, text).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+    vault.rename("target.md", "renamed.md").unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("source.md")).unwrap(),
+        "后文 [[renamed]]\n"
+    );
+    assert_eq!(vault.links_to("renamed.md").unwrap().len(), 1);
+}
+
+#[test]
+fn consecutive_moves_reuse_only_facts_for_current_bytes_and_paths() {
+    let (root, index, vault) = vault_with(&[
+        ("a.md", "[next](./b.md)\n"),
+        ("b.md", "[next](./c.md)\n"),
+        ("c.md", "[[a]]\n"),
+    ]);
+    fs::create_dir(root.path().join("archive")).unwrap();
+    for name in ["a.md", "b.md", "c.md"] {
+        let outcome = vault.rename(name, &format!("archive/{name}")).unwrap();
+        assert!(outcome.warning.is_none());
+    }
+    assert_eq!(vault.read("archive/a.md").unwrap(), b"[next](./b.md)\n");
+    assert_eq!(vault.read("archive/b.md").unwrap(), b"[next](./c.md)\n");
+    drop(vault);
+    let reopened = Vault::open(root.path(), index.path()).unwrap();
+    for name in ["a.md", "b.md", "c.md"] {
+        assert_eq!(
+            reopened.links_to(&format!("archive/{name}")).unwrap().len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn large_move_validates_live_aliases_and_backlinks_across_snapshot_chunks() {
+    let root = TempDir::new().unwrap();
+    let index = TempDir::new().unwrap();
+    fs::create_dir(root.path().join("archive")).unwrap();
+    fs::write(root.path().join("target.md"), "---\naliases: [Old]\n---\n").unwrap();
+    for number in 0..256 {
+        fs::write(
+            root.path().join(format!("{number:03}.MD")),
+            "前文 [[Old]]\n",
+        )
+        .unwrap();
+    }
+    let vault = Vault::open(root.path(), index.path()).unwrap();
+    // 分片边界不能改变版本契约：保留时间戳和长度的外部编辑仍必须按新内容处理。
+    for (name, text) in (0..256)
+        .map(|number| (format!("{number:03}.MD"), "后文 [[New]]\n"))
+        .chain([(String::from("target.md"), "---\naliases: [New]\n---\n")])
+    {
+        let path = root.path().join(name);
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, text).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+    let outcome = vault.rename("target.md", "archive/renamed.md").unwrap();
+    assert!(outcome.warning.is_none());
+    for number in 0..256 {
+        assert_eq!(
+            vault.read(&format!("{number:03}.MD")).unwrap(),
+            "后文 [[renamed]]\n".as_bytes()
+        );
+    }
+    assert_eq!(vault.links_to("archive/renamed.md").unwrap().len(), 256);
+    drop(vault);
+    let reopened = Vault::open(root.path(), index.path()).unwrap();
+    assert_eq!(reopened.links_to("archive/renamed.md").unwrap().len(), 256);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_snapshot_chunk_prevents_all_writes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = TempDir::new().unwrap();
+    let index = TempDir::new().unwrap();
+    fs::write(root.path().join("target.md"), "target\n").unwrap();
+    for number in 0..256 {
+        fs::write(root.path().join(format!("{number:03}.md")), "[[target]]\n").unwrap();
+    }
+    let vault = Vault::open(root.path(), index.path()).unwrap();
+    let blocked = root.path().join("255.md");
+    let permissions = fs::metadata(&blocked).unwrap().permissions();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+    // 提权测试环境可能绕过文件权限，此时不能制造本测试需要的真实读盘错误。
+    if fs::read(&blocked).is_ok() {
+        fs::set_permissions(blocked, permissions).unwrap();
+        eprintln!("当前用户可绕过文件权限，跳过不可读分片场景");
+        return;
+    }
+    let outcome = vault.rename("target.md", "renamed.md");
+    fs::set_permissions(blocked, permissions).unwrap();
+    assert!(outcome.is_err());
+    assert_eq!(vault.read("target.md").unwrap(), b"target\n");
+    assert!(!root.path().join("renamed.md").exists());
+    for number in 0..256 {
+        assert_eq!(
+            vault.read(&format!("{number:03}.md")).unwrap(),
+            b"[[target]]\n"
+        );
+    }
+    let recovery = rusqlite::Connection::open(index.path().join("recovery.sqlite")).unwrap();
+    let pending: i64 = recovery
+        .query_row("SELECT count(*) FROM rename_operation", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(pending, 0);
+}
+
+#[test]
 fn invalid_destination_parent_does_not_leave_rewritten_backlinks() {
     let (root, _index, vault) =
         vault_with(&[("A.md", "[[B]]\n"), ("B.md", "note"), ("blocked", "file")]);

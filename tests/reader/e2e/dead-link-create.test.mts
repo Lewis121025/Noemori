@@ -50,7 +50,7 @@ test("死链创建：#标题锚点随创建写入新笔记并直接定位", asyn
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "ref.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
     // 点击死链弹出创建确认，文案承诺种子标题。

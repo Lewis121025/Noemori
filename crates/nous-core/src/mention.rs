@@ -90,9 +90,16 @@ fn push_needle(out: &mut Vec<String>, raw: &str) {
 pub(crate) fn paragraph_snippet(source: &str, start: usize, end: usize) -> String {
     let start = start.min(source.len());
     let end = end.min(source.len()).max(start);
-    let para_start = source[..start].rfind("\n\n").map_or(0, |index| index + 2);
-    let para_end = source[end..]
-        .find("\n\n")
+    // 外部改写后索引偏移可能落进 UTF-8 字符内部；按字节找 ASCII 空行，
+    // 最后只在空行边界切字符串，既保留上下文，也不让暂未刷新的索引中断阅读。
+    let bytes = source.as_bytes();
+    let para_start = bytes[..start]
+        .windows(2)
+        .rposition(|pair| pair == b"\n\n")
+        .map_or(0, |index| index + 2);
+    let para_end = bytes[end..]
+        .windows(2)
+        .position(|pair| pair == b"\n\n")
         .map_or(source.len(), |index| end + index);
     source[para_start..para_end].trim().to_string()
 }
@@ -195,12 +202,22 @@ fn collect_text_hits(
     let Some(position) = text.position.as_ref() else {
         return;
     };
-    let text_start = position.start.offset.min(source.len());
+    let text_start = position.start.offset;
+    let Some(raw) = source.get(text_start..position.end.offset) else {
+        return;
+    };
+    let decoded = crate::wiki::decoded_ranges(raw);
+    // 提及的区间会用于原文替换；mdast 的 value 已去掉引用前缀、转义与 CRLF，
+    // 只能用 AST 限定正文范围，再在源字节上匹配，不能把解码后的位置相加。
     for regex in regexes {
-        for found in regex.find_iter(&text.value) {
-            let start = text_start.saturating_add(found.start());
-            let end = text_start.saturating_add(found.end());
-            if range_occupied(occupied, start, end) {
+        for found in regex.find_iter(raw) {
+            let start = text_start + found.start();
+            let end = text_start + found.end();
+            if range_occupied(occupied, start, end)
+                || decoded
+                    .iter()
+                    .any(|range| overlaps((range.start, range.end), (found.start(), found.end())))
+            {
                 continue;
             }
             hits.push((start, end));

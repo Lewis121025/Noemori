@@ -14,6 +14,9 @@ import type {
   SavedCopy,
   SearchExpr,
   SearchHit,
+  SearchPage,
+  SearchMatch,
+  SearchMatchesPage,
   SearchQuery,
   TagCount,
   VaultEntry,
@@ -22,6 +25,7 @@ import type {
   WriteResult,
 } from "./api";
 import { SIDEBAR_LAYOUT } from "./api";
+import { parseFileTreeState } from "./file-browser";
 import {
   parseRecentFiles,
   parseSessionDocuments,
@@ -180,6 +184,7 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
       // 视图记忆与最近列表是恢复性数据：损坏条目按会话解析规则丢弃，不拒绝整个恢复。
       viewModes: parseViewModes(value.viewModes),
       recentFiles: parseRecentFiles(value.recentFiles),
+      fileTree: parseFileTreeState(value.fileTree),
     };
   }
   throw new Error("笔记库恢复响应无效，请重新打开笔记库");
@@ -342,7 +347,7 @@ export function parseSearchQueryArgument(value: unknown): SearchQuery {
   const budget = { nodes: 0 };
   return {
     expr: parseSearchExpr(value.expr, 0, budget),
-    limit: Math.min(Math.trunc(value.limit), 500),
+    limit: Math.max(0, Math.min(Math.trunc(value.limit), 500)),
   };
 }
 
@@ -390,11 +395,110 @@ export function parseSearchHits(value: unknown): SearchHit[] {
       !record(item) ||
       !relativePath(item.path) ||
       typeof item.title !== "string" ||
-      typeof item.snippet !== "string"
+      typeof item.snippet !== "string" ||
+      typeof item.contentHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(item.contentHash) ||
+      !Array.isArray(item.matches) ||
+      item.matches.length > 5 ||
+      typeof item.matchCount !== "number" ||
+      !Number.isSafeInteger(item.matchCount) ||
+      item.matchCount < item.matches.length
     )
-      throw new Error("检索命中包含无效路径、标题或摘要");
-    return { path: item.path, title: item.title, snippet: item.snippet };
+      throw new Error("检索命中的路径、文本、内容版本或匹配列表无效");
+    const matchesCursor = parseSearchCursor(item.matchesCursor);
+    if (
+      matchesCursor === null
+        ? item.matchCount !== item.matches.length
+        : item.matches.length !== 5 || item.matchCount <= 5
+    )
+      throw new Error("检索命中总数与续页不一致");
+    return {
+      path: item.path,
+      title: item.title,
+      snippet: item.snippet,
+      contentHash: item.contentHash,
+      matches: item.matches.map(parseSearchMatch),
+      matchCount: item.matchCount,
+      matchesCursor,
+    };
   });
+}
+
+/** 搜索任务 ID 由调用方预先生成，限制长度和字符以保证跨进程身份稳定；无效时拒绝。 */
+export function parseSearchId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value))
+    throw new Error("搜索请求标识无效");
+  return value;
+}
+
+/** 续页游标仅原样转交内核校验；null 表示新查询，禁止无限长度的外部输入。 */
+export function parseSearchCursor(value: unknown): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    new TextEncoder().encode(value).length > 8192
+  )
+    throw new Error("搜索续页游标无效");
+  return value;
+}
+
+/** 单篇续页必须携带已证明存在后续命中的游标；null 不能启动新的命中查询。 */
+export function parseSearchMatchesCursor(value: unknown): string {
+  const cursor = parseSearchCursor(value);
+  if (cursor === null) throw new Error("搜索命中续页游标无效");
+  return cursor;
+}
+
+/** 验证命中续页的大小及结束标识，空页不能冒充成功续页。 */
+export function parseSearchMatchesPage(value: unknown): SearchMatchesPage {
+  if (
+    !record(value) ||
+    !Array.isArray(value.matches) ||
+    value.matches.length < 1 ||
+    value.matches.length > 20
+  )
+    throw new Error("搜索命中分页响应无效");
+  const matches = value.matches.map(parseSearchMatch);
+  const nextCursor = parseSearchCursor(value.nextCursor);
+  if (nextCursor !== null && matches.length !== 20) throw new Error("搜索命中分页未填满");
+  return { matches, nextCursor };
+}
+
+/** 校验整页结果；重复路径或空页携带续页都违反文件分页契约。 */
+export function parseSearchPage(value: unknown): SearchPage {
+  if (!record(value)) throw new Error("搜索分页响应无效");
+  const hits = parseSearchHits(value.hits);
+  const nextCursor = parseSearchCursor(value.nextCursor);
+  if (
+    new Set(hits.map((hit) => hit.path)).size !== hits.length ||
+    (hits.length === 0 && nextCursor !== null)
+  )
+    throw new Error("搜索分页结果重复或续页无效");
+  return { hits, nextCursor };
+}
+
+function parseSearchMatch(value: unknown): SearchMatch {
+  if (!record(value) || typeof value.snippet !== "string") throw new Error("检索命中上下文无效");
+  const location = value.location;
+  if (location === null) return { location: null, snippet: value.snippet };
+  if (
+    !record(location) ||
+    typeof location.startByte !== "number" ||
+    !Number.isSafeInteger(location.startByte) ||
+    location.startByte < 0 ||
+    typeof location.endByte !== "number" ||
+    !Number.isSafeInteger(location.endByte) ||
+    location.endByte <= location.startByte ||
+    typeof location.line !== "number" ||
+    !Number.isSafeInteger(location.line) ||
+    location.line < 1
+  )
+    throw new Error("检索命中位置无效");
+  return {
+    snippet: value.snippet,
+    location: { startByte: location.startByte, endByte: location.endByte, line: location.line },
+  };
 }
 
 /** 标签计数逐项校验；损坏数据整体拒绝，不渲染半份清单。 */

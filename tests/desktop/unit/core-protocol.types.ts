@@ -4,7 +4,7 @@ import type {
   FileSnapshot,
   HeadingRecord,
   Mentions,
-  SearchHit,
+  SearchPage,
   WriteResult,
 } from "../../../apps/desktop/src/features/reader/shared/api";
 
@@ -37,10 +37,10 @@ void mentions;
 // @ts-expect-error 提及查询必须指定库内路径。
 client.call("indexMentionsTo");
 
-const hits: Promise<SearchHit[]> = client.call("searchQuery", {
+const hits: Promise<SearchPage> = client.call("searchQuery", {
   expr: { kind: "term", value: "全文" },
   limit: 100,
-});
+}, "search-id", null);
 void hits;
 const headings: Promise<HeadingRecord[]> = client.call("indexHeadings", "note.md");
 void headings;

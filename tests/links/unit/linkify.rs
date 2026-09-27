@@ -51,6 +51,21 @@ fn linkify_replaces_only_the_mention_range_and_updates_index() {
 }
 
 #[test]
+fn linkify_in_chinese_quote_preserves_prefix_and_line_endings() {
+    let original = "> 前文\r\n> 中文阅读内容\r\n";
+    let (root, _index, vault) = vault_with(&[("阅读.md", "# 阅读\n"), ("资料.md", original)]);
+    let (start, end, text) = first_unlinked(&vault, "阅读.md");
+    assert_eq!(text, "阅读");
+    vault
+        .linkify_mention("资料.md", start, end, &text, "阅读.md")
+        .expect("准确替换原文字节");
+    assert_eq!(
+        fs::read_to_string(root.path().join("资料.md")).expect("读回"),
+        "> 前文\r\n> 中文[[阅读]]内容\r\n"
+    );
+}
+
+#[test]
 fn title_mentions_keep_the_sentence_as_alias() {
     let (root, _index, vault) = vault_with(&[
         ("design.md", "# 设计笔记\n"),

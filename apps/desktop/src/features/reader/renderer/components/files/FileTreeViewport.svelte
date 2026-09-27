@@ -2,25 +2,39 @@
   import { onMount, tick, type Snippet } from "svelte";
   import type { FileTreeRow } from "../../engine/navigation/file-tree";
   import { fileTreeWindow } from "../../engine/navigation/file-tree-window";
+  import type { FileTreePosition } from "../../../shared/file-browser";
 
   let {
     rows,
     focusable,
     dragging,
+    position,
+    onPosition,
+    onEmptyFocus,
     children,
   }: {
     rows: FileTreeRow[];
     focusable: string | null;
     dragging: string | null;
+    /** 完整目录与临时搜索各自持有滚动位置，卸载视口不会丢失浏览上下文。 */
+    position: FileTreePosition | null;
+    onPosition: (position: FileTreePosition | null) => void;
+    /** 正在浏览的目录变空时，将键盘交还文件栏入口；其他控件的焦点不受影响。 */
+    onEmptyFocus: () => void;
     children: Snippet<[FileTreeRow]>;
   } = $props();
   const descriptionId = $props.id();
   let element: HTMLUListElement;
   let measure: HTMLLIElement;
-  let scrollTop = $state(0);
   let height = $state(0);
   let rowHeight = $state(35.2);
+  let previousRows: readonly FileTreeRow[] = [];
   const positions = $derived(new Map(rows.map((row, index) => [row.node.path, index])));
+  const scrollTop = $derived(
+    position === null
+      ? 0
+      : (positions.get(position.path) ?? 0) * rowHeight + Math.min(position.offset, rowHeight),
+  );
   const indices = $derived(
     fileTreeWindow(rows.length, scrollTop, height, rowHeight, [
       positions.get(focusable ?? "") ?? -1,
@@ -29,23 +43,68 @@
   );
 
   onMount(() => {
-    function measureViewport(): void {
+    function measureViewport(entries: ResizeObserverEntry[]): void {
       height = element.clientHeight;
-      scrollTop = element.scrollTop;
-      const measured = measure.getBoundingClientRect().height;
-      if (measured > 0) rowHeight = measured;
+      // 深滚动的屏幕坐标会损失小数精度；布局尺寸不受位置影响，避免误差乘以数千行。
+      const measured = entries.find((entry) => entry.target === measure)?.borderBoxSize[0]
+        ?.blockSize;
+      if (measured !== undefined && measured > 0) rowHeight = measured;
     }
-    measureViewport();
+    height = element.clientHeight;
     const observer = new ResizeObserver(measureViewport);
     observer.observe(element);
     observer.observe(measure);
     return () => observer.disconnect();
   });
 
-  /** 新查询从顶部展示结果；保留完整目录的选中项和展开状态。 */
-  export function resetScroll(): void {
-    element.scrollTop = 0;
-    scrollTop = 0;
+  $effect(() => {
+    element.scrollTop = scrollTop;
+  });
+
+  $effect.pre(() => {
+    const previous = previousRows;
+    previousRows = rows;
+    const active = document.activeElement;
+    // 原位编辑器负责自己的提交和焦点交接，目录导航只接续消失的条目按钮。
+    if (
+      !(active instanceof HTMLButtonElement) ||
+      active.getAttribute("role") !== "treeitem" ||
+      !element?.contains(active)
+    )
+      return;
+    const path = active.dataset.path;
+    if (path === undefined || positions.has(path)) return;
+    const index = previous.findIndex((row) => row.node.path === path);
+    const survives = (row: FileTreeRow) => positions.has(row.node.path);
+    const next =
+      previous.slice(index + 1).find(survives) ??
+      previous.slice(0, index).findLast(survives) ??
+      rows[0];
+    let cancelled = false;
+    // 在旧节点卸载前确认焦点归属；等待期间用户转去其他控件时不能抢回焦点。
+    void tick().then(() => {
+      if (
+        cancelled ||
+        !element.isConnected ||
+        (document.activeElement !== active && document.activeElement !== document.body)
+      )
+        return;
+      if (next === undefined) onEmptyFocus();
+      else void focusPath(next.node.path);
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function rememberPosition(): void {
+    const index = Math.floor(element.scrollTop / rowHeight);
+    const row = rows[index];
+    onPosition(
+      row === undefined
+        ? null
+        : { path: row.node.path, offset: element.scrollTop - index * rowHeight },
+    );
   }
 
   /**
@@ -60,7 +119,7 @@
     if (top < element.scrollTop) element.scrollTop = top;
     else if (bottom > element.scrollTop + element.clientHeight)
       element.scrollTop = bottom - element.clientHeight;
-    scrollTop = element.scrollTop;
+    rememberPosition();
     await tick();
     Array.from(element.querySelectorAll<HTMLButtonElement>("[data-path]"))
       .find((button) => button.dataset.path === path)
@@ -76,9 +135,8 @@
   aria-label="笔记库目录"
   aria-describedby={descriptionId}
   bind:this={element}
-  onscroll={() => {
-    scrollTop = element.scrollTop;
-  }}
+  onscroll={rememberPosition}
+  aria-multiselectable="true"
 >
   <li class="measure" aria-hidden="true" bind:this={measure}></li>
   <li class="extent" aria-hidden="true" style:height="{rows.length * rowHeight}px"></li>

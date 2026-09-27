@@ -1,8 +1,12 @@
 //! 根据实时内容生成改名计划，并以持久化日志恢复中断的文件提交。
 
+mod batch;
+mod commit;
+mod snapshot;
+
+pub use batch::{RenameBatchIssue, RenameBatchOutcome};
 mod source;
 
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
@@ -11,9 +15,11 @@ use std::path::Path;
 use crate::pathutil::{path_to_slashes, resolve_in_root};
 use crate::recovery::RecoveryStore;
 use crate::rename_journal::{FileChange, RenameJournal};
-use crate::save::{read_optional, stage, sync_parent};
+use crate::save::{read_optional, sync_parent};
 use crate::vault::{resolve_against, Inventory};
-use crate::{Error, LinkKind, Vault};
+use crate::{EntryMutation, Error, LinkKind, LinkRecord, Vault};
+use commit::{apply_rename, replace_version};
+use snapshot::{RenameDocument, RenameSnapshot};
 use source::MoveSource;
 
 /// 文件已完成改名；派生索引和日志清理的失败不撤销已提交内容。
@@ -24,6 +30,64 @@ pub struct RenameOutcome {
 }
 
 impl Vault {
+    /// 在同一写锁内预检全部独立条目，不移动或删除用户文件。
+    ///
+    /// 移动检查完整源目录（含隐藏内容）、已有目标和未保存草稿；废纸篓仅检查相关草稿。
+    /// 执行阶段仍须使用 `rename` / `trash_entry` 的事务校验，预检不是外部文件系统的锁。
+    /// # Errors
+    /// 无效或重叠请求、路径冲突、符号链接、源丢失、父目录丢失或草稿冲突时失败。
+    pub fn check_entry_batch(&self, changes: &[EntryMutation]) -> Result<(), Error> {
+        let _guard = self.lock_writes()?;
+        recover_pending(self.root(), &self.recovery)?;
+        self.check_entry_batch_locked(changes)
+    }
+
+    fn check_entry_batch_locked(&self, changes: &[EntryMutation]) -> Result<(), Error> {
+        let mut sources = BTreeSet::new();
+        let mut targets = BTreeSet::new();
+        for change in changes {
+            let from = relative_path(self.root(), &change.from)?;
+            if from != change.from || !sources.insert(from) {
+                return Err(Error::Io(io::Error::other(
+                    "批量操作包含重复或非规范源路径",
+                )));
+            }
+            if let Some(to) = &change.to {
+                crate::entries::validate_entry_path(to)?;
+                if !targets.insert(to) {
+                    return Err(Error::Io(io::Error::other(format!("目标名称重复：{to}"))));
+                }
+            }
+        }
+        for path in &sources {
+            if contains_source_ancestor(Path::new(path).parent(), &sources)? {
+                return Err(Error::Io(io::Error::other("父文件夹与子条目不能重复执行")));
+            }
+        }
+        if changes.iter().any(|change| change.to.is_some()) {
+            self.check_entry_drafts(None)?;
+        }
+        for change in changes {
+            let source = self.entry_path(&change.from)?;
+            if let Some(to) = &change.to {
+                let target = resolve_in_root(self.root(), to)?;
+                if contains_source_ancestor(Some(Path::new(to)), &sources)? {
+                    return Err(Error::Io(io::Error::other("不能移动到自身的子文件夹")));
+                }
+                if fs::symlink_metadata(&target).is_ok() {
+                    return Err(Error::AlreadyExists { path: target });
+                }
+                if !target.parent().is_some_and(Path::is_dir) {
+                    return Err(Error::Io(io::Error::other("目标父文件夹不存在")));
+                }
+                MoveSource::scan(self.root(), &change.from)?;
+            } else {
+                self.check_entry_drafts(Some(&source))?;
+            }
+        }
+        Ok(())
+    }
+
     /// 将 `from` 改名为 `to`，按当前源内容更新内部链接。
     ///
     /// 两个参数均为库内相对路径。提交前保存每个文件的前后版本；失败时回滚，
@@ -42,9 +106,25 @@ impl Vault {
             return Ok(RenameOutcome { warning: None });
         }
         self.check_rename_drafts()?;
-        let journal = self.plan_rename(&from, &to)?;
+        let mut snapshot = self.read_rename_snapshot()?;
+        let mut outcome = self.rename_from_snapshot(&from, &to, &mut snapshot)?;
+        if let Err(err) = self.refresh_index_locked() {
+            append_warning(&mut outcome.warning, format!("链接索引更新失败：{err}"));
+        }
+        Ok(outcome)
+    }
+
+    /// 已持有写锁；批次与单项共用同一日志提交路径，快照只吸收已提交的变化。
+    fn rename_from_snapshot(
+        &self,
+        from: &str,
+        to: &str,
+        snapshot: &mut RenameSnapshot,
+    ) -> Result<RenameOutcome, Error> {
+        recover_pending(self.root(), &self.recovery)?;
+        let journal = self.plan_rename(from, to, snapshot)?;
         self.recovery.prepare_rename(&journal)?;
-        if let Err(cause) = self.apply_rename(&journal) {
+        if let Err(cause) = apply_rename(self.root(), &self.recovery, &journal) {
             // 提交标记若已持久化，清理故障不能再把成功的改名回滚。
             let committed = self
                 .recovery
@@ -66,34 +146,28 @@ impl Vault {
         if let Err(err) = recover_pending(self.root(), &self.recovery) {
             warnings.push(format!("改名记录清理失败，下次打开时会重试：{err}"));
         }
-        if let Err(err) = self.refresh_index_locked() {
-            warnings.push(format!("链接索引更新失败：{err}"));
-        }
-        if let Err(err) = self.remap_bookmarks_locked(&from, &to) {
+        if let Err(err) = self.remap_bookmarks_locked(from, to) {
             warnings.push(format!("书签路径未能更新：{err}"));
         }
+        snapshot.apply_committed(&journal);
         Ok(RenameOutcome {
             warning: (!warnings.is_empty()).then(|| warnings.join("；")),
         })
     }
 
     fn check_rename_drafts(&self) -> Result<(), Error> {
-        for path in self.recovery.paths()? {
-            if let Some(draft) = self.recovery.get(&path)? {
-                if !draft
-                    .is_committed(read_optional(&resolve_in_root(self.root(), &path)?)?.as_deref())
-                {
-                    return Err(Error::Io(io::Error::other(format!(
-                        "请先处理未保存草稿：{path}"
-                    ))));
-                }
-                self.recovery.remove(&path)?;
-            }
+        for path in self.check_entry_drafts(None)? {
+            self.recovery.remove(&path)?;
         }
         Ok(())
     }
 
-    fn plan_rename(&self, from: &str, to: &str) -> Result<RenameJournal, Error> {
+    fn plan_rename(
+        &self,
+        from: &str,
+        to: &str,
+        snapshot: &RenameSnapshot,
+    ) -> Result<RenameJournal, Error> {
         let from_abs = resolve_in_root(self.root(), from)?;
         let to_abs = resolve_in_root(self.root(), to)?;
         if to_abs.starts_with(&from_abs) {
@@ -104,9 +178,7 @@ impl Vault {
         }
         let source = MoveSource::scan(self.root(), from)?;
         let directories = source.directories(self.root(), to)?;
-        let files = self.scan_files()?;
-        // 身份和改写必须用同一次读取，避免两次读盘之间正文变了，歧义判断和写入各看各的。
-        let snapshot = self.read_markdown_snapshot(&files)?;
+        let files = &snapshot.files;
         let before = Inventory::with_extra(files.clone(), &snapshot.extras);
         let after_extras: HashMap<String, Vec<String>> = snapshot
             .extras
@@ -133,18 +205,17 @@ impl Vault {
             if !moving && !path.to_lowercase().ends_with(".md") {
                 continue;
             }
-            let bytes = snapshot
-                .bytes
-                .get(path)
-                .cloned()
-                .map_or_else(|| self.read(path), Ok)?;
-            let rewritten = if path.to_lowercase().ends_with(".md") {
-                rewrite_file(path, &bytes, from, to, &before, &after)?
+            let uncached;
+            let document = if let Some(document) = snapshot.documents.get(path) {
+                document
             } else {
-                bytes.clone()
+                uncached = RenameDocument::scan(path, self.read(path)?).0;
+                &uncached
             };
-            let permissions = file_permissions(&resolve_in_root(self.root(), path)?)?;
+            let bytes = &document.bytes;
+            let rewritten = rewrite_file(path, bytes, &document.links, from, to, &before, &after)?;
             if moving {
+                let permissions = file_permissions(&resolve_in_root(self.root(), path)?)?;
                 creates.push(FileChange {
                     path: moved_path(path, from, to),
                     before: None,
@@ -159,7 +230,8 @@ impl Vault {
                     permissions,
                     started: false,
                 });
-            } else if rewritten != bytes {
+            } else if rewritten != *bytes {
+                let permissions = file_permissions(&resolve_in_root(self.root(), path)?)?;
                 updates.push(FileChange {
                     path: path.clone(),
                     before: Some(bytes.clone()),
@@ -168,17 +240,11 @@ impl Vault {
                     started: false,
                 });
             }
-            observed.push((path, Sha256::digest(&bytes)));
+            observed.push((path.as_str(), document.hash));
         }
-        for (path, digest) in observed {
-            if Sha256::digest(self.read(path)?) != digest {
-                return Err(Error::FileChanged {
-                    path: resolve_in_root(self.root(), path)?,
-                });
-            }
-        }
+        self.verify_rename_snapshot(&observed)?;
         source.verify()?;
-        if self.scan_files()? != files {
+        if self.scan_files()? != *files {
             return Err(Error::Io(io::Error::other("库文件集合已变化，请重试改名")));
         }
         creates.extend(updates);
@@ -192,99 +258,26 @@ impl Vault {
             created_directories: BTreeSet::new(),
         })
     }
-
-    /// 一次读完 Markdown，同时给出身份键和即将改写的字节。
-    ///
-    /// 读失败直接返回，不再吞掉错误后用另一份内容继续改名。
-    fn read_markdown_snapshot(&self, files: &[String]) -> Result<MarkdownSnapshot, Error> {
-        let mut bytes = HashMap::new();
-        let mut extras = HashMap::new();
-        for path in files {
-            if !crate::vault::is_markdown(path) {
-                continue;
-            }
-            let read = self.read(path)?;
-            if let Ok(text) = std::str::from_utf8(&read) {
-                let keys = crate::identity::keys_from_scan(&crate::scan::scan_markdown(path, text));
-                if !keys.is_empty() {
-                    extras.insert(path.clone(), keys);
-                }
-            }
-            bytes.insert(path.clone(), read);
-        }
-        Ok(MarkdownSnapshot { extras, bytes })
-    }
-
-    fn apply_rename(&self, journal: &RenameJournal) -> Result<(), Error> {
-        for directory in &journal.directories {
-            create_move_directory(self.root(), &self.recovery, journal, directory)?;
-        }
-        for (ordinal, change) in journal.changes.iter().enumerate() {
-            self.recovery.start_rename_step(ordinal)?;
-            let mut written = false;
-            let result = replace_version(
-                self.root(),
-                change,
-                change.before.as_deref(),
-                change.after.as_deref(),
-                &mut written,
-            );
-            if result.is_err() && !written {
-                self.recovery.cancel_rename_step(ordinal)?;
-            }
-            result?;
-        }
-        for directory in journal.directories.iter().rev() {
-            sync_parent(&resolve_in_root(self.root(), directory)?)?;
-        }
-        self.recovery.commit_rename()
-    }
 }
 
-/// 改名计划用的 Markdown 快照：身份键和正文来自同一次读取。
-struct MarkdownSnapshot {
-    extras: HashMap<String, Vec<String>>,
-    bytes: HashMap<String, Vec<u8>>,
-}
-
-fn create_move_directory(
-    root: &Path,
-    store: &RecoveryStore,
-    journal: &RenameJournal,
-    directory: &str,
-) -> Result<(), Error> {
-    let path = resolve_in_root(root, directory)?;
-    let original = moved_path(directory, &journal.to, &journal.from);
-    let permissions = if original == directory {
-        None
-    } else {
-        Some(fs::metadata(resolve_in_root(root, &original)?)?.permissions())
-    };
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    if let Some(permissions) = &permissions {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        // 创建时就限制访问，不能短暂将私有目录暴露为系统默认权限。
-        builder.mode(permissions.mode());
+/// 只检查真实路径祖先，避免预检每项目标都遍历整批源路径，也不误判相似名称。
+fn contains_source_ancestor(
+    mut path: Option<&Path>,
+    sources: &BTreeSet<String>,
+) -> Result<bool, Error> {
+    while let Some(ancestor) = path.filter(|path| !path.as_os_str().is_empty()) {
+        if sources.contains(&path_to_slashes(ancestor)?) {
+            return Ok(true);
+        }
+        path = ancestor.parent();
     }
-    builder.create(&path)?;
-    // mkdir 与 SQLite 无法原子提交；中间退出时保留未确认的空目录，不能推测归属并删除。
-    if let Err(cause) = store.record_created_directory(directory) {
-        fs::remove_dir(&path).map_err(|error| Error::RenameRecovery {
-            detail: format!("目录归属记录失败：{cause}；清理 {directory} 失败：{error}"),
-        })?;
-        sync_parent(&path)?;
-        return Err(cause);
-    }
-    if let Some(permissions) = permissions {
-        fs::set_permissions(&path, permissions)?;
-    }
-    Ok(())
+    Ok(false)
 }
 
 fn rewrite_file(
     path: &str,
     bytes: &[u8],
+    links: &[LinkRecord],
     from: &str,
     to: &str,
     before: &Inventory,
@@ -293,7 +286,6 @@ fn rewrite_file(
     let Ok(source) = std::str::from_utf8(bytes) else {
         return Ok(bytes.to_vec());
     };
-    let links = crate::scan::scan_markdown(path, source).links;
     let mut edits = Vec::new();
     for link in links.iter().rev() {
         let Some(target) = resolve_against(before, path, &link.to_raw, link.kind) else {
@@ -435,38 +427,13 @@ fn rollback_file(root: &Path, change: &FileChange) -> Result<(), Error> {
         }
         return Ok(());
     }
-    replace_version(
+    let path = replace_version(
         root,
         change,
         change.after.as_deref(),
         change.before.as_deref(),
-        &mut false,
-    )
-}
-
-fn replace_version(
-    root: &Path,
-    change: &FileChange,
-    expected: Option<&[u8]>,
-    desired: Option<&[u8]>,
-    written: &mut bool,
-) -> Result<(), Error> {
-    let path = resolve_in_root(root, &change.path)?;
-    check_version(&path, expected)?;
-    if let Some(bytes) = desired {
-        let file = stage(&path, bytes)?;
-        set_permissions(file.as_file(), change.permissions)?;
-        file.as_file().sync_all()?;
-        check_version(&path, expected)?;
-        if expected.is_none() {
-            file.persist_noclobber(&path).map_err(|err| err.error)?;
-        } else {
-            file.persist(&path).map_err(|err| err.error)?;
-        }
-    } else {
-        fs::remove_file(&path)?;
-    }
-    *written = true;
+    )?;
+    // 恢复逐步落盘，日志只会在所有原始版本均已恢复后清理。
     sync_parent(&path)?;
     Ok(())
 }
@@ -498,17 +465,28 @@ fn file_permissions(path: &Path) -> Result<u32, Error> {
     }
 }
 
-fn set_permissions(file: &fs::File, mode: u32) -> Result<(), Error> {
+/// 从日志恢复最终权限，交由暂存写入在同一次文件同步前设置。
+fn version_permissions(parent: &Path, mode: u32) -> Result<fs::Permissions, Error> {
+    let mut permissions = fs::metadata(parent)?.permissions();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(mode))?;
+        permissions.set_mode(mode);
     }
     #[cfg(not(unix))]
     {
-        let mut permissions = file.metadata()?.permissions();
         permissions.set_readonly(mode != 0);
-        file.set_permissions(permissions)?;
     }
-    Ok(())
+    Ok(permissions)
+}
+
+/// 提交后的派生错误只能追加为警告，不能改变已经成功的文件归属。
+fn append_warning(warning: &mut Option<String>, message: String) {
+    match warning {
+        Some(previous) => {
+            previous.push('；');
+            previous.push_str(&message);
+        }
+        None => *warning = Some(message),
+    }
 }

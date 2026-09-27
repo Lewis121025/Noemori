@@ -63,7 +63,7 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
       () =>
         document.querySelector(".document-name")?.textContent === "笔记.md" &&
         document.querySelector(".ProseMirror") !== null &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
     const properties = page.locator(".properties");
     await expect

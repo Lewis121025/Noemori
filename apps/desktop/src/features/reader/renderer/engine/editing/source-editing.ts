@@ -8,7 +8,8 @@ export const sourceEditingKey = new PluginKey<boolean>("sourceEditing");
 const sourceNodes = new Set(["math_inline", "math_block", "html_inline", "html_block"]);
 
 /** 仅显式操作进入源码；普通节点选择继续保留预览和正文焦点。 */
-export const editSelectedSource: Command = (state, dispatch) => {
+export const editSelectedSource: Command = (state, dispatch, view) => {
+  if (view !== undefined && !view.editable) return false;
   const selection = state.selection;
   if (!(selection instanceof NodeSelection) || !sourceNodes.has(selection.node.type.name))
     return false;
@@ -51,10 +52,11 @@ export function createSourceEditingPlugin(initial = false) {
           event.shiftKey
         )
           return false;
-        return event.key === "Enter" && editSelectedSource(view.state, view.dispatch);
+        return event.key === "Enter" && editSelectedSource(view.state, view.dispatch, view);
       },
       handleDoubleClickOn(view, _pos, node, nodePos, event) {
-        if (event.ctrlKey || event.metaKey || !sourceNodes.has(node.type.name)) return false;
+        if (!view.editable || event.ctrlKey || event.metaKey || !sourceNodes.has(node.type.name))
+          return false;
         view.dispatch(
           view.state.tr
             .setSelection(NodeSelection.create(view.state.doc, nodePos))

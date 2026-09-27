@@ -10,6 +10,8 @@ const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 /** 完整实现两个表面接口，只用快照通道；不靠断言伪造类型。 */
 function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
   return {
+    capturePosition: () => null,
+    restorePosition: async () => {},
     history: () => false,
     historyAvailability: () => null,
     openAttachments: () => {},
@@ -19,7 +21,7 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
     snapshot,
     jumpTo: () => {},
     jumpToMention: () => {},
-    jumpToText: () => {},
+    jumpToSearch: () => {},
     jumpToHeading: () => false,
     currentHeading: () => null,
   };
@@ -27,12 +29,15 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
 
 function codeApi(snapshot: () => EditorSnapshot): CodeEditorApi {
   return {
+    capturePosition: () => null,
+    restorePosition: async () => {},
     history: () => false,
     historyAvailability: () => null,
     focus: () => {},
     openSearch: () => {},
     snapshot,
     jumpToByte: () => {},
+    jumpToSearch: () => {},
   };
 }
 

@@ -1,5 +1,7 @@
 /** 阅读器会话只记录笔记库、当前文件、文件栏与阅读栈，不包含主题或窗口几何。 */
 import { SIDEBAR_LAYOUT, type PaneLayout } from "./api";
+import { parseFileTreeState, type FileTreeState } from "./file-browser";
+import { parseReadingBookmark, type ReadingBookmark } from "./reading-position";
 
 /** 文件栏默认宽度（像素）。 */
 export const DEFAULT_LEFT_WIDTH = SIDEBAR_LAYOUT.leftWidth;
@@ -19,12 +21,14 @@ export type ViewModes = Record<string, RememberedView>;
 /** 最近打开列表上限；快速切换器空查询只需要近期落点。 */
 export const RECENT_FILES_LIMIT = 50;
 
-/** 阅读栈条目：一次导航落点。滚动位置只在会话内恢复，不持久化。 */
+/** 阅读栈条目：一次导航落点及可跨布局恢复的正文锚点。 */
 export type HistoryEntry = {
   /** 库内相对路径。 */
   path: string;
   /** 落点标题锚点；无锚点为 `null`。 */
   anchor: string | null;
+  /** 离开时实际读到的正文位置；旧记录仅包含标题锚点。 */
+  position?: ReadingBookmark;
 };
 
 /** 阅读栈的双向持久化形态。 */
@@ -41,6 +45,8 @@ export type PaneSession = {
   currentPath: string | null;
   /** 该栏的阅读栈。 */
   history: SessionHistory;
+  /** 当前正文的阅读锚点；旧会话或不可定位的附件不包含此字段。 */
+  position?: ReadingBookmark;
 };
 
 /** 文档会话：分栏集合、活动栏与分栏开关。 */
@@ -73,6 +79,8 @@ export type ReaderSession = PaneLayout & {
   viewModes: ViewModes;
   /** 最近打开的文件，最新在前；切库时清空。 */
   recentFiles: string[];
+  /** 文件树的展开、选择与滚动锚点；缺席表示首次定位当前文档。 */
+  fileTree: FileTreeState | null;
 };
 
 /** 缺失或损坏的阅读器状态从空笔记库开始。 */
@@ -83,6 +91,7 @@ export const emptyReaderSession: ReaderSession = {
   leftWidth: DEFAULT_LEFT_WIDTH,
   viewModes: {},
   recentFiles: [],
+  fileTree: null,
 };
 
 function parseCollapsed(value: unknown): boolean {
@@ -125,7 +134,8 @@ function parseHistoryEntries(value: unknown): HistoryEntry[] {
     const record = item as Record<string, unknown>;
     if (typeof record.path !== "string" || record.path === "") continue;
     const anchor = typeof record.anchor === "string" && record.anchor !== "" ? record.anchor : null;
-    out.push({ path: record.path, anchor });
+    const position = parseReadingBookmark(record.position);
+    out.push({ path: record.path, anchor, ...(position === null ? {} : { position }) });
   }
   return out;
 }
@@ -250,9 +260,12 @@ function parsePaneSession(value: unknown): PaneSession {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return emptyPaneSession();
   const record = value as Record<string, unknown>;
+  const currentPath = parseNullableString(record.currentPath);
+  const position = currentPath === null ? null : parseReadingBookmark(record.position);
   return {
-    currentPath: parseNullableString(record.currentPath),
+    currentPath,
     history: parseSessionHistory(record.history),
+    ...(position === null ? {} : { position }),
   };
 }
 
@@ -316,6 +329,7 @@ export function parseReaderSession(value: unknown): ReaderSession {
     // 旧版只记源码视图的路径列表；新字段缺席时迁移过来。
     viewModes: parseViewModes(record.viewModes, record.sourceViews),
     recentFiles: parseRecentFiles(record.recentFiles),
+    fileTree: parseFileTreeState(record.fileTree),
     ...(parsePaneLayout(record) ?? emptyReaderSession),
   };
 }

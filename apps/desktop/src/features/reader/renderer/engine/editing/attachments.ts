@@ -63,7 +63,7 @@ export function createAttachmentEditing(io: {
   }
 
   function prepare(view: EditorView, pos = view.state.selection.to): boolean {
-    if (!live) return false;
+    if (!live || !view.editable) return false;
     if (busy || failed.length > 0) {
       io.report("请先完成或关闭当前附件导入，再插入其他附件。");
       return false;
@@ -94,7 +94,7 @@ export function createAttachmentEditing(io: {
   }
 
   async function insertFiles(view: EditorView, files: File[]): Promise<void> {
-    if (busy || !live) return;
+    if (busy || !live || !view.editable) return;
     if (files.length === 0) {
       clear(view);
       return;
@@ -120,15 +120,17 @@ export function createAttachmentEditing(io: {
             throw new Error("附件超过 64 MiB，请缩小文件后重试");
           const bytes = new Uint8Array(await file.arrayBuffer());
           if (!live) return;
-          if (key.getState(view.state) == null) {
-            io.report("插入位置已被删除，附件未导入；请重新选择正文位置。");
+          if (!view.editable || key.getState(view.state) == null) {
+            io.report(
+              "文档已进入阅读状态或插入位置已变化，附件未导入；请返回编辑并重新选择正文位置。",
+            );
             clear(view);
             return;
           }
           imported = await io.import(file.name, bytes);
           await waitForComposition(view);
           const pos = live ? key.getState(view.state) : null;
-          if (pos == null || !canInsertAttachment(view.state, pos)) {
+          if (!view.editable || pos == null || !canInsertAttachment(view.state, pos)) {
             io.report(
               `附件已导入 ${imported.path}，原文档或插入位置已变化，尚未插入引用。可从文件栏查看，或通过链接插入；无需重复导入。${imported.warning ?? ""}`,
             );

@@ -50,6 +50,55 @@ fn linked_mentions_use_surrounding_paragraph_as_snippet() {
 }
 
 #[test]
+fn unlinked_ranges_follow_source_bytes_after_markdown_normalization() {
+    for body in [
+        "> 第一行\n> 中文阅读内容\n",
+        "> 第一行\r\n> 中文阅读内容\r\n",
+        "&amp; 中文阅读内容\n",
+        "\\* 中文阅读内容\n",
+    ] {
+        let (_root, _index, vault) = vault_with(&[("阅读.md", "# 阅读\n"), ("资料.md", body)]);
+        let mentions = vault.mentions_to("阅读.md").expect("提及不应崩溃");
+        assert_eq!(mentions.unlinked.len(), 1, "{body:?}");
+        let hit = &mentions.unlinked[0];
+        let start = usize::try_from(hit.start_byte).expect("起点");
+        let end = usize::try_from(hit.end_byte).expect("终点");
+        assert_eq!(body.get(start..end), Some("阅读"), "{body:?}");
+        assert_eq!(hit.to_raw, "阅读");
+        assert!(hit.snippet.contains("中文阅读内容"));
+    }
+}
+
+#[test]
+fn unlinked_does_not_treat_character_reference_syntax_as_visible_text() {
+    let body = "&amp; 后面才是 amp。\n";
+    let (_root, _index, vault) = vault_with(&[("amp.md", "# amp\n"), ("资料.md", body)]);
+    let mentions = vault.mentions_to("amp.md").expect("提及");
+    assert_eq!(mentions.unlinked.len(), 1);
+    assert_eq!(
+        mentions.unlinked[0].start_byte,
+        i64::try_from(body.rfind("amp").expect("正文命中")).expect("字节位置")
+    );
+}
+
+#[test]
+fn linked_snippets_tolerate_stale_offsets_inside_utf8_characters() {
+    let (root, _index, vault) = vault_with(&[
+        ("Topic.md", "# Topic\n"),
+        ("资料.md", "word [[Topic]] tail\n"),
+    ]);
+    // 外部改写到监视刷新之间，索引里的字节位置仍属于旧文本。
+    fs::write(
+        root.path().join("资料.md"),
+        "中文段落已经由外部工具改写。\n",
+    )
+    .expect("外部改写");
+    let mentions = vault.mentions_to("Topic.md").expect("旧索引不应让阅读崩溃");
+    assert_eq!(mentions.linked.len(), 1);
+    assert_eq!(mentions.linked[0].snippet, "中文段落已经由外部工具改写。");
+}
+
+#[test]
 fn unlinked_skips_fenced_and_inline_code() {
     let (_root, _index, vault) = vault_with(&[
         ("Topic.md", "# Topic\n"),

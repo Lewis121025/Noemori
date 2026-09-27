@@ -156,7 +156,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     const note = page.getByRole("treeitem", { name: "笔记.md", exact: true });
     await note.focus();
     await page.keyboard.press("F2");
-    const filename = page.locator(".entry-dialog").getByLabel("文件名", { exact: true });
+    const filename = page.getByRole("textbox", { name: "重命名文件", exact: true });
     await filename.fill("放弃的新名称.md");
     await historyMenu("撤销");
     await expect.poll(() => filename.inputValue()).toBe("笔记.md");

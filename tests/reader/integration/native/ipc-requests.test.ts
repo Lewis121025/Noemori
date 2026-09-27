@@ -1,7 +1,9 @@
 import { Worker } from "node:worker_threads";
+import { EventEmitter } from "node:events";
 import { beforeEach, expect, it, vi } from "vitest";
 import { CoreClient } from "../../../../apps/desktop/src/main/core-client";
 import { registerReaderIpc } from "@reader/main/ipc";
+import { EntryBatchControl } from "@reader/main/entry-batch-control";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const { handlers, call } = vi.hoisted(() => ({
@@ -27,11 +29,111 @@ beforeEach(() => {
   registerReaderIpc(() => null, new CoreClient(new Worker("unused"), vi.fn()));
 });
 
+const sender = Object.assign(new EventEmitter(), {
+  id: 1,
+  isDestroyed: () => false,
+  send: vi.fn(),
+});
+
 async function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   const handler = handlers.get(channel);
   if (!handler) throw new Error(`未注册通道：${channel}`);
-  return handler(undefined, ...args);
+  return handler({ sender }, ...args);
 }
+
+it("批量请求与目录现场整体校验，并携带笔记库归属进入工作队列", async () => {
+  const request = {
+    root: "/notes",
+    action: "move",
+    paths: ["folder/note.md", "folder"],
+    destination: "target",
+  };
+  for (const paths of [[], ["a.md", "../outside"], ["a.md", null]])
+    await expect(invoke("reader.entry.batch", { ...request, paths })).rejects.toThrow("路径");
+  await expect(invoke("reader.session.setFileTree", "/notes", {})).rejects.toThrow("目录会话");
+  expect(call).not.toHaveBeenCalled();
+  await invoke("reader.entry.batch", request, "batch-1");
+  expect(call).toHaveBeenLastCalledWith(
+    "entryBatch",
+    { ...request, paths: ["folder"] },
+    expect.any(SharedArrayBuffer),
+  );
+  const state = {
+    expanded: ["folder"],
+    selected: ["folder/note.md"],
+    focused: "folder/note.md",
+    scroll: { path: "folder", offset: 3 },
+  };
+  await invoke("reader.session.setFileTree", "/notes", state);
+  expect(call).toHaveBeenLastCalledWith("readerFileTreeSave", "/notes", state);
+});
+
+it("停止信号无需等待内核队列，且旧编号、其他窗口或其他库不能停止当前批次", async () => {
+  vi.useFakeTimers();
+  const request = { root: "/notes", action: "trash", paths: ["a.md", "b.md"] };
+  let finish = () => {};
+  call.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = invoke("reader.entry.batch", request, "batch-active");
+  const shared: unknown = call.mock.calls.at(-1)?.[2];
+  if (!(shared instanceof SharedArrayBuffer)) throw new Error("缺少共享停止信号");
+  const worker = new EntryBatchControl(shared);
+  try {
+    await expect(invoke("reader.entry.batch", request, "batch-duplicate")).rejects.toThrow("等待");
+    await invoke("reader.entry.batch.stop", "/notes", "batch-old");
+    await invoke("reader.entry.batch.stop", "/other", "batch-active");
+    await handlers.get("reader.entry.batch.stop")!({ sender: { id: 2 } }, "/notes", "batch-active");
+    expect(worker.stopped).toBe(false);
+    worker.running();
+    worker.completed(1);
+    await vi.advanceTimersByTimeAsync(80);
+    expect(sender.send).toHaveBeenLastCalledWith("reader.entry.batch.progress", "batch-active", {
+      phase: "running",
+      completed: 1,
+      total: 2,
+    });
+    await invoke("reader.entry.batch.stop", "/notes", "batch-active");
+    expect(worker.stopped).toBe(true);
+    expect(call).toHaveBeenCalledTimes(1);
+    finish();
+    await pending;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(sender.listenerCount("destroyed")).toBe(0);
+    await invoke("reader.entry.batch", request, "batch-retry");
+    const retried: unknown = call.mock.calls.at(-1)?.[2];
+    if (!(retried instanceof SharedArrayBuffer)) throw new Error("缺少重试信号");
+    expect(new EntryBatchControl(retried).stopped).toBe(false);
+  } finally {
+    finish();
+    await pending;
+    vi.useRealTimers();
+  }
+});
+
+it("窗口销毁请求安全停止，内核拒绝后清理批次与监听器", async () => {
+  const request = { root: "/notes", action: "trash", paths: ["a.md"] };
+  let fail = (_error: Error) => {};
+  call.mockImplementationOnce(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  const pending = invoke("reader.entry.batch", request, "destroyed");
+  const rejected = expect(pending).rejects.toThrow("线程错误");
+  const shared: unknown = call.mock.calls.at(-1)?.[2];
+  if (!(shared instanceof SharedArrayBuffer)) throw new Error("缺少共享停止信号");
+  sender.emit("destroyed");
+  expect(new EntryBatchControl(shared).stopped).toBe(true);
+  fail(new Error("线程错误"));
+  await rejected;
+  expect(sender.listenerCount("destroyed")).toBe(0);
+  await invoke("reader.entry.batch", request, "next");
+});
 
 it("错误字节和缺失基准在 IPC 入口被拒绝，不进入保存或副本执行队列", async () => {
   const bytes = new Uint8Array([0, 255]);
@@ -142,7 +244,7 @@ it("检索条件在 IPC 入口结构化校验，超界上限被收敛后才进�
     { expr: { kind: "and", children: [] }, limit: "10" },
     { expr: deep, limit: 10 },
   ])
-    await expect(invoke("reader.search.query", invalid)).rejects.toThrow();
+    await expect(invoke("reader.search.query", invalid, "search-id", null)).rejects.toThrow();
   expect(call).not.toHaveBeenCalled();
   const expr = {
     kind: "and",
@@ -152,8 +254,21 @@ it("检索条件在 IPC 入口结构化校验，超界上限被收敛后才进�
       { kind: "attr", key: "status", value: null },
     ],
   };
-  await invoke("reader.search.query", { expr, limit: 1e9 });
-  expect(call).toHaveBeenLastCalledWith("searchQuery", { expr, limit: 500 });
+  await invoke("reader.search.query", { expr, limit: 1e9 }, "search-id", null);
+  expect(call).toHaveBeenLastCalledWith("searchQuery", { expr, limit: 500 }, "search-id", null);
+  await expect(
+    invoke("reader.search.matches", { expr, limit: 100 }, "search-id", null),
+  ).rejects.toThrow("游标");
+  await expect(
+    invoke("reader.search.matches", { expr, limit: 100 }, "bad/id", "cursor"),
+  ).rejects.toThrow("标识");
+  await invoke("reader.search.matches", { expr, limit: 100 }, "search-id", "cursor");
+  expect(call).toHaveBeenLastCalledWith(
+    "searchMatches",
+    { expr, limit: 100 },
+    "search-id",
+    "cursor",
+  );
 });
 
 it("提及转链接的区间与文本在 IPC 入口校验后才进入内核", async () => {

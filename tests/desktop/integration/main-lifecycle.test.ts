@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onFlushResult, type CloseGate } from "../../../apps/desktop/src/main/close-gate";
 
-const { call, shutdown, register, historyItems } = vi.hoisted(() => ({
+const { call, shutdown, register, historyItems, windowOptions } = vi.hoisted(() => ({
   call: vi.fn(),
   shutdown: vi.fn(),
   register: vi.fn(),
+  windowOptions: vi.fn(),
   historyItems: new Map([
     ["undo", { enabled: false }],
     ["redo", { enabled: false }],
@@ -31,12 +32,14 @@ vi.mock("electron", async () => {
       isLoadingMainFrame: () => false,
       send: vi.fn(),
     });
-    constructor() {
+    constructor(options: Electron.BrowserWindowConstructorOptions) {
       super();
+      windowOptions(options);
       Window.windows.push(this);
     }
     loadFile = vi.fn();
     loadURL = vi.fn();
+    maximize = vi.fn();
     isMaximized = () => false;
     getBounds = () => ({ x: 10, y: 20, width: 900, height: 700 });
   }
@@ -51,10 +54,11 @@ vi.mock("electron", async () => {
       whenReady: () => Promise.resolve(),
       getPath: () => "/state",
       quit: vi.fn(),
+      setActivationPolicy: vi.fn(),
     }),
     dialog: { showErrorBox: vi.fn() },
     protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
-    screen: {},
+    screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
     nativeTheme: { themeSource: "system", shouldUseDarkColors: false },
   };
 });
@@ -81,6 +85,7 @@ afterEach(async () => {
   app.removeAllListeners();
   BrowserWindow.getAllWindows().splice(0);
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 async function start() {
@@ -91,6 +96,38 @@ async function start() {
 }
 
 describe("main process worker lifetime", () => {
+  it("后台测试从创建起隐藏窗口并保持渲染调度，普通启动仍显示窗口", async () => {
+    vi.stubEnv("NOUS_TEST_WINDOW", "hidden");
+    const { app } = await start();
+    expect(windowOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        show: false,
+        webPreferences: expect.objectContaining({ backgroundThrottling: false }),
+      }),
+    );
+    if (process.platform === "darwin")
+      expect(app.setActivationPolicy).toHaveBeenCalledWith("accessory");
+  });
+
+  it("普通启动保持前台窗口与后台节流", async () => {
+    vi.stubEnv("NOUS_TEST_WINDOW", "");
+    await start();
+    expect(windowOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        show: true,
+        webPreferences: expect.objectContaining({ backgroundThrottling: true }),
+      }),
+    );
+  });
+  it("隐藏测试恢复最大化会话时不调用会显示窗口的 maximize", async () => {
+    vi.stubEnv("NOUS_TEST_WINDOW", "hidden");
+    call.mockResolvedValue({
+      window: { x: 0, y: 0, width: 900, height: 700, maximized: true },
+      appearance: "system",
+    });
+    const { window } = await start();
+    expect(window.maximize).not.toHaveBeenCalled();
+  });
   it("页面重载、渲染进程退出及关闭窗口都会清除旧历史菜单状态", async () => {
     const { window } = await start();
     const enable = () => {

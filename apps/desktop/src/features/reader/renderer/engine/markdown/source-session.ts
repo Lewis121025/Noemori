@@ -2,7 +2,7 @@ import { type Node as PmNode } from "prosemirror-model";
 import { parseMarkdown } from "./parse";
 import { serializeMarkdown } from "./serialize";
 import { markdownProcessor } from "./markdown-processor";
-import { sourceTree, positionInTree } from "./source-map";
+import { sourceTree, positionInTree, rangeInTree, sourceOffsetInTree } from "./source-map";
 import { renderSource } from "./source-render";
 import type { Transaction } from "prosemirror-state";
 import { Mapping } from "prosemirror-transform";
@@ -57,6 +57,9 @@ export function createMarkdownSession(source: string, recovery?: string) {
         revision += 1;
         currentDoc = current;
       }
+      // 滚动结束与视图交接会读取同一快照；内容未变化时不重复解析整篇 Markdown。
+      if (navigationReady && sourceRevision === revision)
+        return { bytes: new TextEncoder().encode(navigationSource), revision };
       let text: string;
       try {
         const cached = snapshots.get(current);
@@ -86,6 +89,24 @@ export function createMarkdownSession(source: string, recovery?: string) {
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > navigationSource.length)
         throw new Error("源码位置不在当前快照范围内");
       return changes.map(positionInTree(tree, navigationSource, offset, -1));
+    },
+    /** 反向映射必须先取得当前快照；未保存的新字符不能借用旧源码的偏移。 */
+    sourceOffsetAt(position: number): number {
+      if (!navigationReady || sourceRevision !== revision)
+        throw new Error("请先取得当前编辑内容的保真快照");
+      if (!Number.isSafeInteger(position) || position < 0 || position > currentDoc.content.size)
+        throw new RangeError("排版位置不在当前文档范围内");
+      return sourceOffsetInTree(tree, navigationSource, position);
+    },
+    /** 精确定位只接受未发生编辑的快照；异步版本核对期间发生输入也必须拒绝旧范围。 */
+    rangeAt(
+      start: number,
+      end: number,
+      expectedRevision: number,
+    ): { from: number; to: number } | null {
+      if (!navigationReady || expectedRevision !== sourceRevision || expectedRevision !== revision)
+        throw new Error("搜索结果已过期，请重新搜索后定位。");
+      return rangeInTree(tree, navigationSource, start, end);
     },
   };
 }

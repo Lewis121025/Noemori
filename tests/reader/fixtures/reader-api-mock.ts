@@ -7,7 +7,7 @@
  */
 import { vi } from "vitest";
 import type { ReaderApi } from "@reader/shared/api";
-import type { LinkTarget, SearchHit } from "@reader/shared/api";
+import type { LinkTarget, SearchPage } from "@reader/shared/api";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -23,6 +23,7 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
       },
       viewModes: {},
       recentFiles: [],
+      fileTree: null,
     })),
     vaultOpen: vi.fn(async () => null),
     vaultClose: vi.fn(async () => {}),
@@ -31,6 +32,14 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
     entryCreate: vi.fn(async () => ({ warning: null })),
     attachmentImport: vi.fn(async () => ({ path: "attachments/a.png", warning: null })),
     entryTrash: vi.fn(async () => ({ warning: null })),
+    entryBatch: vi.fn(async () => ({
+      completed: [],
+      remaining: [],
+      skipped: [],
+      issues: [],
+      warning: null,
+    })),
+    entryBatchStop: vi.fn(async () => {}),
     entryReveal: vi.fn(async () => {}),
     fileRead: vi.fn(async () => encode("")),
     fileSnapshot: vi.fn(async () => ({ disk: encode("# 笔记\n\n正文。\n"), draft: null })),
@@ -40,6 +49,7 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
     sessionSetDocuments: vi.fn(async () => {}),
     sessionSetViewModes: vi.fn(async () => {}),
     sessionSetRecentFiles: vi.fn(async () => {}),
+    sessionSetFileTree: vi.fn(async () => {}),
     sessionGetPanes: vi.fn(async () => ({ filesCollapsed: false, leftWidth: 232 })),
     sessionSetPanes: vi.fn(async () => {}),
     linksResolve: vi.fn(async (): Promise<LinkTarget> => ({ status: "dead" })),
@@ -48,7 +58,11 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
     indexLinksFrom: vi.fn(async () => []),
     indexMentionsTo: vi.fn(async () => ({ linked: [], unlinked: [] })),
     mentionsLinkify: vi.fn(async () => ({ warning: null })),
-    searchQuery: vi.fn(async (): Promise<SearchHit[]> => []),
+    searchQuery: vi.fn(async (): Promise<SearchPage> => ({ hits: [], nextCursor: null })),
+    searchCancel: vi.fn(async () => {}),
+    searchMatches: vi.fn(async () => {
+      throw new Error("测试未提供命中续页响应");
+    }),
     indexHeadings: vi.fn(async () => []),
     indexTags: vi.fn(async () => []),
     indexNoteKeys: vi.fn(async () => []),

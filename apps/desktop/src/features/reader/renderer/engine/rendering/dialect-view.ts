@@ -14,6 +14,7 @@ import {
 } from "prosemirror-view";
 import { createCompositionGuard, isCompositionKey } from "../editing/composition";
 import { applyMarkdownHistory } from "../editing/history";
+import { focusDocument } from "../editing/read-only";
 import { SourceNodeView } from "./source-node-view";
 
 /** 注释预览只显示原文；编辑复用源码节点的输入生命周期。 */
@@ -54,11 +55,13 @@ class CalloutView implements NodeView {
   private readonly title: HTMLInputElement;
   private readonly fold: HTMLButtonElement;
   private node: PmNode;
+  private revealRequest: symbol | undefined;
 
   constructor(
     node: PmNode,
     private readonly view: EditorView,
     private readonly getPos: () => number | undefined,
+    decorations: readonly Decoration[],
   ) {
     this.node = node;
     this.dom = document.createElement("div");
@@ -80,6 +83,7 @@ class CalloutView implements NodeView {
     this.dom.append(this.header, this.contentDOM);
     this.sync(node);
     this.setCollapsed(node.attrs["fold"] === "-");
+    this.revealSelection(decorations);
   }
 
   private sync(node: PmNode): void {
@@ -90,6 +94,7 @@ class CalloutView implements NodeView {
     this.dom.dataset["calloutFold"] = fold;
     this.fold.hidden = fold === "";
     this.title.placeholder = calloutDefaultTitle(kind);
+    this.title.readOnly = !this.view.editable;
     this.title.setAttribute("aria-label", `${calloutDefaultTitle(kind)} 标注标题`);
     if (document.activeElement !== this.title && this.title.value !== title)
       this.title.value = title;
@@ -99,6 +104,15 @@ class CalloutView implements NodeView {
     this.dom.classList.toggle("collapsed", collapsed);
     this.fold.setAttribute("aria-expanded", String(!collapsed));
     this.fold.setAttribute("aria-label", collapsed ? "展开标注" : "收起标注");
+  }
+
+  private revealSelection(decorations: readonly Decoration[]): void {
+    for (const decoration of decorations) {
+      const request: unknown = decoration.spec["calloutReveal"];
+      if (typeof request !== "symbol" || request === this.revealRequest) continue;
+      this.revealRequest = request;
+      this.setCollapsed(false);
+    }
   }
 
   /** 标题输入实时写入属性；Enter/Esc/↓ 回到正文开头，保存与撤销交回编辑器。 */
@@ -139,17 +153,20 @@ class CalloutView implements NodeView {
       const pos = this.getPos();
       if (pos === undefined) return;
       const { state } = this.view;
-      this.view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(pos + 1))));
-      this.view.focus();
+      this.view.dispatch(
+        state.tr.setSelection(TextSelection.near(state.doc.resolve(pos + 1))).scrollIntoView(),
+      );
+      focusDocument(this.view);
     });
   }
 
-  update(node: PmNode): boolean {
+  update(node: PmNode, decorations: readonly Decoration[]): boolean {
     if (node.type !== this.node.type) return false;
     const refold = node.attrs["fold"] !== this.node.attrs["fold"];
     this.node = node;
     this.sync(node);
     if (refold) this.setCollapsed(node.attrs["fold"] === "-");
+    this.revealSelection(decorations);
     return true;
   }
 
@@ -168,8 +185,43 @@ class CalloutView implements NodeView {
 
 /** 标注节点视图。 */
 export const calloutNodeViews: Record<string, NodeViewConstructor> = {
-  callout: (node, view, getPos) => new CalloutView(node, view, getPos),
+  callout: (node, view, getPos, decorations) => new CalloutView(node, view, getPos, decorations),
 };
+
+const calloutRevealKey = new PluginKey<DecorationSet>("callout-reveal");
+
+/**
+ * 显式定位选区时，在布局与滚动前展开目标的所有祖先标注。
+ * @returns 只提供节点装饰的插件；初始折叠、普通查询更新与手动收起不触发展开，也不改写文档。
+ */
+export function calloutRevealPlugin(): Plugin<DecorationSet> {
+  return new Plugin<DecorationSet>({
+    key: calloutRevealKey,
+    state: {
+      init: () => DecorationSet.empty,
+      apply(tr, previous, _old, state) {
+        if (!tr.scrolledIntoView)
+          return tr.docChanged ? previous.map(tr.mapping, state.doc) : previous;
+        const decorations: Decoration[] = [];
+        const { $head } = state.selection;
+        // 每次定位都是独立请求：手动收起后再次定位同一命中，也必须重新展开。
+        const request = Symbol();
+        for (let depth = $head.depth; depth > 0; depth--) {
+          const node = $head.node(depth);
+          if (node.type.name !== "callout") continue;
+          const start = $head.before(depth);
+          decorations.push(
+            Decoration.node(start, start + node.nodeSize, {}, { calloutReveal: request }),
+          );
+        }
+        return DecorationSet.create(state.doc, decorations);
+      },
+    },
+    props: {
+      decorations: (state) => calloutRevealKey.getState(state) ?? DecorationSet.empty,
+    },
+  });
+}
 
 /** Mermaid 图表渲染器；测试注入替身，生产环境按需加载 mermaid。 */
 export type MermaidRenderer = (id: string, source: string, dark: boolean) => Promise<string>;
@@ -215,7 +267,7 @@ class MermaidView implements NodeView {
     this.preview = document.createElement("div");
     this.preview.className = "mermaid-preview";
     this.preview.contentEditable = "false";
-    this.preview.title = "点击编辑图表源码";
+    this.syncAccess();
     this.preview.addEventListener("mousedown", (event) => {
       event.preventDefault();
       this.editSource();
@@ -237,6 +289,11 @@ class MermaidView implements NodeView {
     const end = pos + 1 + this.node.content.size;
     this.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, end)));
     this.view.focus();
+  }
+
+  private syncAccess(): void {
+    if (this.view.editable) this.preview.title = "点击编辑图表源码";
+    else this.preview.removeAttribute("title");
   }
 
   private schedule(): void {
@@ -277,6 +334,7 @@ class MermaidView implements NodeView {
       this.source = node.textContent;
       this.schedule();
     }
+    this.syncAccess();
     return true;
   }
 

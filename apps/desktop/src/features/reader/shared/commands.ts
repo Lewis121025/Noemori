@@ -124,6 +124,8 @@ export type CommandContext = {
   readonly hasDocument: boolean;
   /** 活动栏文档可编辑。 */
   readonly canEdit: boolean;
+  /** 活动栏处于阅读态；允许保存此前的编辑，不允许发起正文写入。 */
+  readonly reading: boolean;
   /** 活动栏文档是 Markdown。 */
   readonly markdown: boolean;
   /** 活动栏阅读栈可后退。 */
@@ -154,7 +156,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "save":
       return context.canEdit;
     case "insert-attachment":
-      return context.canEdit && context.markdown;
+      return context.canEdit && context.markdown && !context.reading;
     case "find":
     case "rename-file":
     case "bookmark-file":

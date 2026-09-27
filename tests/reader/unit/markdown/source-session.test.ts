@@ -18,6 +18,33 @@ function edit(source: string, needle: string, replacement: string): string {
 }
 
 describe("局部编辑的源码契约", () => {
+  it.each([
+    "\uFEFF# 标题\r\n\r\n> 首行 &amp;\r\n> 第二行定位 🌱\r\n",
+    "正文 **加粗定位** 和 [链接](note.md)\n",
+    "- 第一项\n  - 嵌套定位\n",
+    "```ts\r\nconst 变量 = '定位';\r\n```\r\n",
+    "正文 `代码定位` 结尾\n",
+  ])("排版位置与源码位置往返保留实际字符：%j", (source) => {
+    const session = createMarkdownSession(source);
+    const offset = source.indexOf("定位");
+    const position = session.positionAt(offset);
+    expect(session.doc.textBetween(position, position + 2)).toBe("定位");
+    expect(session.sourceOffsetAt(position)).toBe(offset);
+  });
+
+  it("逆向位置只属于最新保真快照，不能把新编辑映射到旧源码", () => {
+    const session = createMarkdownSession("原文\n\n定位");
+    const state = EditorState.create({ doc: session.doc });
+    const transaction = state.tr.insertText("新增", 1);
+    session.track(transaction);
+    expect(() => session.sourceOffsetAt(7)).toThrow("快照");
+    const snapshot = session.snapshot(transaction.doc);
+    const source = new TextDecoder().decode(snapshot.bytes);
+    const offset = source.indexOf("定位");
+    expect(session.sourceOffsetAt(session.positionAt(offset))).toBe(offset);
+    expect(session.snapshot(transaction.doc)).toEqual(snapshot);
+  });
+
   it.each(["```ts\nconst value = 1;\n```", "- 第一项\n- 第二项"])(
     "带 BOM 的首段转换成多行结构时不复制 BOM：%s",
     (replacement) => {

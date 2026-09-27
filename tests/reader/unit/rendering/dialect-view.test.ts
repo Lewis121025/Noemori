@@ -8,6 +8,7 @@ import { parseMarkdown, serializeMarkdown } from "@reader/renderer/engine/markdo
 import {
   calloutDefaultTitle,
   calloutNodeViews,
+  calloutRevealPlugin,
   commentNodeViews,
   createCodeBlockViews,
   findFootnoteDefinition,
@@ -20,13 +21,14 @@ let views: EditorView[] = [];
 afterEach(() => {
   for (const view of views) view.destroy();
   views = [];
+  document.body.replaceChildren();
   vi.useRealTimers();
 });
 
 function mountEditor(
   source: string,
   nodeViews: Record<string, NodeViewConstructor>,
-  plugins = [mermaidFocusPlugin(), footnoteNavigation()],
+  plugins = [calloutRevealPlugin(), mermaidFocusPlugin(), footnoteNavigation()],
 ): EditorView {
   const host = document.createElement("div");
   document.body.append(host);
@@ -64,6 +66,42 @@ describe("标注视图", () => {
     expect(serializeMarkdown(view.state.doc)).toBe("> [!tip] 新标题\n> 正文\n");
     expect(calloutDefaultTitle("WARNING")).toBe("Warning");
   });
+
+  it.each([false, true])(
+    "定位在滚动前展开嵌套祖先，其他标注保持收起（反向选区：%s）",
+    (backward) => {
+      const view = mountEditor(
+        "> [!note]- 外层\n> 外层正文\n>\n> > [!tip]- 内层\n> > 深处目标\n\n> [!warning]- 另一处\n> 无关正文\n",
+        calloutNodeViews,
+      );
+      const callouts = [...view.dom.querySelectorAll<HTMLElement>(".callout")];
+      expect(callouts).toHaveLength(3);
+      expect(callouts.every((node) => node.classList.contains("collapsed"))).toBe(true);
+      const text = callouts[1]!.querySelector("p")!.firstChild!;
+      const from = view.posAtDOM(text, 0);
+      const to = from + "深处目标".length;
+      const before = view.state.doc;
+      const scroll = vi.fn(() => {
+        expect(callouts.map((node) => node.classList.contains("collapsed"))).toEqual([
+          false,
+          false,
+          true,
+        ]);
+        return true;
+      });
+      view.setProps({ handleScrollToSelection: scroll });
+      view.focus();
+      view.dispatch(
+        view.state.tr
+          .setSelection(
+            TextSelection.create(view.state.doc, backward ? to : from, backward ? from : to),
+          )
+          .scrollIntoView(),
+      );
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(view.state.doc).toBe(before);
+    },
+  );
 });
 
 describe("注释视图", () => {

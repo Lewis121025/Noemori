@@ -2,6 +2,11 @@
   import { tick, untrack } from "svelte";
   import Sidebar from "./Sidebar.svelte";
   import FileTreeViewport from "./FileTreeViewport.svelte";
+  import InlineRename from "./InlineRename.svelte";
+  import FileBatchDialog from "./FileBatchDialog.svelte";
+  import { selectFileRows } from "../../engine/navigation/file-selection";
+  import type { FileTreePosition } from "../../../shared/file-browser";
+  import type { EntryBatchResult } from "../../../shared/entry-batch";
   import SearchResults from "./SearchResults.svelte";
   import TagBrowser from "./TagBrowser.svelte";
   import BookmarksPane from "./BookmarksPane.svelte";
@@ -10,7 +15,6 @@
   import type { Bookmark, SearchHit, VaultEntry } from "../../../shared/api";
   import type { ReaderWorkspaceController } from "../../state/workspace.svelte";
   import { isCompositionKey } from "../../engine/editing/composition";
-  import { matchNeedle } from "../../engine/search/query";
   import {
     ancestorDirectories,
     buildFileTree,
@@ -38,15 +42,24 @@
     hidden?: boolean;
   } = $props();
   let query = $state("");
-  let expanded = $state.raw<ReadonlySet<string>>(new Set());
-  let selected = $state<string | null>(null);
-  let focused = $state<string | null>(null);
+  const browser = $derived(workspace.fileTree);
+  const expanded = $derived(new Set(browser.state.expanded));
+  const selected = $derived(new Set(browser.state.selected));
+  const focused = $derived(browser.state.focused);
+  let selectionAnchor = $state<string | null>(null);
+  let filteredScroll = $state.raw<FileTreePosition | null>(null);
+  let renaming = $state.raw<VaultEntry | null>(null);
+  let renameIssue = $state("");
+  const renameErrorId = $props.id();
   // 结果模式下文件树被卸载，引用可能为空；调用处统一可选链。
   let treeViewport: FileTreeViewport | undefined = $state();
   let searchResults: SearchResults | undefined = $state();
   let recoveryElement: HTMLElement | undefined = $state();
   let searchInput: HTMLInputElement;
   let menu: FileMenu;
+  let batchDialog: FileBatchDialog;
+  let draggedEntries = $state.raw<VaultEntry[]>([]);
+  let batchFallback: string | null = null;
   let bookmarksPane: BookmarksPane | undefined = $state();
   const search = $derived(workspace.search);
   /** 侧栏主体：文件树、标签浏览或书签；检索结果优先于三者。 */
@@ -55,6 +68,7 @@
   let dragging = $state<VaultEntry | null>(null);
   let dropTarget = $state<string | null>(null);
   let previousRoot: string | null | undefined;
+  let previousActive: string | null | undefined;
   const tree = $derived(buildFileTree(workspace.entries.filter((entry) => !entry.recoveryOnly)));
   const recoveries = $derived(
     workspace.entries.filter(
@@ -65,6 +79,11 @@
   );
   const searching = $derived(query.trim() !== "");
   const rows = $derived(visibleFileRows(filterFileTree(tree, query), expanded, searching));
+  const selectedEntries = $derived(
+    rows
+      .filter((row) => selected.has(row.node.path))
+      .map((row) => ({ path: row.node.path, kind: row.node.kind })),
+  );
   const active = $derived(workspace.document.path);
   const activeRecovery = $derived(
     workspace.entries.some((entry) => entry.recoveryOnly && entry.path === active),
@@ -82,35 +101,73 @@
     const path = active;
     const recovering = activeRecovery;
     const root = workspace.vaultRoot;
+    if (!browser.ready || busy) return;
     untrack(() => {
-      if (root !== previousRoot) {
-        expanded = new Set();
+      const initial = root !== previousRoot;
+      if (initial) {
         query = "";
-        selected = null;
+        filteredScroll = null;
+        renaming = null;
+        renameIssue = "";
         paneMode = "files";
+        selectionAnchor = browser.state.focused;
         previousRoot = root;
       }
-      expanded = new Set([...expanded, ...ancestorDirectories(path)]);
-      if (path !== null) {
-        selected = recovering ? null : path;
-        focused = selected;
+      if ((!initial && path !== previousActive) || (initial && !browser.hasStoredState)) {
+        setExpanded(new Set([...expanded, ...ancestorDirectories(path)]));
+        if (path !== null) selectOnly(recovering ? null : path);
       }
+      previousActive = path;
     });
   });
 
-  function toggle(path: string): void {
-    expanded = expanded.has(path)
-      ? new Set([...expanded].filter((item) => item !== path))
-      : new Set([...expanded, path]);
+  $effect(() => {
+    const visible = new Set(rows.map((row) => row.node.path));
+    if (!browser.ready || busy) return;
+    untrack(() => {
+      const retained = browser.state.selected.filter((path) => visible.has(path));
+      if (retained.length !== browser.state.selected.length) browser.update({ selected: retained });
+    });
+  });
+
+  function setExpanded(paths: ReadonlySet<string>): void {
+    browser.update({ expanded: [...paths] });
   }
-  async function focusPath(path: string): Promise<void> {
-    focused = path;
+  function selectOnly(path: string | null): void {
+    browser.update({ selected: path === null ? [] : [path], focused: path });
+    selectionAnchor = path;
+  }
+  function selectRow(path: string, mode: "replace" | "toggle" | "range" | "extend"): void {
+    const next = selectFileRows(
+      { paths: selected, anchor: selectionAnchor },
+      rows.map((row) => row.node.path),
+      path,
+      mode,
+    );
+    browser.update({ selected: [...next.paths], focused: path });
+    selectionAnchor = next.anchor;
+  }
+  function toggle(path: string): void {
+    setExpanded(
+      expanded.has(path)
+        ? new Set([...expanded].filter((item) => item !== path))
+        : new Set([...expanded, path]),
+    );
+  }
+  /** 切换侧栏内容时同时结束旧检索，避免隐藏的结果模式遮住用户要去的面板。 */
+  function showPane(mode: typeof paneMode, text = ""): void {
+    search.reset();
+    paneMode = mode;
+    query = text;
+  }
+  async function focusPath(path: string, select = true): Promise<void> {
+    if (select) selectOnly(path);
+    else browser.update({ focused: path });
     await tick();
     await treeViewport?.focusPath(path);
   }
   async function activate(entry: VaultEntry): Promise<void> {
-    selected = entry.recoveryOnly ? null : entry.path;
-    focused = selected;
+    selectOnly(entry.recoveryOnly ? null : entry.path);
     if (entry.kind === "directory") toggle(entry.path);
     else {
       await workspace.openFile(entry.path);
@@ -119,13 +176,13 @@
   }
   async function locate(): Promise<void> {
     if (active === null) return;
-    query = "";
+    showPane("files");
     if (activeRecovery) {
       await focusRecovery(active);
       return;
     }
-    selected = active;
-    expanded = new Set([...expanded, ...ancestorDirectories(active)]);
+    selectOnly(active);
+    setExpanded(new Set([...expanded, ...ancestorDirectories(active)]));
     await focusPath(active);
   }
   async function focusRecovery(path: string): Promise<void> {
@@ -143,7 +200,8 @@
       return;
     }
     if (kind === "collapse") {
-      expanded = new Set();
+      showPane("files");
+      setExpanded(new Set());
       return;
     }
     if (kind === "locate") {
@@ -151,8 +209,16 @@
       return;
     }
     if (busy || workspace.vaultRoot === null) return;
+    if ((kind === "move" || kind === "trash") && selected.size > 1) {
+      beginBatch(kind);
+      return;
+    }
     if (kind === "reveal") {
       if (entry) void workspace.revealEntry(entry.path);
+      return;
+    }
+    if (kind === "rename") {
+      if (entry !== null) void beginRename(entry);
       return;
     }
     const parent =
@@ -163,8 +229,73 @@
           : parentDirectory(entry.path);
     onEdit(kind, entry, parent);
   }
+  async function beginRename(entry: VaultEntry): Promise<void> {
+    await focusPath(entry.path);
+    selectOnly(entry.path);
+    renaming = entry;
+    renameIssue = "";
+  }
+  async function finishRename(
+    entry: VaultEntry,
+    destination: string | null,
+    focus: boolean,
+  ): Promise<void> {
+    // 切库或退出本次编辑后，旧请求的收尾不能改变新目录的焦点。
+    if (renaming !== entry) return;
+    renaming = null;
+    renameIssue = "";
+    if (destination !== null)
+      await reflectChange(
+        { action: "relocate", from: entry.path, entry: { ...entry, path: destination } },
+        focus && !hidden,
+      );
+    else if (focus && !hidden) await focusPath(entry.path);
+  }
   function currentEntry(): VaultEntry | null {
-    return findFileTreeNode(tree, selected);
+    return selected.size === 1 ? findFileTreeNode(tree, [...selected][0] ?? null) : null;
+  }
+  function rememberBatchFallback(entries: VaultEntry[]): void {
+    const affected = (path: string) =>
+      entries.some((entry) => path === entry.path || path.startsWith(`${entry.path}/`));
+    const first = rows.findIndex((row) => affected(row.node.path));
+    batchFallback =
+      rows.slice(first).find((row) => !affected(row.node.path))?.node.path ??
+      rows.slice(0, first).findLast((row) => !affected(row.node.path))?.node.path ??
+      null;
+  }
+  function beginBatch(kind: "move" | "trash"): void {
+    if (busy || selectedEntries.length === 0) return;
+    rememberBatchFallback(selectedEntries);
+    void batchDialog.open(kind, selectedEntries);
+  }
+  async function reflectBatch(result: EntryBatchResult): Promise<void> {
+    await tick();
+    showPane("files");
+    const paths =
+      result.remaining.length > 0
+        ? result.remaining
+        : [
+            ...result.completed.flatMap((change) => (change.to === null ? [] : [change.to])),
+            ...result.skipped,
+          ];
+    setExpanded(new Set([...expanded, ...paths.flatMap(ancestorDirectories)]));
+    const available = new Set(rows.map((row) => row.node.path));
+    const retained = paths.filter((path) => available.has(path));
+    browser.update({
+      selected: retained,
+      focused:
+        retained[0] ??
+        (batchFallback !== null && available.has(batchFallback)
+          ? batchFallback
+          : (rows[0]?.node.path ?? null)),
+    });
+    selectionAnchor = browser.state.focused;
+  }
+  async function finishBatch(): Promise<void> {
+    if (hidden) return;
+    await tick();
+    if (focusable !== null) await focusPath(focusable, false);
+    else searchInput.focus();
   }
   /** 从工具栏、空白状态和快捷键进入同一个新建流程，使用当前选中项所在目录。 */
   export function beginCreate(kind: "file" | "directory"): void {
@@ -183,27 +314,12 @@
   export async function reflectChange(change: FileEntryChange, focus: boolean): Promise<void> {
     // 等待活动文档的更新完成，避免它的自动定位覆盖用户刚整理的条目。
     await tick();
-    const from =
-      change.action === "relocate"
-        ? change.from
-        : change.action === "trash"
-          ? change.entry.path
-          : null;
-    if (from !== null) {
-      expanded = new Set(
-        [...expanded].flatMap((path) => {
-          if (path !== from && !path.startsWith(`${from}/`)) return [path];
-          return change.action === "relocate" ? [change.entry.path + path.slice(from.length)] : [];
-        }),
-      );
-    }
     const path = change.action === "trash" ? parentDirectory(change.entry.path) : change.entry.path;
-    query = "";
-    expanded = new Set([...expanded, ...ancestorDirectories(path)]);
+    showPane("files");
+    setExpanded(new Set([...expanded, ...ancestorDirectories(path)]));
     const next =
       rows.find((row) => row.node.path === path)?.node.path ?? rows[0]?.node.path ?? null;
-    selected = next;
-    focused = next;
+    selectOnly(next);
     if (!focus) return;
     if (next === null) searchInput.focus();
     else await focusPath(next);
@@ -211,9 +327,7 @@
   /** 清除按钮：退出结果模式并清空过滤词，回到完整文件树。 */
   function clearSearch(): void {
     if (workspace.isComposing) return;
-    search.reset();
-    query = "";
-    treeViewport?.resetScroll();
+    showPane("files");
     searchInput.focus();
   }
   /** Escape：先退出结果模式（保留查询词供文件树过滤），再清空过滤词。 */
@@ -234,35 +348,30 @@
    */
   async function submitSearch(): Promise<void> {
     if (busy) return;
-    await search.run(query);
-    if (!search.active) return;
+    if (!(await search.run(query))) return;
     await tick();
     searchResults?.focusFirst();
   }
   /** 选中标签：转成 `tag:` 谓词检索，主体让位给结果列表。 */
   function pickTag(tag: string): void {
-    paneMode = "files";
-    query = `tag:${tag}`;
+    showPane("files", `tag:${tag}`);
     void submitSearch();
   }
   /** 切到书签并把键盘焦点交给第一条；检索结果优先显示，所以先退出结果模式。 */
   export async function showBookmarks(): Promise<void> {
-    search.reset();
-    paneMode = "bookmarks";
+    showPane("bookmarks");
     await tick();
     bookmarksPane?.focusFirst();
   }
   /** 文件与标题在活动栏打开；文件夹回到文件树展开定位；搜索重新执行。 */
   async function openBookmark(bookmark: Bookmark): Promise<void> {
     if (bookmark.kind === "search") {
-      paneMode = "files";
-      query = bookmark.query;
+      showPane("files", bookmark.query);
       await submitSearch();
     } else if (bookmark.kind === "folder") {
-      paneMode = "files";
-      query = "";
-      selected = bookmark.path;
-      expanded = new Set([...expanded, ...ancestorDirectories(bookmark.path), bookmark.path]);
+      showPane("files");
+      selectOnly(bookmark.path);
+      setExpanded(new Set([...expanded, ...ancestorDirectories(bookmark.path), bookmark.path]));
       await focusPath(bookmark.path);
     } else {
       await workspace.openBookmark(bookmark);
@@ -285,22 +394,63 @@
       else if (rows[0]) void focusPath(rows[0].node.path);
     }
   }
-  /** 打开命中文件并定位命中词；门禁阻止切换时保持当前文档。 */
-  async function openHit(hit: SearchHit): Promise<void> {
-    const submitted = search.query;
-    if (submitted === null) return;
-    const needle = matchNeedle(hit, submitted);
-    await workspace.navigation.openTextMatch(hit.path, needle, workspace.openFile);
+  /** 打开具体命中；位置失效时提供反馈，不猜测同名文本的位置。 */
+  async function openHit(hit: SearchHit, match = hit.matches[0]): Promise<void> {
+    await workspace.navigation.openSearchMatch(hit, match, workspace.openFile, (message) =>
+      workspace.report(message),
+    );
     if (workspace.document.path === hit.path) onOpen();
   }
   function context(event: MouseEvent, entry: VaultEntry): void {
     event.preventDefault();
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
-    selected = entry.path;
-    focused = entry.path;
+    if (!selected.has(entry.path)) selectOnly(entry.path);
+    browser.update({ focused: entry.path });
     void menu.open(entry, event.clientX, event.clientY);
   }
   function keydown(event: KeyboardEvent, row: FileTreeRow): void {
+    if (event.defaultPrevented || busy || isCompositionKey(event) || workspace.isComposing) return;
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      event.stopPropagation();
+      browser.update({ selected: rows.map((item) => item.node.path) });
+      selectionAnchor = row.node.path;
+      return;
+    }
+    if (event.key === " " && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      selectRow(row.node.path, "toggle");
+      return;
+    }
+    if (event.key === "Escape" && selected.size > 1) {
+      event.preventDefault();
+      event.stopPropagation();
+      selectOnly(row.node.path);
+      return;
+    }
+    if (
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      ((!event.metaKey && event.key === "Delete") || (event.metaKey && event.key === "Backspace"))
+    ) {
+      event.preventDefault();
+      const entry = currentEntry();
+      if (!event.repeat && (entry !== null || selected.size > 1)) action("trash", entry);
+      return;
+    }
+    const navigation = ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key);
+    if (
+      event.altKey ||
+      (!navigation && (event.metaKey || event.ctrlKey || (event.shiftKey && event.key !== "F10")))
+    )
+      return;
+    if (event.key === "Escape" && searching) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearSearch();
+      return;
+    }
     const index = rows.findIndex((item) => item.node.path === row.node.path);
     let next: string | undefined;
     if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)]?.node.path;
@@ -314,23 +464,31 @@
       if (row.node.kind === "directory" && expanded.has(row.node.path) && !searching)
         toggle(row.node.path);
       else next = row.parent ?? undefined;
-    } else if (event.key === "F2") action("rename", row.node);
-    else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    } else if (event.key === "F2") {
+      const entry = currentEntry();
+      if (entry !== null) action("rename", entry);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       const rect =
         event.currentTarget instanceof HTMLElement
           ? event.currentTarget.getBoundingClientRect()
           : null;
+      if (!selected.has(row.node.path)) selectOnly(row.node.path);
       if (rect) void menu.open(row.node, rect.left + 20, rect.bottom);
     } else return;
     event.preventDefault();
-    if (next !== undefined) void focusPath(next);
+    if (next !== undefined) {
+      if (event.shiftKey) selectRow(next, event.metaKey || event.ctrlKey ? "extend" : "range");
+      else if (!event.metaKey && !event.ctrlKey) selectOnly(next);
+      void focusPath(next, false);
+    }
   }
   function allowDrop(event: DragEvent, directory: string): void {
     if (
       busy ||
       dragging === null ||
-      dragging.path === directory ||
-      directory.startsWith(`${dragging.path}/`)
+      draggedEntries.some(
+        (entry) => entry.path === directory || directory.startsWith(`${entry.path}/`),
+      )
     )
       return;
     event.preventDefault();
@@ -339,27 +497,33 @@
   }
   async function drop(event: DragEvent, directory: string): Promise<void> {
     event.preventDefault();
-    const entry = dragging;
+    const entries = draggedEntries;
     dragging = null;
+    draggedEntries = [];
     dropTarget = null;
     if (
-      entry === null ||
+      entries.length === 0 ||
       busy ||
-      entry.path === directory ||
-      directory.startsWith(`${entry.path}/`)
+      entries.some((entry) => entry.path === directory || directory.startsWith(`${entry.path}/`))
     )
       return;
-    const name = entry.path.slice(entry.path.lastIndexOf("/") + 1);
-    const to = directory === "" ? name : `${directory}/${name}`;
-    const error = await workspace.renameEntry(entry.path, to);
-    if (error !== null) workspace.report(error);
-    else
-      await reflectChange(
-        { action: "relocate", from: entry.path, entry: { ...entry, path: to } },
-        true,
-      );
+    rememberBatchFallback(entries);
+    await batchDialog.drop(entries, directory);
   }
 </script>
+
+{#snippet entryIcon(row: FileTreeRow)}
+  <span class="chevron" class:expanded={searching || expanded.has(row.node.path)}
+    >{#if row.node.kind === "directory"}<svg viewBox="0 0 16 16" aria-hidden="true"
+        ><path d="m6 4 4 4-4 4" /></svg
+      >{/if}</span
+  >
+  <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true"
+    >{#if row.node.kind === "directory"}<path
+        d="M2.5 5a1 1 0 0 1 1-1h4l2 2h7a1 1 0 0 1 1 1v9h-15z"
+      />{:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4" />{/if}</svg
+  >
+{/snippet}
 
 <Sidebar {width} {onWidth} {hidden}>
   <nav class="list" aria-label="文件列表">
@@ -370,7 +534,8 @@
         class:drop-target={dropTarget === ""}
         title="笔记库根目录；可将条目拖到这里"
         onclick={() => {
-          selected = null;
+          showPane("files");
+          selectOnly(null);
         }}
         ondragover={(event) => allowDrop(event, "")}
         ondrop={(event) => void drop(event, "")}>笔记</button
@@ -383,8 +548,7 @@
           title="浏览标签"
           disabled={busy || workspace.vaultRoot === null}
           onclick={() => {
-            paneMode = paneMode === "tags" ? "files" : "tags";
-            treeViewport?.resetScroll();
+            showPane(paneMode === "tags" && !search.active ? "files" : "tags");
           }}
           ><svg viewBox="0 0 20 20" aria-hidden="true"
             ><path d="M8 3 6.5 17M14 3l-1.5 14M4 7.5h12M3.5 12.5h12" /></svg
@@ -397,8 +561,7 @@
           title="书签"
           disabled={busy || workspace.vaultRoot === null}
           onclick={() => {
-            paneMode = paneMode === "bookmarks" ? "files" : "bookmarks";
-            treeViewport?.resetScroll();
+            showPane(paneMode === "bookmarks" && !search.active ? "files" : "bookmarks");
           }}
           ><svg viewBox="0 0 20 20" aria-hidden="true"
             ><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
@@ -445,7 +608,10 @@
         disabled={busy}
         bind:this={searchInput}
         bind:value={query}
-        oninput={() => treeViewport?.resetScroll()}
+        oninput={(event) => {
+          showPane("files", event.currentTarget.value);
+          filteredScroll = null;
+        }}
         onkeydown={searchKeydown}
       />
       {#if search.active && searchBookmark.query !== ""}
@@ -481,7 +647,7 @@
         bind:this={searchResults}
         {search}
         activePath={active}
-        onActivate={(hit) => void openHit(hit)}
+        onActivate={(hit, match) => void openHit(hit, match)}
         onExit={escapeSearch}
       />
     {:else if paneMode === "tags"}
@@ -494,6 +660,19 @@
         onActivate={(bookmark) => void openBookmark(bookmark)}
       />
     {:else}
+      {#if selected.size > 1}
+        <div class="selection-tools" role="toolbar" aria-label="批量文件操作">
+          <span>已选 {selected.size} 项</span>
+          <button type="button" disabled={busy} onclick={() => beginBatch("move")}>移动到…</button>
+          <button type="button" disabled={busy} onclick={() => beginBatch("trash")}>废纸篓</button>
+          <button
+            type="button"
+            aria-label="取消多选"
+            title="取消多选（Escape）"
+            onclick={() => selectOnly(focusable)}>×</button
+          >
+        </div>
+      {/if}
       {#if recoveries.length > 0}
         <section class="recovery" aria-label="待恢复的笔记" bind:this={recoveryElement}>
           <h2>待恢复的笔记</h2>
@@ -520,75 +699,119 @@
         {rows}
         {focusable}
         dragging={dragging?.path ?? null}
+        position={searching ? filteredScroll : browser.state.scroll}
+        onPosition={(position) => {
+          if (searching) filteredScroll = position;
+          else browser.update({ scroll: position });
+        }}
+        onEmptyFocus={() => searchInput.focus()}
       >
         {#snippet children(row)}
-          <button
-            type="button"
-            role="treeitem"
-            class="file"
-            class:folder={row.node.kind === "directory"}
-            class:active={row.node.kind === "file" && row.node.path === active}
-            class:dragging={dragging?.path === row.node.path}
-            class:drop-target={dropTarget === row.node.path}
-            data-path={row.node.path}
-            style:--depth={row.depth}
-            tabindex={focusable === row.node.path ? 0 : -1}
-            aria-level={row.depth + 1}
-            aria-posinset={row.position}
-            aria-setsize={row.siblings}
-            aria-selected={selected === row.node.path}
-            aria-current={row.node.kind === "file" && row.node.path === active ? "page" : undefined}
-            aria-expanded={row.node.kind === "directory"
-              ? searching || expanded.has(row.node.path)
-              : undefined}
-            title={row.node.path}
-            disabled={busy}
-            draggable={!busy}
-            onfocus={() => {
-              focused = row.node.path;
-              selected = row.node.path;
-            }}
-            onclick={() => void activate(row.node)}
-            onkeydown={(event) => keydown(event, row)}
-            oncontextmenu={(event) => context(event, row.node)}
-            ondragstart={(event) => {
-              dragging = { path: row.node.path, kind: row.node.kind };
-              event.dataTransfer?.setData("text/plain", row.node.path);
-              if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-            }}
-            ondragend={() => {
-              dragging = null;
-              dropTarget = null;
-            }}
-            ondragover={(event) => {
-              if (row.node.kind === "directory") allowDrop(event, row.node.path);
-            }}
-            ondragleave={() => {
-              dropTarget = null;
-            }}
-            ondrop={(event) => {
-              if (row.node.kind === "directory") void drop(event, row.node.path);
-            }}
-          >
-            <span class="chevron" class:expanded={searching || expanded.has(row.node.path)}
-              >{#if row.node.kind === "directory"}<svg viewBox="0 0 16 16" aria-hidden="true"
-                  ><path d="m6 4 4 4-4 4" /></svg
-                >{/if}</span
+          {#if renaming?.path === row.node.path}
+            {@const entry = renaming}
+            <div
+              role="treeitem"
+              class="file"
+              class:folder={row.node.kind === "directory"}
+              data-path={row.node.path}
+              style:--depth={row.depth}
+              aria-label={row.node.name}
+              aria-level={row.depth + 1}
+              aria-posinset={row.position}
+              aria-setsize={row.siblings}
+              aria-selected="true"
+              aria-expanded={row.node.kind === "directory"
+                ? searching || expanded.has(row.node.path)
+                : undefined}
             >
-            <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true"
-              >{#if row.node.kind === "directory"}<path
-                  d="M2.5 5a1 1 0 0 1 1-1h4l2 2h7a1 1 0 0 1 1 1v9h-15z"
-                />{:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4" />{/if}</svg
+              {@render entryIcon(row)}
+              <InlineRename
+                {entry}
+                entries={workspace.entries}
+                errorId={renameErrorId}
+                onRename={(from, to) => workspace.renameEntry(from, to)}
+                onIssue={(issue) => {
+                  renameIssue = issue;
+                }}
+                onFinish={(destination, focus) => void finishRename(entry, destination, focus)}
+              />
+            </div>
+          {:else}
+            <button
+              type="button"
+              role="treeitem"
+              class="file"
+              class:folder={row.node.kind === "directory"}
+              class:active={row.node.kind === "file" && row.node.path === active}
+              class:dragging={dragging?.path === row.node.path}
+              class:drop-target={dropTarget === row.node.path}
+              data-path={row.node.path}
+              style:--depth={row.depth}
+              tabindex={focusable === row.node.path ? 0 : -1}
+              aria-level={row.depth + 1}
+              aria-posinset={row.position}
+              aria-setsize={row.siblings}
+              aria-selected={selected.has(row.node.path)}
+              aria-keyshortcuts="F2 Delete Meta+Backspace"
+              aria-current={row.node.kind === "file" && row.node.path === active
+                ? "page"
+                : undefined}
+              aria-expanded={row.node.kind === "directory"
+                ? searching || expanded.has(row.node.path)
+                : undefined}
+              title={row.node.path}
+              disabled={busy}
+              draggable={!busy}
+              onfocus={() => {
+                browser.update({ focused: row.node.path });
+              }}
+              onclick={(event) => {
+                if (event.shiftKey)
+                  selectRow(row.node.path, event.metaKey || event.ctrlKey ? "extend" : "range");
+                else if (event.metaKey || event.ctrlKey) selectRow(row.node.path, "toggle");
+                else void activate(row.node);
+              }}
+              onkeydown={(event) => keydown(event, row)}
+              oncontextmenu={(event) => context(event, row.node)}
+              ondragstart={(event) => {
+                if (!selected.has(row.node.path)) selectOnly(row.node.path);
+                draggedEntries = selectedEntries;
+                dragging = { path: row.node.path, kind: row.node.kind };
+                event.dataTransfer?.setData(
+                  "text/plain",
+                  draggedEntries.map((entry) => entry.path).join("\n"),
+                );
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+              }}
+              ondragend={() => {
+                dragging = null;
+                draggedEntries = [];
+                dropTarget = null;
+              }}
+              ondragover={(event) => {
+                if (row.node.kind === "directory") allowDrop(event, row.node.path);
+              }}
+              ondragleave={() => {
+                dropTarget = null;
+              }}
+              ondrop={(event) => {
+                if (row.node.kind === "directory") void drop(event, row.node.path);
+              }}
             >
-            <span class="name">{row.node.name}</span>
-            {#if row.node.kind === "file" && row.node.path === active}<span
-                class="current-dot"
-                aria-hidden="true"
-                title="正在阅读"
-              ></span>{/if}
-          </button>
+              {@render entryIcon(row)}
+              <span class="name">{row.node.name}</span>
+              {#if row.node.kind === "file" && row.node.path === active}<span
+                  class="current-dot"
+                  aria-hidden="true"
+                  title="正在阅读"
+                ></span>{/if}
+            </button>
+          {/if}
         {/snippet}
       </FileTreeViewport>
+      {#if renameIssue}<p class="rename-error" id={renameErrorId} role="alert">
+          {renameIssue}
+        </p>{/if}
       {#if rows.length === 0 && recoveries.length === 0}
         <div class="empty">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v13H4z" /></svg>
@@ -618,7 +841,14 @@
 <FileMenu
   bind:this={menu}
   onAction={action}
+  selectionCount={selected.size}
   bookmarked={(entry) => workspace.bookmarks.has(entryBookmark(entry))}
+/>
+<FileBatchDialog
+  bind:this={batchDialog}
+  {workspace}
+  onComplete={reflectBatch}
+  onClose={() => void finishBatch()}
 />
 
 <style>
@@ -634,6 +864,21 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.7rem 0.8rem 0.35rem;
+  }
+  .selection-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0 0.6rem 0.4rem;
+    font-size: 0.75rem;
+  }
+  .selection-tools span {
+    flex: 1;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  .selection-tools button {
+    padding: 0.3rem;
   }
   .root-label {
     color: var(--muted);
@@ -762,6 +1007,13 @@
     padding: 0.3rem 0.5rem 0.3rem calc(0.25rem + var(--depth) * 1rem);
     font-size: 0.85rem;
     margin-bottom: 0.1rem;
+    border-radius: 0.4rem;
+  }
+  .rename-error {
+    margin: 0.4rem 0.8rem 0.65rem;
+    color: var(--danger);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
   }
   .chevron {
     flex: 0 0 0.75rem;

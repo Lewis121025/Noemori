@@ -1,4 +1,4 @@
-//! 全文搜索端到端：trigram MATCH、短词 LIKE 回落、谓词组合与摘要。
+//! 全文搜索端到端：长词位置索引、短词倒排、谓词组合与摘要。
 
 use nous_core::{SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
 use std::fs;
@@ -78,26 +78,26 @@ fn title_match_ranks_above_body_match() {
 }
 
 #[test]
-fn cjk_terms_match_via_trigram_and_like_fallback() {
+fn cjk_terms_match_via_long_and_short_indexes() {
     let (_root, _index, vault) = vault_with(&[
         ("cn.md", "# 笔记\n\n这是一段全文检索的测试正文。\n"),
         ("en.md", "unrelated english body\n"),
     ]);
-    // 4 字走 trigram MATCH。
+    // 4 字由连续的三字片段检索。
     assert_eq!(search(&vault, &terms(&["全文检索"])), ["cn.md"]);
-    // 2 字走 LIKE 回落，结果一致。
+    // 2 字走短词索引，结果一致。
     let hits = vault.search(&terms(&["检索"])).expect("检索");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "cn.md");
     assert!(hits[0]
         .snippet
         .contains(&format!("{SNIPPET_START}检索{SNIPPET_END}")));
-    // 1 字同样可查（LIKE 回落的下限）。
+    // 1 字同样可查（单字索引）。
     assert_eq!(search(&vault, &terms(&["笔"])), ["cn.md"]);
 }
 
 #[test]
-fn short_ascii_term_falls_back_to_like() {
+fn short_ascii_terms_use_the_same_case_rules() {
     let (_root, _index, vault) = vault_with(&[("fox.md", "The quick brown FOX.\n")]);
     // 子串 + 大小写不敏感。
     assert_eq!(search(&vault, &terms(&["ox"])), ["fox.md"]);
@@ -222,4 +222,114 @@ fn limit_caps_result_count() {
         })
         .expect("检索");
     assert_eq!(hits.len(), 2);
+}
+
+#[test]
+fn unicode_terms_and_attributes_share_the_same_matching_rules() {
+    let (_root, _index, vault) = vault_with(&[(
+        "unicode.md",
+        "---\nÉTAT: ÉBAUCHE\n---\n\n# Unicode\n\nÉ İx\n",
+    )]);
+    assert_eq!(search(&vault, &terms(&["é"])), ["unicode.md"]);
+    assert_eq!(search(&vault, &terms(&["i\u{307}x"])), ["unicode.md"]);
+    assert_eq!(
+        search(
+            &vault,
+            &query(SearchExpr::Attr {
+                key: "état".into(),
+                value: Some("ébauche".into()),
+            })
+        ),
+        ["unicode.md"],
+    );
+}
+
+#[test]
+fn path_case_mismatches_do_not_consume_the_result_limit() {
+    let (_root, _index, vault) =
+        vault_with(&[("A/Notes.md", "shared body"), ("B/notes.md", "shared body")]);
+    assert_eq!(
+        search(
+            &vault,
+            &SearchQuery {
+                expr: SearchExpr::Path("notes".into()),
+                limit: 1,
+            }
+        ),
+        ["B/notes.md"],
+    );
+}
+
+#[test]
+fn each_occurrence_keeps_its_source_range_and_file_version() {
+    let source = "\u{feff}# 笔记\r\n\r\n预算**审批**\r\n\r\n预算审批\r\n";
+    let (_root, _index, vault) = vault_with(&[("ranges.md", source)]);
+    let hits = vault.search(&terms(&["预算审批"])).unwrap();
+    assert_eq!(hits[0].matches.len(), 2);
+    assert_eq!(hits[0].content_hash.len(), 64);
+    let locations = hits[0]
+        .matches
+        .iter()
+        .map(|hit| hit.location.as_ref().expect("准确源码范围"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        &source[usize::try_from(locations[0].start_byte).unwrap()
+            ..usize::try_from(locations[0].end_byte).unwrap()],
+        "预算**审批"
+    );
+    assert_eq!(
+        &source[usize::try_from(locations[1].start_byte).unwrap()
+            ..usize::try_from(locations[1].end_byte).unwrap()],
+        "预算审批"
+    );
+    assert_eq!((locations[0].line, locations[1].line), (3, 5));
+}
+
+#[test]
+fn entities_escaped_text_and_code_keep_exact_source_ranges() {
+    for (source, needle, expected) in [
+        ("before &amp; after", "&", "&amp;"),
+        ("&amp;", "&", "&amp;"),
+        ("a \\* b", "*", "\\*"),
+        ("```token\ntoken\n```", "token", "token"),
+        ("`first\r\nsecond`", "first second", "first\r\nsecond"),
+        ("> ```txt\n> first\n> second\n> ```", "second", "second"),
+    ] {
+        let (_root, _index, vault) = vault_with(&[("ranges.md", source)]);
+        let hits = vault.search(&terms(&[needle])).unwrap();
+        assert!(!hits.is_empty(), "{source:?} / {needle}");
+        let location = hits[0].matches[0].location.as_ref().expect(source);
+        assert_eq!(
+            &source[usize::try_from(location.start_byte).unwrap()
+                ..usize::try_from(location.end_byte).unwrap()],
+            expected,
+            "{source}"
+        );
+        if source.starts_with("```token") {
+            assert_eq!(location.line, 2);
+        }
+    }
+}
+
+#[test]
+fn mixed_short_long_and_scoped_terms_keep_exact_semantics() {
+    let (_root, _index, vault) = vault_with(&[
+        ("both.md", "量子 quantum research\n"),
+        ("split.md", "量子\n\nquantum research\n"),
+        ("other.md", "quantum only\n"),
+    ]);
+    assert_eq!(
+        search(&vault, &terms(&["量子", "quantum"])),
+        ["both.md", "split.md"]
+    );
+    assert_eq!(
+        search(
+            &vault,
+            &query(SearchExpr::Line(Box::new(SearchExpr::And(vec![
+                term("量子"),
+                term("quantum")
+            ]))))
+        ),
+        ["both.md"]
+    );
 }

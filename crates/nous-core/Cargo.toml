@@ -66,6 +66,10 @@ name = "links_integration_rename_recovery"
 path = "../../tests/links/integration/rename_recovery.rs"
 
 [[test]]
+name = "links_integration_rename_batch"
+path = "../../tests/links/integration/rename_batch.rs"
+
+[[test]]
 name = "search_unit_tags"
 path = "../../tests/search/unit/tags.rs"
 
@@ -103,12 +107,35 @@ path = "../../tests/vault/unit/bookmarks.rs"
 [dependencies]
 markdown = "1.0.0"
 notify = "8.2.0"
-notify-debouncer-full = "0.7.0"
 percent-encoding = "2.3.2"
 regex = "1.13.1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "functions", "hooks"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
+tantivy = { version = "0.26.2", default-features = false, features = ["mmap"] }
 tempfile = "3.23.0"
 yaml-rust2 = "0.13"
+
+[[test]]
+name = "search_performance_scale"
+path = "../../tests/search/performance/scale.rs"
+
+[[test]]
+name = "search_performance_occurrences"
+path = "../../tests/search/performance/occurrences.rs"
+
+[[test]]
+name = "search_integration_engine"
+path = "../../tests/search/integration/engine.rs"
+
+[[test]]
+name = "search_integration_paging"
+path = "../../tests/search/integration/paging.rs"
+
+[[test]]
+name = "vault_performance_files"
+path = "../../tests/vault/performance/files.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }

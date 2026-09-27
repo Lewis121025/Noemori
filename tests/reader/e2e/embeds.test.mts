@@ -14,7 +14,10 @@ test("嵌入：列表内展开、循环检测与深度上限", async (t) => {
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
-  await Promise.all([mkdir(vault, { recursive: true }), mkdir(userData, { recursive: true })]);
+  await Promise.all([
+    mkdir(join(vault, "notes"), { recursive: true }),
+    mkdir(userData, { recursive: true }),
+  ]);
   const files: Record<string, string> = {
     // 甲 → 乙 → 丙 → 甲：三层内出现环。
     "甲.md": "# 甲\n\n![[乙]]\n",
@@ -22,7 +25,9 @@ test("嵌入：列表内展开、循环检测与深度上限", async (t) => {
     "丙.md": "# 丙\n\n丙正文标记\n\n![[甲]]\n",
     // 列表项整体是嵌入。
     "戊.md": "# 戊\n\n- ![[己]]\n",
-    "己.md": "己列表内容标记\n",
+    "notes/己.md":
+      "己列表内容标记 $E=mc^2$ %%隐藏注释%%\n\n[下一篇](./下篇.md)\n\n> [!note]- 提示\n> 嵌入标注正文\n\n```mermaid\ngraph TD\n  A-->B\n```\n\n<div><strong>HTML 渲染内容</strong></div>\n\n- [ ] 任务\n",
+    "notes/下篇.md": "# 下一篇\n\n来自嵌入所在目录。\n",
   };
   // 丁1 → 丁2 → 丁3 → 丁4 → 丁5：深度上限（3 层）截断丁5。
   for (let index = 1; index <= 5; index += 1) {
@@ -67,7 +72,7 @@ test("嵌入：列表内展开、循环检测与深度上限", async (t) => {
       await page.waitForFunction(
         (expected) =>
           document.querySelector(".document-name")?.textContent === expected &&
-          !document.querySelector(".panes")?.hasAttribute("inert"),
+          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
     };
@@ -88,6 +93,22 @@ test("嵌入：列表内展开、循环检测与深度上限", async (t) => {
     // 列表项内独立成段的嵌入同样展开。
     await openViaTree("戊.md");
     await expect.poll(editorText).toContain("己列表内容标记");
+    const embedded = page.locator(".ProseMirror .ProseMirror");
+    await embedded.locator("mjx-container").waitFor();
+    await embedded.locator(".mermaid-preview svg").waitFor({ timeout: 15000 });
+    expect(await embedded.locator(".mermaid-source").isVisible()).toBe(false);
+    expect(await embedded.locator(".comment-inline").isVisible()).toBe(false);
+    expect(await embedded.locator(".task-checkbox").isDisabled()).toBe(true);
+    expect(await embedded.locator(".callout-title").getAttribute("readonly")).not.toBeNull();
+    expect(await embedded.locator(".html-block strong").textContent()).toBe("HTML 渲染内容");
+    await embedded.getByRole("button", { name: "展开标注" }).click();
+    expect(await embedded.locator(".callout-content").isVisible()).toBe(true);
+    await embedded.getByRole("link", { name: "下一篇" }).hover();
+    const preview = page.locator(".hover-preview");
+    await preview.waitFor();
+    await expect.poll(() => preview.textContent()).toContain("来自嵌入所在目录");
+    await preview.getByRole("button", { name: "./下篇.md" }).click();
+    await documentReady("下篇.md");
 
     // 深度上限：第 3 层（丁4）仍展开，第 4 层（丁5）截断并说明。
     await openViaTree("丁1.md");

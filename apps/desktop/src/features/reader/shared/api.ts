@@ -6,6 +6,8 @@
 
 import type { ImportedAttachment } from "./attachments";
 import type { SessionDocuments, ViewModes } from "./session";
+import type { FileTreeState } from "./file-browser";
+import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./entry-batch";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
 export type HistoryAction = "undo" | "redo";
@@ -128,11 +130,24 @@ export type SearchExpr =
   | { kind: "term" | "regex" | "tag" | "path" | "file"; value: string }
   | { kind: "attr"; key: string; value: string | null };
 
-/** 一次检索：表达式与结果上限。 */
+/** 一次检索：表达式与每页文件数。 */
 export type SearchQuery = {
   expr: SearchExpr;
-  /** 结果上限；非正数由内核取默认值。 */
+  /** 每页文件数；非正数由内核取默认值，续页沿用相同页长。 */
   limit: number;
+};
+
+/** 一页准确命中；不提供未经完整统计的总数，续页必须使用原查询。 */
+export type SearchPage = {
+  hits: SearchHit[];
+  /** 绑定查询和资料库版本；null 表示已结束，资料库改变后旧游标会拒绝。 */
+  nextCursor: string | null;
+};
+
+/** 单篇正文命中的下一批位置；每页最多二十处，与原结果属于同一索引版本。 */
+export type SearchMatchesPage = {
+  matches: SearchMatch[];
+  nextCursor: string | null;
 };
 
 /** 一条搜索命中。 */
@@ -143,6 +158,31 @@ export type SearchHit = {
   title: string;
   /** 正文摘要；命中词以 U+0001/U+0002 控制字符包围，可能为空串。 */
   snippet: string;
+  /** 与命中范围同版本的磁盘文件 SHA-256。 */
+  contentHash: string;
+  /** 已加载的具体正文命中；内核首批最多五处，纯谓词或仅标题命中为空。 */
+  matches: SearchMatch[];
+  /** 去重后的精确正文命中总数，不随展开改变。 */
+  matchCount: number;
+  /** 后续具体命中的不透明游标；null 表示已经全部加载。 */
+  matchesCursor: string | null;
+};
+
+/** 一处命中；无法证明源码对应关系时明确缺少位置。 */
+export type SearchMatch = {
+  location: SearchLocation | null;
+  /** 该处命中的高亮上下文。 */
+  snippet: string;
+};
+
+/** 源文件同一内容版本的 UTF-8 范围；界面不能直接当作 UTF-16 下标。 */
+export type SearchLocation = {
+  /** 起点（含）。 */
+  startByte: number;
+  /** 终点（不含）。 */
+  endByte: number;
+  /** 源文件行号，从 1 开始。 */
+  line: number;
 };
 
 /** 全库标签计数的一行。 */
@@ -224,6 +264,8 @@ export type VaultRestore = {
   viewModes: ViewModes;
   /** 上次会话的最近打开列表，最新在前；渲染端按当前文件列表过滤失效条目。 */
   recentFiles: string[];
+  /** 同一笔记库的目录工作现场；旧会话为 null。 */
+  fileTree: FileTreeState | null;
 };
 
 /** 打开文件时同时取回尚未提交的编辑，删除后的文件也能恢复。 */
@@ -274,6 +316,8 @@ export type ReaderApi = {
   sessionSetViewModes: (modes: ViewModes) => Promise<void>;
   /** 持久化最近打开列表（最新在前）；损坏条目由会话解析丢弃。 */
   sessionSetRecentFiles: (paths: string[]) => Promise<void>;
+  /** 写入目录现场并核对笔记库归属；切库后的过期请求拒绝。 */
+  sessionSetFileTree: (root: string, state: FileTreeState) => Promise<void>;
   /** 读取文件栏布局（宽度、收起）。 */
   sessionGetPanes: () => Promise<PaneLayout>;
   /** 记住文件栏布局；不能经此改库路径或当前文件。 */
@@ -299,6 +343,13 @@ export type ReaderApi = {
   ) => Promise<ImportedAttachment>;
   /** 移入系统废纸篓；有未处理草稿时拒绝，绝不永久删除。 */
   entryTrash: (path: string) => Promise<RenameOutcome>;
+  /** 一次保存门禁对应一批请求；部分成功以结构化结果返回，剩余项可重试。 */
+  entryBatch: (
+    request: EntryBatchRequest,
+    onProgress?: (progress: EntryBatchProgress) => void,
+  ) => Promise<EntryBatchResult>;
+  /** 请求停止当前库的活动批次；当前条目提交后返回剩余项，不中断写盘。 */
+  entryBatchStop: (root: string) => Promise<void>;
   /** 在系统文件管理器中定位已校验的库内条目。 */
   entryReveal: (path: string) => Promise<void>;
   /** 读取原始字节。 */
@@ -343,7 +394,11 @@ export type ReaderApi = {
   /** 出链。 */
   indexLinksFrom: (path: string) => Promise<LinkRecord[]>;
   /** 结构化全文搜索：正文词、标签、属性与路径谓词组合。 */
-  searchQuery: (query: SearchQuery) => Promise<SearchHit[]>;
+  searchQuery: (query: SearchQuery, id: string, cursor: string | null) => Promise<SearchPage>;
+  /** 在同一搜索会话内加载更多具体命中；版本变化或已取消时拒绝。 */
+  searchMatches: (query: SearchQuery, id: string, cursor: string) => Promise<SearchMatchesPage>;
+  /** 取消指定查询；迟到的取消不影响后发查询，已完成或关闭时幂等。 */
+  searchCancel: (id: string) => Promise<void>;
   /** 一篇文件的全部标题，按文档顺序；供锚点解析与标题补全。 */
   indexHeadings: (path: string) => Promise<HeadingRecord[]>;
   /** 全库标签及计数，标签升序；供标签浏览面板。 */

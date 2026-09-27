@@ -26,6 +26,10 @@ pub enum Error {
     RenameRecovery { detail: String },
     /// 检索条件无法执行（如正则表达式无效）。
     InvalidQuery { detail: String },
+    /// 搜索已被新查询、清空或切库取消；不应展示为索引故障。
+    SearchCancelled,
+    /// 续页对应的正文版本已改变，必须重新搜索，不能混合两个版本。
+    SearchExpired,
     /// 书签文件损坏或书签内容不合法。
     InvalidBookmarks { detail: String },
 }
@@ -42,6 +46,8 @@ impl std::fmt::Display for Error {
             Self::FileChanged { path } => write!(f, "文件已被外部修改: {}", path.display()),
             Self::RenameRecovery { detail } => write!(f, "改名恢复未完成：{detail}"),
             Self::InvalidQuery { detail } => write!(f, "{detail}"),
+            Self::SearchCancelled => write!(f, "搜索已取消"),
+            Self::SearchExpired => write!(f, "笔记库已更新，请重新搜索"),
             Self::InvalidBookmarks { detail } => write!(f, "书签无效：{detail}"),
         }
     }
@@ -58,6 +64,8 @@ impl std::error::Error for Error {
             | Self::FileChanged { .. }
             | Self::RenameRecovery { .. }
             | Self::InvalidQuery { .. }
+            | Self::SearchCancelled
+            | Self::SearchExpired
             | Self::InvalidBookmarks { .. } => None,
         }
     }

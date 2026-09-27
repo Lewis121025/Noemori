@@ -20,6 +20,7 @@ export const taskItemView: NodeViewConstructor = (node, view, getPos) => {
   const update = (next: typeof node): boolean => {
     if (next.type !== node.type) return false;
     const checked = next.attrs["checked"];
+    button.disabled = !view.editable;
     button.hidden = typeof checked !== "boolean";
     if (typeof checked === "boolean") {
       dom.dataset["checked"] = String(checked);
@@ -30,6 +31,7 @@ export const taskItemView: NodeViewConstructor = (node, view, getPos) => {
   };
   button.onmousedown = (event) => event.preventDefault();
   button.onclick = () => {
+    if (!view.editable) return;
     const pos = getPos();
     if (pos === undefined) return;
     const current = view.state.doc.nodeAt(pos);

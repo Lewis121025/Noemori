@@ -73,7 +73,8 @@ it("所有阅读器响应在进入调用方前校验，错误元数据不能冒�
     { read: () => api.indexLinksTo("note.md"), invalid: [{}] },
     { read: () => api.indexLinksFrom("note.md"), invalid: [{}] },
     { read: () => api.indexMentionsTo("note.md"), invalid: { linked: [] } },
-    { read: () => api.searchQuery(emptyQuery()), invalid: [{ path: "../逃逸.md" }] },
+    { read: () => api.searchQuery(emptyQuery(), "search-id", null), invalid: [{ path: "../逃逸.md" }] },
+    { read: () => api.searchMatches(emptyQuery(), "search-id", "cursor"), invalid: { matches: [], nextCursor: "more" } },
     { read: () => api.indexHeadings("note.md"), invalid: [{ path: "note.md", level: 9 }] },
     {
       read: () => api.indexNoteKeys(),
@@ -130,4 +131,47 @@ it("损坏通知作为可恢复索引状态传播，后续有效通知仍可到�
   expect(callback).toHaveBeenLastCalledWith(valid);
   stop();
   expect(ipcRenderer.removeListener).toHaveBeenCalledWith("reader.vault.changed", listener);
+});
+
+it("批次订阅隔离旧进度，停止核对库归属，损坏进度不丢失有效提交结果", async () => {
+  const api = createReaderApi();
+  const progress = vi.fn();
+  const request = { root: "/notes", action: "trash" as const, paths: ["a.md", "b.md"] };
+  const outcome = {
+    completed: [{ from: "a.md", to: null }],
+    remaining: ["b.md"],
+    skipped: [],
+    issues: [],
+    warning: null,
+  };
+  let finish = () => {};
+  vi.mocked(ipcRenderer.invoke).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(outcome);
+      }),
+  );
+  const pending = api.entryBatch(request, progress);
+  const id: unknown = vi.mocked(ipcRenderer.invoke).mock.calls.at(-1)?.[2];
+  const listener: unknown = vi.mocked(ipcRenderer.on).mock.calls.at(-1)?.[1];
+  if (typeof id !== "string" || typeof listener !== "function") throw new Error("缺少批次监听");
+  await expect(api.entryBatch(request)).rejects.toThrow("等待");
+  listener(undefined, "old-batch", { phase: "running", completed: 2, total: 2 });
+  expect(progress).not.toHaveBeenCalled();
+  listener(undefined, id, { phase: "running", completed: 5, total: 2 });
+  expect(progress).not.toHaveBeenCalled();
+  listener(undefined, id, { phase: "running", completed: 1, total: 2 });
+  expect(progress).toHaveBeenCalledExactlyOnceWith({ phase: "running", completed: 1, total: 2 });
+  await api.entryBatchStop("/other");
+  expect(ipcRenderer.invoke).toHaveBeenCalledTimes(1);
+  vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(undefined);
+  await api.entryBatchStop("/notes");
+  expect(ipcRenderer.invoke).toHaveBeenLastCalledWith("reader.entry.batch.stop", "/notes", id);
+  finish();
+  const result = await pending;
+  expect(result.completed).toEqual(outcome.completed);
+  expect(result.warning).toContain("进度通知异常");
+  expect(ipcRenderer.removeListener).toHaveBeenCalledWith("reader.entry.batch.progress", listener);
+  await api.entryBatchStop("/notes");
+  expect(ipcRenderer.invoke).toHaveBeenCalledTimes(2);
 });

@@ -27,6 +27,8 @@
   import { utf8ByteToCodeIndex } from "../../engine/document/source-offset";
   import { applyCodeChanges } from "../../engine/document/code-source";
   import { nativeInputOwnsHistory } from "../../engine/editing/history";
+  import { bindCodeSearchInput } from "../../engine/editing/code-search";
+  import { codePosition } from "../../engine/editing/editor-position";
   import {
     captureCodeReload,
     prepareCodeReload,
@@ -34,6 +36,8 @@
   } from "../../engine/editing/code-reload";
 
   type Props = {
+    /** 文档加载代次；文本相同的重载只重新登记表面归属。 */
+    epoch?: number;
     /** 打开时的文本。 */
     source: string;
     /** 用于选择高亮语言的库内路径。 */
@@ -48,9 +52,10 @@
     completions?: Extension;
   };
 
-  let { source, path, onDirty, onSave, register, completions }: Props = $props();
+  let { source, path, onDirty, onSave, register, completions, epoch = 0 }: Props = $props();
   let host: HTMLDivElement | undefined = $state();
   let editorState = $state.raw<EditorState | null>(null);
+  let publicApi = $state.raw<CodeEditorApi | null>(null);
   let previous: CodeReloadContext | null = null;
 
   $effect(() => {
@@ -60,11 +65,10 @@
     }
     const currentPath = path;
     const currentSource = source;
-    // 先记下 path/source。挂载里调用的 register/onDirty 可能读外壳状态，不能进依赖。
+    // 先记下 path/source。挂载里调用的 onDirty 可能读外壳状态，不能进依赖。
     return untrack(() => {
       const save = onSave;
       const dirty = onDirty;
-      const bindApi = register;
       let cancelled = false;
       let revision = 0;
       let rawSource = currentSource;
@@ -141,9 +145,12 @@
           ],
         }),
       });
+      const stopSearchInput = bindCodeSearchInput(view);
       reload?.restore(view);
       editorState = view.state;
-      bindApi({
+      const snapshot = () => ({ bytes: new TextEncoder().encode(rawSource), revision });
+      publicApi = {
+        ...codePosition(view, snapshot),
         history: (action) => {
           if (nativeInputOwnsHistory(view.contentDOM)) return false;
           if (!view.composing) (action === "undo" ? undo : redo)(view);
@@ -161,7 +168,18 @@
         openSearch: () => {
           openSearchPanel(view);
         },
-        snapshot: () => ({ bytes: new TextEncoder().encode(rawSource), revision }),
+        snapshot,
+        jumpToSearch: (location, snapshot) => {
+          if (snapshot.revision !== revision) throw new Error("搜索结果已过期，请重新搜索后定位。");
+          view.dispatch({
+            selection: EditorSelection.range(
+              utf8ByteToCodeIndex(rawSource, location.startByte),
+              utf8ByteToCodeIndex(rawSource, location.endByte),
+            ),
+            scrollIntoView: true,
+          });
+          view.focus();
+        },
         jumpToByte: (byteOffset) => {
           const index = Math.min(view.state.doc.length, utf8ByteToCodeIndex(rawSource, byteOffset));
           view.dispatch({
@@ -170,7 +188,7 @@
           });
           view.focus();
         },
-      });
+      };
       void languageExtensions(currentPath).then((lang) => {
         if (cancelled) {
           return;
@@ -178,12 +196,25 @@
         view.dispatch({ effects: langConf.reconfigure(lang) });
       });
       return () => {
+        stopSearchInput();
         previous = captureCodeReload(view);
         cancelled = true;
-        bindApi(null);
+        publicApi = null;
         editorState = null;
         view.destroy();
       };
+    });
+  });
+
+  // 归属更新与文本会话分开：相同内容的重载不能重建编辑器并清空历史。
+  $effect(() => {
+    const api = publicApi;
+    const bindApi = register;
+    void epoch;
+    if (api === null) return;
+    return untrack(() => {
+      bindApi(api);
+      return () => bindApi(null);
     });
   });
 </script>

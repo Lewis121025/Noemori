@@ -8,9 +8,21 @@ use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFun
 use napi_derive::napi;
 use nous_core::{LinkKind, Vault, WatchHandle, WriteOutcome};
 
+pub mod entry_batch;
+pub mod search;
+
 struct AppState {
     vault: Arc<Vault>,
     _watch: WatchHandle,
+    search: Option<(String, nous_core::SearchCancellation)>,
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        if let Some((_, token)) = &self.search {
+            token.cancel();
+        }
+    }
 }
 
 static STATE: Mutex<Option<AppState>> = Mutex::new(None);
@@ -33,6 +45,7 @@ fn to_napi(err: nous_core::Error) -> Error {
 }
 
 fn lock_state() -> Result<std::sync::MutexGuard<'static, Option<AppState>>> {
+    entry_batch::check_callback_reentry()?;
     STATE
         .lock()
         .map_err(|_| Error::from_reason("内核状态锁已毒化"))
@@ -60,6 +73,7 @@ fn with_vault<T>(
 /// 打不开目录、索引或监视器时失败。
 #[napi]
 pub fn vault_open(root: String, index_dir: String, on_changed: JsFunction) -> Result<()> {
+    search::cancel_current()?;
     let tsfn: ThreadsafeFunction<JsVaultEvent, ErrorStrategy::Fatal> =
         on_changed.create_threadsafe_function(0, |ctx| Ok(vec![ctx.value]))?;
     let vault = Arc::new(Vault::open(&root, &index_dir).map_err(to_napi)?);
@@ -111,6 +125,7 @@ pub fn vault_open(root: String, index_dir: String, on_changed: JsFunction) -> Re
     *state = Some(AppState {
         vault,
         _watch: watch,
+        search: None,
     });
     Ok(())
 }
@@ -222,6 +237,28 @@ pub fn entry_trash(path: String) -> Result<JsRenameOutcome> {
     Ok(JsRenameOutcome {
         warning: result.warning,
     })
+}
+
+/// 批量预检的独立条目，不包含未经确认的覆盖或永久删除选项。
+#[napi(object)]
+pub struct JsEntryMutation {
+    /// 规范的库内源路径。
+    pub from: String,
+    /// 缺席表示废纸篓操作，否则为规范移动目标。
+    pub to: Option<String>,
+}
+
+/// 预检整批操作；不修改用户文件，路径、草稿或目标冲突通过异常返回。
+#[napi]
+pub fn entry_check_batch(changes: Vec<JsEntryMutation>) -> Result<()> {
+    let changes: Vec<_> = changes
+        .into_iter()
+        .map(|change| nous_core::EntryMutation {
+            from: change.from,
+            to: change.to,
+        })
+        .collect();
+    with_vault(|vault| vault.check_entry_batch(&changes))
 }
 
 /// 获取经过库根校验的现有路径，只供主进程调用系统文件管理器。
@@ -562,12 +599,12 @@ pub struct JsSearchExpr {
     pub children: Option<Vec<JsSearchExpr>>,
 }
 
-/// 一次检索：表达式与结果上限。
+/// 一次检索：表达式与每页文件数。
 #[napi(object)]
 pub struct JsSearchQuery {
     /// 检索表达式。
     pub expr: JsSearchExpr,
-    /// 结果上限；非正数按内核默认值处理。
+    /// 每页文件数；非正数按内核默认值处理。
     pub limit: i32,
 }
 
@@ -625,28 +662,34 @@ pub struct JsSearchHit {
     pub title: String,
     /// 正文摘要；命中词以 U+0001/U+0002 控制字符包围，可能为空串。
     pub snippet: String,
+    /// 与命中范围同版本的文件 SHA-256。
+    pub content_hash: String,
+    /// 首批最多五处具体命中，按正文顺序排列。
+    pub matches: Vec<JsSearchMatch>,
+    /// 去重后的精确正文命中总数。
+    pub match_count: i64,
+    /// 单篇后续命中的游标，没有更多时明确为 null。
+    pub matches_cursor: Either<String, Null>,
 }
 
-/// 执行结构化检索。
-///
-/// # Errors
-///
-/// 未打开库、表达式结构无效、正则无效或索引查询失败。
-#[napi]
-pub fn search_query(query: JsSearchQuery) -> Result<Vec<JsSearchHit>> {
-    let query = nous_core::SearchQuery {
-        expr: search_expr(query.expr, 0)?,
-        limit: i64::from(query.limit),
-    };
-    let hits = with_vault(|vault| vault.search(&query))?;
-    Ok(hits
-        .into_iter()
-        .map(|hit| JsSearchHit {
-            path: hit.path,
-            title: hit.title,
-            snippet: hit.snippet,
-        })
-        .collect())
+/// 一处命中的源码位置与上下文。
+#[napi(object)]
+pub struct JsSearchMatch {
+    /// 无法证明源码映射时不返回位置，禁止用同名词猜测。
+    pub location: Either<JsSearchLocation, Null>,
+    /// 本处命中的高亮上下文。
+    pub snippet: String,
+}
+
+/// UTF-8 源码区间；范围仅对结果携带的内容版本有效。
+#[napi(object)]
+pub struct JsSearchLocation {
+    /// 起点（含）。
+    pub start_byte: i64,
+    /// 终点（不含）。
+    pub end_byte: i64,
+    /// 一基行号。
+    pub line: i64,
 }
 
 /// 索引里的一条标题记录。

@@ -26,7 +26,7 @@ export function nativeInputOwnsHistory(content: HTMLElement): boolean {
  */
 export function applyMarkdownHistory(view: EditorView, action: HistoryAction): boolean {
   if (nativeInputOwnsHistory(view.dom)) return false;
-  if (view.isDestroyed || view.composing) return true;
+  if (view.isDestroyed || view.composing || !view.editable) return true;
   const active = document.activeElement;
   const hadFocus = active !== null && view.dom.contains(active);
   (action === "undo" ? undo : redo)(view.state, view.dispatch);

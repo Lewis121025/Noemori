@@ -9,7 +9,7 @@ const step = (path: string, anchor: string | null = null, scrollTop: number | nu
 
 function attached(scrollTop: number): ReaderHistory {
   const history = new ReaderHistory();
-  history.attachScroll({ capture: () => scrollTop, apply: () => {} });
+  history.attachScroll({ capture: () => scrollTop, reset: () => {}, apply: () => {} });
   return history;
 }
 

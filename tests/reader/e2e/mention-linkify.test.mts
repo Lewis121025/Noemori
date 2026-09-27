@@ -55,7 +55,7 @@ test("未链接提及就地转为链接：来源文件按字节改写，引用�
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "目标笔记.md" &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
     // 引用面板的「可能相关的提及」里出现 ref.md 的未链接出现。

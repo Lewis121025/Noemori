@@ -8,6 +8,8 @@
   import type { VaultEntry } from "../../../shared/api";
   import type { ReaderWorkspaceController } from "../../state/workspace.svelte";
   import { createCompositionGuard } from "../../engine/editing/composition";
+  import { moveDestinations } from "../../engine/navigation/move-destinations";
+  import MoveDestinationPicker from "./MoveDestinationPicker.svelte";
   import {
     entryNameError,
     parentDirectory,
@@ -31,17 +33,24 @@
   let parent = $state("");
   let error = $state("");
   let busy = $state(false);
+  let opening = $state(0);
+  let moveParent = $state<string | null>(null);
   const composition = createCompositionGuard();
   const filename = $derived(
     action === "file" && !name.toLowerCase().endsWith(".md") ? `${name}.md` : name,
   );
   const directory = $derived(
-    action === "rename" && entry !== null ? parentDirectory(entry.path) : parent,
+    action === "move"
+      ? (moveParent ?? parent)
+      : action === "rename" && entry !== null
+        ? parentDirectory(entry.path)
+        : parent,
   );
   const destination = $derived(directory === "" ? filename : `${directory}/${filename}`);
   const unchanged = $derived(
     (action === "rename" || action === "move") && destination === entry?.path,
   );
+  const unavailable = $derived(action === "move" && moveParent === null);
   const validation = $derived.by(() => {
     if (action === "trash") return null;
     if (action !== "move") {
@@ -67,15 +76,7 @@
   const confirmLabel = $derived(
     action === "file" || action === "directory" ? "创建" : action === "move" ? "移动" : title,
   );
-  const destinations = $derived(
-    workspace.entries.filter(
-      (item) =>
-        item.kind === "directory" &&
-        (entry === null ||
-          action !== "move" ||
-          (item.path !== entry.path && !item.path.startsWith(`${entry.path}/`))),
-    ),
-  );
+  const destinations = $derived(entry === null ? [] : moveDestinations(workspace.entries, entry));
 
   /** 打开条目操作；目标为库内条目，新建时 parentPath 决定所在文件夹。 */
   export async function open(
@@ -86,6 +87,8 @@
     action = next;
     entry = target;
     parent = parentPath;
+    moveParent = null;
+    opening += 1;
     error = "";
     name =
       next === "file" || next === "directory"
@@ -104,30 +107,42 @@
   }
 
   async function submit(): Promise<void> {
-    if (composition.active || busy || unchanged || validation !== null) return;
+    if (composition.active || busy || unchanged || unavailable || validation !== null) return;
+    // 提交后目录刷新会改变候选有效性；完成事件必须描述实际提交的路径。
+    const requested = { action, entry, destination };
     busy = true;
     error = "";
     try {
       let result: string | null;
-      if (action === "trash")
-        result = entry === null ? "没有选中的条目" : await workspace.trashEntry(entry.path);
+      if (requested.action === "trash")
+        result =
+          requested.entry === null
+            ? "没有选中的条目"
+            : await workspace.trashEntry(requested.entry.path);
       else {
         result =
-          action === "file" || action === "directory"
-            ? await workspace.createEntry(destination, action)
-            : entry === null
+          requested.action === "file" || requested.action === "directory"
+            ? await workspace.createEntry(requested.destination, requested.action)
+            : requested.entry === null
               ? "没有选中的条目"
-              : await workspace.renameEntry(entry.path, destination);
+              : await workspace.renameEntry(requested.entry.path, requested.destination);
       }
       if (result === null) {
         dialog.close();
-        if (action === "file" || action === "directory")
-          onComplete({ action: "create", entry: { path: destination, kind: action } });
-        else if (entry !== null)
+        if (requested.action === "file" || requested.action === "directory")
+          onComplete({
+            action: "create",
+            entry: { path: requested.destination, kind: requested.action },
+          });
+        else if (requested.entry !== null)
           onComplete(
-            action === "trash"
-              ? { action: "trash", entry }
-              : { action: "relocate", from: entry.path, entry: { ...entry, path: destination } },
+            requested.action === "trash"
+              ? { action: "trash", entry: requested.entry }
+              : {
+                  action: "relocate",
+                  from: requested.entry.path,
+                  entry: { ...requested.entry, path: requested.destination },
+                },
           );
       } else error = result;
     } catch (cause) {
@@ -161,21 +176,18 @@
       <p class="hint">可以从系统废纸篓恢复。</p>
     {:else if action === "move"}
       <p class="hint">{entry?.path}</p>
-      <label for="entry-parent">目标文件夹</label>
-      <select
-        id="entry-parent"
-        bind:value={parent}
-        disabled={busy}
-        onchange={() => {
-          error = "";
-        }}
-        aria-describedby={issue ? "entry-error" : undefined}
-      >
-        <option value="">笔记库根目录</option>
-        {#each destinations as directory (directory.path)}<option value={directory.path}
-            >{directory.path}</option
-          >{/each}
-      </select>
+      {#key opening}
+        <MoveDestinationPicker
+          {destinations}
+          initialPath={parent}
+          disabled={busy}
+          onSelect={(path) => {
+            moveParent = path;
+            error = "";
+          }}
+        />
+      {/key}
+      {#if moveParent !== null}<p class="hint">移动后：{destination}</p>{/if}
     {:else}
       <label for="entry-name"
         >{action === "directory" || entry?.kind === "directory" ? "文件夹名称" : "文件名"}</label
@@ -210,7 +222,7 @@
         class="reader-button primary"
         class:destructive={action === "trash"}
         type="submit"
-        disabled={busy || unchanged || validation !== null}
+        disabled={busy || unchanged || unavailable || validation !== null}
         >{busy ? "处理中…" : confirmLabel}</button
       >
     </div>
@@ -251,14 +263,6 @@
   .hint {
     font-size: 0.85rem;
     color: var(--muted);
-  }
-  select {
-    font: inherit;
-    color: inherit;
-    background: var(--bg);
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
   }
   .actions {
     display: flex;

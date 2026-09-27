@@ -50,4 +50,22 @@ describe("替换命令的边界", () => {
       ).toBe(false);
     }
   });
+
+  it("手动选中重叠文字时先定位高亮命中，不替换未计入结果的重叠范围", () => {
+    let state = EditorState.create({
+      doc: parseMarkdown("aaaaa\n"),
+      plugins: [search({ initialQuery: new SearchQuery({ search: "aa", replace: "X" }) })],
+    });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 2, 4)));
+    replaceSearch(false)(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(state.doc.textContent).toBe("aaaaa");
+    expect(state.selection.from).toBe(1);
+    expect(state.selection.to).toBe(3);
+    replaceSearch(true)(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(state.doc.textContent).toBe("XXa");
+  });
 });

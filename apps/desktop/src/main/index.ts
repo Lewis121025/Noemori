@@ -22,6 +22,10 @@ let core: CoreClient | null = null;
 let storedWindow: WindowSession | null = null;
 let quitState: "running" | "stopping" | "stopped" = "running";
 
+// 桌面测试显式启用后台窗口；创建前决定可见性，避免先弹出再隐藏而抢走用户焦点。
+const hiddenTestWindow = process.env["NOUS_TEST_WINDOW"] === "hidden";
+if (hiddenTestWindow && process.platform === "darwin") app.setActivationPolicy("accessory");
+
 /**
  * 把记下的窗口放到当前仍存在的显示器上，避免外接屏拔掉后开到屏外。
  *
@@ -74,6 +78,7 @@ function createWindow(client: CoreClient): void {
     ...(bounds ?? { width: 1100, height: 720 }),
     minWidth: 640,
     minHeight: 480,
+    show: !hiddenTestWindow,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#202022" : "#ffffff",
     autoHideMenuBar: true,
     webPreferences: {
@@ -82,9 +87,12 @@ function createWindow(client: CoreClient): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // 隐藏测试仍需执行动画帧和布局；正常应用保留 Electron 的节流行为。
+      backgroundThrottling: !hiddenTestWindow,
     },
   });
-  if (stored !== null && stored.maximized) {
+  // Electron 的 maximize 会同时显示隐藏窗口；后台测试只恢复普通几何。
+  if (!hiddenTestWindow && stored !== null && stored.maximized) {
     mainWindow.maximize();
   }
 

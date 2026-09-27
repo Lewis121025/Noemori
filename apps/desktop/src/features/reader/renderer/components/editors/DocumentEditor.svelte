@@ -11,30 +11,23 @@
   import { search } from "prosemirror-search";
   import "prosemirror-view/style/prosemirror.css";
   import type { MarkdownEditorApi } from "../../engine/editing/editor-api";
-  import { createHtmlNodeViews } from "../../engine/rendering/html-view";
-  import { createImageNodeViews } from "../../engine/rendering/image-view";
-  import { createPdfNodeViews } from "../../engine/rendering/pdf-view";
-  import { createPlayerNodeViews } from "../../engine/rendering/media-view";
-  import { mathInputPlugins, mathNodeViews } from "../../engine/rendering/math-view";
+  import { mathInputPlugins } from "../../engine/rendering/math-view";
   import {
-    calloutNodeViews,
-    commentNodeViews,
-    createCodeBlockViews,
+    calloutRevealPlugin,
     footnoteNavigation,
     mermaidFocusPlugin,
   } from "../../engine/rendering/dialect-view";
   import { createMarkdownSession } from "../../engine/markdown/source-session";
   import { findHeadingPmPos } from "../../engine/navigation/heading-anchor";
   import { findBlockPmPos } from "../../engine/navigation/block-anchor";
-  import { createNoteEmbedViews } from "../../engine/rendering/note-embed-view";
+  import { createContentNodeViews } from "../../engine/rendering/content-view";
   import { findMentionPmPos } from "../../engine/navigation/mention-jump";
-  import { findSearchMatchPmPos } from "../../engine/search/locate";
-  import { type MediaIo, resolveMediaUrl } from "../../engine/media/media";
+  import { utf8ByteToJsIndex } from "../../engine/document/source-offset";
+  import { type MediaIo } from "../../engine/media/media";
   import { collectOutline, type OutlineItem } from "../../engine/navigation/outline";
   import { writingPlugins } from "../../engine/editing/writing";
-  import { taskItemView } from "../../engine/rendering/task-view";
   import { createSourceEditingPlugin } from "../../engine/editing/source-editing";
-  import { linkInteraction } from "../../engine/editing/link-interaction";
+  import { linkInteraction, type OpenContentLink } from "../../engine/editing/link-interaction";
   import { createLinkSelectionPlugin } from "../../engine/editing/link-editing";
   import {
     captureMarkdownReload,
@@ -42,6 +35,12 @@
     type MarkdownReloadContext,
   } from "../../engine/editing/markdown-reload";
   import { applyMarkdownHistory, nativeInputOwnsHistory } from "../../engine/editing/history";
+  import {
+    documentAccess,
+    setDocumentReadOnly,
+    focusDocument,
+  } from "../../engine/editing/read-only";
+  import { markdownPosition } from "../../engine/editing/editor-position";
   import { suggestRequest, type SuggestRequest } from "../../engine/editing/link-suggest/context";
   import {
     rankBlockCandidates,
@@ -73,6 +72,8 @@
   } from "../../engine/navigation/block-list";
 
   type Props = {
+    /** 文档加载代次；文本相同的重载只重新登记表面归属。 */
+    epoch?: number;
     /** 阅读器注入的资源访问能力，编辑器不依赖宿主应用。 */
     mediaIo: MediaIo;
     /** 已捕获文档身份的附件字节导入能力。 */
@@ -97,7 +98,7 @@
      * @param kind wiki 或 Markdown 链接。
      * @param raw 目标原文（wiki 名为 target，md 为 href）。
      */
-    onOpenLink: (kind: "wiki" | "md", raw: string) => void;
+    onOpenLink: OpenContentLink;
     /** 文档大纲变化时调用；卸载时传空数组。 */
     onOutline: (items: OutlineItem[]) => void;
     /** 注册/注销序列化入口。 */
@@ -110,7 +111,7 @@
     formattingId?: string;
     /** 本栏是否为活动栏。失去活动时关闭格式面板，避免弹层还作用在背后那一栏。 */
     active?: boolean;
-    /** 阅读视图：同一编辑器切为只读，链接单击即打开，任务仍可勾选。 */
+    /** 阅读视图：同一编辑器严格只读，链接单击即打开。 */
     readOnly?: boolean;
     /** 库内链接候选；仅用于交互，不参与文档挂载依赖。 */
     linkTargets?: string[];
@@ -130,6 +131,7 @@
   };
 
   let {
+    epoch = 0,
     mediaIo,
     importAttachment,
     onAttachmentReport,
@@ -154,6 +156,7 @@
   let host: HTMLDivElement | undefined = $state();
   let editor = $state.raw<EditorView | null>(null);
   let editorState = $state.raw<EditorState | null>(null);
+  let publicApi = $state.raw<MarkdownEditorApi | null>(null);
   let showLink = $state(false);
   let showSearch = $state(false);
   let formattingOpen = $state(false);
@@ -403,7 +406,7 @@
     const locked = readOnly;
     const view = editor;
     if (view === null) return;
-    view.setProps({ editable: () => !locked });
+    setDocumentReadOnly(view, locked);
     if (locked) {
       formattingPanel?.dismiss();
       showLink = false;
@@ -426,10 +429,6 @@
       const dirty = onDirty;
       const openLink = onOpenLink;
       const pushOutline = onOutline;
-      const bindApi = register;
-      const loadMd = (raw: string) => resolveMediaUrl(notePath, raw, "md", mediaIo);
-      const loadAny = (raw: string, kind: "md" | "wiki") =>
-        resolveMediaUrl(notePath, raw, kind, mediaIo);
       const session = createMarkdownSession(src, recovered);
       const doc = session.doc;
       const reload = previous === null ? null : prepareMarkdownReload(previous, doc);
@@ -446,11 +445,11 @@
       attachments = attachmentEditing;
       const locked = readOnly;
       const created = new EditorView(el, {
-        editable: () => !locked,
         state: EditorState.create({
           doc,
           ...(reload === null ? {} : { selection: reload.selection }),
           plugins: [
+            documentAccess(locked),
             // 补全弹层激活时优先接管导航键；未激活时完全透明。
             linkSuggestPlugin(suggestKeys),
             history(),
@@ -459,12 +458,13 @@
             createSourceEditingPlugin(reload?.sourceEditing),
             createLinkSelectionPlugin(reload?.bookmark),
             linkInteraction(openLink),
+            calloutRevealPlugin(),
             footnoteNavigation(),
             mermaidFocusPlugin(),
             ...mathInputPlugins(),
             ...writingPlugins({
               link: () => {
-                showLink = true;
+                if (created.editable) showLink = true;
               },
               search: openSearch,
             }),
@@ -480,18 +480,7 @@
             keymap(baseKeymap),
           ],
         }),
-        nodeViews: {
-          list_item: taskItemView,
-          ...mathNodeViews,
-          ...commentNodeViews,
-          ...calloutNodeViews,
-          ...createCodeBlockViews(),
-          ...createHtmlNodeViews(loadMd),
-          ...createImageNodeViews(loadAny),
-          ...createPdfNodeViews(notePath, openLink, mediaIo),
-          ...createPlayerNodeViews(notePath, mediaIo),
-          ...createNoteEmbedViews(notePath, openLink, mediaIo),
-        },
+        nodeViews: createContentNodeViews(notePath, openLink, mediaIo),
         dispatchTransaction(tr) {
           const { state: next, transactions } = created.state.applyTransaction(tr);
           for (const transaction of transactions) session.track(transaction);
@@ -508,17 +497,18 @@
       editor = created;
       editorState = created.state;
       pushOutline(collectOutline(created.state.doc));
-      bindApi({
+      publicApi = {
+        ...markdownPosition(created, session),
         history: (action) => applyMarkdownHistory(created, action),
         historyAvailability: () => {
           if (nativeInputOwnsHistory(created.dom)) return null;
           const state = editorState;
           return {
-            undo: state !== null && undoDepth(state) > 0,
-            redo: state !== null && redoDepth(state) > 0,
+            undo: !readOnly && state !== null && undoDepth(state) > 0,
+            redo: !readOnly && state !== null && redoDepth(state) > 0,
           };
         },
-        focus: () => created.focus(),
+        focus: () => focusDocument(created),
         openSearch,
         openAttachments,
         settleAttachments: attachmentEditing.settle,
@@ -533,12 +523,21 @@
           }
           jumpEditor(created, pos, "center");
         },
-        jumpToText: (needle) => {
-          const pos = findSearchMatchPmPos(created.state.doc, needle);
-          if (pos === null) {
-            return;
-          }
-          jumpEditor(created, pos, "center");
+        jumpToSearch: (location, snapshot) => {
+          const source = new TextDecoder("utf-8", { ignoreBOM: true }).decode(snapshot.bytes);
+          const range = session.rangeAt(
+            utf8ByteToJsIndex(source, location.startByte),
+            utf8ByteToJsIndex(source, location.endByte),
+            snapshot.revision,
+          );
+          if (range === null)
+            throw new Error("此处暂不能在排版视图精确定位，请切换源码视图后打开结果。");
+          created.dispatch(
+            created.state.tr
+              .setSelection(TextSelection.create(created.state.doc, range.from, range.to))
+              .scrollIntoView(),
+          );
+          focusDocument(created);
         },
         jumpToHeading: (anchor) => {
           const pos = anchor.startsWith("^")
@@ -556,12 +555,12 @@
             collectOutline(created.state.doc).findLast((item) => item.pos < from)?.text ?? null
           );
         },
-      });
+      };
       return () => {
         stopRestoring?.();
         previous = captureMarkdownReload(created);
         pushOutline([]);
-        bindApi(null);
+        publicApi = null;
         closeSuggest();
         editor = null;
         editorState = null;
@@ -573,6 +572,18 @@
     });
   });
 
+  // 归属更新与文本会话分开：相同内容的重载不能重建编辑器并清空历史。
+  $effect(() => {
+    const api = publicApi;
+    const bindApi = register;
+    void epoch;
+    if (api === null) return;
+    return untrack(() => {
+      bindApi(api);
+      return () => bindApi(null);
+    });
+  });
+
   function jumpEditor(view: EditorView, pos: number, block: ScrollLogicalPosition): void {
     const { doc } = view.state;
     if (pos < 0 || pos >= doc.content.size) {
@@ -580,7 +591,7 @@
     }
     const resolved = doc.resolve(Math.min(pos + 1, doc.content.size));
     view.dispatch(view.state.tr.setSelection(TextSelection.near(resolved)).scrollIntoView());
-    view.focus();
+    focusDocument(view);
     const nodeDom = view.nodeDOM(pos);
     if (nodeDom instanceof HTMLElement) {
       // 目录要对齐到阅读区顶部。PM 的 scrollIntoView 只保证「勉强看见」，标题会被贴在底部。
@@ -636,6 +647,7 @@
       bind:this={searchPanel}
       view={editor}
       state={editorState}
+      {readOnly}
       onClose={() => (showSearch = false)}
     />{/if}
   {#if showLink}<EditorLink
@@ -662,417 +674,8 @@
 {/if}
 
 <style>
-  .surface {
+  .surface,
+  .surface :global(> .markdown-content) {
     min-height: 16rem;
-  }
-
-  .surface :global(.ProseMirror) {
-    outline: none;
-    min-height: 16rem;
-    padding: 0.5rem;
-    font-size: var(--font-reading);
-    line-height: var(--line-reading);
-  }
-
-  .surface :global(.ProseMirror :is(h1, h2, h3, h4, h5, h6)) {
-    line-height: 1.35;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin: 1.8em 0 0.65em;
-  }
-
-  .surface :global(.ProseMirror h1) {
-    font-size: 30px;
-  }
-  .surface :global(.ProseMirror h2) {
-    font-size: 24px;
-  }
-  .surface :global(.ProseMirror h3) {
-    font-size: 20px;
-  }
-  .surface :global(.ProseMirror :is(h4, h5, h6)) {
-    font-size: 17px;
-  }
-  .surface :global(.ProseMirror > :first-child) {
-    margin-top: 0.5rem;
-  }
-  .surface :global(.ProseMirror p) {
-    margin: 0.85em 0;
-  }
-  .surface :global(.ProseMirror :is(ul, ol)) {
-    padding-left: 1.6em;
-    margin: 1em 0;
-  }
-  .surface :global(.ProseMirror li + li) {
-    margin-top: 0.3em;
-  }
-  .surface :global(.ProseMirror :is(ul, ol) :is(ul, ol)) {
-    margin: 0.3em 0;
-  }
-
-  .surface :global(.ProseMirror blockquote) {
-    margin: 1.2em 0;
-    padding-left: 1rem;
-    border-left: 2px solid var(--border);
-    color: var(--muted);
-  }
-
-  .surface :global(.ProseMirror code) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
-    background: var(--sidebar);
-    border-radius: 0.25rem;
-    padding: 0.1em 0.3em;
-  }
-
-  .surface :global(.ProseMirror pre) {
-    padding: 1rem;
-    background: var(--sidebar);
-    border-radius: 0.6rem;
-    line-height: 1.6;
-    overflow-x: auto;
-  }
-
-  .surface :global(.ProseMirror pre code) {
-    padding: 0;
-    background: transparent;
-  }
-
-  .surface :global(.wiki-link) {
-    text-decoration: underline;
-    cursor: text;
-  }
-
-  .surface :global(.ProseMirror a) {
-    color: inherit;
-    cursor: text;
-  }
-
-  .surface :global(.math-inline) {
-    display: inline-block;
-    vertical-align: middle;
-    cursor: text;
-  }
-
-  .surface :global(.math-block) {
-    display: block;
-    margin: 0.5rem 0;
-    overflow-x: auto;
-    cursor: text;
-  }
-
-  .surface :global(.html-inline) {
-    display: inline;
-    cursor: text;
-  }
-
-  .surface :global(.html-block) {
-    display: block;
-    margin: 0.5rem 0;
-    cursor: text;
-  }
-
-  .surface :global(.media-embed) {
-    display: inline-block;
-    max-width: 100%;
-    color: var(--muted);
-    font-size: 0.85em;
-  }
-  .surface :global(.media-audio) {
-    width: min(100%, 28rem);
-  }
-  .surface :global(.media-audio audio) {
-    width: 100%;
-  }
-  .surface :global(.media-video video) {
-    max-width: 100%;
-    border-radius: 0.4rem;
-  }
-
-  .surface :global(.note-image) {
-    max-width: 100%;
-    height: auto;
-    vertical-align: middle;
-  }
-
-  .surface :global(table) {
-    border-collapse: collapse;
-    display: block;
-    overflow-x: auto;
-    max-width: 100%;
-    margin: 1.25em 0;
-  }
-
-  .surface :global(th),
-  .surface :global(td) {
-    border: 1px solid var(--border);
-    padding: 0.45rem 0.75rem;
-    min-width: 7em;
-    max-width: 24em;
-    vertical-align: top;
-  }
-
-  .surface :global(li[data-checked]) {
-    list-style: none;
-    position: relative;
-  }
-  .surface :global(.task-checkbox) {
-    position: absolute;
-    right: calc(100% + 0.15rem);
-    top: -1px;
-    width: 32px;
-    height: 32px;
-    border: 0;
-    border-radius: 0.25em;
-    padding: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-  .surface :global(.task-checkbox::before) {
-    content: "";
-    position: absolute;
-    inset: 7px;
-    border: 1.5px solid var(--muted);
-    border-radius: 4px;
-  }
-  .surface :global(.task-checkbox[aria-checked="true"]::before) {
-    background: var(--accent-fill);
-    border-color: var(--accent-fill);
-  }
-  .surface :global(.task-checkbox[aria-checked="true"]::after) {
-    content: "";
-    position: absolute;
-    left: 13px;
-    top: 10px;
-    width: 4px;
-    height: 8px;
-    border: solid var(--accent-text);
-    border-width: 0 1.5px 1.5px 0;
-    transform: rotate(45deg);
-  }
-  .surface :global(.list-item-content > p:first-child) {
-    margin-top: 0;
-  }
-  .surface :global(.ProseMirror-search-match) {
-    background: light-dark(#fff0a8, #625018);
-  }
-  .surface :global(.ProseMirror-active-search-match) {
-    outline: 2px solid var(--accent);
-  }
-
-  .surface :global(.math-source),
-  .surface :global(.html-source) {
-    display: block;
-    max-width: 100%;
-    padding: 0.4rem 0.6rem;
-    color: var(--fg);
-    background: var(--sidebar);
-    border: 1px solid var(--accent);
-    border-radius: 0.4rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
-    line-height: 1.5;
-    outline: none;
-  }
-
-  .surface :global(textarea.math-source),
-  .surface :global(textarea.html-source) {
-    width: 100%;
-    resize: vertical;
-  }
-
-  .surface :global(.ProseMirror-selectednode) {
-    outline: 2px solid var(--accent);
-    outline-offset: 3px;
-    border-radius: 0.2rem;
-  }
-
-  .surface :global(.source-editing) {
-    outline: none;
-  }
-
-  .surface :global(.source-editing:is(.math-inline, .html-inline)) {
-    display: inline-block;
-    max-width: 100%;
-    vertical-align: middle;
-  }
-
-  .surface :global(.math-error) {
-    color: #b00020;
-  }
-
-  .surface :global(.ProseMirror mark) {
-    color: inherit;
-    background: light-dark(#fff3a3, #5c4a12);
-    border-radius: 0.15em;
-    padding: 0 0.05em;
-  }
-
-  .surface :global(:is(.comment-inline, .comment-block)) {
-    color: var(--muted);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85em;
-    opacity: 0.8;
-    cursor: text;
-  }
-  .surface :global(.comment-block) {
-    display: block;
-    margin: 0.85em 0;
-    white-space: pre-wrap;
-  }
-  .surface :global(.comment-source) {
-    display: block;
-    width: 100%;
-    padding: 0.4rem 0.6rem;
-    color: var(--fg);
-    background: var(--sidebar);
-    border: 1px solid var(--accent);
-    border-radius: 0.4rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
-    outline: none;
-  }
-
-  .surface :global(.callout) {
-    --callout: var(--accent);
-    margin: 1.2em 0;
-    padding: 0.6rem 0.9rem;
-    border-left: 3px solid var(--callout);
-    border-radius: 0.4rem;
-    background: color-mix(in srgb, var(--callout) 8%, transparent);
-  }
-  .surface
-    :global(
-      .callout:is([data-callout="warning"], [data-callout="caution"], [data-callout="attention"])
-    ) {
-    --callout: light-dark(#b8660b, #f0b060);
-  }
-  .surface
-    :global(
-      .callout:is(
-        [data-callout="danger"],
-        [data-callout="error"],
-        [data-callout="bug"],
-        [data-callout="failure"],
-        [data-callout="fail"]
-      )
-    ) {
-    --callout: var(--danger);
-  }
-  .surface
-    :global(
-      .callout:is(
-        [data-callout="tip"],
-        [data-callout="hint"],
-        [data-callout="success"],
-        [data-callout="check"],
-        [data-callout="done"]
-      )
-    ) {
-    --callout: light-dark(#1f7a4a, #6fd39c);
-  }
-  .surface
-    :global(.callout:is([data-callout="quote"], [data-callout="cite"], [data-callout="example"])) {
-    --callout: var(--muted);
-  }
-  .surface :global(.callout-header) {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-  }
-  .surface :global(.callout-title) {
-    flex: 1 1 auto;
-    min-width: 0;
-    font: inherit;
-    font-weight: 600;
-    color: var(--callout);
-    background: transparent;
-    border: 0;
-    padding: 0;
-    outline: none;
-  }
-  .surface :global(.callout-title::placeholder) {
-    color: var(--callout);
-    opacity: 1;
-  }
-  .surface :global(.callout-fold) {
-    width: 1.2rem;
-    height: 1.2rem;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--callout);
-    cursor: pointer;
-  }
-  .surface :global(.callout-fold::before) {
-    content: "▾";
-  }
-  .surface :global(.callout.collapsed .callout-fold::before) {
-    content: "▸";
-  }
-  .surface :global(.callout.collapsed > .callout-content) {
-    display: none;
-  }
-  .surface :global(.callout-content > :first-child) {
-    margin-top: 0.4em;
-  }
-  .surface :global(.callout-content > :last-child) {
-    margin-bottom: 0;
-  }
-
-  .surface :global(.footnote-ref) {
-    color: var(--accent);
-    font-size: 0.75em;
-    cursor: pointer;
-  }
-  .surface :global(.footnote-def) {
-    position: relative;
-    margin: 0.6em 0;
-    padding-left: 2.2em;
-    font-size: 0.92em;
-    color: var(--muted);
-  }
-  .surface :global(.footnote-def::before) {
-    content: "[" attr(data-footnote-def) "]";
-    position: absolute;
-    left: 0;
-    top: 0.85em;
-    line-height: inherit;
-    color: var(--accent);
-    font-size: 0.85em;
-  }
-
-  .surface :global(.mermaid-block) {
-    margin: 1em 0;
-  }
-  .surface :global(.mermaid-preview) {
-    display: flex;
-    justify-content: center;
-    overflow-x: auto;
-    cursor: pointer;
-  }
-  .surface :global(.mermaid-preview.mermaid-error) {
-    justify-content: flex-start;
-    color: var(--danger);
-    font-size: 0.85em;
-  }
-  .surface :global(.mermaid-block:not(.code-active) .mermaid-source) {
-    display: none;
-  }
-
-  /* 阅读视图：隐藏注释，链接可单击打开，标注标题只读。 */
-  .surface.reading :global(:is(.comment-inline, .comment-block)) {
-    display: none;
-  }
-  .surface.reading :global(:is(.wiki-link, .ProseMirror a)) {
-    cursor: pointer;
-  }
-  .surface.reading :global(.callout-title) {
-    pointer-events: none;
-  }
-  .surface.reading :global(.mermaid-preview) {
-    cursor: default;
   }
 </style>

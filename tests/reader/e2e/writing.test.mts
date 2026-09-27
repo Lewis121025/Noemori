@@ -50,7 +50,15 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    const ready = (name: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.querySelector(".document-name")?.textContent === expected &&
+          document.querySelector("section[data-pane]")?.hasAttribute("inert") === false,
+        name,
+      );
     const editor = page.locator(".ProseMirror");
+    await ready("写作.md");
     await editor.waitFor();
     const formatting = page.getByRole("group", { name: "文本格式", exact: true });
     const formatButton = page.getByRole("button", { name: "文本格式", exact: true });
@@ -133,10 +141,12 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     expect(saved).toContain("[[参考.md|阅读资料]]");
     await editor.locator(".wiki-link").click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("heading", { name: "参考资料" }).waitFor();
+    await ready("参考.md");
     await page
       .getByRole("navigation", { name: "文件列表" })
       .getByRole("treeitem", { name: "文本.txt", exact: true })
       .click();
+    await ready("文本.txt");
     expect(await formatButton.isVisible()).toBe(false);
     await page.getByRole("button", { name: "文内查找", exact: true }).click();
     const textSearch = page.locator(".cm-search");
@@ -154,6 +164,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       .getByRole("treeitem", { name: "写作.md", exact: true })
       .click();
     await page.getByRole("heading", { name: "核心写作" }).waitFor();
+    await ready("写作.md");
     const task = editor.locator(".task-checkbox").first();
     await task.focus();
     await page.keyboard.press("Space");
@@ -237,14 +248,23 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     const files = page.getByRole("navigation", { name: "文件列表" });
     await files.getByRole("treeitem", { name: "长文.md", exact: true }).click();
+    await ready("长文.md");
     expect(await search.isVisible()).toBe(false);
     await expect.poll(() => files.isVisible()).toBe(false);
     await page.getByRole("button", { name: "文内查找", exact: true }).click();
     await search.getByLabel("查找", { exact: true }).fill("定位目标");
-    for (let index = 0; index < 3; index++)
+    const searchStatus = search.getByRole("status");
+    await expect.poll(() => searchStatus.textContent()).toBe("共 4 处");
+    for (let index = 0; index < 3; index++) {
       await search.getByRole("button", { name: "下一处" }).click();
+      await expect.poll(() => searchStatus.textContent()).toBe(`第 ${index + 1} 处，共 4 处`);
+    }
     await search.getByRole("button", { name: "替换选项" }).click();
     await search.getByRole("button", { name: "上一处" }).click();
+    await expect.poll(() => searchStatus.textContent()).toBe("第 2 处，共 4 处");
+    expect(
+      await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth),
+    ).toBe(true);
     const resultBounds = await editor.locator(".ProseMirror-active-search-match").boundingBox();
     const searchBounds = await search.boundingBox();
     expect(resultBounds).not.toBeNull();
@@ -254,6 +274,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-long-search.png") });
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     await files.getByRole("treeitem", { name: "写作.md", exact: true }).click();
+    await ready("写作.md");
     expect(errors).toEqual([]);
     await app.close();
     app = await launch();

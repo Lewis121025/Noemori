@@ -49,6 +49,35 @@ afterEach(() => {
 });
 
 describe("链接跳转的解析分支", () => {
+  it("预览链接按内容所属笔记解析，死链创建也保留同一目录", async () => {
+    const api = createApi({ status: "dead" });
+    const workspace = await startWorkspace(api);
+    await workspace.openLink("md", "./missing.md#小节", "notes/资料.md");
+    expect(api.linksResolve).toHaveBeenCalledWith("notes/资料.md", "./missing.md#小节", "md");
+    expect(workspace.deadLinkOffer).toEqual({ path: "notes/missing.md", anchor: "小节" });
+    expect(workspace.document.path).toBe("ref.md");
+  });
+
+  it("预览解析迟到时不跳转到已经离开的宿主文档", async () => {
+    let finish!: (value: LinkTarget) => void;
+    const api = createApi(
+      { status: "dead" },
+      {
+        linksResolve: vi.fn(
+          () =>
+            new Promise<LinkTarget>((resolve) => {
+              finish = resolve;
+            }),
+        ),
+      },
+    );
+    const workspace = await startWorkspace(api);
+    const pending = workspace.openLink("md", "./target.md", "notes/资料.md");
+    await workspace.openFile("a/foo.md");
+    finish({ status: "resolved", path: "notes/target.md", anchor: null });
+    await pending;
+    expect(workspace.document.path).toBe("a/foo.md");
+  });
   it("可创建的死链等待确认，纯锚点只提示无法跳转", async () => {
     const workspace = await startWorkspace(createApi({ status: "dead" }));
     await workspace.openLink("wiki", "missing#小节");

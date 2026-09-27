@@ -50,6 +50,7 @@
       vaultOpen: workspace.vaultRoot !== null,
       hasDocument: doc.path !== null,
       canEdit: doc.canEdit,
+      reading: workspace.viewMode === "reading",
       markdown: doc.content?.kind === "markdown",
       canBack: workspace.history.canBack,
       canForward: workspace.history.canForward,

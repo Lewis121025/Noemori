@@ -268,27 +268,45 @@ pub(super) fn stage(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, Error> {
     )
 }
 
+/// 在 `parent` 内暂存 `bytes` 并持久化最终权限；返回可用于原子替换的文件。
+/// 创建、写入、设置权限或同步失败时返回 IO 错误，临时文件由所有权释放清理。
 pub(super) fn stage_bytes(
     parent: &Path,
     bytes: &[u8],
     permissions: Option<fs::Permissions>,
 ) -> Result<NamedTempFile, Error> {
-    let mut file = Builder::new().prefix(".nous-").tempfile_in(parent)?;
-    if let Some(permissions) = permissions {
-        file.as_file().set_permissions(permissions)?;
-    }
-    file.write_all(bytes)?;
+    let file = write_staged_bytes(parent, bytes, permissions)?;
     file.as_file().sync_all()?;
     Ok(file)
 }
 
+/// 在 `parent` 内写入 `bytes` 和最终权限，返回尚未同步的私有暂存文件。
+/// 调用方必须同步成功后才能替换正式路径；创建、写入或设置权限失败返回 IO 错误。
+pub(super) fn write_staged_bytes(
+    parent: &Path,
+    bytes: &[u8],
+    permissions: Option<fs::Permissions>,
+) -> Result<NamedTempFile, Error> {
+    let mut file = Builder::new().prefix(".nous-").tempfile_in(parent)?;
+    file.write_all(bytes)?;
+    // 暂存文件先以私有权限写完，再恢复最终权限，避免写入清掉源文件的特殊权限位。
+    if let Some(permissions) = permissions {
+        file.as_file().set_permissions(permissions)?;
+    }
+    Ok(file)
+}
+
 pub(super) fn sync_parent(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    fs::File::open(
+    sync_directory(
         path.parent()
             .ok_or_else(|| io::Error::other("路径没有父目录"))?,
-    )?
-    .sync_all()?;
+    )
+}
+
+/// 同步目录项；改名事务在提交标记前按目录去重，单文件保存仍同步其父目录。
+pub(super) fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    fs::File::open(path)?.sync_all()?;
     #[cfg(not(unix))]
     let _ = path;
     Ok(())

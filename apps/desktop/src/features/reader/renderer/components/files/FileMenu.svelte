@@ -18,10 +18,12 @@
   let {
     onAction,
     bookmarked,
+    selectionCount = 0,
   }: {
     onAction: (action: FileMenuAction, entry: VaultEntry | null) => void;
     /** 条目是否已收藏；决定菜单显示「加入」还是「移出」书签。 */
     bookmarked: (entry: VaultEntry) => boolean;
+    selectionCount?: number;
   } = $props();
   let element: HTMLDivElement;
   let target = $state<VaultEntry | null>(null);
@@ -29,6 +31,7 @@
   let top = $state(0);
   let opened = false;
   let returnFocus: HTMLElement | null = null;
+  const multiple = $derived(target !== null && selectionCount > 1);
   /** 打开当前条目的菜单；位置限制在窗口内，键盘焦点进入第一项。 */
   export async function open(entry: VaultEntry | null, x: number, y: number): Promise<void> {
     target = entry;
@@ -98,16 +101,18 @@
   onkeydown={keydown}
   tabindex="-1"
 >
-  <button role="menuitem" onclick={() => choose("file")}>新建笔记</button>
-  <button role="menuitem" onclick={() => choose("directory")}>新建文件夹</button>
+  {#if !multiple}
+    <button role="menuitem" onclick={() => choose("file")}>新建笔记</button>
+    <button role="menuitem" onclick={() => choose("directory")}>新建文件夹</button>
+  {/if}
   {#if target !== null}
     <div class="separator" role="separator"></div>
-    <button role="menuitem" onclick={() => choose("rename")}>重命名…</button>
+    {#if !multiple}<button role="menuitem" onclick={() => choose("rename")}>重命名…</button>{/if}
     <button role="menuitem" onclick={() => choose("move")}>移动到…</button>
-    <button role="menuitem" onclick={() => choose("bookmark")}
-      >{bookmarked(target) ? "移出书签" : "加入书签"}</button
-    >
-    <button role="menuitem" onclick={() => choose("reveal")}>在系统文件夹中显示</button>
+    {#if !multiple}<button role="menuitem" onclick={() => choose("bookmark")}
+        >{bookmarked(target) ? "移出书签" : "加入书签"}</button
+      >
+      <button role="menuitem" onclick={() => choose("reveal")}>在系统文件夹中显示</button>{/if}
     <div class="separator" role="separator"></div>
     <button role="menuitem" class="danger" onclick={() => choose("trash")}>移到废纸篓…</button>
   {:else}

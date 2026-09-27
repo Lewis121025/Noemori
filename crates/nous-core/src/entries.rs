@@ -25,6 +25,14 @@ pub struct VaultEntry {
     pub recovery_only: bool,
 }
 
+/// 批量操作的独立源条目；目标缺席表示移入系统废纸篓。
+pub struct EntryMutation {
+    /// 规范的库内源路径，不得与本批其他源形成父子关系。
+    pub from: String,
+    /// 移动目标；父目录必须已经存在。
+    pub to: Option<String>,
+}
+
 impl Vault {
     /// 列出可见文件、空目录和可恢复草稿。
     /// # Errors
@@ -121,13 +129,20 @@ impl Vault {
         let _guard = self.lock_writes()?;
         crate::rename::recover_pending(self.root(), &self.recovery)?;
         let path = self.entry_path(rel)?;
+        for draft_path in self.check_entry_drafts(Some(&path))? {
+            self.recovery.remove(&draft_path)?;
+        }
+        trash(&path)?;
+        Ok(self.finish_entry(&path))
+    }
+
+    /// 校验相关草稿并返回已提交的记录；预检仅校验，实际操作才清理这些记录。
+    pub(super) fn check_entry_drafts(&self, ancestor: Option<&Path>) -> Result<Vec<String>, Error> {
+        let mut committed = Vec::new();
         for draft_path in self.recovery.paths()? {
             // 先按路径归属筛选，其他目录的恢复问题不应阻止整理无关条目。
-            if !self
-                .root()
-                .join(validate_relative_path(&draft_path)?)
-                .starts_with(&path)
-            {
+            let absolute = self.root().join(validate_relative_path(&draft_path)?);
+            if ancestor.is_some_and(|path| !absolute.starts_with(path)) {
                 continue;
             }
             let draft_abs = resolve_in_root(self.root(), &draft_path)?;
@@ -137,11 +152,10 @@ impl Vault {
                         "请先处理未保存草稿：{draft_path}"
                     ))));
                 }
-                self.recovery.remove(&draft_path)?;
+                committed.push(draft_path);
             }
         }
-        trash(&path)?;
-        Ok(self.finish_entry(&path))
+        Ok(committed)
     }
 
     /// 返回可供系统文件管理器显示的现有条目路径。

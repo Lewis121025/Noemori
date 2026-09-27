@@ -43,6 +43,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("阅读态不启动附件导入；已开始的导入在切换后保留文件并报告未插入引用", async () => {
+  const { view, editing, importer, report, save } = start();
+  const original = save();
+  view.setProps({ editable: () => false });
+  expect(editing.prepare(view)).toBe(false);
+  await editing.insertFiles(view, [file("blocked.png")]);
+  expect(importer).not.toHaveBeenCalled();
+  view.setProps({ editable: () => true });
+  const pending = deferred<ImportedAttachment>();
+  importer.mockReturnValueOnce(pending.promise);
+  expect(editing.prepare(view)).toBe(true);
+  const request = editing.insertFiles(view, [file("pending.png")]);
+  await vi.waitFor(() => expect(importer).toHaveBeenCalledOnce());
+  view.setProps({ editable: () => false });
+  pending.resolve({ path: "资料/attachments/pending.png", warning: null });
+  await request;
+  expect(save()).toBe(original);
+  expect(report).toHaveBeenCalledWith(expect.stringContaining("尚未插入引用"));
+  expect(importer).toHaveBeenCalledOnce();
+});
+
 it("图片、PDF 和普通文件使用可往返的相对引用，撤销保留字节与前后源码", async () => {
   const { view, editing, importer, save } = start();
   const original = view.state.doc;

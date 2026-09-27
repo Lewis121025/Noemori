@@ -13,7 +13,7 @@ type Definitions = ReadonlyMap<string, Definition>;
  * 把 Markdown 映射为文档，引用定义与脚注等未支持的节点也必须保留。
  *
  * 独立成段的 `![[笔记]]` 在顶层、引用块与列表项内都提升为嵌入块；
- * 嵌套深度与循环的控制在嵌入视图层执行（见 `note-embed-view`），
+ * 嵌套深度与循环的控制在内容视图层执行（见 `content-view`），
  * 解析层始终产出完整结构。
  *
  * @param source Markdown 原文。

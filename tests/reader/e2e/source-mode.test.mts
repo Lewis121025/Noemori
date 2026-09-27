@@ -71,7 +71,7 @@ test("源码视图：排版表达不了的语法逐字节保真，[[ 补全与�
       () =>
         document.querySelector(".document-name")?.textContent === "笔记.md" &&
         document.querySelector(".ProseMirror") !== null &&
-        !document.querySelector(".panes")?.hasAttribute("inert"),
+        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
     // 切到源码视图：工具栏按钮 + 原始字节完整呈现。

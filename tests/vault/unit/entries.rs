@@ -1,4 +1,4 @@
-use nous_core::{EntryKind, Error, Vault};
+use nous_core::{EntryKind, EntryMutation, Error, Vault};
 use std::fs;
 use tempfile::TempDir;
 
@@ -7,6 +7,140 @@ fn setup() -> (TempDir, TempDir, Vault) {
     let state = TempDir::new().unwrap();
     let vault = Vault::open(root.path(), state.path()).unwrap();
     (root, state, vault)
+}
+
+#[test]
+fn batch_preflight_rejects_later_conflicts_without_moving_earlier_files() {
+    let (root, _state, vault) = setup();
+    fs::create_dir(root.path().join("target")).unwrap();
+    for path in ["a.md", "b.md", "target/b.md"] {
+        fs::write(root.path().join(path), path).unwrap();
+    }
+    let changes = vec![
+        EntryMutation {
+            from: "a.md".into(),
+            to: Some("target/a.md".into()),
+        },
+        EntryMutation {
+            from: "b.md".into(),
+            to: Some("target/b.md".into()),
+        },
+    ];
+    assert!(vault.check_entry_batch(&changes).is_err());
+    assert_eq!(vault.read("a.md").unwrap(), b"a.md");
+    assert!(!root.path().join("target/a.md").exists());
+    fs::remove_file(root.path().join("target/b.md")).unwrap();
+    vault.check_entry_batch(&changes).unwrap();
+    assert!(root.path().join("a.md").exists());
+    for change in changes {
+        vault
+            .rename(&change.from, change.to.as_deref().unwrap())
+            .unwrap();
+    }
+    assert_eq!(vault.read("target/b.md").unwrap(), b"b.md");
+}
+
+#[test]
+fn batch_preflight_preserves_uncommitted_drafts_and_rejects_overlapping_sources() {
+    let (root, _state, vault) = setup();
+    fs::create_dir(root.path().join("folder")).unwrap();
+    fs::write(root.path().join("folder/a.md"), b"disk").unwrap();
+    fs::write(root.path().join("b.md"), b"keep").unwrap();
+    vault
+        .write("folder/a.md", b"editing", Some(b"old"))
+        .unwrap();
+    let changes = vec![
+        EntryMutation {
+            from: "b.md".into(),
+            to: None,
+        },
+        EntryMutation {
+            from: "folder".into(),
+            to: None,
+        },
+    ];
+    assert!(vault
+        .check_entry_batch(&changes)
+        .unwrap_err()
+        .to_string()
+        .contains("草稿"));
+    assert!(root.path().join("b.md").exists());
+    assert_eq!(
+        vault.snapshot("folder/a.md").unwrap().draft.unwrap().bytes,
+        b"editing"
+    );
+    let overlapping = vec![
+        EntryMutation {
+            from: "folder".into(),
+            to: None,
+        },
+        EntryMutation {
+            from: "folder/a.md".into(),
+            to: None,
+        },
+    ];
+    assert!(vault
+        .check_entry_batch(&overlapping)
+        .unwrap_err()
+        .to_string()
+        .contains("重复"));
+}
+
+#[test]
+fn batch_preflight_checks_path_ancestors_without_confusing_name_prefixes() {
+    let (root, _state, vault) = setup();
+    for path in ["folder", "folder-other", "archive"] {
+        fs::create_dir(root.path().join(path)).unwrap();
+    }
+    fs::write(root.path().join("a.md"), b"keep").unwrap();
+    let mut changes = vec![
+        EntryMutation {
+            from: "folder".into(),
+            to: Some("archive/folder".into()),
+        },
+        EntryMutation {
+            from: "a.md".into(),
+            to: Some("folder-other/a.md".into()),
+        },
+    ];
+    vault.check_entry_batch(&changes).unwrap();
+    changes[1].to = Some("folder/a.md".into());
+    assert!(vault
+        .check_entry_batch(&changes)
+        .unwrap_err()
+        .to_string()
+        .contains("自身"));
+    changes[1].to = Some("folder".into());
+    assert!(vault.check_entry_batch(&changes).is_err());
+    changes[1].to = Some("a.md/child".into());
+    assert!(vault.check_entry_batch(&changes).is_err());
+    assert_eq!(vault.read("a.md").unwrap(), b"keep");
+    assert!(root.path().join("folder").is_dir());
+    assert!(!root.path().join("archive/folder").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn batch_preflight_inspects_hidden_children_before_any_move() {
+    use std::os::unix::fs::symlink;
+    let (root, _state, vault) = setup();
+    fs::create_dir(root.path().join("source")).unwrap();
+    fs::create_dir(root.path().join("target")).unwrap();
+    fs::write(root.path().join("a.md"), b"keep").unwrap();
+    symlink(root.path().join("a.md"), root.path().join("source/.link")).unwrap();
+    let changes = vec![
+        EntryMutation {
+            from: "a.md".into(),
+            to: Some("target/a.md".into()),
+        },
+        EntryMutation {
+            from: "source".into(),
+            to: Some("target/source".into()),
+        },
+    ];
+    assert!(vault.check_entry_batch(&changes).is_err());
+    assert!(root.path().join("a.md").exists());
+    assert!(!root.path().join("target/a.md").exists());
 }
 
 #[test]

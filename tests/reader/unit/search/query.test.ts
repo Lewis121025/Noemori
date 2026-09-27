@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   isEmptyQuery,
-  matchNeedle,
   parseSearchQuery,
   SEARCH_LIMIT,
   snippetParts,
 } from "@reader/renderer/engine/search/query";
+import {
+  parseSearchQueryArgument,
+  SEARCH_DEPTH_LIMIT,
+  SEARCH_NODE_LIMIT,
+} from "@reader/shared/reader-protocol";
 
 const expr = (text: string) => parseSearchQuery(text).expr;
 const term = (value: string) => ({ kind: "term", value });
@@ -126,6 +130,46 @@ describe("parseSearchQuery 运算符", () => {
   });
 });
 
+describe("parseSearchQuery 复杂度边界", () => {
+  it.each(["-", "(", "line:(", "section:("])(
+    "大量 %s 嵌套在进入递归前报告查询错误，不抛栈溢出",
+    (prefix) => {
+      const suffix = prefix === "-" ? "" : ")".repeat(10_000);
+      expect(() => parseSearchQuery(`${prefix.repeat(10_000)}alpha${suffix}`)).toThrow(
+        "检索条件嵌套过深",
+      );
+    },
+  );
+
+  it("深度上限处能通过跨进程校验，多一层拒绝", () => {
+    const query = parseSearchQuery(`${"-".repeat(SEARCH_DEPTH_LIMIT)}alpha`);
+    expect(parseSearchQueryArgument(query)).toEqual(query);
+    expect(() => parseSearchQuery(`${"-".repeat(SEARCH_DEPTH_LIMIT + 1)}alpha`)).toThrow(
+      "检索条件嵌套过深",
+    );
+    // OR 本身也是表达式节点，不能只限制前缀或括号的语法层数。
+    expect(() => parseSearchQuery(`${"-".repeat(SEARCH_DEPTH_LIMIT)}alpha OR beta`)).toThrow(
+      "检索条件嵌套过深",
+    );
+  });
+
+  it("节点预算包含组合节点，达到上限可用、超出立即拒绝", () => {
+    const text = Array.from({ length: SEARCH_NODE_LIMIT - 1 }, (_, index) => `词${index}`).join(
+      " ",
+    );
+    const query = parseSearchQuery(text);
+    expect(parseSearchQueryArgument(query)).toEqual(query);
+    expect(() => parseSearchQuery(`${text} 超额`)).toThrow("检索条件过于复杂");
+  });
+
+  it("字面引号与正则中的括号、减号不消耗嵌套预算", () => {
+    const literal = "(-".repeat(SEARCH_DEPTH_LIMIT + 1);
+    expect(expr(`"${literal}"`)).toEqual(term(literal));
+    const pattern = "(a)".repeat(SEARCH_DEPTH_LIMIT + 1);
+    expect(expr(`/${pattern}/`)).toEqual({ kind: "regex", value: pattern });
+  });
+});
+
 describe("snippetParts", () => {
   it("按控制字符切分高亮与普通片段", () => {
     expect(snippetParts("before\u{1}hit\u{2}after")).toEqual([
@@ -142,15 +186,5 @@ describe("snippetParts", () => {
       { text: "a", mark: false },
       { text: "b", mark: true },
     ]);
-  });
-});
-
-describe("matchNeedle", () => {
-  const hit = (snippet: string) => ({ path: "a.md", title: "A", snippet });
-
-  it("优先摘要高亮片段，其次第一个正向全文词，取反词与谓词查询不定位", () => {
-    expect(matchNeedle(hit("x\u{1}Alpha\u{2}y"), parseSearchQuery("alpha beta"))).toBe("Alpha");
-    expect(matchNeedle(hit(""), parseSearchQuery("-skip alpha beta"))).toBe("alpha");
-    expect(matchNeedle(hit(""), parseSearchQuery("tag:t"))).toBe("");
   });
 });

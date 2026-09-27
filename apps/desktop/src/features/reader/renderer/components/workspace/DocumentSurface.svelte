@@ -38,6 +38,7 @@
     {#key doc.path}
       {#if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor
+          epoch={doc.epoch}
           readOnly={pane.viewMode === "reading"}
           formattingId="editor-formatting-{pane.id}"
           active={workspace.activePane.id === pane.id}
@@ -61,6 +62,7 @@
         />
       {:else if doc.content?.kind === "markdown" || doc.content?.kind === "text"}
         <CodeEditor
+          epoch={doc.epoch}
           source={doc.content.source}
           path={doc.path}
           onDirty={pane.markDirty}

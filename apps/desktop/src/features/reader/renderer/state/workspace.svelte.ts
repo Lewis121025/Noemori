@@ -1,3 +1,5 @@
+import { tick } from "svelte";
+import { parseReadingBookmark } from "../../shared/reading-position";
 import type {
   Bookmark,
   NoteKeys,
@@ -21,6 +23,13 @@ import { ReaderPane, type PaneHost, type ViewMode } from "./pane.svelte";
 import type { ReaderHistory } from "./history.svelte";
 import { ReaderSearch } from "./search.svelte";
 import { ReaderBookmarks } from "./bookmarks.svelte";
+import { ReaderFileTree } from "./file-tree.svelte";
+import {
+  mapEntryPath,
+  type EntryBatchRequest,
+  type EntryBatchProgress,
+  type EntryBatchResult,
+} from "../../shared/entry-batch";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -44,6 +53,8 @@ export class ReaderWorkspaceController {
   readonly search: ReaderSearch;
   /** 当前库的书签；随目录刷新重读，改名后的路径由内核同步改写。 */
   readonly bookmarks: ReaderBookmarks;
+  /** 文件树的跨重启现场，文件操作与外部清单刷新均经此迁移。 */
+  readonly fileTree: ReaderFileTree;
   /** 可编辑分栏，1–2 个；下标即栏位，永不为空。 */
   private paneList = $state<ReaderPane[]>([]);
   private activeId = $state(0);
@@ -76,6 +87,7 @@ export class ReaderWorkspaceController {
   private refreshEpoch = 0;
   /** 目录快照的世代：切库或恢复重启时递增，过期列表结果直接丢弃。 */
   private listGeneration = 0;
+  private listRequest = 0;
   private pendingRefresh = false;
   private idleWaiters: Array<() => void> = [];
   private compositionWaiters: Array<() => void> = [];
@@ -83,8 +95,13 @@ export class ReaderWorkspaceController {
 
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
   constructor(private readonly api: ReaderApi) {
-    this.search = new ReaderSearch(api);
+    this.search = new ReaderSearch(api, (message) => this.report(message));
     this.bookmarks = new ReaderBookmarks(api);
+    this.fileTree = new ReaderFileTree(
+      () => this.root,
+      (root, state) => api.sessionSetFileTree(root, state),
+      (message) => this.report(message),
+    );
     // 对象字面量的 getter 里 this 指向 host 自身，用闭包读工作区实时状态。
     const vaultRoot = () => this.root;
     const composing = () => this.composing;
@@ -311,6 +328,11 @@ export class ReaderWorkspaceController {
     this.notice = null;
   };
 
+  /** 操作完成后的轻量确认；随当前文档变化失效，不使用错误提示样式。 */
+  announce(message: string): void {
+    this.announceFor(this.activePane, message);
+  }
+
   private announceFor(pane: ReaderPane, message: string): void {
     this.notice =
       message === ""
@@ -356,6 +378,7 @@ export class ReaderWorkspaceController {
       }
     });
     return () => {
+      this.fileTree.reset();
       for (const pane of this.paneList) pane.dispose();
       unsubscribe();
     };
@@ -393,7 +416,7 @@ export class ReaderWorkspaceController {
         };
         pane.history.restore(session.history, (path) => files.includes(path));
         if (session.currentPath !== null && files.includes(session.currentPath)) {
-          await pane.loadFile(session.currentPath);
+          await pane.loadFile(session.currentPath, false, session.position);
           // 初始落点不入栈：与浏览器一致，恢复的起点没有「上一步」。
           pane.currentStep = { path: session.currentPath, anchor: null };
         } else {
@@ -401,6 +424,7 @@ export class ReaderWorkspaceController {
         }
       }
       await this.persistDocuments();
+      this.fileTree.restore(restored.fileTree, this.listed);
     } catch (error) {
       this.report(error instanceof Error ? error.message : "恢复会话失败");
     } finally {
@@ -414,6 +438,7 @@ export class ReaderWorkspaceController {
       await this.withAllPanesSaved(async () => {
         const root = await this.api.vaultOpen();
         if (root === null) return;
+        this.fileTree.reset();
         this.root = root;
         this.backgroundError = "";
         // 切库重置为单栏：旧库的文档、阅读栈与分栏布局都不跨库携带。
@@ -430,6 +455,7 @@ export class ReaderWorkspaceController {
         this.report("");
         this.listGeneration += 1;
         await this.refreshList();
+        this.fileTree.restore(null, this.listed);
         await this.persistDocuments();
       });
     } catch (error) {
@@ -633,9 +659,17 @@ export class ReaderWorkspaceController {
     }
     while (this.paneList.some((pane) => !pane.idle))
       await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
-    const ready = await this.withAllPanesSaved(async () => true);
-    if (!ready && this.message === "") this.report("当前编辑尚未保存，请处理后再关闭。");
-    return ready === true;
+    try {
+      const ready = await this.withAllPanesSaved(async () => {
+        await this.persistDocuments();
+        return true;
+      });
+      if (!ready && this.message === "") this.report("当前编辑尚未保存，请处理后再关闭。");
+      return ready === true && (await this.fileTree.flush());
+    } catch (error) {
+      this.report(`阅读现场未能保存，请重试关闭：${errorText(error)}`);
+      return false;
+    }
   }
 
   /** 新建笔记后在活动栏打开，新建文件夹时保留当前文档；返回对话框错误或 null。 */
@@ -687,6 +721,118 @@ export class ReaderWorkspaceController {
     );
   }
 
+  /**
+   * 全栏只保存一次后提交整批请求；只迁移已提交项，清单与文档最后统一刷新。
+   * 预检/执行失败以可重试结果返回；提交后的界面错误放入 warning，不重做已提交文件。
+   * @throws 桥接未返回有效结果时无法确认已提交范围，刷新目录后抛错，禁止盲目重试原批次。
+   */
+  async batchEntries(
+    request: EntryBatchRequest,
+    onProgress?: (progress: EntryBatchProgress) => void,
+  ): Promise<EntryBatchResult> {
+    let result: EntryBatchResult = {
+      completed: [],
+      remaining: [...request.paths],
+      skipped: [],
+      issues: [],
+      warning: null,
+    };
+    const panes = [...this.paneList];
+    const before = panes.map((pane) => pane.document.path);
+    let awaitingReply = false;
+    try {
+      const allowed = await this.withAllPanesSaved(async () => {
+        if (request.root !== this.root) throw new Error("笔记库已切换，请重新选择条目");
+        await this.fileTree.flush();
+        this.listRequest += 1;
+        awaitingReply = true;
+        result = await (onProgress === undefined
+          ? this.api.entryBatch(request)
+          : this.api.entryBatch(request, onProgress));
+        awaitingReply = false;
+        if (result.completed.length === 0) {
+          await this.refreshList();
+          return true;
+        }
+        await this.applyCompletedEntries(request.action, result.completed, panes, before);
+        if (!(await this.fileTree.flush()))
+          result.warning = [result.warning, "目录状态未能保存，当前窗口内的选择仍保留。"]
+            .filter(Boolean)
+            .join("；");
+        return true;
+      });
+      if (!allowed)
+        result.issues.push({
+          path: "",
+          message: panes.some((pane) => pane.document.dirty)
+            ? "当前编辑尚未保存，请先处理保存问题后重试。"
+            : "正在处理其他操作，请稍后重试。",
+        });
+    } catch (error) {
+      if (awaitingReply) {
+        let detail = errorText(error);
+        try {
+          await this.refreshList();
+        } catch (refreshError) {
+          detail += `；目录刷新失败：${errorText(refreshError)}`;
+        }
+        throw new Error(`未能确认操作结果，请关闭后核对目录并重新选择条目。${detail}`);
+      }
+      if (result.completed.length === 0)
+        result.issues.push({ path: "", message: errorText(error) });
+      else {
+        const warning = `文件操作已完成，但界面更新失败：${errorText(error)}`;
+        result.warning = [result.warning, warning].filter(Boolean).join("；");
+        for (const pane of panes) pane.clearDocument();
+        try {
+          await this.refreshList();
+        } catch (refreshError) {
+          result.warning += `；目录刷新失败：${errorText(refreshError)}`;
+        }
+      }
+    }
+    return result;
+  }
+
+  /** 请求当前批次在完整提交一项后停止；原批次仍负责返回结果与迁移会话。 */
+  async stopBatchEntries(root: string): Promise<void> {
+    await this.api.entryBatchStop(root);
+  }
+
+  /** 已提交范围统一迁移所有分栏与目录，再重载被链接改写影响的文档；失败由批量入口报告警告。 */
+  private async applyCompletedEntries(
+    action: EntryBatchRequest["action"],
+    changes: EntryBatchResult["completed"],
+    panes: readonly ReaderPane[],
+    before: readonly (string | null)[],
+  ): Promise<void> {
+    const map = (path: string) => mapEntryPath(path, changes);
+    for (const pane of panes) {
+      for (const change of changes) pane.history.remapPath(change.from, change.to);
+      if (pane.currentStep !== null) {
+        const path = map(pane.currentStep.path);
+        pane.currentStep = path === null ? null : { ...pane.currentStep, path };
+      }
+    }
+    const views = mapViewModes(this.viewModes, map);
+    if (views !== null) {
+      this.clearViewModes();
+      Object.assign(this.viewModes, views);
+    }
+    this.recent = mapPathList(this.recent, map) ?? this.recent;
+    this.fileTree.remap(map);
+    this.persistViewModes();
+    this.persistRecentFiles();
+    for (const [index, pane] of panes.entries()) {
+      const oldPath = before[index] ?? null;
+      const path = oldPath === null ? null : map(oldPath);
+      if (path === null) pane.clearDocument();
+      else if (path !== oldPath || action === "move") await pane.loadFile(path);
+    }
+    await this.refreshList();
+    await this.persistDocuments();
+  }
+
   /** 由主进程定位库内条目，错误通过工作区提示。 */
   revealEntry = async (path: string): Promise<void> => {
     try {
@@ -713,11 +859,14 @@ export class ReaderWorkspaceController {
     let after: Array<string | null> = before;
     try {
       const completed = await this.withAllPanesSaved(async () => {
+        this.listRequest += 1;
+        await this.fileTree.flush();
         after = panes.map((pane, index) => nextPath(pane, before[index] ?? null));
         const result = await operation();
         committed = true;
         // 阅读栈与视图记忆跟随改名/移动；删除的条目直接移除。
         if (remapHistory !== null) {
+          this.fileTree.remap((path) => nextPath(this.activePane, path));
           for (const pane of panes) {
             remapHistory(pane.history);
             if (pane.currentStep !== null) {
@@ -793,12 +942,21 @@ export class ReaderWorkspaceController {
   }
 
   /** 组合当前分栏状态并持久化；失败抛给调用方决定可见性。 */
-  persistDocuments(): Promise<void> {
+  async persistDocuments(): Promise<void> {
+    // 文档身份先于编辑器 DOM 更新；等换面完成后再捕获，不能把旧文档位置写给新路径。
+    await tick();
     return this.api.sessionSetDocuments({
-      panes: this.paneList.map((pane) => ({
-        currentPath: pane.document.path,
-        history: pane.history.snapshot(),
-      })),
+      panes: this.paneList.map((pane) => {
+        const position =
+          pane.document.path === null
+            ? null
+            : parseReadingBookmark(pane.navigation.capturePosition()?.reading);
+        return {
+          currentPath: pane.document.path,
+          history: pane.history.snapshot(),
+          ...(position == null ? {} : { position }),
+        };
+      }),
       active: Math.max(
         0,
         this.paneList.findIndex((pane) => pane.id === this.activeId),
@@ -922,9 +1080,12 @@ export class ReaderWorkspaceController {
   async refreshList(): Promise<void> {
     const root = this.root;
     const generation = this.listGeneration;
+    const request = ++this.listRequest;
     const files = await this.api.vaultEntries();
-    if (root !== this.root || generation !== this.listGeneration) return;
+    if (root !== this.root || generation !== this.listGeneration || request !== this.listRequest)
+      return;
     this.listed = files;
+    this.fileTree.reconcile(files);
     this.revision += 1;
     this.refreshNoteKeys();
     void this.bookmarks.reload();

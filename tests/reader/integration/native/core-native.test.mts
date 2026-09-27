@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "vitest";
 import { Worker } from "node:worker_threads";
 import { CoreClient } from "../../../../apps/desktop/src/main/core-client";
-import type { VaultEvent } from "../../../../apps/desktop/src/features/reader/shared/api";
-import { createHash } from "node:crypto";
+import type { SearchQuery, VaultEvent } from "../../../../apps/desktop/src/features/reader/shared/api";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const workerUrl = new URL("../../../../apps/desktop/out/main/core-worker.js", import.meta.url);
 const bytes = (text: string) => new TextEncoder().encode(text);
@@ -15,6 +18,172 @@ const text = (data: Uint8Array | null): string => {
   assert.ok(data, "此场景应返回文件内容");
   return new TextDecoder().decode(data);
 };
+
+async function search(core: CoreClient, query: SearchQuery) {
+  return (await core.call("searchQuery", query, randomUUID(), null)).hits;
+}
+
+test("单篇命中按需读取，与文件续页并行，取消后迟到展开不能复活旧会话", async (t) => {
+  const {
+    roots: [root],
+    start,
+  } = await fixture(t);
+  await Promise.all(
+    ["a.md", "b.md", "c.md"].map((path) => writeFile(join(root, path), "needle\n".repeat(26))),
+  );
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  const query: SearchQuery = { expr: { kind: "term", value: "needle" }, limit: 2 };
+  const first = await core.call("searchQuery", query, "same-session", null);
+  assert.equal(first.hits.length, 2);
+  for (const hit of first.hits) {
+    assert.equal(hit.matchCount, 26);
+    assert.equal(hit.matches.length, 5);
+    assert.ok(hit.matchesCursor);
+  }
+  assert.ok(first.nextCursor);
+  const cursors = first.hits.map((hit) => {
+    assert.ok(hit.matchesCursor);
+    return hit.matchesCursor;
+  });
+  const expansions = cursors.map((cursor) =>
+    core.call("searchMatches", query, "same-session", cursor),
+  );
+  const files = core.call("searchQuery", query, "same-session", first.nextCursor);
+  const pages = await Promise.all(expansions);
+  assert.equal((await files).hits.length, 1);
+  for (const page of pages) {
+    assert.equal(page.matches.length, 20);
+    assert.ok(page.nextCursor);
+    const last = await core.call("searchMatches", query, "same-session", page.nextCursor);
+    assert.equal(last.matches.length, 1);
+    assert.equal(last.matches[0]?.location?.line, 26);
+    assert.equal(last.nextCursor, null);
+  }
+  const latest = core.call("searchQuery", query, "new-session", null);
+  await assert.rejects(
+    core.call("searchMatches", query, "same-session", cursors[0]!),
+    /搜索已取消/,
+  );
+  assert.equal((await latest).hits.length, 2);
+  await core.call("searchCancel", "new-session");
+  await assert.rejects(core.call("searchMatches", query, "new-session", cursors[0]!), /搜索已取消/);
+});
+
+for (const mode of ["stop", "throw", "reenter"]) {
+  test(`原生移动批次 ${mode} 保留提交数、刷新索引并释放回调状态`, async (t) => {
+    const {
+      roots: [root],
+      userData,
+    } = await fixture(t);
+    await mkdir(join(root, "archive"));
+    await Promise.all([
+      writeFile(join(root, "a.md"), "[b](./b.md)\n"),
+      writeFile(join(root, "b.md"), "[a](./a.md)\n"),
+    ]);
+    // 独立进程的硬超时可以捕获原生锁重入死锁，不让整套测试跟随阻塞。
+    const script = `
+      const assert = require("node:assert/strict");
+      const native = require(process.argv[1]);
+      const mode = process.argv[4];
+      native.vaultOpen(process.argv[2], process.argv[3], () => {});
+      try {
+        const changes = ["a.md", "b.md"].map(from => ({ from, to: "archive/" + from }));
+        const seen = [];
+        const outcome = native.entryRenameBatch(changes, completed => {
+          seen.push(completed);
+          if (completed === 0) return true;
+          if (mode === "throw") throw new Error("observer failed");
+          if (mode === "reenter") native.vaultClose();
+          return false;
+        });
+        assert.deepEqual(seen, [0, 1]);
+        assert.equal(outcome.completed, 1);
+        assert.equal(outcome.warning, undefined);
+        if (mode === "stop") assert.equal(outcome.issue, undefined);
+        else assert.match(outcome.issue.message, mode === "throw" ? /observer failed/ : /不能重新调用内核/);
+        assert.equal(native.indexLinksTo("archive/a.md").length, 1);
+        assert.deepEqual(native.vaultList(), ["archive/a.md", "b.md"]);
+        const retried = native.entryRenameBatch(changes.slice(outcome.completed), () => true);
+        assert.equal(retried.completed, 1);
+        assert.equal(retried.issue, undefined);
+        assert.equal(native.indexLinksTo("archive/b.md").length, 1);
+        assert.equal(Buffer.from(native.fileRead("archive/a.md")).toString(), "[b](./b.md)\\n");
+      } finally { native.vaultClose(); }
+    `;
+    await promisify(execFile)(
+      process.execPath,
+      [
+        "-e",
+        script,
+        fileURLToPath(new URL("../../../../crates/nous-napi/index.js", import.meta.url)),
+        root,
+        userData,
+        mode,
+      ],
+      { timeout: 10000 },
+    );
+  });
+}
+
+test("真实异步搜索允许保存并响应取消、替换、切库与停机", async (t) => {
+  const { roots: [root, other], start } = await fixture(t);
+  await Promise.all(Array.from({ length: 32 }, (_, index) => writeFile(join(root, `${index}.md`), "a".repeat(128_000))));
+  await writeFile(join(other, "other.md"), "otherword");
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  const slow: SearchQuery = { expr: { kind: "or", children: [
+    { kind: "term", value: `${"a".repeat(1024)}b` }, { kind: "regex", value: "absent" },
+  ] }, limit: 100 };
+  const pending = core.call("searchQuery", slow, "cancel-me", null);
+  const cancelled = assert.rejects(pending, /搜索已取消/);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const saved = await core.call("fileWrite", "saved.md", bytes("savedword"), null);
+  assert.equal(saved.status, "saved");
+  await core.call("searchCancel", "cancel-me");
+  await cancelled;
+
+  const replaced = assert.rejects(core.call("searchQuery", slow, "old-query", null), /搜索已取消/);
+  const latest = core.call("searchQuery", { expr: { kind: "term", value: "savedword" }, limit: 10 }, "new-query", null);
+  await core.call("searchCancel", "old-query");
+  assert.deepEqual((await latest).hits.map((hit) => hit.path), ["saved.md"]);
+  await replaced;
+
+  const switched = assert.rejects(core.call("searchQuery", slow, "old-vault", null), /搜索已取消/);
+  await core.call("vaultOpen", other);
+  await switched;
+  assert.deepEqual((await search(core, { expr: { kind: "term", value: "otherword" }, limit: 10 })).map((hit) => hit.path), ["other.md"]);
+
+  await core.call("vaultOpen", root);
+  const stopped = assert.rejects(core.call("searchQuery", slow, "closing", null), /搜索已取消/);
+  const write = core.call("fileWrite", "final.md", bytes("finalword"), null);
+  await core.shutdown();
+  assert.equal((await write).status, "saved");
+  await stopped;
+  assert.equal(await readFile(join(root, "final.md"), "utf8"), "finalword");
+}, 20000);
+
+test("原生分页无重复，版本变化拒绝旧游标", async (t) => {
+  const { roots: [root], start } = await fixture(t);
+  await Promise.all(Array.from({ length: 7 }, (_, index) => writeFile(join(root, `${index}.md`), index === 6 ? "量子" : "archive")));
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  const query: SearchQuery = { expr: { kind: "or", children: [
+    { kind: "term", value: "archive" }, { kind: "term", value: "量子" },
+  ] }, limit: 3 };
+  const first = await core.call("searchQuery", query, "paging", null);
+  assert.equal(first.hits.length, 3);
+  assert.ok(first.nextCursor);
+  const second = await core.call("searchQuery", query, "paging", first.nextCursor);
+  assert.equal(second.hits.length, 3);
+  assert.ok(second.nextCursor);
+  const last = await core.call("searchQuery", query, "paging", second.nextCursor);
+  assert.equal(last.hits.length, 1);
+  assert.equal(last.nextCursor, null);
+  assert.equal(new Set([...first.hits, ...second.hits, ...last.hits].map((hit) => hit.path)).size, 7);
+  await core.call("fileWrite", "new.md", bytes("archive"), null);
+  await assert.rejects(core.call("searchQuery", query, "paging", first.nextCursor), /笔记库已更新/);
+});
 
 async function fixture(t: TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "nous-core-worker-"));
@@ -298,6 +467,7 @@ test("queued writes stay in their original vault and shutdown drains the final s
     documents: { panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }], active: 0, split: false },
     viewModes: {},
     recentFiles: [],
+    fileTree: null,
   });
   assert.equal((await restored.call("readerSessionLoad")).filesCollapsed, true);
   const panes = await restored.call("readerSessionLoad");
@@ -430,23 +600,31 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
 
   const term = (value: string) => ({ expr: { kind: "term" as const, value }, limit: 100 });
   const tag = (value: string) => ({ expr: { kind: "tag" as const, value }, limit: 100 });
-  // 长词走 trigram MATCH；命中标题的文件排在仅命中正文之前。
-  const fulltext = await core.call("searchQuery", term("全文检索"));
+  // 长词使用带位置的三字片段；标题命中具有更高排名权重。
+  const fulltext = await search(core, term("全文检索"));
   assert.deepEqual(
     fulltext.map((hit) => hit.path),
     ["note.md"],
   );
   assert.ok(fulltext[0]?.snippet.includes("全文检索"));
   assert.equal(fulltext[0]?.title, "设计笔记");
-  // 1 字中文短词走 LIKE 回落，结果一致。
-  const short = await core.call("searchQuery", term("笔"));
+  assert.match(fulltext[0]?.contentHash ?? "", /^[a-f0-9]{64}$/);
+  const location = fulltext[0]?.matches[0]?.location;
+  assert.ok(location);
+  assert.equal(
+    Buffer.from(source).subarray(location.startByte, location.endByte).toString(),
+    "全文检索",
+  );
+  assert.equal(location.line, 8);
+  // 1 字中文短词走单字倒排，结果一致。
+  const short = await search(core, term("笔"));
   assert.deepEqual(
     short.map((hit) => hit.path),
     ["note.md"],
   );
   // 标签谓词：frontmatter 与行内标签同表可查。
   for (const name of ["project", "inline-tag", "#PROJECT"]) {
-    const hits = await core.call("searchQuery", tag(name));
+    const hits = await search(core, tag(name));
     assert.deepEqual(
       hits.map((hit) => hit.path),
       ["note.md"],
@@ -454,12 +632,12 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
     );
   }
   // 属性谓词大小写不敏感。
-  const byAttribute = await core.call("searchQuery", {
+  const byAttribute = await search(core, {
     expr: { kind: "attr", key: "STATUS", value: "Draft" },
     limit: 100,
   });
   // 表达式树穿过原生线程：OR、取反与正则组合。
-  const composed = await core.call("searchQuery", {
+  const composed = await search(core, {
     expr: {
       kind: "or",
       children: [
@@ -471,7 +649,7 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
   });
   assert.deepEqual(composed.map((hit) => hit.path).sort(), ["note.md", "other.md"]);
   await assert.rejects(
-    core.call("searchQuery", { expr: { kind: "regex", value: "(" }, limit: 100 }),
+    search(core, { expr: { kind: "regex", value: "(" }, limit: 100 }),
     /正则表达式无效/,
   );
   assert.deepEqual(
@@ -508,12 +686,12 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
     status: "saved",
     warning: null,
   });
-  assert.deepEqual(await core.call("searchQuery", term("全文检索")), []);
+  assert.deepEqual(await search(core, term("全文检索")), []);
   assert.deepEqual(
-    (await core.call("searchQuery", term("重写之后"))).map((hit) => hit.path),
+    (await search(core, term("重写之后"))).map((hit) => hit.path),
     ["note.md"],
   );
-  assert.deepEqual(await core.call("searchQuery", tag("project")), []);
+  assert.deepEqual(await search(core, tag("project")), []);
   assert.deepEqual(
     (await core.call("indexHeadings", "note.md")).map((heading) => heading.text),
     ["设计笔记"],

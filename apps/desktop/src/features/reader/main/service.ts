@@ -15,7 +15,8 @@ import type {
   RenameOutcome,
   SavedCopy,
   SearchExpr,
-  SearchHit,
+  SearchPage,
+  SearchMatchesPage,
   SearchQuery,
   TagCount,
   VaultRestore,
@@ -25,6 +26,14 @@ import type {
   VaultGraph,
 } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
+import { createSerialEntryBatchRunner, executeEntryBatch } from "./entry-batch";
+import { EntryBatchControl } from "./entry-batch-control";
+import {
+  parseEntryBatchRequest,
+  mapEntryPath,
+  type EntryBatchRequest,
+} from "../shared/entry-batch";
+import { mapFileTreeState, parseFileTreeState, type FileTreeState } from "../shared/file-browser";
 import { parseAttachmentRequest, parseImportedAttachment } from "../shared/attachments";
 import { parseDraftRequest } from "../shared/editor-recovery";
 import type {
@@ -45,11 +54,16 @@ import {
   parseLinkTarget,
   parseMentions,
   parseNoteKeys,
-  parseSearchHits,
+  parseSearchPage,
+  parseSearchId,
+  parseSearchCursor,
+  parseSearchMatchesCursor,
+  parseSearchMatchesPage,
   parseSearchQueryArgument,
   parseTagCounts,
   parseWriteResult,
   parseSavedCopy,
+  parseVaultEntries,
 } from "../shared/reader-protocol";
 
 const require = createRequire(import.meta.url);
@@ -178,7 +192,7 @@ function mapSessionDocuments(
 }
 
 /**
- * 创建仅由工作线程使用的同步内核服务，所有命令共用同一库与会话。
+ * 创建仅由工作线程使用的内核服务；写入同步提交，搜索在原生后台任务中执行。
  *
  * @param userData 应用数据目录，不能由渲染进程指定。
  * @param onChanged 当前库的索引刷新通知；关闭或切库后丢弃旧回调。
@@ -194,6 +208,16 @@ export function createReaderService(
 ) {
   const native = require("@nous/native") as typeof NativeModule;
   let activeVault: object | null = null;
+
+  function listEntries(): VaultEntry[] {
+    return parseVaultEntries(
+      native.vaultEntries().map((entry) => ({
+        path: entry.path,
+        kind: entry.kind,
+        ...(entry.recoveryOnly ? { recoveryOnly: true } : {}),
+      })),
+    );
+  }
 
   function openVault(root: string): void {
     const vault = {};
@@ -214,6 +238,7 @@ export function createReaderService(
   function rememberEntryChange(
     warning: string | null,
     mapPath: (path: string) => string | null,
+    notify = true,
   ): RenameOutcome {
     try {
       const session = sessions.load();
@@ -221,19 +246,27 @@ export function createReaderService(
       const documents = mapSessionDocuments(session.documents, mapPath);
       const viewModes = mapViewModes(session.viewModes, mapPath);
       const recentFiles = mapPathList(session.recentFiles, mapPath);
-      if (documents !== null || viewModes !== null || recentFiles !== null)
+      const storedTree = parseFileTreeState(session.fileTree);
+      const fileTree = storedTree === null ? null : mapFileTreeState(storedTree, mapPath);
+      if (
+        documents !== null ||
+        viewModes !== null ||
+        recentFiles !== null ||
+        JSON.stringify(fileTree) !== JSON.stringify(storedTree)
+      )
         sessions.save({
           ...session,
           documents: documents ?? session.documents,
           viewModes: viewModes ?? session.viewModes,
           recentFiles: recentFiles ?? session.recentFiles,
+          ...(storedTree === null ? {} : { fileTree }),
         });
     } catch (error) {
       warning = [warning, `文件操作已完成，会话更新失败：${String(error)}`]
         .filter(Boolean)
         .join("；");
     }
-    onChanged({ status: "changed", paths: [], healthy: false });
+    if (notify) onChanged({ status: "changed", paths: [], healthy: false });
     return { warning };
   }
 
@@ -248,6 +281,7 @@ export function createReaderService(
         documents: emptySessionDocuments(),
         viewModes: {},
         recentFiles: [],
+        fileTree: null,
       });
       try {
         openVault(root);
@@ -271,6 +305,7 @@ export function createReaderService(
         documents: stored.documents,
         viewModes: stored.viewModes,
         recentFiles: stored.recentFiles,
+        fileTree: parseFileTreeState(stored.fileTree),
       };
     },
     vaultClose(): void {
@@ -281,14 +316,7 @@ export function createReaderService(
       return native.vaultList();
     },
     vaultEntries(): VaultEntry[] {
-      return native.vaultEntries().map((entry) => {
-        if (entry.kind !== "file" && entry.kind !== "directory") throw new Error("未知条目类型");
-        return {
-          path: entry.path,
-          kind: entry.kind,
-          ...(entry.recoveryOnly ? { recoveryOnly: true as const } : {}),
-        };
-      });
+      return listEntries();
     },
     entryCreate(path: string, kind: VaultEntry["kind"], content?: Uint8Array): RenameOutcome {
       return rememberEntryChange(
@@ -301,6 +329,33 @@ export function createReaderService(
       return rememberEntryChange(native.entryTrash(path).warning ?? null, (current) =>
         current === path || current.startsWith(`${path}/`) ? null : current,
       );
+    },
+    entryBatch(value: EntryBatchRequest, control?: SharedArrayBuffer) {
+      const request = parseEntryBatchRequest(value);
+      if (activeVault === null || sessions.load().vaultRoot !== request.root)
+        throw new Error("笔记库已切换，请重新选择条目");
+      const entries = listEntries();
+      const result = executeEntryBatch(
+        entries,
+        request,
+        request.action === "move"
+          ? (changes, progress) => {
+              const outcome = native.entryRenameBatch(
+                changes.map(({ from, to }) => ({ from, ...(to === null ? {} : { to }) })),
+                progress,
+              );
+              return { ...outcome, issue: outcome.issue ?? null, warning: outcome.warning ?? null };
+            }
+          : createSerialEntryBatchRunner(
+              (changes) => native.entryCheckBatch(changes.map(({ from }) => ({ from }))),
+              (change) => ({ warning: native.entryTrash(change.from).warning ?? null }),
+            ),
+        (change) => rememberEntryChange(null, (path) => mapEntryPath(path, [change]), false),
+        control === undefined ? undefined : new EntryBatchControl(control),
+      );
+      if (result.completed.length > 0)
+        onChanged({ status: "changed", paths: [], healthy: result.warning === null });
+      return result;
     },
     entryPath(path: string): string {
       return native.entryPath(path);
@@ -326,6 +381,11 @@ export function createReaderService(
     },
     readerSessionPatch(patch: Partial<ReaderSession>): void {
       sessions.save({ ...sessions.load(), ...patch });
+    },
+    readerFileTreeSave(root: string, state: FileTreeState): void {
+      const session = sessions.load();
+      if (session.vaultRoot !== root) throw new Error("笔记库已切换，忽略旧目录状态");
+      sessions.save({ ...session, fileTree: state });
     },
     fileRead(rel: string): Uint8Array {
       return new Uint8Array(parseFileBytes(native.fileRead(rel)));
@@ -413,10 +473,31 @@ export function createReaderService(
         warning: native.mentionsLinkify(from, startByte, endByte, expected, target).warning ?? null,
       });
     },
-    searchQuery(query: SearchQuery): SearchHit[] {
+    async searchQuery(query: SearchQuery, id: string, cursor: string | null): Promise<SearchPage> {
       const request = parseSearchQueryArgument(query);
-      return parseSearchHits(
-        native.searchQuery({ expr: nativeSearchExpr(request.expr), limit: request.limit }),
+      return parseSearchPage(
+        await native.searchQuery(
+          { expr: nativeSearchExpr(request.expr), limit: request.limit },
+          parseSearchId(id),
+          parseSearchCursor(cursor),
+        ),
+      );
+    },
+    searchCancel(id: string): void {
+      native.searchCancel(parseSearchId(id));
+    },
+    async searchMatches(
+      query: SearchQuery,
+      id: string,
+      cursor: string,
+    ): Promise<SearchMatchesPage> {
+      const request = parseSearchQueryArgument(query);
+      return parseSearchMatchesPage(
+        await native.searchMatches(
+          { expr: nativeSearchExpr(request.expr), limit: request.limit },
+          parseSearchId(id),
+          parseSearchMatchesCursor(cursor),
+        ),
       );
     },
     indexHeadings(path: string): HeadingRecord[] {
