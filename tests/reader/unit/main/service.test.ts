@@ -12,6 +12,9 @@ const { native, session } = vi.hoisted(() => ({
     indexMentionsTo: vi.fn(),
     searchQuery: vi.fn(),
     indexHeadings: vi.fn(),
+    indexNoteKeys: vi.fn(),
+    bookmarksList: vi.fn(),
+    bookmarksSet: vi.fn(),
     entryRename: vi.fn(),
     entryTrash: vi.fn(),
     entryCreate: vi.fn(),
@@ -45,7 +48,8 @@ beforeEach(() => {
     documents: documents("a.md"),
     filesCollapsed: false,
     leftWidth: 232,
-    sourceViews: [],
+    viewModes: {},
+    recentFiles: [],
   });
 });
 
@@ -79,7 +83,7 @@ describe("文件操作与会话提交", () => {
     expect(native.attachmentImport).toHaveBeenCalledTimes(1);
   });
 
-  it("移动父文件夹后会话跟随子文件，阅读栈与源码视图记忆同口径迁移，成功通知只触发一次", () => {
+  it("移动父文件夹后会话跟随子文件，阅读栈、源码视图记忆与最近列表同口径迁移，成功通知只触发一次", () => {
     session.loadSession.mockReturnValue({
       vaultRoot: "/notes",
       documents: documents("old/sub/note.md", {
@@ -89,7 +93,8 @@ describe("文件操作与会话提交", () => {
         ],
         forward: [{ path: "old/sub/note.md", anchor: null }],
       }),
-      sourceViews: ["old/sub/view.md"],
+      viewModes: { "old/sub/view.md": "source" },
+      recentFiles: ["old/a.md", "keep.md"],
     });
     native.entryRename.mockReturnValue({});
     const changed = vi.fn();
@@ -107,7 +112,8 @@ describe("文件操作与会话提交", () => {
         ],
         forward: [{ path: "new/sub/note.md", anchor: null }],
       }),
-      sourceViews: ["new/sub/view.md"],
+      viewModes: { "new/sub/view.md": "source" },
+      recentFiles: ["new/a.md", "keep.md"],
     });
     expect(changed).toHaveBeenCalledTimes(1);
   });
@@ -120,7 +126,8 @@ describe("文件操作与会话提交", () => {
     });
     session.loadSession.mockReturnValue({
       documents: documents("old-archive/note.md"),
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: ["old-archive/note.md"],
     });
     service.entryTrash("old");
     expect(session.saveSession).not.toHaveBeenCalled();
@@ -129,19 +136,22 @@ describe("文件操作与会话提交", () => {
         back: [{ path: "old/sub/other.md", anchor: null }],
         forward: [],
       }),
-      sourceViews: ["old/sub/view.md"],
+      viewModes: { "old/sub/view.md": "source" },
+      recentFiles: ["old/sub/other.md", "old-archive/note.md"],
     });
     service.entryTrash("old");
     expect(session.saveSession).toHaveBeenCalledWith({
       documents: documents(null),
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: ["old-archive/note.md"],
     });
   });
 
   it("会话写入失败作为提交后警告，不把已经移动的文件报告成失败", () => {
     session.loadSession.mockReturnValue({
       documents: documents("old/note.md"),
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: [],
     });
     session.saveSession.mockImplementationOnce(() => {
       throw new Error("disk full");
@@ -195,10 +205,14 @@ it("检索条件与结果在工作线程边界结构化校验，损坏行不冒�
     save: session.saveSession,
   });
   const query = {
-    terms: ["全文"],
-    tags: ["标签"],
-    attributes: [{ key: "status", value: "draft" }],
-    pathContains: null,
+    expr: {
+      kind: "and" as const,
+      children: [
+        { kind: "term" as const, value: "全文" },
+        { kind: "line" as const, child: { kind: "tag" as const, value: "标签" } },
+        { kind: "attr" as const, key: "status", value: null },
+      ],
+    },
     limit: 10,
   };
   native.searchQuery.mockReturnValue([
@@ -207,11 +221,23 @@ it("检索条件与结果在工作线程边界结构化校验，损坏行不冒�
   expect(service.searchQuery(query)).toEqual([
     { path: "notes/a.md", title: "A", snippet: "命中\u{1}全文\u{2}词" },
   ]);
-  // null 路径过滤转换成原生层的 undefined；条件原样透传。
-  expect(native.searchQuery).toHaveBeenCalledWith({ ...query, pathContains: undefined });
+  // 单子条件转为 children 列表；属性值为 null 时省略 value 键。
+  expect(native.searchQuery).toHaveBeenCalledWith({
+    expr: {
+      kind: "and",
+      children: [
+        { kind: "term", value: "全文" },
+        { kind: "line", children: [{ kind: "tag", value: "标签" }] },
+        { kind: "attr", key: "status" },
+      ],
+    },
+    limit: 10,
+  });
   native.searchQuery.mockReturnValue([{ path: "../逃逸.md", title: "A", snippet: "" }]);
   expect(() => service.searchQuery(query)).toThrow("检索命中");
-  expect(() => service.searchQuery({ ...query, terms: "全文" } as never)).toThrow("全文词");
+  expect(() =>
+    service.searchQuery({ expr: { kind: "term", value: 1 }, limit: 10 } as never),
+  ).toThrow("文本");
   native.indexHeadings.mockReturnValue([
     { path: "a.md", level: 2, text: "标题", startByte: 0, endByte: 9 },
   ]);
@@ -222,6 +248,54 @@ it("检索条件与结果在工作线程边界结构化校验，损坏行不冒�
     { path: "a.md", level: 0, text: "标题", startByte: 0, endByte: 9 },
   ]);
   expect(() => service.indexHeadings("a.md")).toThrow("标题索引");
+});
+
+it("笔记身份在工作线程边界校验，切库清空最近列表", () => {
+  const service = createReaderService("/state", vi.fn(), {
+    load: session.loadSession,
+    save: session.saveSession,
+  });
+  native.indexNoteKeys.mockReturnValue([{ path: "a.md", title: "甲", aliases: ["别名"] }]);
+  expect(service.indexNoteKeys()).toEqual([{ path: "a.md", title: "甲", aliases: ["别名"] }]);
+  native.indexNoteKeys.mockReturnValue([{ path: "a.md", title: 1, aliases: [] }]);
+  expect(() => service.indexNoteKeys()).toThrow("笔记身份");
+  session.loadSession.mockReturnValue({
+    vaultRoot: "/first",
+    documents: documents("a.md"),
+    filesCollapsed: false,
+    leftWidth: 232,
+    viewModes: { "a.md": "reading" },
+    recentFiles: ["a.md"],
+  });
+  service.vaultOpen("/second");
+  expect(session.saveSession).toHaveBeenCalledWith(
+    expect.objectContaining({ vaultRoot: "/second", viewModes: {}, recentFiles: [] }),
+  );
+});
+
+it("书签在原生扁平对象与渲染层联合类型之间双向转换，缺省字段省略键", () => {
+  const service = createReaderService("/state", vi.fn(), {
+    load: session.loadSession,
+    save: session.saveSession,
+  });
+  native.bookmarksList.mockReturnValue([
+    { kind: "file", path: "a.md" },
+    { kind: "search", query: "tag:#x", title: "标签" },
+  ]);
+  expect(service.bookmarksList()).toEqual([
+    { kind: "file", path: "a.md", title: null },
+    { kind: "search", query: "tag:#x", title: "标签" },
+  ]);
+  native.bookmarksList.mockReturnValue([{ kind: "folder" }]);
+  expect(() => service.bookmarksList()).toThrow("书签");
+  service.bookmarksSet([
+    { kind: "heading", path: "a.md", heading: "目标", title: null },
+    { kind: "folder", path: "docs", title: "文档" },
+  ]);
+  expect(native.bookmarksSet).toHaveBeenLastCalledWith([
+    { kind: "heading", path: "a.md", heading: "目标" },
+    { kind: "folder", path: "docs", title: "文档" },
+  ]);
 });
 
 it("原生层的错误字节不能被 Uint8Array 转换成空文档", () => {

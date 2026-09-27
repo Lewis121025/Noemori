@@ -21,7 +21,12 @@
       <ul>
         {#each groups.resolved as link, index (`r${index}:${link.startByte}`)}
           <li>
-            <button type="button" class="hit" onclick={() => onOpen(link)}>
+            <button
+              type="button"
+              class="hit"
+              data-preview-path={link.toPath}
+              onclick={() => onOpen(link)}
+            >
               <span class="raw">{link.toRaw}</span>
               {#if link.toPath !== link.toRaw}<span class="target">{link.toPath}</span>{/if}
             </button>

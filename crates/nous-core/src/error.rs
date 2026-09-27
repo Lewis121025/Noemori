@@ -24,6 +24,10 @@ pub enum Error {
     FileChanged { path: PathBuf },
     /// 改名恢复尚未完成，日志必须保留以便重试。
     RenameRecovery { detail: String },
+    /// 检索条件无法执行（如正则表达式无效）。
+    InvalidQuery { detail: String },
+    /// 书签文件损坏或书签内容不合法。
+    InvalidBookmarks { detail: String },
 }
 
 impl std::fmt::Display for Error {
@@ -37,6 +41,8 @@ impl std::fmt::Display for Error {
             Self::AlreadyExists { path } => write!(f, "目标已存在: {}", path.display()),
             Self::FileChanged { path } => write!(f, "文件已被外部修改: {}", path.display()),
             Self::RenameRecovery { detail } => write!(f, "改名恢复未完成：{detail}"),
+            Self::InvalidQuery { detail } => write!(f, "{detail}"),
+            Self::InvalidBookmarks { detail } => write!(f, "书签无效：{detail}"),
         }
     }
 }
@@ -50,7 +56,9 @@ impl std::error::Error for Error {
             | Self::NotFound { .. }
             | Self::AlreadyExists { .. }
             | Self::FileChanged { .. }
-            | Self::RenameRecovery { .. } => None,
+            | Self::RenameRecovery { .. }
+            | Self::InvalidQuery { .. }
+            | Self::InvalidBookmarks { .. } => None,
         }
     }
 }

@@ -53,6 +53,7 @@ vi.mock("electron", async () => {
       quit: vi.fn(),
     }),
     dialog: { showErrorBox: vi.fn() },
+    protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
     screen: {},
     nativeTheme: { themeSource: "system", shouldUseDarkColors: false },
   };
@@ -116,6 +117,13 @@ describe("main process worker lifetime", () => {
     call.mockResolvedValue({ window: null, appearance: "dark" });
     const { nativeTheme } = await start();
     expect(nativeTheme.themeSource).toBe("dark");
+  });
+  it("就绪前声明库内媒体协议，内核就绪后才接管请求", async () => {
+    const { protocol } = await start();
+    expect(protocol.registerSchemesAsPrivileged).toHaveBeenCalledWith([
+      expect.objectContaining({ scheme: "nous-vault" }),
+    ]);
+    expect(protocol.handle).toHaveBeenCalledWith("nous-vault", expect.any(Function));
   });
   it("flushes the editor before stopping and holds quit until the worker has exited", async () => {
     const stopped = deferred<void>();

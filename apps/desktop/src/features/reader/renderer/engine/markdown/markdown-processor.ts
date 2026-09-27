@@ -6,6 +6,7 @@ import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { remarkWiki, type WikiLink } from "./wiki";
+import { remarkObsidian } from "./obsidian";
 import type { Literal } from "mdast";
 
 /** 已确认的 Markdown 语法片段；不经过普通文本转义。 */
@@ -23,13 +24,14 @@ declare module "mdast" {
   }
 }
 
-/** 共用处理器；自定义片段只用于 wiki 语法和未提供富文本编辑的源码。 */
+/** 共用处理器；自定义片段只用于 wiki、Obsidian 方言和未提供富文本编辑的源码。 */
 export const markdownProcessor = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ["yaml", "toml"])
   .use(remarkGfm, { tablePipeAlign: false })
   .use(remarkMath)
   .use(remarkWiki)
+  .use(remarkObsidian)
   .use(remarkStringify, {
     bullet: "-",
     emphasis: "*",

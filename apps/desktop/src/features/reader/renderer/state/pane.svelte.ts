@@ -1,18 +1,31 @@
 import type { LinkKind, MentionRecord, ReaderApi } from "../../shared/api";
-import {
-  deadLinkCreatePath,
-  deadLinkSeed,
-  type DeadLinkOffer,
-} from "../engine/navigation/dead-link";
+import type { RememberedView } from "../../shared/session";
+import { deadLinkCreatePath, type DeadLinkOffer } from "../engine/navigation/dead-link";
 import { externalUrl, hasUrlScheme } from "../../shared/link-target";
 import type { AttachmentImporter } from "../../shared/attachments";
 import { createAutosave } from "../engine/document/autosave";
+import {
+  listSourceBlocks,
+  newBlockId,
+  takenBlockIds,
+  withBlockId,
+  type BlockCandidate,
+  type BlockTarget,
+} from "../engine/navigation/block-list";
 import { ReaderDocument } from "./document.svelte";
 import { ReaderHistory, type ReadingStep } from "./history.svelte";
 import { ReaderNavigation } from "./navigation.svelte";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Markdown 表面：排版（可编辑）、源码或阅读（只读排版）。 */
+export type ViewMode = "wysiwyg" | RememberedView;
+
+/** 保留 BOM 解码：块 ID 写回时 BOM 是文件字节的一部分。 */
+function decodeSource(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
 }
 
 /** 标题锚点与 `^` 块引用共用跳转失败文案。 */
@@ -49,9 +62,13 @@ export type PaneHost = {
   offerDeadLink(pane: ReaderPane, offer: DeadLinkOffer): void;
   /** 歧义候选选择（工作区级对话框）；记住来源栏。 */
   offerCandidates(pane: ReaderPane, paths: string[], anchor: string | null): void;
-  /** 源码视图记忆（按库内路径，跨栏共享）。 */
-  isSourceView(path: string): boolean;
-  setSourceView(path: string, source: boolean): void;
+  /** 文件成功载入本栏；工作区据此维护跨栏共享的最近打开列表。 */
+  noteOpened(path: string): void;
+  /** 冲刷打开着 `path` 的各栏；任一栏仍有未保存编辑时返回 false。 */
+  settlePath(path: string): Promise<boolean>;
+  /** 视图记忆（按库内路径，跨栏共享）；排版视图是默认值，记为 null。 */
+  viewModeOf(path: string): RememberedView | null;
+  setViewMode(path: string, mode: RememberedView | null): void;
   /** 分栏文档/阅读栈/布局的会话持久化；失败抛给调用方决定可见性。 */
   persistDocuments(): Promise<void>;
   /** 目录快照刷新。 */
@@ -81,7 +98,7 @@ export class ReaderPane {
   /** 本栏导航落点；进入阅读栈的下一个条目。 */
   currentStep: { path: string; anchor: string | null } | null = null;
   /** 本栏 Markdown 视图；默认排版。 */
-  view = $state<"wysiwyg" | "source">("wysiwyg");
+  view = $state<ViewMode>("wysiwyg");
   private transitioning = $state(false);
   private duplicating = $state(false);
   private idleWaiters: Array<() => void> = [];
@@ -123,7 +140,7 @@ export class ReaderPane {
     return !this.transitioning && !this.duplicating;
   }
   /** 当前 Markdown 文档的视图模式。 */
-  get viewMode(): "wysiwyg" | "source" {
+  get viewMode(): ViewMode {
     return this.view;
   }
 
@@ -278,41 +295,53 @@ export class ReaderPane {
     );
   }
 
+  /** 源码视图与排版/阅读视图之间切换（排版与阅读都回到排版）。 */
+  toggleViewMode = (): Promise<void> =>
+    this.switchView(this.view === "source" ? "wysiwyg" : "source");
+
+  /** 阅读视图与排版视图之间切换；从源码视图进入阅读视图同样交接文本。 */
+  toggleReadingMode = (): Promise<void> =>
+    this.switchView(this.view === "reading" ? "wysiwyg" : "reading");
+
   /**
-   * 切换排版/源码视图。
+   * 切换 Markdown 视图并记住选择。
    *
    * 排版文档模型是 Markdown 的有损投影；源码视图直接编辑字节，
    * 「排版表达不了的语法保存时被重写」由源码模式从构造上消除。
-   * 切换以当前活动表面的快照为交接文本：未保存编辑随文本带过去，
+   * 跨越源码边界时以当前活动表面的快照为交接文本：未保存编辑随文本带过去，
    * 保存基准与脏标记不变。存在无法保真保存的编辑（needsSourceRepair）
-   * 时拒绝切换——恢复记录属于排版会话，不能静默丢弃。
+   * 时拒绝进出源码——恢复记录属于排版会话，不能静默丢弃。
+   * 排版与阅读共用同一编辑器，只切换是否可编辑，不需要交接。
    */
-  toggleViewMode = async (): Promise<void> => {
+  private async switchView(target: ViewMode): Promise<void> {
     const path = this.document.path;
-    if (path === null || this.document.content?.kind !== "markdown") return;
+    if (path === null || this.document.content?.kind !== "markdown" || target === this.view) return;
     if (this.transitioning || this.duplicating || this.host.composing) return;
-    if (this.document.needsSourceRepair) {
+    const crossesSource = target === "source" || this.view === "source";
+    if (crossesSource && this.document.needsSourceRepair) {
       this.host.report("当前文档存在无法保真保存的编辑，请先处理保存问题再切换视图。");
       return;
     }
     try {
-      // 先冲刷挂起的保存；冲突失败时编辑随快照文本带到新表面。
-      await this.autosave.flush();
-      if (this.transitioning || this.duplicating || this.document.path !== path) return;
-      // ignoreBOM：BOM 是文件字节的一部分，切换视图必须原样带走。
-      const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
-        this.navigation.snapshot().bytes,
-      );
-      this.document.replaceSourceText(text);
-      this.view = this.view === "wysiwyg" ? "source" : "wysiwyg";
-      this.host.setSourceView(path, this.view === "source");
+      if (crossesSource) {
+        // 先冲刷挂起的保存；冲突失败时编辑随快照文本带到新表面。
+        await this.autosave.flush();
+        if (this.transitioning || this.duplicating || this.document.path !== path) return;
+        // ignoreBOM：BOM 是文件字节的一部分，切换视图必须原样带走。
+        const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+          this.navigation.snapshot().bytes,
+        );
+        this.document.replaceSourceText(text);
+      }
+      this.view = target;
+      this.host.setViewMode(path, target === "wysiwyg" ? null : target);
       // 新表面挂载在微任务里；尽力把焦点交过去，失败不打断切换。
       await Promise.resolve();
       this.navigation.focusEditor();
     } catch (error) {
       this.host.report(`切换视图失败：${errorText(error)}`, error);
     }
-  };
+  }
 
   /**
    * 补全弹层：解析链接目标并返回其标题文本。
@@ -330,6 +359,64 @@ export class ReaderPane {
       return headings.map((heading) => heading.text);
     } catch {
       return [];
+    }
+  };
+
+  /**
+   * 块补全的目标与块清单。
+   *
+   * 空目标或解析到本笔记时交给编辑器处理（包含未保存编辑）；其他笔记读磁盘源码。
+   * 死链、歧义与读取失败退化为 null，补全不弹错误。
+   */
+  suggestBlocks = async (target: string, kind: LinkKind): Promise<BlockTarget | null> => {
+    const from = this.document.path;
+    if (from === null) return null;
+    if (target.trim() === "") return { kind: "self" };
+    try {
+      const resolved = await this.api.linksResolve(from, target, kind);
+      if (resolved.status !== "resolved") return null;
+      if (resolved.path === from) return { kind: "self" };
+      const source = decodeSource(await this.api.fileRead(resolved.path));
+      return { kind: "file", path: resolved.path, blocks: listSourceBlocks(source) };
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * 确保其他笔记里的块带有 ID，返回可写进链接的 ID。
+   *
+   * 先冲刷打开着目标的分栏，再以读取时的字节为基准写入；块文字已变化或写入
+   * 冲突时报告原因并返回 null，调用方不插入链接。
+   */
+  ensureBlockId = async (path: string, block: BlockCandidate): Promise<string | null> => {
+    if (block.id !== null) return block.id;
+    try {
+      if (!(await this.host.settlePath(path))) {
+        this.host.report("目标笔记有未保存的编辑，请先处理后再引用其中的块。");
+        return null;
+      }
+      const bytes = await this.api.fileRead(path);
+      const source = decodeSource(bytes);
+      const blocks = listSourceBlocks(source);
+      const current = blocks[block.index];
+      if (current === undefined || current.text !== block.text) {
+        this.host.report("目标笔记已变化，请重新选择要引用的块。");
+        return null;
+      }
+      if (current.id !== null) return current.id;
+      const id = newBlockId(takenBlockIds(blocks));
+      const next = new TextEncoder().encode(withBlockId(source, current, id));
+      const result = await this.api.fileWrite(path, next, bytes);
+      if (result.status === "conflict") {
+        this.host.report("目标笔记刚被修改，块 ID 未写入，请重试。");
+        return null;
+      }
+      if (result.warning !== null) this.host.report(`块 ID 已写入。${result.warning}`);
+      return id;
+    } catch (error) {
+      this.host.report(`写入块 ID 失败：${errorText(error)}`, error);
+      return null;
     }
   };
 
@@ -374,7 +461,12 @@ export class ReaderPane {
     const path = this.document.path;
     const epoch = this.document.epoch;
     return (name, bytes) => {
-      if (root === null || path === null || epoch !== this.document.epoch || root !== this.host.vaultRoot)
+      if (
+        root === null ||
+        path === null ||
+        epoch !== this.document.epoch ||
+        root !== this.host.vaultRoot
+      )
         return Promise.reject(new Error("文档已切换，请回到原笔记重新插入附件"));
       return this.api.attachmentImport(root, path, name, bytes);
     };
@@ -492,15 +584,16 @@ export class ReaderPane {
    */
   async loadFile(path: string): Promise<void> {
     this.document.load(path, await this.api.fileSnapshot(path));
-    // 恢复记录属于排版会话；带恢复记录的文件强制排版视图，
+    this.host.noteOpened(path);
+    // 恢复记录属于排版会话；带恢复记录的文件不进源码视图，
     // 否则记住的源码视图会让未写入磁盘的编辑静默缺席。
+    const remembered = this.host.viewModeOf(path);
     this.view =
-      this.host.isSourceView(path) && !this.document.needsSourceRepair ? "source" : "wysiwyg";
+      remembered === null || (remembered === "source" && this.document.needsSourceRepair)
+        ? "wysiwyg"
+        : remembered;
     this.navigation.resetReferences();
-    this.host.announce(
-      this,
-      this.document.dirty ? "已恢复上次未保存的编辑，请检查后保存。" : "",
-    );
+    this.host.announce(this, this.document.dirty ? "已恢复上次未保存的编辑，请检查后保存。" : "");
     await this.host.persistDocuments();
     await this.refreshReferences();
   }

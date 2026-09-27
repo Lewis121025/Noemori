@@ -5,7 +5,7 @@
  */
 
 import type { ImportedAttachment } from "./attachments";
-import type { SessionDocuments } from "./session";
+import type { SessionDocuments, ViewModes } from "./session";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
 export type HistoryAction = "undo" | "redo";
@@ -13,19 +13,7 @@ export type HistoryAction = "undo" | "redo";
 /** 当前输入表面的历史可用性；只从编辑器或原生控件派生，不存储撤销记录。 */
 export type HistoryAvailability = Readonly<{ undo: boolean; redo: boolean }>;
 
-/** 阅读器提供的用户动作；外壳可以通过菜单调用，不直接接触编辑状态。 */
-export type ReaderCommand =
-  | "open-vault"
-  | "new-note"
-  | "new-folder"
-  | "save"
-  | "find"
-  | "find-files"
-  | "toggle-files"
-  | "insert-attachment"
-  | "go-back"
-  | "go-forward"
-  | "toggle-source";
+export type { ReaderCommand } from "./commands";
 
 /** 链接语法。 */
 export type LinkKind = "wiki" | "md";
@@ -126,16 +114,23 @@ export type Mentions = {
   unlinked: MentionRecord[];
 };
 
-/** 结构化检索条件；由查询文本在渲染层解析而来，各字段之间是 AND 关系。 */
+/**
+ * 检索表达式；由查询文本在渲染层解析而来。
+ *
+ * - `and`/`or`：子条件全部/任一满足；空 `and` 表示没有条件。
+ * - `not`：子条件不满足；`line`/`section`：某一行/某个标题段满足子条件。
+ * - `term`：标题或正文里大小写不敏感的子串；`regex`：正则匹配。
+ * - `tag`/`attr`/`path`/`file`：整篇级谓词（标签含嵌套子标签；属性值为 `null` 只要求键存在）。
+ */
+export type SearchExpr =
+  | { kind: "and" | "or"; children: SearchExpr[] }
+  | { kind: "not" | "line" | "section"; child: SearchExpr }
+  | { kind: "term" | "regex" | "tag" | "path" | "file"; value: string }
+  | { kind: "attr"; key: string; value: string | null };
+
+/** 一次检索：表达式与结果上限。 */
 export type SearchQuery = {
-  /** 全文词；大小写不敏感子串匹配。 */
-  terms: string[];
-  /** 标签谓词；祖先标签前缀匹配嵌套子标签。 */
-  tags: string[];
-  /** frontmatter 属性谓词；键值均大小写不敏感精确匹配。 */
-  attributes: { key: string; value: string }[];
-  /** 路径子串过滤；`null` 表示不过滤。 */
-  pathContains: string | null;
+  expr: SearchExpr;
   /** 结果上限；非正数由内核取默认值。 */
   limit: number;
 };
@@ -156,6 +151,34 @@ export type TagCount = {
   tag: string;
   /** 携带该标签的文件数。 */
   count: number;
+};
+
+/**
+ * 图谱节点。笔记的 `path` 是库内相对路径；死链节点（`dead`）的 `path`
+ * 是去掉锚点后的链接目标原文，只能当作 wiki 目标重新解析，不能直接读盘。
+ */
+export type GraphNode = { path: string; title: string; tags: string[]; dead: boolean };
+
+/** 两个节点之间的有向边；`count` 为这对起止之间的链接条数（≥ 1）。 */
+export type GraphEdge = { from: string; to: string; count: number };
+
+/** 全库关系图谱；节点按路径升序，边只引用已列出的节点。 */
+export type VaultGraph = { nodes: GraphNode[]; edges: GraphEdge[] };
+
+/** 一条书签；存放在库内，随库同步。`title` 为空时界面按目标生成显示名。 */
+export type Bookmark =
+  | { kind: "file" | "folder"; path: string; title: string | null }
+  | { kind: "heading"; path: string; heading: string; title: string | null }
+  | { kind: "search"; query: string; title: string | null };
+
+/** 一篇笔记可被点名的身份，供快速切换器与别名补全匹配。 */
+export type NoteKeys = {
+  /** 库内相对路径。 */
+  path: string;
+  /** 展示标题：文首一级标题，缺失时为文件名词干。 */
+  title: string;
+  /** frontmatter 别名，按书写顺序。 */
+  aliases: string[];
 };
 
 /** 索引里的一条标题记录。 */
@@ -197,8 +220,10 @@ export type VaultRestore = {
   root: string;
   /** 上次会话的分栏文档与阅读栈；渲染端按当前文件列表过滤失效条目。 */
   documents: SessionDocuments;
-  /** 上次会话记住源码视图的文件路径。 */
-  sourceViews: string[];
+  /** 上次会话按文件记住的源码或阅读视图。 */
+  viewModes: ViewModes;
+  /** 上次会话的最近打开列表，最新在前；渲染端按当前文件列表过滤失效条目。 */
+  recentFiles: string[];
 };
 
 /** 打开文件时同时取回尚未提交的编辑，删除后的文件也能恢复。 */
@@ -245,8 +270,10 @@ export type ReaderApi = {
   vaultRestore: () => Promise<VaultRestore | null>;
   /** 持久化各分栏的当前文档、阅读栈与分栏布局；路径与条目由主进程校验。 */
   sessionSetDocuments: (documents: SessionDocuments) => Promise<void>;
-  /** 持久化源码视图记忆；损坏条目由会话解析丢弃。 */
-  sessionSetSourceViews: (paths: string[]) => Promise<void>;
+  /** 持久化视图记忆（源码/阅读）；损坏条目由会话解析丢弃。 */
+  sessionSetViewModes: (modes: ViewModes) => Promise<void>;
+  /** 持久化最近打开列表（最新在前）；损坏条目由会话解析丢弃。 */
+  sessionSetRecentFiles: (paths: string[]) => Promise<void>;
   /** 读取文件栏布局（宽度、收起）。 */
   sessionGetPanes: () => Promise<PaneLayout>;
   /** 记住文件栏布局；不能经此改库路径或当前文件。 */
@@ -321,6 +348,14 @@ export type ReaderApi = {
   indexHeadings: (path: string) => Promise<HeadingRecord[]>;
   /** 全库标签及计数，标签升序；供标签浏览面板。 */
   indexTags: () => Promise<TagCount[]>;
+  /** 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。 */
+  indexNoteKeys: () => Promise<NoteKeys[]>;
+  /** 全库关系图谱；`includeDead` 为真时死链目标作为虚节点出现。 */
+  indexGraph: (includeDead: boolean) => Promise<VaultGraph>;
+  /** 读出库内书签；书签文件损坏时拒绝，界面显示原因。 */
+  bookmarksList: () => Promise<Bookmark[]>;
+  /** 整体替换书签清单；损坏的旧文件先备份再覆盖。 */
+  bookmarksSet: (items: Bookmark[]) => Promise<void>;
   /** 改名并更新链接。 */
   entryRename: (from: string, to: string) => Promise<RenameOutcome>;
   /**

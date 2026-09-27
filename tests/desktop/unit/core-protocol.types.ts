@@ -38,10 +38,7 @@ void mentions;
 client.call("indexMentionsTo");
 
 const hits: Promise<SearchHit[]> = client.call("searchQuery", {
-  terms: ["全文"],
-  tags: [],
-  attributes: [],
-  pathContains: null,
+  expr: { kind: "term", value: "全文" },
   limit: 100,
 });
 void hits;

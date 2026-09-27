@@ -43,6 +43,8 @@ export type MarkdownEditorApi = {
    * @returns 是否找到并跳转；调用方据此提示锚点失效。
    */
   jumpToHeading: (anchor: string) => boolean;
+  /** 选区所在章节的标题文本（大纲同一口径）；选区在首个标题之前时为 `null`。 */
+  currentHeading: () => string | null;
 };
 
 /** 代码表面：返回缓冲区内的纯文本，并按字节跳转。 */

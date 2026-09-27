@@ -243,23 +243,26 @@ export declare function indexMentionsTo(path: string): JsMentions
  * 未打开库、目标不在库内、区间过期或写盘失败。
  */
 export declare function mentionsLinkify(from: string, startByte: number, endByte: number, expected: string, target: string): JsRenameOutcome
-/** 属性谓词：frontmatter 键值对，键值均大小写不敏感精确匹配。 */
-export interface JsSearchAttribute {
-  /** 属性名，保留原文大小写。 */
-  key: string
-  /** 属性值。 */
-  value: string
+/**
+ * 检索表达式节点；查询文本解析在渲染层完成。
+ *
+ * `kind` 为 `and`/`or`（`children` 为子条件）、`not`/`line`/`section`（恰好一个子条件）、
+ * `term`/`regex`/`tag`/`path`/`file`（`value` 为文本）或 `attr`（`key` 必填，`value` 可缺）。
+ */
+export interface JsSearchExpr {
+  /** 节点种类。 */
+  kind: string
+  /** 文本值；属性节点缺失表示只要求键存在。 */
+  value?: string
+  /** 属性名；只用于 `attr`。 */
+  key?: string
+  /** 子条件。 */
+  children?: Array<JsSearchExpr>
 }
-/** 结构化检索条件；查询文本解析在渲染层完成，各字段之间是 AND 关系。 */
+/** 一次检索：表达式与结果上限。 */
 export interface JsSearchQuery {
-  /** 全文词；大小写不敏感子串匹配。 */
-  terms: Array<string>
-  /** 标签谓词；祖先标签前缀匹配嵌套子标签。 */
-  tags: Array<string>
-  /** 属性谓词。 */
-  attributes: Array<JsSearchAttribute>
-  /** 路径子串过滤；缺失表示不过滤。 */
-  pathContains?: string
+  /** 检索表达式。 */
+  expr: JsSearchExpr
   /** 结果上限；非正数按内核默认值处理。 */
   limit: number
 }
@@ -277,7 +280,7 @@ export interface JsSearchHit {
  *
  * # Errors
  *
- * 未打开库或索引查询失败。
+ * 未打开库、表达式结构无效、正则无效或索引查询失败。
  */
 export declare function searchQuery(query: JsSearchQuery): Array<JsSearchHit>
 /** 索引里的一条标题记录。 */
@@ -308,6 +311,87 @@ export interface JsTagCount {
  * 未打开库。
  */
 export declare function indexTags(): Array<JsTagCount>
+/** 一条书签；`kind` 为 `file`/`folder`（`path`）、`heading`（`path` 与 `heading`）或 `search`（`query`）。 */
+export interface JsBookmark {
+  /** 书签种类。 */
+  kind: string
+  /** 库内相对路径；文件、文件夹与标题书签必填。 */
+  path?: string
+  /** 标题原文；只用于标题书签。 */
+  heading?: string
+  /** 查询文本；只用于搜索书签。 */
+  query?: string
+  /** 自定义显示名。 */
+  title?: string
+}
+/**
+ * 读出库内书签；文件不存在时为空。
+ *
+ * # Errors
+ *
+ * 未打开库、读盘失败或书签文件损坏。
+ */
+export declare function bookmarksList(): Array<JsBookmark>
+/**
+ * 整体替换书签清单；损坏的旧文件先备份再覆盖。
+ *
+ * # Errors
+ *
+ * 未打开库、书签字段无效或写盘失败。
+ */
+export declare function bookmarksSet(items: Array<JsBookmark>): void
+/** 一篇笔记可被点名的标题与别名。 */
+export interface JsNoteKeys {
+  /** 库内相对路径。 */
+  path: string
+  /** 展示标题：文首一级标题，缺失时为文件名词干。 */
+  title: string
+  /** frontmatter 别名，按书写顺序。 */
+  aliases: Array<string>
+}
+/**
+ * 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
+ *
+ * # Errors
+ *
+ * 未打开库或索引查询失败。
+ */
+export declare function indexNoteKeys(): Array<JsNoteKeys>
+/** 图谱节点：笔记或死链目标。 */
+export interface JsGraphNode {
+  /** 笔记的库内相对路径；死链为去掉锚点后的目标原文。 */
+  path: string
+  /** 展示标题。 */
+  title: string
+  /** 标签，升序。 */
+  tags: Array<string>
+  /** 是否为尚未创建的死链目标。 */
+  dead: boolean
+}
+/** 图谱中的有向边。 */
+export interface JsGraphEdge {
+  /** 源笔记路径。 */
+  from: string
+  /** 目标节点的 `path`。 */
+  to: string
+  /** 这对起止之间的链接条数。 */
+  count: number
+}
+/** 全库图谱。 */
+export interface JsGraph {
+  /** 节点，按路径升序。 */
+  nodes: Array<JsGraphNode>
+  /** 边，按起止升序。 */
+  edges: Array<JsGraphEdge>
+}
+/**
+ * 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
+ *
+ * # Errors
+ *
+ * 未打开库或索引查询失败。
+ */
+export declare function indexGraph(includeDead: boolean): JsGraph
 /**
  * `path` 的全部标题，按文档顺序；供锚点解析与标题补全。
  *

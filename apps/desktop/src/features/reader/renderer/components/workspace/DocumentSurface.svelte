@@ -1,6 +1,7 @@
 <script lang="ts">
   import BacklinksPane from "../navigation/BacklinksPane.svelte";
   import OutlinksPane from "../navigation/OutlinksPane.svelte";
+  import LocalGraphPane from "../graph/LocalGraphPane.svelte";
   import CodeEditor from "../editors/CodeEditor.svelte";
   import DocumentEditor from "../editors/DocumentEditor.svelte";
   import ImagePreview from "../previews/ImagePreview.svelte";
@@ -22,19 +23,22 @@
   } = $props();
   const doc = $derived(pane.document);
   const navigation = $derived(pane.navigation);
-  // 源码视图的 [[ 补全；文件列表在每次触发时实时读取，
-  // 标题锚点经本栏解析目标后取索引（与排版模式共用排序）。
-  const sourceCompletions = markdownLinkCompletion(
-    () => workspace.files,
-    (target) => pane.suggestHeadings(target, "wiki"),
-  );
+  // 源码视图的 [[ 补全；文件列表与别名在每次触发时实时读取，
+  // 标题锚点与块经本栏解析目标后获取（与排版模式共用排序）。
+  const sourceCompletions = markdownLinkCompletion(() => workspace.files, {
+    headings: (target) => pane.suggestHeadings(target, "wiki"),
+    aliases: () => workspace.noteKeys,
+    blocks: (target) => pane.suggestBlocks(target, "wiki"),
+    ensureBlockId: (path, block) => pane.ensureBlockId(path, block),
+  });
 </script>
 
 {#if doc.path !== null}
   {#key workspace.vaultRoot}
     {#key doc.path}
-      {#if doc.content?.kind === "markdown" && pane.viewMode === "wysiwyg"}
+      {#if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor
+          readOnly={pane.viewMode === "reading"}
           formattingId="editor-formatting-{pane.id}"
           active={workspace.activePane.id === pane.id}
           linkTargets={workspace.files.filter((path) => path.toLowerCase().endsWith(".md"))}
@@ -51,6 +55,9 @@
           onOutline={navigation.setOutline}
           register={navigation.registerMarkdown}
           suggestHeadings={pane.suggestHeadings}
+          linkAliases={workspace.noteKeys}
+          suggestBlocks={pane.suggestBlocks}
+          ensureBlockId={pane.ensureBlockId}
         />
       {:else if doc.content?.kind === "markdown" || doc.content?.kind === "text"}
         <CodeEditor
@@ -89,6 +96,14 @@
       }}
     />
   {/key}
+  {#if doc.content?.kind === "markdown"}
+    <LocalGraphPane
+      {workspace}
+      path={doc.path}
+      onOpen={(node) =>
+        void (node.dead ? pane.openLink("wiki", node.path) : pane.openFile(node.path))}
+    />
+  {/if}
 {/if}
 
 <style>

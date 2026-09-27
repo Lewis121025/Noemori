@@ -9,6 +9,7 @@
     { name: "bold", label: "加粗", text: "B", mark: "strong", shortcut: "B" },
     { name: "italic", label: "斜体", text: "I", mark: "em", shortcut: "I" },
     { name: "strike", label: "删除线", text: "S", mark: "strike", shortcut: "Shift + X" },
+    { name: "highlight", label: "高亮", text: "H", mark: "highlight", shortcut: "Shift + H" },
     { name: "code", label: "行内代码", text: "〈〉", mark: "code", shortcut: "`" },
   ] as const;
 
@@ -63,5 +64,8 @@
   }
   button[aria-label="删除线"] {
     text-decoration: line-through;
+  }
+  button[aria-label="高亮"] {
+    background: light-dark(#fff3a3, #5c4a12);
   }
 </style>

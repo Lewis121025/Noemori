@@ -50,6 +50,14 @@ name = "links_unit_linkify"
 path = "../../tests/links/unit/linkify.rs"
 
 [[test]]
+name = "links_unit_note_keys"
+path = "../../tests/links/unit/note_keys.rs"
+
+[[test]]
+name = "links_unit_graph"
+path = "../../tests/links/unit/graph.rs"
+
+[[test]]
 name = "links_integration_rename"
 path = "../../tests/links/integration/rename.rs"
 
@@ -70,6 +78,10 @@ name = "search_integration_fulltext"
 path = "../../tests/search/integration/fulltext.rs"
 
 [[test]]
+name = "search_integration_expr"
+path = "../../tests/search/integration/expr.rs"
+
+[[test]]
 name = "search_integration_index_sync"
 path = "../../tests/search/integration/index_sync.rs"
 
@@ -84,6 +96,10 @@ path = "../../tests/vault/unit/entries.rs"
 name = "vault_unit_attachments"
 path = "../../tests/vault/unit/attachments.rs"
 
+[[test]]
+name = "vault_unit_bookmarks"
+path = "../../tests/vault/unit/bookmarks.rs"
+
 [dependencies]
 markdown = "1.0.0"
 notify = "8.2.0"
@@ -91,6 +107,8 @@ notify-debouncer-full = "0.7.0"
 percent-encoding = "2.3.2"
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 sha2 = "0.11.0"
 tempfile = "3.23.0"
 yaml-rust2 = "0.13"

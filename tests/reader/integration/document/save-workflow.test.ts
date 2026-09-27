@@ -55,7 +55,8 @@ beforeEach(() => {
         active: 0,
         split: false,
       },
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: [],
     })),
     vaultOpen: vi.fn(async () => null),
     vaultClose: vi.fn(async () => {}),
@@ -82,7 +83,8 @@ beforeEach(() => {
       return { path: "note (副本).md", warning: null };
     }),
     sessionSetDocuments: vi.fn(async () => {}),
-    sessionSetSourceViews: vi.fn(async () => {}),
+    sessionSetViewModes: vi.fn(async () => {}),
+    sessionSetRecentFiles: vi.fn(async () => {}),
     sessionGetPanes: vi.fn(async () => ({ ...emptyReaderSession })),
     sessionSetPanes: vi.fn(async () => {}),
     linksResolve: vi.fn(async () => ({ status: "dead" as const })),
@@ -94,6 +96,10 @@ beforeEach(() => {
     searchQuery: vi.fn(async () => []),
     indexHeadings: vi.fn(async () => []),
     indexTags: vi.fn(async () => []),
+    indexNoteKeys: vi.fn(async () => []),
+    indexGraph: vi.fn(async () => ({ nodes: [], edges: [] })),
+    bookmarksList: vi.fn(async () => []),
+    bookmarksSet: vi.fn(async () => {}),
     entryRename: vi.fn(async () => ({ warning: null })),
     subscribeVaultChanged: (callback) => {
       onChanged = (event = { status: "changed", paths: [], healthy: true }) => callback(event);
@@ -817,7 +823,8 @@ describe("保存、冲突与恢复的完整界面流程", () => {
         active: 0,
         split: false,
       },
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: [],
     });
     await started;
     await vi.waitFor(() => expect(appApi.closeAfterFlush).toHaveBeenCalledTimes(1));

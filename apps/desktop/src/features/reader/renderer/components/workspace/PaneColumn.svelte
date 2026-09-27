@@ -8,6 +8,7 @@
    */
   import { onMount, tick } from "svelte";
   import DocumentSurface from "./DocumentSurface.svelte";
+  import HoverPreview from "../previews/HoverPreview.svelte";
   import type { MediaIo } from "../../engine/media/media";
   import type { ReaderPane } from "../../state/pane.svelte";
   import type { ReaderWorkspaceController } from "../../state/workspace.svelte";
@@ -72,6 +73,14 @@
   <div class:document-body={doc.content?.kind === "markdown"}>
     {#if doc.path !== null}
       <DocumentSurface {workspace} {pane} {mediaIo} />
+      {#if scrollElement !== undefined}
+        <HoverPreview
+          host={scrollElement}
+          from={doc.path}
+          io={mediaIo}
+          openLink={(kind, raw) => void pane.openLink(kind, raw)}
+        />
+      {/if}
     {:else}
       <div class="welcome">
         <h1>

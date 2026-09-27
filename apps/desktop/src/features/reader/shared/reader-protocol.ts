@@ -1,22 +1,33 @@
 import type {
+  Bookmark,
+  GraphEdge,
+  GraphNode,
   HeadingRecord,
   LinkKind,
   LinkRecord,
   LinkTarget,
   MentionRecord,
   Mentions,
+  NoteKeys,
   PaneLayout,
   RenameOutcome,
   SavedCopy,
+  SearchExpr,
   SearchHit,
   SearchQuery,
   TagCount,
   VaultEntry,
+  VaultGraph,
   VaultRestore,
   WriteResult,
 } from "./api";
 import { SIDEBAR_LAYOUT } from "./api";
-import { parseSessionDocuments, parseSourceViews, type SessionDocuments } from "./session";
+import {
+  parseRecentFiles,
+  parseSessionDocuments,
+  parseViewModes,
+  type SessionDocuments,
+} from "./session";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -166,8 +177,9 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
     return {
       root: value.root,
       documents,
-      // 视图记忆是恢复性数据：损坏条目按会话解析规则丢弃，不拒绝整个恢复。
-      sourceViews: parseSourceViews(value.sourceViews),
+      // 视图记忆与最近列表是恢复性数据：损坏条目按会话解析规则丢弃，不拒绝整个恢复。
+      viewModes: parseViewModes(value.viewModes),
+      recentFiles: parseRecentFiles(value.recentFiles),
     };
   }
   throw new Error("笔记库恢复响应无效，请重新打开笔记库");
@@ -311,44 +323,63 @@ export function parseMentions(value: unknown): Mentions {
   };
 }
 
-function parseStringList(value: unknown, label: string): string[] {
-  if (!Array.isArray(value)) throw new Error(`${label}必须是文本列表`);
-  return value.map((item: unknown) => {
-    if (typeof item !== "string") throw new Error(`${label}必须是文本列表`);
-    return item;
-  });
-}
+/** 检索表达式的嵌套深度上限；查询框手写不会接近，超出视为损坏或恶意输入。 */
+export const SEARCH_DEPTH_LIMIT = 32;
+/** 检索表达式的节点总数上限。 */
+export const SEARCH_NODE_LIMIT = 256;
 
 /**
- * 校验结构化检索条件；查询文本的谓词解析发生在渲染层，主进程不接受原始查询串。
+ * 校验结构化检索条件；查询文本的解析发生在渲染层，主进程不接受原始查询串。
  *
+ * 表达式逐节点校验种类与字段，深度与节点数设上限，避免病态输入在内核里递归求值。
  * `limit` 截断为整数并压到 0–500：0 由内核解释为默认上限，超出内核对 `i32`
  * 的表示范围会在原生边界报错，必须提前收敛。
  */
 export function parseSearchQueryArgument(value: unknown): SearchQuery {
   if (!record(value)) throw new Error("检索条件无效");
-  const attributes = Array.isArray(value.attributes)
-    ? value.attributes.map((item: unknown) => {
-        if (!record(item) || typeof item.key !== "string" || typeof item.value !== "string")
-          throw new Error("属性谓词必须是键值文本对");
-        return { key: item.key, value: item.value };
-      })
-    : null;
-  if (attributes === null) throw new Error("属性谓词必须是键值文本对");
-  let pathContains: string | null = null;
-  if (value.pathContains !== null && value.pathContains !== undefined) {
-    if (typeof value.pathContains !== "string") throw new Error("检索条件的路径过滤必须是文本");
-    pathContains = value.pathContains;
-  }
   if (typeof value.limit !== "number" || !Number.isFinite(value.limit))
     throw new Error("检索条件的结果上限无效");
+  const budget = { nodes: 0 };
   return {
-    terms: parseStringList(value.terms, "全文词"),
-    tags: parseStringList(value.tags, "标签谓词"),
-    attributes,
-    pathContains,
+    expr: parseSearchExpr(value.expr, 0, budget),
     limit: Math.min(Math.trunc(value.limit), 500),
   };
+}
+
+function parseSearchExpr(value: unknown, depth: number, budget: { nodes: number }): SearchExpr {
+  if (depth > SEARCH_DEPTH_LIMIT) throw new Error("检索条件嵌套过深");
+  budget.nodes += 1;
+  if (budget.nodes > SEARCH_NODE_LIMIT) throw new Error("检索条件过于复杂");
+  if (!record(value)) throw new Error("检索条件无效");
+  switch (value.kind) {
+    case "and":
+    case "or":
+      if (!Array.isArray(value.children)) throw new Error("检索条件的子条件必须是列表");
+      return {
+        kind: value.kind,
+        children: value.children.map((child: unknown) => parseSearchExpr(child, depth + 1, budget)),
+      };
+    case "not":
+    case "line":
+    case "section":
+      return { kind: value.kind, child: parseSearchExpr(value.child, depth + 1, budget) };
+    case "term":
+    case "regex":
+    case "tag":
+    case "path":
+    case "file":
+      if (typeof value.value !== "string") throw new Error("检索条件的值必须是文本");
+      return { kind: value.kind, value: value.value };
+    case "attr":
+      if (
+        typeof value.key !== "string" ||
+        (value.value !== null && typeof value.value !== "string")
+      )
+        throw new Error("属性谓词必须是键与文本值");
+      return { kind: "attr", key: value.key, value: value.value };
+    default:
+      throw new Error("未知的检索条件种类");
+  }
 }
 
 /** 检索命中逐项校验；摘要里的控制字符是合法的命中标记，不做过滤。 */
@@ -381,6 +412,101 @@ export function parseTagCounts(value: unknown): TagCount[] {
       throw new Error("标签清单包含无效的标签或计数");
     return { tag: item.tag, count: item.count };
   });
+}
+
+/**
+ * 图谱逐项校验。
+ *
+ * 笔记节点必须是规范库内相对路径（点击会直接打开）；死链节点只要求非空文本。
+ * 边必须引用已列出的节点且计数为正整数，界面据此建立邻接表而不再做存在性检查。
+ */
+export function parseGraph(value: unknown): VaultGraph {
+  if (!record(value) || !Array.isArray(value.nodes) || !Array.isArray(value.edges))
+    throw new Error("图谱无效");
+  const paths = new Set<string>();
+  const nodes = value.nodes.map((node: unknown): GraphNode => {
+    if (
+      !record(node) ||
+      typeof node.dead !== "boolean" ||
+      typeof node.path !== "string" ||
+      (node.dead ? node.path === "" : !relativePath(node.path)) ||
+      typeof node.title !== "string" ||
+      !Array.isArray(node.tags) ||
+      !node.tags.every((tag) => typeof tag === "string") ||
+      paths.has(node.path)
+    )
+      throw new Error("图谱节点无效");
+    paths.add(node.path);
+    return { path: node.path, title: node.title, tags: [...node.tags], dead: node.dead };
+  });
+  const edges = value.edges.map((edge: unknown): GraphEdge => {
+    if (
+      !record(edge) ||
+      typeof edge.from !== "string" ||
+      typeof edge.to !== "string" ||
+      !paths.has(edge.from) ||
+      !paths.has(edge.to) ||
+      typeof edge.count !== "number" ||
+      !Number.isSafeInteger(edge.count) ||
+      edge.count < 1
+    )
+      throw new Error("图谱边无效");
+    return { from: edge.from, to: edge.to, count: edge.count };
+  });
+  return { nodes, edges };
+}
+
+/** 书签清单上限；只防病态输入，手工整理远达不到。 */
+export const BOOKMARK_LIMIT = 1000;
+
+/**
+ * 书签逐项校验；请求与响应共用。
+ *
+ * 路径必须是规范库内相对路径，文本字段必须非空；多余字段不透传。
+ * 损坏数据整体拒绝，不渲染半份清单，也不把越界路径写进库。
+ */
+export function parseBookmarks(value: unknown): Bookmark[] {
+  if (!Array.isArray(value) || value.length > BOOKMARK_LIMIT) throw new Error("书签清单无效");
+  return value.map((item: unknown): Bookmark => {
+    if (!record(item) || (item.title !== null && typeof item.title !== "string"))
+      throw new Error("书签字段无效");
+    const title = item.title;
+    switch (item.kind) {
+      case "file":
+      case "folder":
+        if (!relativePath(item.path)) throw new Error("书签路径无效");
+        return { kind: item.kind, path: item.path, title };
+      case "heading":
+        if (!relativePath(item.path) || typeof item.heading !== "string" || item.heading === "")
+          throw new Error("标题书签无效");
+        return { kind: "heading", path: item.path, heading: item.heading, title };
+      case "search":
+        if (typeof item.query !== "string" || item.query.trim() === "")
+          throw new Error("搜索书签无效");
+        return { kind: "search", query: item.query, title };
+      default:
+        throw new Error("未知的书签种类");
+    }
+  });
+}
+
+/** 笔记身份逐项校验；损坏数据整体拒绝，不让快速切换器打开越界路径。 */
+export function parseNoteKeys(value: unknown): NoteKeys[] {
+  if (!Array.isArray(value)) throw new Error("笔记身份响应无效");
+  return value.map((item: unknown) => {
+    if (
+      !record(item) ||
+      !relativePath(item.path) ||
+      typeof item.title !== "string" ||
+      !stringArray(item.aliases)
+    )
+      throw new Error("笔记身份包含无效路径、标题或别名");
+    return { path: item.path, title: item.title, aliases: [...item.aliases] };
+  });
+}
+
+function stringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === "string");
 }
 
 /** 标题记录逐项校验；字节区间将被映射为编辑器位置，损坏数据必须整体拒绝。 */

@@ -4,14 +4,17 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import type * as NativeModule from "@nous/native";
 import type {
+  Bookmark,
   FileSnapshot,
   HeadingRecord,
   LinkKind,
   LinkRecord,
   LinkTarget,
   Mentions,
+  NoteKeys,
   RenameOutcome,
   SavedCopy,
+  SearchExpr,
   SearchHit,
   SearchQuery,
   TagCount,
@@ -19,6 +22,7 @@ import type {
   WriteResult,
   VaultEntry,
   VaultEvent,
+  VaultGraph,
 } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
 import { parseAttachmentRequest, parseImportedAttachment } from "../shared/attachments";
@@ -30,14 +34,17 @@ import type {
   SessionDocuments,
   SessionHistory,
 } from "../shared/session";
-import { emptySessionDocuments } from "../shared/session";
+import { emptySessionDocuments, mapPathList, mapViewModes } from "../shared/session";
 import {
+  parseBookmarks,
+  parseGraph,
   parseEntryOutcome,
   parseFileBytes,
   parseHeadingRecords,
   parseLinkRecords,
   parseLinkTarget,
   parseMentions,
+  parseNoteKeys,
   parseSearchHits,
   parseSearchQueryArgument,
   parseTagCounts,
@@ -79,6 +86,40 @@ function mapMention(mention: NativeModule.JsMentionRecord) {
     linkKind: mention.linkKind ?? null,
     toRaw: mention.toRaw,
   };
+}
+
+/**
+ * 检索表达式转为原生层的扁平节点结构。
+ *
+ * exactOptionalPropertyTypes：缺省字段必须省略键，不能传 undefined。
+ */
+function nativeSearchExpr(expr: SearchExpr): NativeModule.JsSearchExpr {
+  switch (expr.kind) {
+    case "and":
+    case "or":
+      return { kind: expr.kind, children: expr.children.map(nativeSearchExpr) };
+    case "not":
+    case "line":
+    case "section":
+      return { kind: expr.kind, children: [nativeSearchExpr(expr.child)] };
+    case "attr":
+      return { kind: "attr", key: expr.key, ...(expr.value === null ? {} : { value: expr.value }) };
+    default:
+      return { kind: expr.kind, value: expr.value };
+  }
+}
+
+/** 书签转为原生层的扁平对象；缺省字段省略键（exactOptionalPropertyTypes）。 */
+function nativeBookmark(item: Bookmark): NativeModule.JsBookmark {
+  const title = item.title === null ? {} : { title: item.title };
+  switch (item.kind) {
+    case "search":
+      return { kind: "search", query: item.query, ...title };
+    case "heading":
+      return { kind: "heading", path: item.path, heading: item.heading, ...title };
+    default:
+      return { kind: item.kind, path: item.path, ...title };
+  }
 }
 
 function mapMentions(value: NativeModule.JsMentions): Mentions {
@@ -136,24 +177,6 @@ function mapSessionDocuments(
   return changed ? { ...documents, panes } : null;
 }
 
-/** 源码视图记忆的路径迁移；没有任何变化时返回 null，避免无谓的会话重写。 */
-function mapSourceViews(
-  sourceViews: string[],
-  mapPath: (path: string) => string | null,
-): string[] | null {
-  let changed = false;
-  const out = sourceViews.flatMap((entry) => {
-    const path = mapPath(entry);
-    if (path === null) {
-      changed = true;
-      return [];
-    }
-    if (path !== entry) changed = true;
-    return [path];
-  });
-  return changed ? out : null;
-}
-
 /**
  * 创建仅由工作线程使用的同步内核服务，所有命令共用同一库与会话。
  *
@@ -194,14 +217,16 @@ export function createReaderService(
   ): RenameOutcome {
     try {
       const session = sessions.load();
-      // 各分栏的当前文档、阅读栈与源码视图记忆同一口径跟随改名/删除。
+      // 各分栏的当前文档、阅读栈、视图记忆与最近列表同一口径跟随改名/删除。
       const documents = mapSessionDocuments(session.documents, mapPath);
-      const sourceViews = mapSourceViews(session.sourceViews, mapPath);
-      if (documents !== null || sourceViews !== null)
+      const viewModes = mapViewModes(session.viewModes, mapPath);
+      const recentFiles = mapPathList(session.recentFiles, mapPath);
+      if (documents !== null || viewModes !== null || recentFiles !== null)
         sessions.save({
           ...session,
           documents: documents ?? session.documents,
-          sourceViews: sourceViews ?? session.sourceViews,
+          viewModes: viewModes ?? session.viewModes,
+          recentFiles: recentFiles ?? session.recentFiles,
         });
     } catch (error) {
       warning = [warning, `文件操作已完成，会话更新失败：${String(error)}`]
@@ -221,7 +246,8 @@ export function createReaderService(
         ...previous,
         vaultRoot: root,
         documents: emptySessionDocuments(),
-        sourceViews: [],
+        viewModes: {},
+        recentFiles: [],
       });
       try {
         openVault(root);
@@ -243,7 +269,8 @@ export function createReaderService(
       return {
         root,
         documents: stored.documents,
-        sourceViews: stored.sourceViews,
+        viewModes: stored.viewModes,
+        recentFiles: stored.recentFiles,
       };
     },
     vaultClose(): void {
@@ -389,14 +416,7 @@ export function createReaderService(
     searchQuery(query: SearchQuery): SearchHit[] {
       const request = parseSearchQueryArgument(query);
       return parseSearchHits(
-        native.searchQuery({
-          terms: request.terms,
-          tags: request.tags,
-          attributes: request.attributes.map(({ key, value }) => ({ key, value })),
-          // exactOptionalPropertyTypes：不过滤时必须省略键，不能传 undefined。
-          ...(request.pathContains === null ? {} : { pathContains: request.pathContains }),
-          limit: request.limit,
-        }),
+        native.searchQuery({ expr: nativeSearchExpr(request.expr), limit: request.limit }),
       );
     },
     indexHeadings(path: string): HeadingRecord[] {
@@ -404,6 +424,26 @@ export function createReaderService(
     },
     indexTags(): TagCount[] {
       return parseTagCounts(native.indexTags());
+    },
+    indexNoteKeys(): NoteKeys[] {
+      return parseNoteKeys(native.indexNoteKeys());
+    },
+    indexGraph(includeDead: boolean): VaultGraph {
+      return parseGraph(native.indexGraph(includeDead));
+    },
+    bookmarksList(): Bookmark[] {
+      return parseBookmarks(
+        native.bookmarksList().map((item) => ({
+          kind: item.kind,
+          path: item.path ?? null,
+          heading: item.heading ?? null,
+          query: item.query ?? null,
+          title: item.title ?? null,
+        })),
+      );
+    },
+    bookmarksSet(items: Bookmark[]): void {
+      native.bookmarksSet(parseBookmarks(items).map(nativeBookmark));
     },
     entryRename(from: string, to: string): RenameOutcome {
       const result = native.entryRename(from, to);

@@ -81,7 +81,8 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
   expect(parseVaultRestore({ root: "/笔记", documents })).toEqual({
     root: "/笔记",
     documents,
-    sourceViews: [],
+    viewModes: {},
+    recentFiles: [],
   });
   // 阅读栈与源码视图记忆随恢复响应归一化；损坏条目丢弃而不是拒绝整个恢复。
   expect(
@@ -97,13 +98,15 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
         active: 0,
         split: false,
       },
-      sourceViews: ["b.md", 7, "", "b.md"],
+      viewModes: { "b.md": "reading", "c.md": "source", "d.md": "wysiwyg", "": "source" },
+      recentFiles: ["c.md", 3, "c.md", "d.md"],
     }),
   ).toMatchObject({
     documents: {
       panes: [{ history: { back: [{ path: "a.md", anchor: "小节" }], forward: [] } }],
     },
-    sourceViews: ["b.md"],
+    viewModes: { "b.md": "reading", "c.md": "source" },
+    recentFiles: ["c.md", "d.md"],
   });
   expect(parseVaultRestore(null)).toBeNull();
   expect(() => parseVaultRestore({ root: "/笔记" })).toThrow();
@@ -183,35 +186,40 @@ it("提及种类、分组和语法必须一致，保留当前纳秒时间字段�
   expect(() => parseMentions({ linked: [], unlinked: [mention] })).toThrow();
 });
 
-it("检索条件逐字段校验，超界上限收敛到内核对 i32 的表示范围", () => {
+it("检索表达式逐节点校验，超界上限收敛到内核对 i32 的表示范围", () => {
+  const expr = {
+    kind: "or",
+    children: [
+      {
+        kind: "and",
+        children: [
+          { kind: "term", value: "全文" },
+          { kind: "regex", value: "a+" },
+        ],
+      },
+      { kind: "section", child: { kind: "path", value: "notes/" } },
+      { kind: "attr", key: "status", value: null },
+    ],
+  };
+  expect(parseSearchQueryArgument({ expr, limit: 1e9, extra: true })).toEqual({ expr, limit: 500 });
+  // 多余字段不透传。
   expect(
-    parseSearchQueryArgument({
-      terms: ["全文"],
-      tags: ["标签"],
-      attributes: [{ key: "status", value: "draft" }],
-      pathContains: "notes/",
-      limit: 1e9,
-    }),
-  ).toEqual({
-    terms: ["全文"],
-    tags: ["标签"],
-    attributes: [{ key: "status", value: "draft" }],
-    pathContains: "notes/",
-    limit: 500,
-  });
-  // 缺失的路径过滤按 null 归一化。
-  expect(
-    parseSearchQueryArgument({ terms: [], tags: [], attributes: [], limit: 10 }).pathContains,
-  ).toBeNull();
+    parseSearchQueryArgument({ expr: { kind: "file", value: "x", junk: 1 }, limit: 1 }).expr,
+  ).toEqual({ kind: "file", value: "x" });
+  const wide = {
+    kind: "and",
+    children: Array.from({ length: 300 }, () => ({ kind: "term", value: "x" })),
+  };
   for (const invalid of [
     undefined,
     "原始查询串",
-    { terms: "全文", tags: [], attributes: [], pathContains: null, limit: 1 },
-    { terms: [1], tags: [], attributes: [], pathContains: null, limit: 1 },
-    { terms: [], tags: [], attributes: [{ key: "k" }], pathContains: null, limit: 1 },
-    { terms: [], tags: [], attributes: [], pathContains: 5, limit: 1 },
-    { terms: [], tags: [], attributes: [], pathContains: null, limit: "1" },
-    { terms: [], tags: [], attributes: [], pathContains: null, limit: Infinity },
+    { expr: { kind: "term", value: 1 }, limit: 1 },
+    { expr: { kind: "not" }, limit: 1 },
+    { expr: { kind: "attr", key: 1, value: null }, limit: 1 },
+    { expr: { kind: "attr", key: "k", value: 5 }, limit: 1 },
+    { expr: { kind: "and", children: [] }, limit: "1" },
+    { expr: { kind: "and", children: [] }, limit: Infinity },
+    { expr: wide, limit: 1 },
   ])
     expect(() => parseSearchQueryArgument(invalid)).toThrow();
 });

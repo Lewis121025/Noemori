@@ -1,11 +1,26 @@
-import type { ReaderApi, TagCount, VaultEntry, RenameOutcome } from "../../shared/api";
+import type {
+  Bookmark,
+  NoteKeys,
+  ReaderApi,
+  TagCount,
+  VaultEntry,
+  VaultGraph,
+  RenameOutcome,
+} from "../../shared/api";
 import type { DeadLinkOffer } from "../engine/navigation/dead-link";
 import type { AttachmentImporter } from "../../shared/attachments";
 import { deadLinkSeed } from "../engine/navigation/dead-link";
-import type { PaneSession } from "../../shared/session";
-import { ReaderPane, type PaneHost } from "./pane.svelte";
+import {
+  mapPathList,
+  mapViewModes,
+  pushRecentFile,
+  type PaneSession,
+  type ViewModes,
+} from "../../shared/session";
+import { ReaderPane, type PaneHost, type ViewMode } from "./pane.svelte";
 import type { ReaderHistory } from "./history.svelte";
 import { ReaderSearch } from "./search.svelte";
+import { ReaderBookmarks } from "./bookmarks.svelte";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -27,14 +42,24 @@ type WorkspaceNotice =
 export class ReaderWorkspaceController {
   /** 全库搜索；结果属于当前库，切库必须丢弃。 */
   readonly search: ReaderSearch;
+  /** 当前库的书签；随目录刷新重读，改名后的路径由内核同步改写。 */
+  readonly bookmarks: ReaderBookmarks;
   /** 可编辑分栏，1–2 个；下标即栏位，永不为空。 */
   private paneList = $state<ReaderPane[]>([]);
   private activeId = $state(0);
   private paneSeq = 1;
-  /** 会话内按文件记住源码视图选择，随会话持久化。非响应式记录表。 */
-  private readonly sourceViews: Record<string, true> = {};
+  /** 会话内按文件记住源码或阅读视图，随会话持久化。非响应式记录表。 */
+  private readonly viewModes: ViewModes = {};
+  /** 最近打开的文件，最新在前；跨栏共享，随会话持久化。 */
+  private recent = $state<string[]>([]);
+  /** 笔记标题与别名；每次目录刷新后更新，供别名补全同步读取。 */
+  private keys = $state.raw<NoteKeys[]>([]);
+  /** 笔记身份读取的请求序号；只有最新一次的结果生效。 */
+  private keysRequest = 0;
   private root = $state<string | null>(null);
   private listed = $state<VaultEntry[]>([]);
+  /** 目录刷新次数；每次库变更后递增，派生视图（图谱）据此重读索引。 */
+  private revision = $state(0);
   private filePaths = $derived(
     this.listed.filter((entry) => entry.kind === "file").map((entry) => entry.path),
   );
@@ -59,14 +84,16 @@ export class ReaderWorkspaceController {
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
   constructor(private readonly api: ReaderApi) {
     this.search = new ReaderSearch(api);
-    // 对象字面量的 getter 里 this 指向 host 自身，经局部别名读工作区实时状态。
-    const workspace = this;
+    this.bookmarks = new ReaderBookmarks(api);
+    // 对象字面量的 getter 里 this 指向 host 自身，用闭包读工作区实时状态。
+    const vaultRoot = () => this.root;
+    const composing = () => this.composing;
     this.host = {
       get vaultRoot() {
-        return workspace.root;
+        return vaultRoot();
       },
       get composing() {
-        return workspace.composing;
+        return composing();
       },
       waitComposition: () => this.waitComposition(),
       report: (message, error) => this.report(message, error),
@@ -81,11 +108,20 @@ export class ReaderWorkspaceController {
       offerCandidates: (pane, paths, anchor) => {
         this.candidateSelection = { paths, anchor, paneId: pane.id };
       },
-      isSourceView: (path) => Object.hasOwn(this.sourceViews, path),
-      setSourceView: (path, source) => {
-        if (source) this.sourceViews[path] = true;
-        else delete this.sourceViews[path];
-        this.persistSourceViews();
+      noteOpened: (path) => {
+        this.recent = pushRecentFile(this.recent, path);
+        this.persistRecentFiles();
+      },
+      settlePath: async (path) => {
+        for (const pane of this.paneList)
+          if (pane.document.path === path && !(await pane.flushBeforeLeave())) return false;
+        return true;
+      },
+      viewModeOf: (path) => (Object.hasOwn(this.viewModes, path) ? this.viewModes[path]! : null),
+      setViewMode: (path, mode) => {
+        if (mode === null) delete this.viewModes[path];
+        else this.viewModes[path] = mode;
+        this.persistViewModes();
       },
       persistDocuments: () => this.persistDocuments(),
       refreshList: () => this.refreshList(),
@@ -110,6 +146,18 @@ export class ReaderWorkspaceController {
   /** 包含空文件夹的目录快照。 */
   get entries() {
     return this.listed;
+  }
+  /** 索引版本：每次目录刷新（打开库、保存、外部变更、改名）后递增。 */
+  get indexRevision(): number {
+    return this.revision;
+  }
+  /** 最近打开的文件，最新在前；可能包含已被外部删除的路径，由使用方按文件列表过滤。 */
+  get recentFiles(): readonly string[] {
+    return this.recent;
+  }
+  /** 最近一次目录刷新时的笔记标题与别名；索引不可用时为空。 */
+  get noteKeys(): readonly NoteKeys[] {
+    return this.keys;
   }
   /** 全部分栏；界面按序渲染。 */
   get panes(): readonly ReaderPane[] {
@@ -168,7 +216,7 @@ export class ReaderWorkspaceController {
     return this.activePane.history;
   }
   /** 活动栏 Markdown 视图模式。 */
-  get viewMode(): "wysiwyg" | "source" {
+  get viewMode(): ViewMode {
     return this.activePane.viewMode;
   }
   /** 活动栏切换期间界面禁止编辑。 */
@@ -193,6 +241,9 @@ export class ReaderWorkspaceController {
   }
   get toggleViewMode() {
     return this.activePane.toggleViewMode;
+  }
+  get toggleReadingMode() {
+    return this.activePane.toggleReadingMode;
   }
   get markDirty() {
     return this.activePane.markDirty;
@@ -317,10 +368,12 @@ export class ReaderWorkspaceController {
       if (restored === null) return;
       this.root = restored.root;
       this.search.reset();
+      this.bookmarks.reset();
       await this.refreshList();
-      // 源码视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
-      this.clearSourceViews();
-      for (const path of restored.sourceViews) this.sourceViews[path] = true;
+      // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
+      this.clearViewModes();
+      Object.assign(this.viewModes, restored.viewModes);
+      this.recent = restored.recentFiles.filter((path) => this.files.includes(path));
       // 按会话恢复分栏；启动栏复用（保持门禁），第二栏按需补建。
       const sessions = restored.documents.panes;
       this.listGeneration += 1;
@@ -369,9 +422,11 @@ export class ReaderWorkspaceController {
         this.paneList = [new ReaderPane(0, this.api, this.host, false)];
         this.activeId = 0;
         this.search.reset();
+        this.bookmarks.reset();
         this.candidateSelection = null;
         this.deadLink = null;
-        this.clearSourceViews();
+        this.clearViewModes();
+        this.recent = [];
         this.report("");
         this.listGeneration += 1;
         await this.refreshList();
@@ -413,6 +468,19 @@ export class ReaderWorkspaceController {
     this.paneList = this.paneList.filter((pane) => pane.id !== id);
     if (this.activeId === id) this.activeId = this.paneList[0]!.id;
     this.persistDocumentsSafe();
+  };
+
+  /**
+   * 在非活动栏打开文件并激活它；单栏时先拆出第二栏。
+   *
+   * 打开失败或门禁拒绝由该栏自己报告，当前栏的文档保持不动。
+   */
+  openInOtherPane = async (path: string): Promise<void> => {
+    if (!this.split) await this.toggleSplit();
+    const other = this.paneList.find((pane) => pane.id !== this.activeId);
+    if (other === undefined) return;
+    this.activatePane(other.id);
+    await other.openFile(path);
   };
 
   /** 激活分栏：命令、侧栏打开与工具栏状态都跟随活动栏。 */
@@ -489,11 +557,68 @@ export class ReaderWorkspaceController {
    * 失败不抛给界面调用方，返回原因文本由面板展示——浏览辅助能力
    * 不打断写作，与检索错误同一口径。
    */
+  /** 收藏或取消收藏活动栏的文件；结果作为活动栏的确认提示。 */
+  bookmarkCurrentFile = async (): Promise<void> => {
+    const path = this.document.path;
+    if (path === null) return;
+    const pane = this.activePane;
+    const added = await this.bookmarks.toggle({ kind: "file", path, title: null });
+    if (this.bookmarks.error === null) this.announceFor(pane, added ? "已加入书签" : "已移出书签");
+  };
+
+  /** 收藏或取消收藏光标所在的标题；源码视图或光标在首个标题之前时提示原因。 */
+  bookmarkCurrentHeading = async (): Promise<void> => {
+    const path = this.document.path;
+    if (path === null) return;
+    const pane = this.activePane;
+    const heading = pane.navigation.currentHeading();
+    if (heading === null) {
+      this.report("光标不在任何标题下；请在排版或阅读视图里把光标放进要收藏的章节。");
+      return;
+    }
+    const added = await this.bookmarks.toggle({ kind: "heading", path, heading, title: null });
+    if (this.bookmarks.error === null)
+      this.announceFor(pane, added ? `已收藏标题「${heading}」` : `已取消收藏标题「${heading}」`);
+  };
+
+  /** 在活动栏打开文件或标题书签；标题失效时由分栏可见提示。 */
+  openBookmark = async (bookmark: Bookmark): Promise<void> => {
+    if (bookmark.kind === "file") await this.activePane.openFile(bookmark.path);
+    else if (bookmark.kind === "heading")
+      await this.activePane.openResolved(bookmark.path, bookmark.heading);
+  };
+
+  /** 读出关系图谱；失败时返回原因而不是抛出，图谱面板就地显示。 */
+  loadGraph = async (
+    includeDead: boolean,
+  ): Promise<{ graph: VaultGraph; error: null } | { graph: null; error: string }> => {
+    try {
+      return { graph: await this.api.indexGraph(includeDead), error: null };
+    } catch (error) {
+      return { graph: null, error: `图谱暂不可用：${errorText(error)}` };
+    }
+  };
+
   listTags = async (): Promise<{ tags: TagCount[]; error: string | null }> => {
     try {
       return { tags: await this.api.indexTags(), error: null };
     } catch (error) {
       return { tags: [], error: `标签暂不可用：${errorText(error)}` };
+    }
+  };
+
+  /**
+   * 快速切换器与别名补全的笔记身份；失败口径与标签清单一致，返回原因文本。
+   */
+  listNoteKeys = async (): Promise<{ keys: NoteKeys[]; error: string | null }> => {
+    try {
+      const root = this.root;
+      const request = ++this.keysRequest;
+      const keys = await this.api.indexNoteKeys();
+      if (request === this.keysRequest && root === this.root) this.keys = keys;
+      return { keys, error: null };
+    } catch (error) {
+      return { keys: [], error: `标题与别名暂不可用：${errorText(error)}` };
     }
   };
 
@@ -541,7 +666,8 @@ export class ReaderWorkspaceController {
       true,
       (history) => {
         history.remapPath(from, to);
-        this.remapSourceViews(from, to);
+        this.remapViewModes(from, to);
+        this.remapRecentFiles(from, to);
       },
     );
   }
@@ -555,7 +681,8 @@ export class ReaderWorkspaceController {
       false,
       (history) => {
         history.remapPath(path, null);
-        this.remapSourceViews(path, null);
+        this.remapViewModes(path, null);
+        this.remapRecentFiles(path, null);
       },
     );
   }
@@ -571,7 +698,7 @@ export class ReaderWorkspaceController {
 
   /**
    * 条目变更的公共门禁与收尾：全栏保存后执行操作，各栏按映射重载，
-   * 阅读栈、源码视图记忆与会话同口径迁移。
+   * 阅读栈、视图记忆与会话同口径迁移。
    */
   private async mutateEntries(
     label: string,
@@ -589,7 +716,7 @@ export class ReaderWorkspaceController {
         after = panes.map((pane, index) => nextPath(pane, before[index] ?? null));
         const result = await operation();
         committed = true;
-        // 阅读栈与源码视图记忆跟随改名/移动；删除的条目直接移除。
+        // 阅读栈与视图记忆跟随改名/移动；删除的条目直接移除。
         if (remapHistory !== null) {
           for (const pane of panes) {
             remapHistory(pane.history);
@@ -598,7 +725,8 @@ export class ReaderWorkspaceController {
               pane.currentStep = mapped === null ? null : { ...pane.currentStep, path: mapped };
             }
           }
-          this.persistSourceViews();
+          this.persistViewModes();
+          this.persistRecentFiles();
           void this.persistDocuments().catch(() => {});
         }
         for (const [index, pane] of panes.entries()) {
@@ -687,31 +815,46 @@ export class ReaderWorkspaceController {
   }
 
   /**
-   * 源码视图记忆写入会话；失败不打断切换。
+   * 视图记忆写入会话；失败不打断切换。
    *
    * 与阅读栈同理：会话文件故障由同链路的文档持久化可见地上报，
    * 这里不重复弹同一条错误。
    */
-  private persistSourceViews(): void {
-    void this.api.sessionSetSourceViews(Object.keys(this.sourceViews)).catch(() => {});
+  private persistViewModes(): void {
+    void this.api.sessionSetViewModes({ ...this.viewModes }).catch(() => {});
   }
 
-  /** 改名/删除后源码视图记忆跟随路径迁移；`to === null` 时移除。 */
-  private remapSourceViews(from: string, to: string | null): void {
-    for (const key of Object.keys(this.sourceViews)) {
-      let mapped: string | null = null;
-      if (key === from) mapped = to;
-      else if (key.startsWith(`${from}/`))
-        mapped = to === null ? null : `${to}${key.slice(from.length)}`;
-      else continue;
-      delete this.sourceViews[key];
-      if (mapped !== null) this.sourceViews[mapped] = true;
-    }
+  /** 改名/删除后视图记忆跟随路径迁移；`to === null` 时移除。 */
+  private remapViewModes(from: string, to: string | null): void {
+    const mapped = mapViewModes(this.viewModes, (key) => {
+      if (key === from) return to;
+      if (key.startsWith(`${from}/`)) return to === null ? null : `${to}${key.slice(from.length)}`;
+      return key;
+    });
+    if (mapped === null) return;
+    this.clearViewModes();
+    Object.assign(this.viewModes, mapped);
   }
 
-  /** 清空源码视图记忆（切库）。 */
-  private clearSourceViews(): void {
-    for (const key of Object.keys(this.sourceViews)) delete this.sourceViews[key];
+  /** 最近打开列表写入会话；失败口径与视图记忆一致，不重复弹错。 */
+  private persistRecentFiles(): void {
+    // 响应式代理不能跨 contextBridge 结构化克隆，必须传普通数组。
+    void this.api.sessionSetRecentFiles([...this.recent]).catch(() => {});
+  }
+
+  /** 改名/删除后最近列表跟随路径迁移；`to === null` 时移除。 */
+  private remapRecentFiles(from: string, to: string | null): void {
+    const mapped = mapPathList(this.recent, (key) => {
+      if (key === from) return to;
+      if (key.startsWith(`${from}/`)) return to === null ? null : `${to}${key.slice(from.length)}`;
+      return key;
+    });
+    if (mapped !== null) this.recent = mapped;
+  }
+
+  /** 清空视图记忆（切库）。 */
+  private clearViewModes(): void {
+    for (const key of Object.keys(this.viewModes)) delete this.viewModes[key];
   }
 
   private get refreshBlocked(): boolean {
@@ -780,6 +923,27 @@ export class ReaderWorkspaceController {
     const root = this.root;
     const generation = this.listGeneration;
     const files = await this.api.vaultEntries();
-    if (root === this.root && generation === this.listGeneration) this.listed = files;
+    if (root !== this.root || generation !== this.listGeneration) return;
+    this.listed = files;
+    this.revision += 1;
+    this.refreshNoteKeys();
+    void this.bookmarks.reload();
+  }
+
+  /**
+   * 目录变化后重读笔记身份。别名补全是辅助能力：失败保留上次结果，不阻塞目录刷新。
+   *
+   * 用独立序号而不是目录世代判定过期：恢复流程在列目录之后才推进世代，
+   * 借用世代会把启动时的第一份结果误当成过期丢弃。
+   */
+  private refreshNoteKeys(): void {
+    const root = this.root;
+    const request = ++this.keysRequest;
+    void this.api.indexNoteKeys().then(
+      (keys) => {
+        if (request === this.keysRequest && root === this.root) this.keys = keys;
+      },
+      () => {},
+    );
   }
 }

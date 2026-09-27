@@ -1,7 +1,18 @@
 /** 编辑器映射回 Markdown 语法树，转义、围栏与嵌套缩进交给共用处理器。 */
-import type { AlignType, BlockContent, Heading, PhrasingContent, Root } from "mdast";
+import type {
+  AlignType,
+  BlockContent,
+  DefinitionContent,
+  Heading,
+  Paragraph,
+  PhrasingContent,
+  Root,
+} from "mdast";
 import type { Mark, Node as PmNode } from "prosemirror-model";
 import { markdownProcessor } from "./markdown-processor";
+
+/** 可出现在根、引用与列表项里的块；脚注定义属于 mdast 的定义内容。 */
+type FlowContent = BlockContent | DefinitionContent;
 
 /**
  * 序列化完整文档；所有节点与格式都必须有显式映射，禁止静默省略。
@@ -15,11 +26,11 @@ export function serializeMarkdown(doc: PmNode): string {
   return markdownProcessor.stringify(root);
 }
 
-function blocks(node: PmNode): BlockContent[] {
+function blocks(node: PmNode): FlowContent[] {
   return node.content.content.map(block);
 }
 
-function block(node: PmNode): BlockContent {
+function block(node: PmNode): FlowContent {
   switch (node.type.name) {
     case "paragraph":
       return { type: "paragraph", children: inline(node) };
@@ -27,6 +38,22 @@ function block(node: PmNode): BlockContent {
       return { type: "heading", depth: headingDepth(node), children: inline(node) };
     case "blockquote":
       return { type: "blockquote", children: blocks(node) };
+    case "callout":
+      return callout(node);
+    case "comment_block":
+      return {
+        type: "paragraph",
+        children: [{ type: "comment", value: String(node.attrs["source"] ?? "") }],
+      };
+    case "footnote_def": {
+      const label = String(node.attrs["label"] ?? "");
+      return {
+        type: "footnoteDefinition",
+        identifier: label.toLowerCase(),
+        label,
+        children: blocks(node),
+      };
+    }
     case "bullet_list":
     case "ordered_list":
       return {
@@ -87,15 +114,41 @@ function block(node: PmNode): BlockContent {
   }
 }
 
+/**
+ * 标注写回为引用块：首行是 `[!kind]± 标题`，正文首段与首行同段（Obsidian 的常见写法），
+ * 其余块照常以引用续行分隔。
+ */
+function callout(node: PmNode): BlockContent {
+  const kind = String(node.attrs["kind"] ?? "note");
+  const fold = String(node.attrs["fold"] ?? "");
+  const title = String(node.attrs["title"] ?? "");
+  const marker = `[!${kind}]${fold}${title === "" ? "" : ` ${title}`}`;
+  const children = blocks(node);
+  const first = children[0];
+  const head: Paragraph = { type: "paragraph", children: [{ type: "rawMarkdown", value: marker }] };
+  if (first?.type !== "paragraph") return { type: "blockquote", children: [head, ...children] };
+  if (first.children.length > 0)
+    head.children.push({ type: "text", value: "\n" }, ...first.children);
+  return { type: "blockquote", children: [head, ...children.slice(1)] };
+}
+
 type MarkedNode = { node: PmNode; marks: readonly Mark[] };
-const markOrder: Record<string, number> = { link: 0, strong: 1, em: 2, strike: 3, code: 4 };
+// 行内代码只能包纯文本，必须排在最内层；高亮包在其他格式外层，避免被加粗等切成两段。
+const markOrder: Record<string, number> = {
+  link: 0,
+  highlight: 1,
+  strong: 2,
+  em: 3,
+  strike: 4,
+  code: 5,
+};
 
 function inline(node: PmNode): PhrasingContent[] {
   return markedContent(
     node.content.content.map((child) => ({
       node: child,
       marks: [...child.marks].sort(
-        (left, right) => (markOrder[left.type.name] ?? 5) - (markOrder[right.type.name] ?? 5),
+        (left, right) => (markOrder[left.type.name] ?? 6) - (markOrder[right.type.name] ?? 6),
       ),
     })),
     0,
@@ -140,6 +193,8 @@ function wrapMark(mark: Mark, children: PhrasingContent[]): PhrasingContent {
       return { type: "emphasis", children };
     case "strike":
       return { type: "delete", children };
+    case "highlight":
+      return { type: "highlight", children };
     case "code": {
       const value = children
         .map((child) =>
@@ -186,7 +241,15 @@ function inlineNode(node: PmNode, table: boolean): PhrasingContent {
       return { type: "html", value: String(node.attrs["html"] ?? "") };
     case "markdown_inline":
       return { type: "rawMarkdown", value: String(node.attrs["source"] ?? "") };
+    case "comment_inline":
+      return { type: "comment", value: String(node.attrs["source"] ?? "") };
+    case "footnote_ref": {
+      const label = String(node.attrs["label"] ?? "");
+      return { type: "footnoteReference", identifier: label.toLowerCase(), label };
+    }
     case "pdf":
+    case "audio":
+    case "video":
     case "image": {
       const src = String(node.attrs["src"] ?? "");
       const alt = String(node.attrs["alt"] ?? "");

@@ -1,17 +1,23 @@
 import type { EditorState } from "prosemirror-state";
 
-const markNames = ["strong", "em", "strike", "code"] as const;
+const markNames = ["strong", "em", "strike", "highlight", "code"] as const;
 
 /** 行内格式的选区状态；mixed 表示可格式化内容中仅有一部分带该样式。 */
 export type InlineMarkStates = Record<(typeof markNames)[number], boolean | "mixed">;
 
 /**
- * 一次遍历读取四种文字样式，避免每个按钮单独扫描长选区。
+ * 一次遍历读取全部文字样式，避免每个按钮单独扫描长选区。
  * @param state 当前编辑器状态；光标处优先使用待输入样式。
  * @returns 全部应用、部分应用或未应用的状态；无可格式化内容时为 false，不抛出异常。
  */
 export function readInlineMarkStates(state: EditorState): InlineMarkStates {
-  const result: InlineMarkStates = { strong: false, em: false, strike: false, code: false };
+  const result: InlineMarkStates = {
+    strong: false,
+    em: false,
+    strike: false,
+    highlight: false,
+    code: false,
+  };
   const { empty, $from, ranges } = state.selection;
   if (empty) {
     for (const name of markNames) {

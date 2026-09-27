@@ -1,6 +1,7 @@
 import { Menu, type MenuItemConstructorOptions } from "electron";
 import type { AppCommand } from "../shared/api";
-import type { HistoryAvailability } from "../features/reader/shared/api";
+import type { HistoryAction, HistoryAvailability } from "../features/reader/shared/api";
+import { acceleratorOf, commandSpec, type ReaderCommand } from "../features/reader/shared/commands";
 
 /** 应用当前输入表面的历史投影；未就绪、重载或关闭窗口时禁用，菜单尚未安装则忽略。 */
 export function updateHistoryMenu(
@@ -18,58 +19,72 @@ export function updateHistoryMenu(
  * @param dispatch 将命令交给活动窗口，保存与切换仍由阅读器协调。
  */
 export function installApplicationMenu(dispatch: (command: AppCommand) => void): void {
-  const command = (
+  // 名称与加速键来自命令表；菜单只决定分组与顺序。
+  const command = (action: ReaderCommand): MenuItemConstructorOptions => {
+    const accelerator = acceleratorOf(action);
+    return {
+      id: action,
+      label: commandSpec(action).label,
+      ...(accelerator === undefined ? {} : { accelerator }),
+      click: () => dispatch(action),
+    };
+  };
+  const history = (
     label: string,
     accelerator: string,
-    action: AppCommand,
+    action: HistoryAction,
   ): MenuItemConstructorOptions => ({
     id: action,
     label,
     accelerator,
-    enabled: action !== "undo" && action !== "redo",
+    enabled: false,
     click: () => dispatch(action),
   });
   const template: MenuItemConstructorOptions[] = [
     {
       label: "文件",
       submenu: [
-        command("新建笔记", "CmdOrCtrl+N", "new-note"),
-        command("新建文件夹", "CmdOrCtrl+Shift+N", "new-folder"),
-        command("打开笔记库…", "CmdOrCtrl+O", "open-vault"),
+        command("new-note"),
+        command("new-folder"),
+        command("open-vault"),
         { type: "separator" },
-        command("保存", "CmdOrCtrl+S", "save"),
+        command("save"),
         { role: "close", label: "关闭窗口" },
       ],
     },
     {
       label: "编辑",
       submenu: [
-        command("撤销", "CmdOrCtrl+Z", "undo"),
-        command("重做", process.platform === "darwin" ? "Cmd+Shift+Z" : "Ctrl+Y", "redo"),
+        history("撤销", "CmdOrCtrl+Z", "undo"),
+        history("重做", process.platform === "darwin" ? "Cmd+Shift+Z" : "Ctrl+Y", "redo"),
         { type: "separator" },
         { role: "cut", label: "剪切" },
         { role: "copy", label: "复制" },
         { role: "paste", label: "粘贴" },
         { role: "selectAll", label: "全选" },
-        command("插入附件…", "CmdOrCtrl+Shift+I", "insert-attachment"),
+        command("insert-attachment"),
         { type: "separator" },
-        command("文内查找", "CmdOrCtrl+F", "find"),
-        command("查找文件", "CmdOrCtrl+Shift+F", "find-files"),
+        command("find"),
+        command("find-files"),
       ],
     },
     {
       label: "导航",
       submenu: [
-        command("后退", "CmdOrCtrl+[", "go-back"),
-        command("前进", "CmdOrCtrl+]", "go-forward"),
+        command("quick-switcher"),
+        command("command-palette"),
         { type: "separator" },
-        command("切换排版/源码视图", "CmdOrCtrl+E", "toggle-source"),
+        command("go-back"),
+        command("go-forward"),
+        { type: "separator" },
+        command("toggle-source"),
+        command("toggle-reading"),
       ],
     },
     {
       label: "显示",
       submenu: [
-        command("显示或隐藏文件栏", "CmdOrCtrl+\\", "toggle-files"),
+        command("toggle-files"),
         { type: "separator" },
         { role: "resetZoom", label: "实际大小" },
         { role: "zoomIn", label: "放大" },

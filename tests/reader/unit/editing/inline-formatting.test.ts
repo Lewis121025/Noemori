@@ -26,7 +26,7 @@ it("只检查实际选中的文本，边缘空白不产生错误的混合状态"
 });
 
 it("一次读取多种叠加样式，互不干扰", () => {
-  const doc = parseMarkdown("***重点*** ~~删除~~ `代码`");
+  const doc = parseMarkdown("***重点*** ~~删除~~ ==高亮== `代码`");
   const state = EditorState.create({
     doc,
     selection: TextSelection.create(doc, 1, doc.content.size - 1),
@@ -35,6 +35,7 @@ it("一次读取多种叠加样式，互不干扰", () => {
     strong: "mixed",
     em: "mixed",
     strike: "mixed",
+    highlight: "mixed",
     code: "mixed",
   });
 });

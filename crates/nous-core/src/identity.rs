@@ -52,6 +52,32 @@ pub(crate) fn keys_from_scan(scanned: &ScannedMarkdown) -> Vec<String> {
     keys
 }
 
+/// 一篇笔记可被点名的身份：展示标题与别名，供快速切换器与别名补全匹配。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteKeys {
+    /// 库内相对路径。
+    pub path: String,
+    /// 展示标题：文首一级标题，缺失时为文件名词干。
+    pub title: String,
+    /// frontmatter `alias` / `aliases` 的别名，按书写顺序去重。
+    pub aliases: Vec<String>,
+}
+
+/// 由文件行与别名表组装全部 Markdown 笔记的身份，按路径升序。
+pub(crate) fn note_keys(rows: &[FileRow], aliases: &HashMap<String, Vec<String>>) -> Vec<NoteKeys> {
+    let mut out: Vec<NoteKeys> = rows
+        .iter()
+        .filter(|row| row.kind == "markdown")
+        .map(|row| NoteKeys {
+            path: row.path.clone(),
+            title: row.title.clone(),
+            aliases: aliases.get(&row.path).cloned().unwrap_or_default(),
+        })
+        .collect();
+    out.sort_by(|left, right| left.path.cmp(&right.path));
+    out
+}
+
 /// 由文件行标题和别名表生成每篇笔记的额外解析键。
 ///
 /// 文件名回退标题与词干重复，由调用方在并入路径键时再去重。

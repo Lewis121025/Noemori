@@ -5,6 +5,7 @@ import { documentSchema } from "@reader/renderer/engine/markdown/schema";
 import { suggestRequest } from "@reader/renderer/engine/editing/link-suggest/context";
 import { suggestInsertion } from "@reader/renderer/engine/editing/link-suggest/insert";
 import {
+  rankBlockCandidates,
   rankFileCandidates,
   rankHeadingCandidates,
   SUGGESTION_LIMIT,
@@ -61,6 +62,21 @@ describe("suggestRequest 触发识别", () => {
       target: "note",
       closeAfter: false,
       labelStart: null,
+    });
+  });
+
+  it("#^ 进入块查询，空目标表示本笔记", () => {
+    expect(suggestRequest(stateAtEnd("[[note#^ab"))).toMatchObject({
+      kind: "block",
+      syntax: "wiki",
+      query: "ab",
+      target: "note",
+      from: 9,
+    });
+    expect(suggestRequest(stateAtEnd("[[#^"))).toMatchObject({
+      kind: "block",
+      target: "",
+      query: "",
     });
   });
 
@@ -145,6 +161,35 @@ describe("rankFileCandidates", () => {
   it("没有命中返回空列表", () => {
     expect(rankFileCandidates("zzz", files)).toEqual([]);
   });
+
+  it("有查询时别名参与匹配，插入目标路径并带别名；空查询不列别名", () => {
+    const notes = [
+      { path: "notes/beta.md", title: "beta", aliases: ["乙", "Second"] },
+      { path: "gone.md", title: "gone", aliases: ["乙号"] },
+    ];
+    expect(rankFileCandidates("乙", files, notes)).toEqual([
+      { value: "notes/beta", label: "乙", detail: "别名 · notes/beta.md", alias: "乙" },
+    ]);
+    expect(rankFileCandidates("sec", files, notes)[0]?.alias).toBe("Second");
+    expect(rankFileCandidates("", files, notes).some((item) => item.alias !== undefined)).toBe(
+      false,
+    );
+  });
+});
+
+describe("rankBlockCandidates", () => {
+  const blocks = [
+    { index: 0, text: "第一段内容", id: null, insertAt: 5 },
+    { index: 1, text: "第二段", id: "keep-1", insertAt: 12 },
+  ];
+
+  it("按块文字与已有 ID 匹配，value 是块序号，副行区分是否需要写入 ID", () => {
+    expect(rankBlockCandidates("", blocks).map((item) => item.value)).toEqual(["0", "1"]);
+    expect(rankBlockCandidates("keep", blocks)).toEqual([
+      { value: "1", label: "第二段", detail: "^keep-1" },
+    ]);
+    expect(rankBlockCandidates("第一", blocks)[0]?.detail).toBe("块 · 将写入新 ID");
+  });
 });
 
 describe("rankHeadingCandidates", () => {
@@ -206,6 +251,24 @@ describe("suggestInsertion 提交事务", () => {
   it("没有配对标签括号时退回文本插入，与手敲语义一致", () => {
     const next = choose(stateAtEnd("see ](pa"), "x.md");
     expect(next.doc.textContent).toBe("see ](x.md)");
+  });
+
+  it("md 锚点候选保留原标签文字", () => {
+    const next = choose(stateAtEnd("[原标签](./note.md#se"), "小节");
+    expect(serializeMarkdown(next.doc)).toBe("[原标签](./note.md#小节)\n");
+  });
+
+  it("块候选拼出 #^ID；别名候选写成带显示名的链接", () => {
+    expect(serializeMarkdown(choose(stateAtEnd("[[note#^ab"), "^abc123").doc)).toBe(
+      "[[note#^abc123]]\n",
+    );
+    const state = stateAtEnd("[[乙");
+    const request = suggestRequest(state)!;
+    const aliased = state.apply(suggestInsertion(state, request, "notes/beta", "乙")!);
+    expect(serializeMarkdown(aliased.doc)).toBe("[[notes/beta|乙]]\n");
+    const md = stateAtEnd("[](./be");
+    const mdAliased = md.apply(suggestInsertion(md, suggestRequest(md)!, "notes/beta.md", "乙")!);
+    expect(serializeMarkdown(mdAliased.doc)).toBe("[乙](notes/beta.md)\n");
   });
 
   it("过期触发范围返回 null，不强行写入", () => {

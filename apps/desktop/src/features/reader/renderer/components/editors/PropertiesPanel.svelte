@@ -18,7 +18,16 @@
   } from "../../engine/document/frontmatter-edit";
 
   // 解构重命名：组件内不能存在名为 state 的变量，否则 $state 会被当作 store 订阅。
-  let { view, state: editorState }: { view: EditorView; state: EditorState } = $props();
+  let {
+    view,
+    state: editorState,
+    readOnly = false,
+  }: {
+    view: EditorView;
+    state: EditorState;
+    /** 阅读视图：只展示属性，不提供修改入口。 */
+    readOnly?: boolean;
+  } = $props();
 
   const block = $derived(frontmatterBlock(editorState.doc));
   const entries = $derived(block === null ? [] : frontmatterEntries(block.text));
@@ -81,7 +90,7 @@
   }
 </script>
 
-<details class="properties" open={block !== null}>
+<details class="properties" open={block !== null} hidden={readOnly && block === null}>
   <summary>属性{entries.length > 0 ? `（${entries.length}）` : ""}</summary>
   <div class="rows">
     {#each entries as entry (entry.key)}
@@ -94,6 +103,7 @@
             autocomplete="off"
             spellcheck="false"
             aria-label="属性 {entry.key} 的值"
+            readonly={readOnly}
             value={valueOf(entry.key, entry.value)}
             oninput={(event) => {
               drafts[entry.key] = event.currentTarget.value;
@@ -114,44 +124,49 @@
         {:else}
           <span class="nested" title="嵌套结构请切换到源码视图编辑">嵌套结构</span>
         {/if}
-        <button
-          type="button"
-          class="remove"
-          aria-label="删除属性 {entry.key}"
-          title="删除属性"
-          onclick={() => remove(entry.key)}>×</button
-        >
+        {#if !readOnly}
+          <button
+            type="button"
+            class="remove"
+            aria-label="删除属性 {entry.key}"
+            title="删除属性"
+            onclick={() => remove(entry.key)}>×</button
+          >
+        {/if}
       </div>
     {/each}
-    <div class="row add-row">
-      <input
-        class="reader-input key-input"
-        type="text"
-        placeholder="键"
-        aria-label="新属性键"
-        autocomplete="off"
-        spellcheck="false"
-        bind:value={newKey}
-      />
-      <input
-        class="reader-input value"
-        type="text"
-        placeholder="值"
-        aria-label="新属性值"
-        autocomplete="off"
-        spellcheck="false"
-        bind:value={newValue}
-        onkeydown={(event) => {
-          if (!event.isComposing && event.key === "Enter") {
-            event.preventDefault();
-            add();
-          }
-        }}
-      />
-      <button type="button" class="reader-button add" disabled={newKey.trim() === ""} onclick={add}
-        >添加</button
-      >
-    </div>
+    {#if !readOnly}<div class="row add-row">
+        <input
+          class="reader-input key-input"
+          type="text"
+          placeholder="键"
+          aria-label="新属性键"
+          autocomplete="off"
+          spellcheck="false"
+          bind:value={newKey}
+        />
+        <input
+          class="reader-input value"
+          type="text"
+          placeholder="值"
+          aria-label="新属性值"
+          autocomplete="off"
+          spellcheck="false"
+          bind:value={newValue}
+          onkeydown={(event) => {
+            if (!event.isComposing && event.key === "Enter") {
+              event.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button
+          type="button"
+          class="reader-button add"
+          disabled={newKey.trim() === ""}
+          onclick={add}>添加</button
+        >
+      </div>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
   </div>
 </details>

@@ -3,9 +3,10 @@ import { externalUrl } from "../shared/link-target";
 import type { PaneLayout } from "../shared/api";
 import { parseAttachmentRequest, type AttachmentReply } from "../shared/attachments";
 import { parseDraftRequest, type DraftReply } from "../shared/editor-recovery";
-import { parseSourceViews } from "../shared/session";
+import { parseRecentFiles, parseViewModes } from "../shared/session";
 import type { ReaderService } from "./service";
 import {
+  parseBookmarks,
   parseByteArgument,
   parseEntryKind,
   parseLinkKindArgument,
@@ -54,8 +55,12 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
     core.call("readerSessionPatch", { documents: parseSessionDocumentsMessage(documents) }),
   );
 
-  ipcMain.handle("reader.session.setSourceViews", (_event, paths: unknown) =>
-    core.call("readerSessionPatch", { sourceViews: parseSourceViews(paths) }),
+  ipcMain.handle("reader.session.setViewModes", (_event, modes: unknown) =>
+    core.call("readerSessionPatch", { viewModes: parseViewModes(modes) }),
+  );
+
+  ipcMain.handle("reader.session.setRecentFiles", (_event, paths: unknown) =>
+    core.call("readerSessionPatch", { recentFiles: parseRecentFiles(paths) }),
   );
 
   ipcMain.handle("reader.session.getPanes", async (): Promise<PaneLayout> => {
@@ -199,6 +204,15 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
     core.call("indexHeadings", parsePathArgument(path)),
   );
   ipcMain.handle("reader.index.tags", () => core.call("indexTags"));
+  ipcMain.handle("reader.index.noteKeys", () => core.call("indexNoteKeys"));
+  ipcMain.handle("reader.index.graph", (_event, includeDead: unknown) => {
+    if (typeof includeDead !== "boolean") throw new Error("图谱请求无效");
+    return core.call("indexGraph", includeDead);
+  });
+  ipcMain.handle("reader.bookmarks.list", () => core.call("bookmarksList"));
+  ipcMain.handle("reader.bookmarks.set", (_event, items: unknown) =>
+    core.call("bookmarksSet", parseBookmarks(items)),
+  );
   ipcMain.handle("reader.entry.rename", (_event, from: unknown, to: unknown) =>
     core.call("entryRename", parsePathArgument(from), parsePathArgument(to)),
   );

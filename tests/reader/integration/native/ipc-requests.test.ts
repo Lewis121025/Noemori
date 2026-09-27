@@ -77,9 +77,33 @@ it("错误会话参数不能清空当前路径或重置布局，额外字段不�
     filesCollapsed: true,
     leftWidth: 240,
   });
-  // 源码视图记忆逐项校验：非文本与空串丢弃，不整体拒绝。
-  await invoke("reader.session.setSourceViews", ["a.md", 5, "", "a.md"]);
-  expect(call).toHaveBeenLastCalledWith("readerSessionPatch", { sourceViews: ["a.md"] });
+  // 视图记忆逐项校验：未知视图与空路径丢弃，不整体拒绝。
+  await invoke("reader.session.setViewModes", { "a.md": "source", "b.md": 5, "": "reading" });
+  expect(call).toHaveBeenLastCalledWith("readerSessionPatch", { viewModes: { "a.md": "source" } });
+  // 最近列表同一口径：保序去重，不能借此写入其他会话字段。
+  await invoke("reader.session.setRecentFiles", ["b.md", null, "a.md", "b.md"]);
+  expect(call).toHaveBeenLastCalledWith("readerSessionPatch", { recentFiles: ["b.md", "a.md"] });
+  await invoke("reader.index.noteKeys");
+  expect(call).toHaveBeenLastCalledWith("indexNoteKeys");
+  await expect(invoke("reader.index.graph", "true")).rejects.toThrow("图谱");
+  await invoke("reader.index.graph", true);
+  expect(call).toHaveBeenLastCalledWith("indexGraph", true);
+  // 书签整体校验：越界路径、空查询与多余字段不能写进库内书签文件。
+  call.mockClear();
+  for (const invalid of [
+    null,
+    [{ kind: "file", path: "../逃逸.md", title: null }],
+    [{ kind: "search", query: " ", title: null }],
+    [{ kind: "heading", path: "a.md", heading: "", title: null }],
+  ])
+    await expect(invoke("reader.bookmarks.set", invalid)).rejects.toThrow("书签");
+  expect(call).not.toHaveBeenCalled();
+  await invoke("reader.bookmarks.set", [
+    { kind: "heading", path: "a.md", heading: "目标", title: null, extra: 1 },
+  ]);
+  expect(call).toHaveBeenLastCalledWith("bookmarksSet", [
+    { kind: "heading", path: "a.md", heading: "目标", title: null },
+  ]);
 });
 
 it("读取、预览、索引和文件操作统一拒绝错误路径与未知种类", async () => {
@@ -106,30 +130,30 @@ it("读取、预览、索引和文件操作统一拒绝错误路径与未知种�
 });
 
 it("检索条件在 IPC 入口结构化校验，超界上限被收敛后才进入内核", async () => {
+  let deep: unknown = { kind: "term", value: "x" };
+  for (let depth = 0; depth < 40; depth += 1) deep = { kind: "not", child: deep };
   for (const invalid of [
     undefined,
     "原始查询串",
-    { terms: "全文词", tags: [], attributes: [], pathContains: null, limit: 10 },
-    { terms: [], tags: [], attributes: [{ key: "k" }], pathContains: null, limit: 10 },
-    { terms: [], tags: [], attributes: [], pathContains: 1, limit: 10 },
-    { terms: [], tags: [], attributes: [], pathContains: null, limit: "10" },
+    { expr: { kind: "term", value: 1 }, limit: 10 },
+    { expr: { kind: "attr", value: "v" }, limit: 10 },
+    { expr: { kind: "and", children: "x" }, limit: 10 },
+    { expr: { kind: "unknown" }, limit: 10 },
+    { expr: { kind: "and", children: [] }, limit: "10" },
+    { expr: deep, limit: 10 },
   ])
     await expect(invoke("reader.search.query", invalid)).rejects.toThrow();
   expect(call).not.toHaveBeenCalled();
-  await invoke("reader.search.query", {
-    terms: ["全文"],
-    tags: ["#标签"],
-    attributes: [{ key: "status", value: "draft" }],
-    pathContains: null,
-    limit: 1e9,
-  });
-  expect(call).toHaveBeenLastCalledWith("searchQuery", {
-    terms: ["全文"],
-    tags: ["#标签"],
-    attributes: [{ key: "status", value: "draft" }],
-    pathContains: null,
-    limit: 500,
-  });
+  const expr = {
+    kind: "and",
+    children: [
+      { kind: "term", value: "全文" },
+      { kind: "not", child: { kind: "tag", value: "#标签" } },
+      { kind: "attr", key: "status", value: null },
+    ],
+  };
+  await invoke("reader.search.query", { expr, limit: 1e9 });
+  expect(call).toHaveBeenLastCalledWith("searchQuery", { expr, limit: 500 });
 });
 
 it("提及转链接的区间与文本在 IPC 入口校验后才进入内核", async () => {

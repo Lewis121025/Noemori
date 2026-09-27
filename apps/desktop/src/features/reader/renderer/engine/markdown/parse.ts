@@ -1,5 +1,5 @@
 /** Markdown 映射到编辑器；暂未提供富文本编辑的语法以可保留的源码节点承载。 */
-import type { Definition, Nodes, PhrasingContent, RootContent } from "mdast";
+import type { Blockquote, Definition, Nodes, PhrasingContent, RootContent } from "mdast";
 import { decodeString } from "micromark-util-decode-string";
 import type { Mark, Node as PmNode } from "prosemirror-model";
 import { markdownProcessor } from "./markdown-processor";
@@ -55,9 +55,26 @@ function mapBlock(node: RootContent, definitions: Definitions): PmNode {
         { level: node.depth },
         mapPhrasing(node.children, definitions),
       );
-    case "paragraph":
+    case "paragraph": {
+      // 独占一段的注释是块注释；句中注释保持行内。
+      const only = node.children.length === 1 ? node.children[0] : undefined;
+      if (only?.type === "comment")
+        return documentSchema.node("comment_block", { source: only.value });
       return paragraph(mapPhrasing(node.children, definitions));
+    }
+    case "footnoteDefinition": {
+      const children = node.children
+        .map((child) => mapBlock(child, definitions))
+        .map(liftEmbedParagraph);
+      return documentSchema.node(
+        "footnote_def",
+        { label: node.label ?? node.identifier },
+        children.length === 0 ? [paragraph()] : children,
+      );
+    }
     case "blockquote": {
+      const callout = calloutBlock(node, definitions);
+      if (callout !== null) return callout;
       const children = node.children
         .map((child) => mapBlock(child, definitions))
         .map(liftEmbedParagraph);
@@ -170,10 +187,24 @@ function mapPhrase(
       return text(node.value, marks);
     case "strong":
     case "emphasis":
-    case "delete": {
-      const name = node.type === "strong" ? "strong" : node.type === "emphasis" ? "em" : "strike";
+    case "delete":
+    case "highlight": {
+      const name =
+        node.type === "strong"
+          ? "strong"
+          : node.type === "emphasis"
+            ? "em"
+            : node.type === "delete"
+              ? "strike"
+              : "highlight";
       return mapPhrasing(node.children, definitions, [...marks, documentSchema.mark(name)], table);
     }
+    case "comment":
+      return [documentSchema.node("comment_inline", { source: node.value }).mark(marks)];
+    case "footnoteReference":
+      return [
+        documentSchema.node("footnote_ref", { label: node.label ?? node.identifier }).mark(marks),
+      ];
     case "inlineCode":
       return text(node.value, [...marks, documentSchema.mark("code")]);
     case "break":
@@ -212,6 +243,62 @@ function mapPhrase(
     default:
       return [sourceNode(node, false).mark(marks)];
   }
+}
+
+/** 首行 `[!kind]±` 标记；类型不含空白与方括号，标题是标记后的剩余首行。 */
+const CALLOUT_MARKER = /^\[!([^\]\s]+)\]([+-]?)(?:[ \t]+|(?=\n)|$)/;
+
+/**
+ * 首段以 `[!kind]` 开头的引用块是 Obsidian 标注。
+ *
+ * 首段的首行是标记与标题，同段的后续行是正文首段；标题按行内 Markdown 原样
+ * 保存在属性里，序列化时写回首行。不符合标记格式时返回 null，按普通引用处理。
+ */
+function calloutBlock(node: Blockquote, definitions: Definitions): PmNode | null {
+  const first = node.children[0];
+  const lead = first?.type === "paragraph" ? first.children[0] : undefined;
+  if (first?.type !== "paragraph" || lead?.type !== "text") return null;
+  const match = CALLOUT_MARKER.exec(lead.value);
+  if (match === null) return null;
+  const title: PhrasingContent[] = [];
+  const rest: PhrasingContent[] = [];
+  let body = false;
+  first.children.forEach((child, index) => {
+    if (body) {
+      rest.push(child);
+      return;
+    }
+    const current: PhrasingContent =
+      index === 0 ? { type: "text", value: lead.value.slice(match[0].length) } : child;
+    const newline = current.type === "text" ? current.value.indexOf("\n") : -1;
+    if (current.type !== "text" || newline < 0) {
+      title.push(current);
+      return;
+    }
+    const head = current.value.slice(0, newline);
+    const tail = current.value.slice(newline + 1);
+    if (head !== "") title.push({ type: "text", value: head });
+    if (tail !== "") rest.push({ type: "text", value: tail });
+    body = true;
+  });
+  const titleSource =
+    title.length === 0
+      ? ""
+      : markdownProcessor
+          .stringify({ type: "root", children: [{ type: "paragraph", children: title }] })
+          .trim();
+  const children = [
+    ...(rest.length === 0 ? [] : [paragraph(mapPhrasing(rest, definitions))]),
+    ...node.children
+      .slice(1)
+      .map((child) => mapBlock(child, definitions))
+      .map(liftEmbedParagraph),
+  ];
+  return documentSchema.node(
+    "callout",
+    { kind: match[1] ?? "note", fold: match[2] ?? "", title: titleSource },
+    children.length === 0 ? [paragraph()] : children,
+  );
 }
 
 function wikiNodes(raw: string, marks: readonly Mark[]): PmNode[] {

@@ -542,6 +542,28 @@ impl Vault {
         index::load_tag_counts(&conn)
     }
 
+    /// 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
+    ///
+    /// # Errors
+    ///
+    /// 索引查询失败。
+    pub fn note_keys(&self) -> Result<Vec<crate::identity::NoteKeys>, Error> {
+        let conn = self.lock_conn()?;
+        let files = index::load_files(&conn)?;
+        let aliases = index::load_alias_keys(&conn)?;
+        Ok(crate::identity::note_keys(&files, &aliases))
+    }
+
+    /// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
+    ///
+    /// # Errors
+    ///
+    /// 索引查询失败。
+    pub fn graph(&self, include_dead: bool) -> Result<crate::Graph, Error> {
+        let conn = self.lock_conn()?;
+        crate::graph::load_graph(&conn, include_dead)
+    }
+
     /// 结构化全文搜索；条件语义见 [`SearchQuery`]。
     ///
     /// # Errors

@@ -259,9 +259,9 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     expect(await dialog.innerText()).toContain("可以从系统废纸篓恢复");
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     expect(await readFile(join(vault, "收件箱/完成.md"), "utf8")).toContain("创建后的内容");
-    expect(
-      JSON.parse(await readFile(join(userData, "session.json"), "utf8")).reader.currentPath,
-    ).toBe("收件箱/完成.md");
+    const reader = JSON.parse(await readFile(join(userData, "session.json"), "utf8")).reader;
+    // 会话按分栏保存；活动栏路径在 documents 里，顶层不再写 currentPath。
+    expect(reader.documents.panes[reader.documents.active].currentPath).toBe("收件箱/完成.md");
 
     await page.getByRole("button", { name: "切换笔记库" }).click();
     await page.getByRole("button", { name: "深色", exact: true }).click();

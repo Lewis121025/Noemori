@@ -1,6 +1,6 @@
 //! 派生表（标题/标签/属性/全文）与磁盘同步：单篇增量、删除清理与版本重扫。
 
-use nous_core::{SearchQuery, Vault};
+use nous_core::{SearchExpr, SearchQuery, Vault};
 use std::fs;
 use tempfile::TempDir;
 
@@ -14,12 +14,18 @@ fn vault_with(files: &[(&str, &str)]) -> (TempDir, TempDir, Vault) {
     (root, index, vault)
 }
 
+fn query(expr: SearchExpr) -> SearchQuery {
+    SearchQuery { expr, limit: 0 }
+}
+
 fn search_paths(vault: &Vault, terms: &[&str]) -> Vec<String> {
     vault
-        .search(&SearchQuery {
-            terms: terms.iter().map(ToString::to_string).collect(),
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::And(
+            terms
+                .iter()
+                .map(|term| SearchExpr::Term((*term).to_string()))
+                .collect(),
+        )))
         .expect("检索")
         .into_iter()
         .map(|hit| hit.path)
@@ -68,10 +74,7 @@ fn write_updates_own_rows_without_touching_sibling() {
     assert_eq!(search_paths(&vault, &["second"]), ["a.md"]);
     assert!(search_paths(&vault, &["first"]).is_empty());
     let tagged = vault
-        .search(&SearchQuery {
-            tags: vec!["tagged".to_string()],
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::Tag("tagged".to_string())))
         .expect("标签检索");
     assert_eq!(tagged.len(), 1);
     assert_eq!(tagged[0].path, "a.md");
@@ -138,18 +141,12 @@ fn missing_derived_table_rebuilds_without_losing_others() {
 
     let vault = Vault::open(root.path(), index.path()).expect("重开");
     let tagged = vault
-        .search(&SearchQuery {
-            tags: vec!["kept".to_string()],
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::Tag("kept".to_string())))
         .expect("标签检索");
     assert_eq!(tagged.len(), 1);
     assert_eq!(tagged[0].path, "a.md");
     let hits = vault
-        .search(&SearchQuery {
-            terms: vec!["body".to_string()],
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::Term("body".to_string())))
         .expect("全文检索");
     assert_eq!(hits.len(), 1);
 }

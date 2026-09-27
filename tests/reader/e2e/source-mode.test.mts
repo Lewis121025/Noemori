@@ -132,9 +132,9 @@ test("源码视图：排版表达不了的语法逐字节保真，[[ 补全与�
     await expect
       .poll(async () => {
         const session = JSON.parse(await readFile(join(userData, "session.json"), "utf8"));
-        return (session.reader?.sourceViews ?? []) as string[];
+        return (session.reader?.viewModes ?? {}) as Record<string, string>;
       })
-      .toContain("笔记.md");
+      .toEqual({ "笔记.md": "source" });
     expect(errors).toEqual([]);
 
     await app.close();

@@ -4,9 +4,10 @@
   import FileTreeViewport from "./FileTreeViewport.svelte";
   import SearchResults from "./SearchResults.svelte";
   import TagBrowser from "./TagBrowser.svelte";
+  import BookmarksPane from "./BookmarksPane.svelte";
   import type { EntryDialogAction } from "./FileEntryDialog.svelte";
-  import FileMenu from "./FileMenu.svelte";
-  import type { SearchHit, VaultEntry } from "../../../shared/api";
+  import FileMenu, { type FileMenuAction } from "./FileMenu.svelte";
+  import type { Bookmark, SearchHit, VaultEntry } from "../../../shared/api";
   import type { ReaderWorkspaceController } from "../../state/workspace.svelte";
   import { isCompositionKey } from "../../engine/editing/composition";
   import { matchNeedle } from "../../engine/search/query";
@@ -46,9 +47,11 @@
   let recoveryElement: HTMLElement | undefined = $state();
   let searchInput: HTMLInputElement;
   let menu: FileMenu;
+  let bookmarksPane: BookmarksPane | undefined = $state();
   const search = $derived(workspace.search);
-  /** 侧栏主体：文件树或标签浏览；检索结果优先于两者。 */
-  let paneMode = $state<"files" | "tags">("files");
+  /** 侧栏主体：文件树、标签浏览或书签；检索结果优先于三者。 */
+  let paneMode = $state<"files" | "tags" | "bookmarks">("files");
+  const searchBookmark = $derived({ kind: "search" as const, query: query.trim(), title: null });
   let dragging = $state<VaultEntry | null>(null);
   let dropTarget = $state<string | null>(null);
   let previousRoot: string | null | undefined;
@@ -131,10 +134,14 @@
       .find((element) => element.dataset.path === path)
       ?.focus();
   }
-  function action(
-    kind: "file" | "directory" | "rename" | "move" | "trash" | "reveal" | "collapse" | "locate",
-    entry: VaultEntry | null,
-  ): void {
+  function entryBookmark(entry: VaultEntry): Bookmark {
+    return { kind: entry.kind === "directory" ? "folder" : "file", path: entry.path, title: null };
+  }
+  function action(kind: FileMenuAction, entry: VaultEntry | null): void {
+    if (kind === "bookmark") {
+      if (entry !== null) void workspace.bookmarks.toggle(entryBookmark(entry));
+      return;
+    }
     if (kind === "collapse") {
       expanded = new Set();
       return;
@@ -237,6 +244,30 @@
     paneMode = "files";
     query = `tag:${tag}`;
     void submitSearch();
+  }
+  /** 切到书签并把键盘焦点交给第一条；检索结果优先显示，所以先退出结果模式。 */
+  export async function showBookmarks(): Promise<void> {
+    search.reset();
+    paneMode = "bookmarks";
+    await tick();
+    bookmarksPane?.focusFirst();
+  }
+  /** 文件与标题在活动栏打开；文件夹回到文件树展开定位；搜索重新执行。 */
+  async function openBookmark(bookmark: Bookmark): Promise<void> {
+    if (bookmark.kind === "search") {
+      paneMode = "files";
+      query = bookmark.query;
+      await submitSearch();
+    } else if (bookmark.kind === "folder") {
+      paneMode = "files";
+      query = "";
+      selected = bookmark.path;
+      expanded = new Set([...expanded, ...ancestorDirectories(bookmark.path), bookmark.path]);
+      await focusPath(bookmark.path);
+    } else {
+      await workspace.openBookmark(bookmark);
+      if (workspace.document.path === bookmark.path) onOpen();
+    }
   }
   function searchKeydown(event: KeyboardEvent): void {
     if (busy || isCompositionKey(event) || workspace.isComposing) return;
@@ -361,6 +392,20 @@
         >
         <button
           type="button"
+          aria-label="书签"
+          aria-pressed={paneMode === "bookmarks"}
+          title="书签"
+          disabled={busy || workspace.vaultRoot === null}
+          onclick={() => {
+            paneMode = paneMode === "bookmarks" ? "files" : "bookmarks";
+            treeViewport?.resetScroll();
+          }}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
+          ></button
+        >
+        <button
+          type="button"
           aria-label="新建笔记"
           aria-keyshortcuts="Meta+N Control+N"
           title="新建笔记（⌘N / Ctrl+N）"
@@ -396,13 +441,29 @@
         aria-label="搜索文件和全文"
         aria-keyshortcuts="Meta+Shift+F Control+Shift+F"
         placeholder="搜索文件，回车搜全文"
-        title="输入即过滤文件；回车全文搜索，支持 tag:标签、path:路径、属性名:值"
+        title="输入即过滤文件；回车全文搜索，支持 OR、-排除、(分组)、&quot;短语&quot;、/正则/、tag:标签、path:路径、file:文件名、[属性]、[属性:值]、line:( )、section:( )"
         disabled={busy}
         bind:this={searchInput}
         bind:value={query}
         oninput={() => treeViewport?.resetScroll()}
         onkeydown={searchKeydown}
       />
+      {#if search.active && searchBookmark.query !== ""}
+        {@const saved = workspace.bookmarks.has(searchBookmark)}
+        <button
+          type="button"
+          class="save-search"
+          class:saved
+          aria-label={saved ? "取消收藏此搜索" : "收藏此搜索"}
+          aria-pressed={saved}
+          title={saved ? "取消收藏此搜索" : "收藏此搜索"}
+          disabled={busy}
+          onclick={() => void workspace.bookmarks.toggle(searchBookmark)}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
+          ></button
+        >
+      {/if}
       {#if query !== "" || search.active}
         <button
           type="button"
@@ -425,6 +486,13 @@
       />
     {:else if paneMode === "tags"}
       <TagBrowser {workspace} onPick={pickTag} />
+    {:else if paneMode === "bookmarks"}
+      <BookmarksPane
+        bind:this={bookmarksPane}
+        {workspace}
+        {busy}
+        onActivate={(bookmark) => void openBookmark(bookmark)}
+      />
     {:else}
       {#if recoveries.length > 0}
         <section class="recovery" aria-label="待恢复的笔记" bind:this={recoveryElement}>
@@ -547,7 +615,11 @@
     {/if}
   </nav>
 </Sidebar>
-<FileMenu bind:this={menu} onAction={action} />
+<FileMenu
+  bind:this={menu}
+  onAction={action}
+  bookmarked={(entry) => workspace.bookmarks.has(entryBookmark(entry))}
+/>
 
 <style>
   .list {
@@ -623,11 +695,18 @@
     font-size: 0.8rem;
     outline: none;
   }
-  .clear-search {
+  .clear-search,
+  .save-search {
     display: flex;
     padding: 0;
     color: var(--muted);
     flex-shrink: 0;
+  }
+  .save-search.saved {
+    color: var(--accent);
+  }
+  .save-search.saved svg {
+    fill: currentColor;
   }
   .search:focus-within {
     outline: 2px solid var(--accent);

@@ -5,6 +5,7 @@ import type {
   ReaderApi,
   ReaderCommand,
 } from "../features/reader/shared/api";
+import { parseReaderCommand } from "../features/reader/shared/commands";
 
 /** 应用外观；system 随操作系统切换，显式选择同时作用于窗口与正文。 */
 export type Appearance = "system" | "light" | "dark";
@@ -28,21 +29,7 @@ export function parseHistoryAvailability(value: unknown): HistoryAvailability | 
 
 /** 校验菜单事件，拒绝未注册的动作。 */
 export function parseAppCommand(value: unknown): AppCommand | null {
-  return value === "open-vault" ||
-    value === "undo" ||
-    value === "redo" ||
-    value === "new-note" ||
-    value === "new-folder" ||
-    value === "save" ||
-    value === "find" ||
-    value === "find-files" ||
-    value === "insert-attachment" ||
-    value === "toggle-files" ||
-    value === "go-back" ||
-    value === "go-forward" ||
-    value === "toggle-source"
-    ? value
-    : null;
+  return value === "undo" || value === "redo" ? value : parseReaderCommand(value);
 }
 
 /** 校验外观输入；未知值返回 null，由会话读取与 IPC 分别决定回退或拒绝。 */

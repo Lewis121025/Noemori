@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LEFT_WIDTH,
+  RECENT_FILES_LIMIT,
   emptyReaderSession,
+  mapPathList,
+  mapViewModes,
   parsePaneLayout,
   parseReaderSession,
+  pushRecentFile,
 } from "@reader/shared/session";
 
 describe("阅读器会话边界", () => {
@@ -59,12 +63,46 @@ describe("阅读器会话边界", () => {
       parseReaderSession({ history: { back: long, forward: [] } }).documents.panes[0]?.history.back,
     ).toHaveLength(100);
   });
-  it("源码视图记忆去重、丢弃非文本并截到上限", () => {
-    expect(parseReaderSession({ sourceViews: ["a.md", 5, "", "a.md"] }).sourceViews).toEqual([
+  it("视图记忆只留已知视图并截到上限，旧版源码视图列表迁移过来", () => {
+    expect(
+      parseReaderSession({ viewModes: { "a.md": "reading", "b.md": "x", "": "source" } }).viewModes,
+    ).toEqual({ "a.md": "reading" });
+    const many = Object.fromEntries(
+      Array.from({ length: 600 }, (_, index) => [`f${index}.md`, "source"]),
+    );
+    expect(Object.keys(parseReaderSession({ viewModes: many }).viewModes)).toHaveLength(500);
+    expect(parseReaderSession({}).viewModes).toEqual({});
+    // 旧版 sourceViews：去重、丢弃非文本，全部迁移为源码视图；新字段在场时忽略旧字段。
+    expect(parseReaderSession({ sourceViews: ["a.md", 5, "", "a.md"] }).viewModes).toEqual({
+      "a.md": "source",
+    });
+    expect(
+      parseReaderSession({ sourceViews: ["a.md"], viewModes: { "b.md": "reading" } }).viewModes,
+    ).toEqual({ "b.md": "reading" });
+  });
+
+  it("视图记忆跟随改名与删除迁移，无变化返回 null", () => {
+    const modes = { "old/a.md": "source", "keep.md": "reading" } as const;
+    expect(
+      mapViewModes(modes, (path) => (path.startsWith("old/") ? `new/${path.slice(4)}` : path)),
+    ).toEqual({ "new/a.md": "source", "keep.md": "reading" });
+    expect(mapViewModes(modes, (path) => (path === "keep.md" ? null : path))).toEqual({
+      "old/a.md": "source",
+    });
+    expect(mapViewModes(modes, (path) => path)).toBeNull();
+  });
+  it("最近打开列表保序去重、截到上限，置顶与路径迁移不改原列表", () => {
+    expect(parseReaderSession({ recentFiles: ["b.md", 1, "a.md", "b.md"] }).recentFiles).toEqual([
+      "b.md",
       "a.md",
     ]);
-    const many = Array.from({ length: 600 }, (_, index) => `f${index}.md`);
-    expect(parseReaderSession({ sourceViews: many }).sourceViews).toHaveLength(500);
-    expect(parseReaderSession({}).sourceViews).toEqual([]);
+    const many = Array.from({ length: 80 }, (_, index) => `f${index}.md`);
+    expect(parseReaderSession({ recentFiles: many }).recentFiles).toHaveLength(RECENT_FILES_LIMIT);
+    const recent = ["a.md", "b.md"];
+    expect(pushRecentFile(recent, "b.md")).toEqual(["b.md", "a.md"]);
+    expect(pushRecentFile(many, "new.md")).toHaveLength(RECENT_FILES_LIMIT);
+    expect(recent).toEqual(["a.md", "b.md"]);
+    expect(mapPathList(recent, (path) => (path === "a.md" ? null : path))).toEqual(["b.md"]);
+    expect(mapPathList(recent, (path) => path)).toBeNull();
   });
 });

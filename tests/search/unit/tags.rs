@@ -3,10 +3,27 @@
 //! 夹具 `tests/search/fixtures/inline-tags.md` 是规则表的权威用例集；
 //! TS 侧编辑器分词器落地时必须与本断言集逐条对齐。
 
-use nous_core::{SearchQuery, Vault};
+use nous_core::{SearchExpr, SearchQuery, Vault};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
+
+fn tag_query(tag: &str) -> SearchQuery {
+    SearchQuery {
+        expr: SearchExpr::Tag(tag.to_string()),
+        limit: 0,
+    }
+}
+
+fn attr_query(key: &str, value: &str) -> SearchQuery {
+    SearchQuery {
+        expr: SearchExpr::Attr {
+            key: key.to_string(),
+            value: Some(value.to_string()),
+        },
+        limit: 0,
+    }
+}
 
 fn fixture_vault() -> (TempDir, TempDir, Vault) {
     let root = TempDir::new().expect("库");
@@ -150,10 +167,7 @@ fn dotted_attribute_keys_are_searchable() {
     .expect("写夹具");
     let vault = Vault::open(root.path(), index.path()).expect("打开");
     let hits = vault
-        .search(&SearchQuery {
-            attributes: vec![("author.name".to_string(), "张三".to_string())],
-            ..SearchQuery::default()
-        })
+        .search(&attr_query("author.name", "张三"))
         .expect("检索");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "a.md");
@@ -162,12 +176,7 @@ fn dotted_attribute_keys_are_searchable() {
 #[test]
 fn tag_search_is_case_insensitive() {
     let (_root, _index, vault) = fixture_vault();
-    let hits = vault
-        .search(&SearchQuery {
-            tags: vec!["PLAIN".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let hits = vault.search(&tag_query("PLAIN")).expect("检索");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "inline-tags.md");
 }
@@ -176,46 +185,21 @@ fn tag_search_is_case_insensitive() {
 fn ancestor_tag_prefix_matches_nested_tags() {
     let (_root, _index, vault) = fixture_vault();
     // `nested` 命中 `nested/one` 与 `nested/deep/tag`（Obsidian 语义）。
-    let hits = vault
-        .search(&SearchQuery {
-            tags: vec!["nested".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let hits = vault.search(&tag_query("nested")).expect("检索");
     assert_eq!(hits.len(), 1);
     // 精确子标签同样命中；`nested/o` 这样的半截前缀不命中。
-    let exact = vault
-        .search(&SearchQuery {
-            tags: vec!["nested/one".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let exact = vault.search(&tag_query("nested/one")).expect("检索");
     assert_eq!(exact.len(), 1);
-    let partial = vault
-        .search(&SearchQuery {
-            tags: vec!["nested/o".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let partial = vault.search(&tag_query("nested/o")).expect("检索");
     assert!(partial.is_empty());
 }
 
 #[test]
 fn unknown_tag_and_hash_prefixed_query_still_work() {
     let (_root, _index, vault) = fixture_vault();
-    let missing = vault
-        .search(&SearchQuery {
-            tags: vec!["does-not-exist".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let missing = vault.search(&tag_query("does-not-exist")).expect("检索");
     assert!(missing.is_empty());
     // 查询侧带 `#` 前缀等价于不带。
-    let hashed = vault
-        .search(&SearchQuery {
-            tags: vec!["#front".to_string()],
-            ..SearchQuery::default()
-        })
-        .expect("检索");
+    let hashed = vault.search(&tag_query("#front")).expect("检索");
     assert_eq!(hashed.len(), 1);
 }

@@ -71,7 +71,12 @@
           {#each group.items as item, index (`${item.startByte}:${index}`)}
             {@const shown = displaySnippet(item.snippet, false, 180, item.toRaw)}
             <li>
-              <button type="button" class="hit" onclick={() => onOpen(item)}>
+              <button
+                type="button"
+                class="hit"
+                data-preview-path={item.fromPath}
+                onclick={() => onOpen(item)}
+              >
                 {#each pieces(shown, item.toRaw) as part, partIndex (`${partIndex}`)}
                   {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
                 {/each}

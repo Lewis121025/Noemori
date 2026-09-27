@@ -45,7 +45,8 @@ describe("应用与阅读器会话", () => {
         },
         leftWidth: 230,
         filesCollapsed: true,
-        sourceViews: [],
+        viewModes: {},
+        recentFiles: [],
       },
     });
   });

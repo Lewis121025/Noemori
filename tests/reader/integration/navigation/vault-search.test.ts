@@ -87,10 +87,13 @@ describe("侧栏全文搜索", () => {
     await typeAndSubmit("hit word");
 
     expect(searchQuery).toHaveBeenCalledWith({
-      terms: ["hit", "word"],
-      tags: [],
-      attributes: [],
-      pathContains: null,
+      expr: {
+        kind: "and",
+        children: [
+          { kind: "term", value: "hit" },
+          { kind: "term", value: "word" },
+        ],
+      },
       limit: 100,
     });
     expect(target.querySelector('[role="treeitem"]')).toBeNull();
@@ -210,10 +213,7 @@ describe("侧栏全文搜索", () => {
     await settle();
     flushSync();
     expect(searchQuery).toHaveBeenCalledWith({
-      terms: [],
-      tags: ["project/nous"],
-      attributes: [],
-      pathContains: null,
+      expr: { kind: "tag", value: "project/nous" },
       limit: 100,
     });
     expect(searchBox().value).toBe("tag:project/nous");
@@ -223,12 +223,23 @@ describe("侧栏全文搜索", () => {
   it("谓词查询进入结构化条件，纯空白回车不发起检索", async () => {
     const searchQuery = vi.fn(async (): Promise<SearchHit[]> => []);
     await startList(createApi({ searchQuery }));
-    await typeAndSubmit("tag:keep status:draft path:notes/");
+    await typeAndSubmit("tag:keep status:draft path:notes/ (a OR -b)");
     expect(searchQuery).toHaveBeenCalledWith({
-      terms: [],
-      tags: ["keep"],
-      attributes: [{ key: "status", value: "draft" }],
-      pathContains: "notes/",
+      expr: {
+        kind: "and",
+        children: [
+          { kind: "tag", value: "keep" },
+          { kind: "attr", key: "status", value: "draft" },
+          { kind: "path", value: "notes/" },
+          {
+            kind: "or",
+            children: [
+              { kind: "term", value: "a" },
+              { kind: "not", child: { kind: "term", value: "b" } },
+            ],
+          },
+        ],
+      },
       limit: 100,
     });
 

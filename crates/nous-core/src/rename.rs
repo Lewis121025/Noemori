@@ -69,6 +69,9 @@ impl Vault {
         if let Err(err) = self.refresh_index_locked() {
             warnings.push(format!("链接索引更新失败：{err}"));
         }
+        if let Err(err) = self.remap_bookmarks_locked(&from, &to) {
+            warnings.push(format!("书签路径未能更新：{err}"));
+        }
         Ok(RenameOutcome {
             warning: (!warnings.is_empty()).then(|| warnings.join("；")),
         })

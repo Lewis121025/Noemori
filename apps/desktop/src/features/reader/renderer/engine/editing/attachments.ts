@@ -7,7 +7,7 @@ import {
   type AttachmentImporter,
   type ImportedAttachment,
 } from "../../../shared/attachments";
-import { mimeFromPath } from "../media/media";
+import { mimeFromPath, previewKindFromMime } from "../media/media";
 
 /** 导入进度与可重试错误；不包含正文或保存状态。 */
 export type AttachmentProgress =
@@ -25,14 +25,10 @@ function attachmentContent(state: EditorState, imported: ImportedAttachment): Fr
   const name = imported.path.split("/").at(-1);
   if (!name) throw new Error("附件缺少文件名");
   const href = `./attachments/${encodeURIComponent(name).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`;
-  const mime = mimeFromPath(name);
+  const preview = previewKindFromMime(mimeFromPath(name));
   const node =
-    mime.startsWith("image/") || mime === "application/pdf"
-      ? state.schema.node(mime === "application/pdf" ? "pdf" : "image", {
-          src: href,
-          alt: name,
-          kind: "md",
-        })
+    preview !== null
+      ? state.schema.node(preview, { src: href, alt: name, kind: "md" })
       : state.schema.text(name, [state.schema.mark("link", { href })]);
   return Fragment.fromArray([node, state.schema.text(" ")]);
 }

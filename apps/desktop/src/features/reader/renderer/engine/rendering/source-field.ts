@@ -5,6 +5,9 @@ import { sourceEditingKey } from "../editing/source-editing";
 import { createCompositionGuard, isCompositionKey } from "../editing/composition";
 import { applyMarkdownHistory } from "../editing/history";
 
+/** 源码节点保存原文的 schema 属性。 */
+export type SourceAttribute = "tex" | "html" | "source";
+
 /**
  * 将输入实时写入文档，同时把保存快捷键交回编辑器。
  *
@@ -18,7 +21,7 @@ export function bindSourceField(
   field: HTMLInputElement | HTMLTextAreaElement,
   view: EditorView,
   getPos: () => number | undefined,
-  attribute: "tex" | "html",
+  attribute: SourceAttribute,
 ): void {
   const composition = createCompositionGuard();
   // 监听仅挂在该输入框上，源码节点移除后随 DOM 一起释放。

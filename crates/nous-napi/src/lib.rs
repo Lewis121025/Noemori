@@ -546,28 +546,74 @@ pub fn mentions_linkify(
     })
 }
 
-/// 属性谓词：frontmatter 键值对，键值均大小写不敏感精确匹配。
+/// 检索表达式节点；查询文本解析在渲染层完成。
+///
+/// `kind` 为 `and`/`or`（`children` 为子条件）、`not`/`line`/`section`（恰好一个子条件）、
+/// `term`/`regex`/`tag`/`path`/`file`（`value` 为文本）或 `attr`（`key` 必填，`value` 可缺）。
 #[napi(object)]
-pub struct JsSearchAttribute {
-    /// 属性名，保留原文大小写。
-    pub key: String,
-    /// 属性值。
-    pub value: String,
+pub struct JsSearchExpr {
+    /// 节点种类。
+    pub kind: String,
+    /// 文本值；属性节点缺失表示只要求键存在。
+    pub value: Option<String>,
+    /// 属性名；只用于 `attr`。
+    pub key: Option<String>,
+    /// 子条件。
+    pub children: Option<Vec<JsSearchExpr>>,
 }
 
-/// 结构化检索条件；查询文本解析在渲染层完成，各字段之间是 AND 关系。
+/// 一次检索：表达式与结果上限。
 #[napi(object)]
 pub struct JsSearchQuery {
-    /// 全文词；大小写不敏感子串匹配。
-    pub terms: Vec<String>,
-    /// 标签谓词；祖先标签前缀匹配嵌套子标签。
-    pub tags: Vec<String>,
-    /// 属性谓词。
-    pub attributes: Vec<JsSearchAttribute>,
-    /// 路径子串过滤；缺失表示不过滤。
-    pub path_contains: Option<String>,
+    /// 检索表达式。
+    pub expr: JsSearchExpr,
     /// 结果上限；非正数按内核默认值处理。
     pub limit: i32,
+}
+
+/// 表达式嵌套深度上限；主进程已校验，这里是跨语言边界的最后一道防线。
+const SEARCH_DEPTH_LIMIT: usize = 32;
+
+fn search_expr(node: JsSearchExpr, depth: usize) -> Result<nous_core::SearchExpr> {
+    use nous_core::SearchExpr;
+    if depth > SEARCH_DEPTH_LIMIT {
+        return Err(Error::from_reason("检索条件嵌套过深"));
+    }
+    let children = |node: JsSearchExpr| -> Result<Vec<SearchExpr>> {
+        node.children
+            .unwrap_or_default()
+            .into_iter()
+            .map(|child| search_expr(child, depth + 1))
+            .collect()
+    };
+    let only = |node: JsSearchExpr| -> Result<Box<SearchExpr>> {
+        let mut list = children(node)?;
+        if list.len() != 1 {
+            return Err(Error::from_reason("检索条件的子条件数量无效"));
+        }
+        Ok(Box::new(list.remove(0)))
+    };
+    let text =
+        |value: Option<String>| value.ok_or_else(|| Error::from_reason("检索条件缺少文本值"));
+    Ok(match node.kind.as_str() {
+        "and" => SearchExpr::And(children(node)?),
+        "or" => SearchExpr::Or(children(node)?),
+        "not" => SearchExpr::Not(only(node)?),
+        "line" => SearchExpr::Line(only(node)?),
+        "section" => SearchExpr::Section(only(node)?),
+        "term" => SearchExpr::Term(text(node.value)?),
+        "regex" => SearchExpr::Regex(text(node.value)?),
+        "tag" => SearchExpr::Tag(text(node.value)?),
+        "path" => SearchExpr::Path(text(node.value)?),
+        "file" => SearchExpr::File(text(node.value)?),
+        "attr" => SearchExpr::Attr {
+            key: node
+                .key
+                .ok_or_else(|| Error::from_reason("属性条件缺少键"))?,
+            value: node.value,
+        },
+        _ => return Err(Error::from_reason("未知的检索条件种类")),
+    })
 }
 
 /// 一条搜索命中。
@@ -585,18 +631,11 @@ pub struct JsSearchHit {
 ///
 /// # Errors
 ///
-/// 未打开库或索引查询失败。
+/// 未打开库、表达式结构无效、正则无效或索引查询失败。
 #[napi]
 pub fn search_query(query: JsSearchQuery) -> Result<Vec<JsSearchHit>> {
     let query = nous_core::SearchQuery {
-        terms: query.terms,
-        tags: query.tags,
-        attributes: query
-            .attributes
-            .into_iter()
-            .map(|attribute| (attribute.key, attribute.value))
-            .collect(),
-        path_contains: query.path_contains,
+        expr: search_expr(query.expr, 0)?,
         limit: i64::from(query.limit),
     };
     let hits = with_vault(|vault| vault.search(&query))?;
@@ -649,6 +688,185 @@ pub fn index_tags() -> Result<Vec<JsTagCount>> {
             count: count.count,
         })
         .collect())
+}
+
+/// 一条书签；`kind` 为 `file`/`folder`（`path`）、`heading`（`path` 与 `heading`）或 `search`（`query`）。
+#[napi(object)]
+pub struct JsBookmark {
+    /// 书签种类。
+    pub kind: String,
+    /// 库内相对路径；文件、文件夹与标题书签必填。
+    pub path: Option<String>,
+    /// 标题原文；只用于标题书签。
+    pub heading: Option<String>,
+    /// 查询文本；只用于搜索书签。
+    pub query: Option<String>,
+    /// 自定义显示名。
+    pub title: Option<String>,
+}
+
+fn js_bookmark(bookmark: nous_core::Bookmark) -> JsBookmark {
+    use nous_core::Bookmark;
+    let (kind, path, heading, query, title) = match bookmark {
+        Bookmark::File { path, title } => ("file", Some(path), None, None, title),
+        Bookmark::Folder { path, title } => ("folder", Some(path), None, None, title),
+        Bookmark::Heading {
+            path,
+            heading,
+            title,
+        } => ("heading", Some(path), Some(heading), None, title),
+        Bookmark::Search { query, title } => ("search", None, None, Some(query), title),
+    };
+    JsBookmark {
+        kind: kind.to_string(),
+        path,
+        heading,
+        query,
+        title,
+    }
+}
+
+fn core_bookmark(bookmark: JsBookmark) -> Result<nous_core::Bookmark> {
+    use nous_core::Bookmark;
+    let missing = |field: &str| Error::from_reason(format!("书签缺少字段 {field}"));
+    Ok(match bookmark.kind.as_str() {
+        "file" => Bookmark::File {
+            path: bookmark.path.ok_or_else(|| missing("path"))?,
+            title: bookmark.title,
+        },
+        "folder" => Bookmark::Folder {
+            path: bookmark.path.ok_or_else(|| missing("path"))?,
+            title: bookmark.title,
+        },
+        "heading" => Bookmark::Heading {
+            path: bookmark.path.ok_or_else(|| missing("path"))?,
+            heading: bookmark.heading.ok_or_else(|| missing("heading"))?,
+            title: bookmark.title,
+        },
+        "search" => Bookmark::Search {
+            query: bookmark.query.ok_or_else(|| missing("query"))?,
+            title: bookmark.title,
+        },
+        _ => return Err(Error::from_reason("未知的书签种类")),
+    })
+}
+
+/// 读出库内书签；文件不存在时为空。
+///
+/// # Errors
+///
+/// 未打开库、读盘失败或书签文件损坏。
+#[napi]
+pub fn bookmarks_list() -> Result<Vec<JsBookmark>> {
+    let items = with_vault(Vault::bookmarks)?;
+    Ok(items.into_iter().map(js_bookmark).collect())
+}
+
+/// 整体替换书签清单；损坏的旧文件先备份再覆盖。
+///
+/// # Errors
+///
+/// 未打开库、书签字段无效或写盘失败。
+#[napi]
+pub fn bookmarks_set(items: Vec<JsBookmark>) -> Result<()> {
+    let items = items
+        .into_iter()
+        .map(core_bookmark)
+        .collect::<Result<Vec<_>>>()?;
+    with_vault(|vault| vault.set_bookmarks(&items))
+}
+
+/// 一篇笔记可被点名的标题与别名。
+#[napi(object)]
+pub struct JsNoteKeys {
+    /// 库内相对路径。
+    pub path: String,
+    /// 展示标题：文首一级标题，缺失时为文件名词干。
+    pub title: String,
+    /// frontmatter 别名，按书写顺序。
+    pub aliases: Vec<String>,
+}
+
+/// 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
+///
+/// # Errors
+///
+/// 未打开库或索引查询失败。
+#[napi]
+pub fn index_note_keys() -> Result<Vec<JsNoteKeys>> {
+    let keys = with_vault(Vault::note_keys)?;
+    Ok(keys
+        .into_iter()
+        .map(|note| JsNoteKeys {
+            path: note.path,
+            title: note.title,
+            aliases: note.aliases,
+        })
+        .collect())
+}
+
+/// 图谱节点：笔记或死链目标。
+#[napi(object)]
+pub struct JsGraphNode {
+    /// 笔记的库内相对路径；死链为去掉锚点后的目标原文。
+    pub path: String,
+    /// 展示标题。
+    pub title: String,
+    /// 标签，升序。
+    pub tags: Vec<String>,
+    /// 是否为尚未创建的死链目标。
+    pub dead: bool,
+}
+
+/// 图谱中的有向边。
+#[napi(object)]
+pub struct JsGraphEdge {
+    /// 源笔记路径。
+    pub from: String,
+    /// 目标节点的 `path`。
+    pub to: String,
+    /// 这对起止之间的链接条数。
+    pub count: u32,
+}
+
+/// 全库图谱。
+#[napi(object)]
+pub struct JsGraph {
+    /// 节点，按路径升序。
+    pub nodes: Vec<JsGraphNode>,
+    /// 边，按起止升序。
+    pub edges: Vec<JsGraphEdge>,
+}
+
+/// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
+///
+/// # Errors
+///
+/// 未打开库或索引查询失败。
+#[napi]
+pub fn index_graph(include_dead: bool) -> Result<JsGraph> {
+    let graph = with_vault(|vault| vault.graph(include_dead))?;
+    Ok(JsGraph {
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|node| JsGraphNode {
+                path: node.path,
+                title: node.title,
+                tags: node.tags,
+                dead: node.dead,
+            })
+            .collect(),
+        edges: graph
+            .edges
+            .into_iter()
+            .map(|edge| JsGraphEdge {
+                from: edge.from,
+                to: edge.to,
+                count: edge.count,
+            })
+            .collect(),
+    })
 }
 
 /// `path` 的全部标题，按文档顺序；供锚点解析与标题补全。

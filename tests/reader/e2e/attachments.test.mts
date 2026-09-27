@@ -101,7 +101,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     expect(JSON.parse(await readFile(join(userData, "session.json"), "utf8")).reader).toMatchObject(
       {
         vaultRoot: vault,
-        currentPath: "preview.pdf",
+        documents: { panes: [{ currentPath: "preview.pdf" }], active: 0 },
         leftWidth: 240,
       },
     );

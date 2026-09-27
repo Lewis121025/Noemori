@@ -65,7 +65,7 @@
   {:else if search.error === null && hits.length === 0}
     <div class="empty">
       <strong>没有匹配的笔记</strong>
-      <p>换个关键词，或用 tag:标签、path:路径、属性名:值 缩小范围。</p>
+      <p>换个关键词，或用 OR、-排除、tag:标签、path:路径、[属性:值]、line:( ) 调整范围。</p>
     </div>
   {:else if search.error === null}
     <ul>

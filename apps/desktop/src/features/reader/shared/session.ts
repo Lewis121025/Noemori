@@ -7,8 +7,17 @@ export const DEFAULT_LEFT_WIDTH = SIDEBAR_LAYOUT.leftWidth;
 /** 阅读栈持久化上限；超长历史没有恢复价值，防止会话文件无限增长。 */
 export const HISTORY_LIMIT = 100;
 
-/** 源码视图记忆条数上限；只防会话文件病态增长，正常库远达不到。 */
-export const SOURCE_VIEW_LIMIT = 500;
+/** 视图记忆条数上限；只防会话文件病态增长，正常库远达不到。 */
+export const VIEW_MODE_LIMIT = 500;
+
+/** 需要记住的 Markdown 视图；排版视图是默认值，不写入记忆。 */
+export type RememberedView = "source" | "reading";
+
+/** 按库内路径记住的视图选择。 */
+export type ViewModes = Record<string, RememberedView>;
+
+/** 最近打开列表上限；快速切换器空查询只需要近期落点。 */
+export const RECENT_FILES_LIMIT = 50;
 
 /** 阅读栈条目：一次导航落点。滚动位置只在会话内恢复，不持久化。 */
 export type HistoryEntry = {
@@ -60,8 +69,10 @@ export type ReaderSession = PaneLayout & {
   vaultRoot: string | null;
   /** 各分栏的文档与阅读栈；切库时重置为单栏。 */
   documents: SessionDocuments;
-  /** 记住源码视图的文件路径；切库时清空。 */
-  sourceViews: string[];
+  /** 按文件记住的源码或阅读视图；切库时清空。 */
+  viewModes: ViewModes;
+  /** 最近打开的文件，最新在前；切库时清空。 */
+  recentFiles: string[];
 };
 
 /** 缺失或损坏的阅读器状态从空笔记库开始。 */
@@ -70,7 +81,8 @@ export const emptyReaderSession: ReaderSession = {
   documents: emptySessionDocuments(),
   filesCollapsed: false,
   leftWidth: DEFAULT_LEFT_WIDTH,
-  sourceViews: [],
+  viewModes: {},
+  recentFiles: [],
 };
 
 function parseCollapsed(value: unknown): boolean {
@@ -134,26 +146,109 @@ export function parseSessionHistory(value: unknown): SessionHistory {
 }
 
 /**
- * 归一化源码视图记忆：只留非空文本，去重并截到上限。
+ * 归一化路径列表：只留非空文本，保序去重并截到上限。
  *
  * 会话是恢复性数据，损坏条目静默丢弃而不是拒绝整个会话。
  */
-export function parseSourceViews(value: unknown): string[] {
+function parsePathList(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const item of value) {
     if (typeof item !== "string" || item === "" || out.includes(item)) continue;
     out.push(item);
-    if (out.length >= SOURCE_VIEW_LIMIT) break;
+    if (out.length >= limit) break;
   }
   return out;
+}
+
+/**
+ * 归一化视图记忆：只留非空路径与已知视图，截到上限。
+ *
+ * @param value 会话或 IPC 里的视图记忆。
+ * @param legacy 旧版会话的 `sourceViews` 路径列表；新字段缺席时迁移为源码视图。
+ * 会话是恢复性数据，损坏条目静默丢弃而不是拒绝整个会话。
+ */
+export function parseViewModes(value: unknown, legacy?: unknown): ViewModes {
+  const out: ViewModes = {};
+  let count = 0;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    for (const [path, mode] of Object.entries(value)) {
+      if (path === "" || (mode !== "source" && mode !== "reading")) continue;
+      out[path] = mode;
+      if (++count >= VIEW_MODE_LIMIT) break;
+    }
+    return out;
+  }
+  for (const path of parsePathList(legacy, VIEW_MODE_LIMIT)) out[path] = "source";
+  return out;
+}
+
+/**
+ * 视图记忆跟随改名或删除迁移。
+ *
+ * @param mapPath 与当前文档同口径的映射；返回 null 表示条目移除。
+ * @returns 迁移后的记忆；没有任何变化时返回 null，避免无谓的会话重写。
+ */
+export function mapViewModes(
+  modes: Readonly<ViewModes>,
+  mapPath: (path: string) => string | null,
+): ViewModes | null {
+  let changed = false;
+  const out: ViewModes = {};
+  for (const [path, mode] of Object.entries(modes)) {
+    const mapped = mapPath(path);
+    if (mapped !== path) changed = true;
+    if (mapped !== null) out[mapped] = mode;
+  }
+  return changed ? out : null;
+}
+
+/** 归一化最近打开列表，保持最新在前的顺序；规则见 {@link parsePathList}。 */
+export function parseRecentFiles(value: unknown): string[] {
+  return parsePathList(value, RECENT_FILES_LIMIT);
+}
+
+/**
+ * 把刚打开的文件置顶。
+ *
+ * @param recent 当前最近列表，最新在前。
+ * @param path 刚打开的库内路径。
+ * @returns 新列表；原列表不变，超出上限丢最旧。
+ */
+export function pushRecentFile(recent: readonly string[], path: string): string[] {
+  return [path, ...recent.filter((item) => item !== path)].slice(0, RECENT_FILES_LIMIT);
+}
+
+/**
+ * 路径列表跟随改名或删除迁移。
+ *
+ * @param paths 会话里的路径列表。
+ * @param mapPath 与当前文档同口径的映射；返回 null 表示条目移除。
+ * @returns 迁移后的列表；没有任何变化时返回 null，避免无谓的会话重写。
+ */
+export function mapPathList(
+  paths: readonly string[],
+  mapPath: (path: string) => string | null,
+): string[] | null {
+  let changed = false;
+  const out = paths.flatMap((entry) => {
+    const path = mapPath(entry);
+    if (path === null) {
+      changed = true;
+      return [];
+    }
+    if (path !== entry) changed = true;
+    return [path];
+  });
+  return changed ? out : null;
 }
 
 /** 分栏数量上限；界面只提供双栏，多余条目丢弃。 */
 export const PANE_LIMIT = 2;
 
 function parsePaneSession(value: unknown): PaneSession {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return emptyPaneSession();
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return emptyPaneSession();
   const record = value as Record<string, unknown>;
   return {
     currentPath: parseNullableString(record.currentPath),
@@ -166,7 +261,10 @@ function parsePaneSession(value: unknown): PaneSession {
  *
  * 会话是恢复性数据：损坏条目丢弃而不是拒绝整个会话。
  */
-export function parseSessionDocuments(value: unknown, legacy?: Record<string, unknown>): SessionDocuments {
+export function parseSessionDocuments(
+  value: unknown,
+  legacy?: Record<string, unknown>,
+): SessionDocuments {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.panes)) {
@@ -205,12 +303,19 @@ export function parseSessionDocuments(value: unknown, legacy?: Record<string, un
  */
 export function parseReaderSession(value: unknown): ReaderSession {
   if (typeof value !== "object" || value === null || Array.isArray(value))
-    return { ...emptyReaderSession, documents: emptySessionDocuments(), sourceViews: [] };
+    return {
+      ...emptyReaderSession,
+      documents: emptySessionDocuments(),
+      viewModes: {},
+      recentFiles: [],
+    };
   const record = value as Record<string, unknown>;
   return {
     vaultRoot: parseNullableString(record.vaultRoot),
     documents: parseSessionDocuments(record.documents, record),
-    sourceViews: parseSourceViews(record.sourceViews),
+    // 旧版只记源码视图的路径列表；新字段缺席时迁移过来。
+    viewModes: parseViewModes(record.viewModes, record.sourceViews),
+    recentFiles: parseRecentFiles(record.recentFiles),
     ...(parsePaneLayout(record) ?? emptyReaderSession),
   };
 }

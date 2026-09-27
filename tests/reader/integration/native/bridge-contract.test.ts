@@ -8,7 +8,7 @@ vi.mock("electron", () => ({
 }));
 
 const bytes = (text: string) => new TextEncoder().encode(text);
-const emptyQuery = () => ({ terms: [], tags: [], attributes: [], pathContains: null, limit: 100 });
+const emptyQuery = () => ({ expr: { kind: "and" as const, children: [] }, limit: 100 });
 beforeEach(() => vi.clearAllMocks());
 
 it("无效保存响应不能清除编辑、更新磁盘基准或冒充保存成功", async () => {
@@ -75,6 +75,36 @@ it("所有阅读器响应在进入调用方前校验，错误元数据不能冒�
     { read: () => api.indexMentionsTo("note.md"), invalid: { linked: [] } },
     { read: () => api.searchQuery(emptyQuery()), invalid: [{ path: "../逃逸.md" }] },
     { read: () => api.indexHeadings("note.md"), invalid: [{ path: "note.md", level: 9 }] },
+    {
+      read: () => api.indexNoteKeys(),
+      invalid: [{ path: "../逃逸.md", title: "标题", aliases: [] }],
+    },
+    { read: () => api.indexNoteKeys(), invalid: [{ path: "a.md", title: "标题", aliases: [1] }] },
+    { read: () => api.sessionSetRecentFiles(["a.md"]), invalid: { status: "failed" } },
+    {
+      read: () => api.bookmarksList(),
+      invalid: [{ kind: "file", path: "../逃逸.md", title: null }],
+    },
+    { read: () => api.bookmarksList(), invalid: [{ kind: "tag", path: "a.md", title: null }] },
+    { read: () => api.bookmarksSet([]), invalid: { status: "failed" } },
+    {
+      read: () => api.indexGraph(false),
+      invalid: { nodes: [{ path: "../逃逸.md", title: "", tags: [], dead: false }], edges: [] },
+    },
+    {
+      read: () => api.indexGraph(false),
+      invalid: {
+        nodes: [{ path: "a.md", title: "甲", tags: [], dead: false }],
+        edges: [{ from: "a.md", to: "不存在.md", count: 1 }],
+      },
+    },
+    {
+      read: () => api.indexGraph(false),
+      invalid: {
+        nodes: [{ path: "a.md", title: "甲", tags: [], dead: false }],
+        edges: [{ from: "a.md", to: "a.md", count: 0 }],
+      },
+    },
   ];
   for (const request of requests) {
     vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(request.invalid);

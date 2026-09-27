@@ -1,11 +1,20 @@
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { BrowserWindow, app, dialog, nativeTheme, screen } from "electron";
+import { BrowserWindow, app, dialog, nativeTheme, protocol, screen } from "electron";
 import { createCloseGate, onCloseAttempt, resetCloseGate, type CloseGate } from "./close-gate";
 import { CoreClient } from "./core-client";
 import { registerIpc } from "./ipc";
 import type { WindowSession } from "./session";
 import { installApplicationMenu, updateHistoryMenu } from "./menu";
+import { VAULT_MEDIA_SCHEME, createVaultMediaHandler } from "./vault-media";
+
+// 特权协议必须在 ready 之前注册；stream 让 <audio>/<video> 可以按区间拖动进度。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: VAULT_MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 const closeGate: CloseGate = createCloseGate();
@@ -126,6 +135,11 @@ app.whenReady().then(async () => {
   );
   core = client;
   registerIpc(() => mainWindow, closeGate, client);
+  // 库根边界由内核 entryPath 校验；协议层只额外限制为音视频类型。
+  protocol.handle(
+    VAULT_MEDIA_SCHEME,
+    createVaultMediaHandler((rel) => client.call("entryPath", rel)),
+  );
   try {
     const session = await client.call("sessionLoad");
     storedWindow = session.window;

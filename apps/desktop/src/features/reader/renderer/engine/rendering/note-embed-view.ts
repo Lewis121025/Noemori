@@ -25,6 +25,64 @@ export const EMBED_DEPTH_LIMIT = 3;
 /** 读取结果：取消为 `null`，失败带给界面的短句，成功是待渲染文档与已解析路径。 */
 type LoadedEmbed = { doc: PmNode; path: string } | { message: string };
 
+/** 一次只读笔记渲染的目标与上下文；嵌入块与悬停预览共用。 */
+export type NotePreviewRequest = {
+  /** 宿主笔记的库内路径，用于解析相对目标。 */
+  from: string;
+  /** 链接目标（不含锚点）。 */
+  target: string;
+  /** 目标语法；嵌入恒为 wiki，悬停可能是 Markdown 链接。 */
+  kind: "wiki" | "md";
+  /** 标题或 `^块` 锚点；整篇为 null。 */
+  anchor: string | null;
+  /** 打开嵌套嵌入标题时沿用工作区的链接处理。 */
+  openLink: (kind: "wiki" | "md", raw: string) => void;
+  io: Pick<MediaIo, "resolveLink" | "readFile">;
+  /** 宿主视图自身的嵌套深度。 */
+  depth: number;
+  /** 已解析的祖先路径链（含宿主），用于环检测。 */
+  chain: readonly string[];
+};
+
+/**
+ * 把目标笔记（或其中一节）只读渲染进容器。
+ *
+ * 读取中的占位由调用方预先放入容器；失败显示原因。返回的 destroy 取消迟到的读取并释放嵌套视图。
+ */
+export function mountNotePreview(
+  body: HTMLElement,
+  request: NotePreviewRequest,
+): { destroy: () => void } {
+  const nested: { view: EditorView | null } = { view: null };
+  let cancelled = false;
+  void loadEmbed(request, () => cancelled).then((loaded) => {
+    if (loaded === null || cancelled) return;
+    if ("message" in loaded) {
+      body.textContent = loaded.message;
+      return;
+    }
+    body.textContent = "";
+    nested.view = new EditorView(body, {
+      state: EditorState.create({ doc: loaded.doc }),
+      editable: () => false,
+      nodeViews: createNoteEmbedViews(
+        loaded.path,
+        request.openLink,
+        request.io,
+        request.depth + 1,
+        [...request.chain, loaded.path],
+      ),
+    });
+  });
+  return {
+    destroy() {
+      cancelled = true;
+      nested.view?.destroy();
+      nested.view = null;
+    },
+  };
+}
+
 /**
  * 创建笔记嵌入的节点视图。
  *
@@ -63,31 +121,19 @@ export function createNoteEmbedViews(
       body.style.marginTop = "0.35rem";
       body.textContent = "正在嵌入…";
       dom.append(header, body);
-      const nested: { view: EditorView | null } = { view: null };
-      let cancelled = false;
-      void loadEmbed(io, from, target, anchor, depth, chain, () => cancelled).then((loaded) => {
-        if (loaded === null || cancelled) return;
-        if ("message" in loaded) {
-          body.textContent = loaded.message;
-          return;
-        }
-        body.textContent = "";
-        nested.view = new EditorView(body, {
-          state: EditorState.create({ doc: loaded.doc }),
-          editable: () => false,
-          nodeViews: createNoteEmbedViews(loaded.path, openLink, io, depth + 1, [
-            ...chain,
-            loaded.path,
-          ]),
-        });
+      const preview = mountNotePreview(body, {
+        from,
+        target,
+        kind: "wiki",
+        anchor,
+        openLink,
+        io,
+        depth,
+        chain,
       });
       return {
         dom,
-        destroy() {
-          cancelled = true;
-          nested.view?.destroy();
-          nested.view = null;
-        },
+        destroy: preview.destroy,
         ignoreMutation: () => true,
         stopEvent: () => true,
       };
@@ -96,18 +142,13 @@ export function createNoteEmbedViews(
 }
 
 async function loadEmbed(
-  io: Pick<MediaIo, "resolveLink" | "readFile">,
-  from: string,
-  target: string,
-  anchor: string | null,
-  depth: number,
-  chain: readonly string[],
+  { io, from, target, kind, anchor, depth, chain }: NotePreviewRequest,
   cancelled: () => boolean,
 ): Promise<LoadedEmbed | null> {
   try {
     if (depth + 1 > EMBED_DEPTH_LIMIT)
       return { message: `嵌套嵌入已达上限（${EMBED_DEPTH_LIMIT} 层），点击标题打开原文` };
-    const path = await io.resolveLink(from, target, "wiki");
+    const path = await io.resolveLink(from, target, kind);
     if (cancelled()) return null;
     if (path === null) return { message: "无法嵌入：目标不存在或同名歧义" };
     if (chain.includes(path)) return { message: "检测到循环嵌入，已停止展开；点击标题打开原文" };

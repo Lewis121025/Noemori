@@ -4,6 +4,8 @@ import { parseVaultEvent } from "../shared/api";
 import { parseAttachmentReply } from "../shared/attachments";
 import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
 import {
+  parseBookmarks,
+  parseGraph,
   parseEmptyReply,
   parseEntryOutcome,
   parseFileBytes,
@@ -11,6 +13,7 @@ import {
   parseLinkRecords,
   parseLinkTarget,
   parseMentions,
+  parseNoteKeys,
   parseNullablePath,
   parsePaneLayoutMessage,
   parseSavedCopy,
@@ -31,8 +34,10 @@ export function createReaderApi(): ReaderApi {
     vaultRestore: async () => parseVaultRestore(await ipcRenderer.invoke("reader.vault.restore")),
     sessionSetDocuments: async (documents) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.session.setDocuments", documents)),
-    sessionSetSourceViews: async (paths) =>
-      parseEmptyReply(await ipcRenderer.invoke("reader.session.setSourceViews", paths)),
+    sessionSetViewModes: async (modes) =>
+      parseEmptyReply(await ipcRenderer.invoke("reader.session.setViewModes", modes)),
+    sessionSetRecentFiles: async (paths) =>
+      parseEmptyReply(await ipcRenderer.invoke("reader.session.setRecentFiles", paths)),
     sessionGetPanes: async () =>
       parsePaneLayoutMessage(await ipcRenderer.invoke("reader.session.getPanes")),
     sessionSetPanes: async (panes) =>
@@ -87,6 +92,12 @@ export function createReaderApi(): ReaderApi {
     indexHeadings: async (path) =>
       parseHeadingRecords(await ipcRenderer.invoke("reader.index.headings", path)),
     indexTags: async () => parseTagCounts(await ipcRenderer.invoke("reader.index.tags")),
+    indexNoteKeys: async () => parseNoteKeys(await ipcRenderer.invoke("reader.index.noteKeys")),
+    indexGraph: async (includeDead) =>
+      parseGraph(await ipcRenderer.invoke("reader.index.graph", includeDead)),
+    bookmarksList: async () => parseBookmarks(await ipcRenderer.invoke("reader.bookmarks.list")),
+    bookmarksSet: async (items) =>
+      parseEmptyReply(await ipcRenderer.invoke("reader.bookmarks.set", items)),
     entryRename: async (from, to) =>
       parseEntryOutcome(await ipcRenderer.invoke("reader.entry.rename", from, to)),
     subscribeVaultChanged: (callback) => {

@@ -189,6 +189,8 @@ const nodes: Record<string, NodeSpec> = {
       String(node.attrs["alt"] || node.attrs["src"]),
     ],
   },
+  audio: mediaNode("audio"),
+  video: mediaNode("video"),
   note_embed: {
     atom: true,
     group: "block",
@@ -298,6 +300,97 @@ const nodes: Record<string, NodeSpec> = {
     ],
     toDOM: (node) => htmlToDom(node, true),
   },
+  callout: {
+    // `> [!kind]± 标题`；标题是原样保留的行内 Markdown，由 NodeView 提供编辑框。
+    attrs: {
+      kind: { default: "note", validate: "string" },
+      fold: { default: "", validate: calloutFold },
+      title: { default: "", validate: "string" },
+    },
+    content: "block+",
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div[data-callout]",
+        getAttrs: (dom) => ({
+          kind: dom.getAttribute("data-callout") ?? "note",
+          fold: dom.getAttribute("data-callout-fold") ?? "",
+          title: dom.getAttribute("data-callout-title") ?? "",
+        }),
+        contentElement: ".callout-content",
+      },
+    ],
+    toDOM: (node) => [
+      "div",
+      {
+        class: "callout",
+        "data-callout": node.attrs["kind"] as string,
+        "data-callout-fold": node.attrs["fold"] as string,
+        "data-callout-title": node.attrs["title"] as string,
+      },
+      ["div", { class: "callout-content" }, 0],
+    ],
+  },
+  comment_block: {
+    atom: true,
+    group: "block",
+    attrs: { source: { default: "", validate: "string" } },
+    parseDOM: [
+      {
+        tag: "div[data-comment-src]",
+        getAttrs: (dom) => ({ source: dom.getAttribute("data-comment-src") ?? "" }),
+      },
+    ],
+    toDOM: (node) => commentToDom(node, true),
+  },
+  comment_inline: {
+    inline: true,
+    atom: true,
+    group: "inline",
+    attrs: { source: { default: "", validate: "string" } },
+    parseDOM: [
+      {
+        tag: "span[data-comment-src]",
+        getAttrs: (dom) => ({ source: dom.getAttribute("data-comment-src") ?? "" }),
+      },
+    ],
+    toDOM: (node) => commentToDom(node, false),
+  },
+  footnote_ref: {
+    inline: true,
+    atom: true,
+    group: "inline",
+    attrs: { label: { default: "", validate: "string" } },
+    parseDOM: [
+      {
+        tag: "sup[data-footnote-ref]",
+        getAttrs: (dom) => ({ label: dom.getAttribute("data-footnote-ref") ?? "" }),
+      },
+    ],
+    toDOM: (node) => [
+      "sup",
+      { class: "footnote-ref", "data-footnote-ref": node.attrs["label"] as string },
+      String(node.attrs["label"] ?? ""),
+    ],
+  },
+  footnote_def: {
+    attrs: { label: { default: "", validate: "string" } },
+    content: "block+",
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div[data-footnote-def]",
+        getAttrs: (dom) => ({ label: dom.getAttribute("data-footnote-def") ?? "" }),
+      },
+    ],
+    toDOM: (node) => [
+      "div",
+      { class: "footnote-def", "data-footnote-def": node.attrs["label"] as string },
+      0,
+    ],
+  },
   table: {
     content: "table_row+",
     group: "block",
@@ -391,6 +484,53 @@ function htmlToDom(node: { attrs: Record<string, unknown> }, display: boolean): 
   ];
 }
 
+/**
+ * 音视频嵌入：与 PDF 同构的行内原子，属性保留原始引用以便逐字节写回。
+ * 播放器由 NodeView 创建；降级 DOM 只带地址与说明文字。
+ */
+function mediaNode(kind: "audio" | "video"): NodeSpec {
+  const attr = `data-${kind}-src`;
+  return {
+    inline: true,
+    atom: true,
+    group: "inline",
+    attrs: mediaAttrs,
+    parseDOM: [
+      {
+        tag: `span[${attr}]`,
+        getAttrs: (dom) => ({
+          src: dom.getAttribute(attr),
+          alt: dom.getAttribute(`data-${kind}-alt`) ?? "",
+          title: dom.getAttribute(`data-${kind}-title`),
+          kind: dom.getAttribute(`data-${kind}-kind`) ?? "md",
+          reference: dom.getAttribute(`data-${kind}-reference`),
+        }),
+      },
+    ],
+    toDOM: (node) => [
+      "span",
+      {
+        [attr]: node.attrs["src"],
+        [`data-${kind}-alt`]: node.attrs["alt"],
+        [`data-${kind}-title`]: node.attrs["title"],
+        [`data-${kind}-kind`]: node.attrs["kind"],
+        [`data-${kind}-reference`]: node.attrs["reference"],
+      },
+      String(node.attrs["alt"] || node.attrs["src"]),
+    ],
+  };
+}
+
+/** 注释降级 DOM 带回原文与分隔符，无 NodeView 时仍能看出是注释。 */
+function commentToDom(node: { attrs: Record<string, unknown> }, block: boolean): DOMOutputSpec {
+  const source = String(node.attrs["source"] ?? "");
+  return [
+    block ? "div" : "span",
+    { "data-comment-src": source, class: block ? "comment-block" : "comment-inline" },
+    `%%${source}%%`,
+  ];
+}
+
 /** 从降级 img 读回源地址；真正加载走 NodeView。 */
 function imageDomAttrs(dom: string | HTMLElement) {
   if (typeof dom === "string") {
@@ -431,6 +571,7 @@ const marks: Record<string, MarkSpec> = {
     parseDOM: [{ tag: "del" }, { tag: "s" }, { tag: "strike" }],
     toDOM: () => ["del", 0],
   },
+  highlight: { parseDOM: [{ tag: "mark" }], toDOM: () => ["mark", 0] },
   code: { parseDOM: [{ tag: "code" }], toDOM: () => ["code", 0] },
   link: {
     attrs: {
@@ -474,6 +615,10 @@ function listOrder(value: unknown): void {
 
 function linkKind(value: unknown): void {
   if (value !== "md" && value !== "wiki") throw new RangeError("未知链接语法");
+}
+
+function calloutFold(value: unknown): void {
+  if (value !== "" && value !== "+" && value !== "-") throw new RangeError("未知的标注折叠标记");
 }
 
 function tableAlign(value: unknown): void {

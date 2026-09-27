@@ -119,6 +119,23 @@
         ><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 6l-2 12" /></svg
       ></button
     >
+    <button
+      class="reader-button icon-button"
+      type="button"
+      aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
+      aria-pressed={workspace.viewMode === "reading"}
+      title={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
+      onclick={() => {
+        onDocumentAction();
+        void workspace.toggleReadingMode();
+      }}
+      disabled={workspace.switching || workspace.copying}
+      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><path
+          d="M3 5.5C5.5 4 9 4 12 6c3-2 6.5-2 9-.5v13c-2.5-1.5-6-1.5-9 .5-3-2-6.5-2-9-.5z"
+        /><path d="M12 6v13" /></svg
+      ></button
+    >
   {/if}
   {#if workspace.vaultRoot !== null}
     <button

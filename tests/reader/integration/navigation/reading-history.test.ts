@@ -100,7 +100,8 @@ describe("阅读栈导航", () => {
             active: 0,
             split: false,
           },
-          sourceViews: [],
+          viewModes: {},
+          recentFiles: [],
         })),
       }),
     );

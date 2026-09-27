@@ -1,6 +1,6 @@
 //! 全文搜索端到端：trigram MATCH、短词 LIKE 回落、谓词组合与摘要。
 
-use nous_core::{SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
+use nous_core::{SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
 use std::fs;
 use tempfile::TempDir;
 
@@ -27,11 +27,20 @@ fn search(vault: &Vault, query: &SearchQuery) -> Vec<String> {
         .collect()
 }
 
+fn query(expr: SearchExpr) -> SearchQuery {
+    SearchQuery { expr, limit: 0 }
+}
+
+fn all(exprs: Vec<SearchExpr>) -> SearchQuery {
+    query(SearchExpr::And(exprs))
+}
+
+fn term(value: &str) -> SearchExpr {
+    SearchExpr::Term(value.to_string())
+}
+
 fn terms(values: &[&str]) -> SearchQuery {
-    SearchQuery {
-        terms: values.iter().map(ToString::to_string).collect(),
-        ..SearchQuery::default()
-    }
+    all(values.iter().map(|value| term(value)).collect())
 }
 
 #[test]
@@ -115,30 +124,31 @@ fn tag_and_attribute_predicates_combine_with_terms() {
         ("b.md", "# B\n\ntarget body plain\n"),
     ]);
     let combined = vault
-        .search(&SearchQuery {
-            terms: vec!["target".to_string()],
-            tags: vec!["keep".to_string()],
-            ..SearchQuery::default()
-        })
+        .search(&all(vec![
+            term("target"),
+            SearchExpr::Tag("keep".to_string()),
+        ]))
         .expect("检索");
     assert_eq!(combined.len(), 1);
     assert_eq!(combined[0].path, "a.md");
     // 属性值大小写不敏感精确匹配。
     let by_attribute = vault
-        .search(&SearchQuery {
-            attributes: vec![("status".to_string(), "DRAFT".to_string())],
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::Attr {
+            key: "status".to_string(),
+            value: Some("DRAFT".to_string()),
+        }))
         .expect("检索");
     assert_eq!(by_attribute.len(), 1);
     assert_eq!(by_attribute[0].path, "a.md");
     // 谓词之间是 AND：不存在的组合无结果。
     let impossible = vault
-        .search(&SearchQuery {
-            tags: vec!["keep".to_string()],
-            attributes: vec![("status".to_string(), "published".to_string())],
-            ..SearchQuery::default()
-        })
+        .search(&all(vec![
+            SearchExpr::Tag("keep".to_string()),
+            SearchExpr::Attr {
+                key: "status".to_string(),
+                value: Some("published".to_string()),
+            },
+        ]))
         .expect("检索");
     assert!(impossible.is_empty());
 }
@@ -150,21 +160,19 @@ fn path_predicate_filters_by_substring_with_wildcards_escaped() {
         ("other/two.md", "shared token inside\n"),
     ]);
     let filtered = vault
-        .search(&SearchQuery {
-            terms: vec!["shared".to_string()],
-            path_contains: Some("notes/".to_string()),
-            ..SearchQuery::default()
-        })
+        .search(&all(vec![
+            term("shared"),
+            SearchExpr::Path("notes/".to_string()),
+        ]))
         .expect("检索");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].path, "notes/one.md");
     // LIKE 通配符按字面处理，不当作模式。
     let literal = vault
-        .search(&SearchQuery {
-            terms: vec!["shared".to_string()],
-            path_contains: Some("notes%".to_string()),
-            ..SearchQuery::default()
-        })
+        .search(&all(vec![
+            term("shared"),
+            SearchExpr::Path("notes%".to_string()),
+        ]))
         .expect("检索");
     assert!(literal.is_empty());
 }
@@ -174,10 +182,7 @@ fn predicate_only_query_lists_files_with_lead_snippet() {
     let (_root, _index, vault) =
         vault_with(&[("a.md", "# A\n\nbody text without the query.\n#keep\n")]);
     let hits = vault
-        .search(&SearchQuery {
-            tags: vec!["keep".to_string()],
-            ..SearchQuery::default()
-        })
+        .search(&query(SearchExpr::Tag("keep".to_string())))
         .expect("检索");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].title, "A");
@@ -212,9 +217,8 @@ fn limit_caps_result_count() {
     let (_root, _index, vault) = vault_with(&refs);
     let hits = vault
         .search(&SearchQuery {
-            terms: vec!["common".to_string()],
+            expr: term("common"),
             limit: 2,
-            ..SearchQuery::default()
         })
         .expect("检索");
     assert_eq!(hits.len(), 2);

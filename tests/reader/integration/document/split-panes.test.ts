@@ -96,7 +96,8 @@ beforeEach(() => {
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
       documents,
-      sourceViews: [],
+      viewModes: {},
+      recentFiles: [],
     })),
     vaultList: vi.fn(async () => [...disk.keys()]),
     vaultEntries: vi.fn(async () =>

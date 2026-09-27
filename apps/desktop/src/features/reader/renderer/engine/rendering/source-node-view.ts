@@ -1,25 +1,39 @@
-/** 公式与 HTML 共用源码编辑和预览生命周期，具体排版与资源由各自的预览实现负责。 */
+/** 公式、HTML 与注释共用源码编辑和预览生命周期，具体排版与资源由各自的预览实现负责。 */
 import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Decoration, EditorView, NodeView } from "prosemirror-view";
-import { bindSourceField } from "./source-field";
+import { bindSourceField, type SourceAttribute } from "./source-field";
 import { NodeSelection } from "prosemirror-state";
 import { sourceEditingKey } from "../editing/source-editing";
 
-/** 两类源码节点的渲染差异；预览只改 DOM，不得提交文档事务。 */
+/** 源码节点种类；决定现有 schema 属性、样式类与剪贴板数据属性。 */
+export type SourceKind = "math" | "html" | "comment";
+
+/** 各类源码节点的渲染差异；预览只改 DOM，不得提交文档事务。 */
 export type SourcePreview = {
-  /** 决定现有 schema 属性、样式类与剪贴板数据属性。 */
-  kind: "math" | "html";
+  kind: SourceKind;
   /** signal 失效后不得再更新预览，并须释放已获得及迟到的资源。 */
   render: (dom: HTMLElement, source: string, display: boolean, signal: AbortSignal) => void;
 };
+
+const SOURCE_ATTRIBUTE: Record<SourceKind, SourceAttribute> = {
+  math: "tex",
+  html: "html",
+  comment: "source",
+};
+const SOURCE_DATASET: Record<SourceKind, string> = {
+  math: "mathTex",
+  html: "htmlSrc",
+  comment: "commentSrc",
+};
+const SOURCE_LABEL: Record<SourceKind, string> = { math: "公式", html: "HTML", comment: "注释" };
 
 /** 源码输入实时进入文档；选择保留预览，显式编辑才创建输入框，滚动保持预览不变。 */
 export class SourceNodeView implements NodeView {
   readonly dom: HTMLElement;
   private readonly nodeType: NodeType;
   private readonly display: boolean;
-  private readonly attribute: "tex" | "html";
-  private readonly sourceKey: "mathTex" | "htmlSrc";
+  private readonly attribute: SourceAttribute;
+  private readonly sourceKey: string;
   private source: string;
   private sourceEl: HTMLInputElement | HTMLTextAreaElement | null = null;
   private previewController: AbortController | null = null;
@@ -40,8 +54,8 @@ export class SourceNodeView implements NodeView {
   ) {
     this.nodeType = node.type;
     this.display = node.isBlock;
-    this.attribute = preview.kind === "math" ? "tex" : "html";
-    this.sourceKey = preview.kind === "math" ? "mathTex" : "htmlSrc";
+    this.attribute = SOURCE_ATTRIBUTE[preview.kind];
+    this.sourceKey = SOURCE_DATASET[preview.kind];
     this.source = String(node.attrs[this.attribute] ?? "");
     this.dom = document.createElement(this.display ? "div" : "span");
     this.dom.className = `${preview.kind}-${this.display ? "block" : "inline"}`;
@@ -73,7 +87,7 @@ export class SourceNodeView implements NodeView {
       : document.createElement("input");
     field.className = `${this.preview.kind}-source`;
     field.value = this.source;
-    const label = this.preview.kind === "math" ? "公式" : "HTML";
+    const label = SOURCE_LABEL[this.preview.kind];
     field.setAttribute("aria-label", `${this.display ? "块级" : "行内"}${label}源码`);
     field.setAttribute(
       "aria-description",
@@ -147,7 +161,7 @@ export class SourceNodeView implements NodeView {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "reader-button source-empty";
-      button.textContent = this.preview.kind === "math" ? "补充公式" : "补充 HTML";
+      button.textContent = `补充${SOURCE_LABEL[this.preview.kind]}`;
       button.onclick = () => {
         const pos = this.getPos();
         if (pos === undefined || this.view.isDestroyed) return;

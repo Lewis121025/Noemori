@@ -3,7 +3,7 @@
  *
  * 只在文本节点内触发：代码块、源码保留块与行内代码里输入链接语法是字面
  * 文本，不弹补全。锚点模式复用同一识别——查询里出现 `#` 后，`#` 之后的
- * 部分成为标题查询，之前的部分成为待解析的目标。
+ * 部分成为标题查询（`#^` 之后是块查询），之前的部分成为待解析的目标。
  */
 
 import type { Node as PmNode } from "prosemirror-model";
@@ -25,13 +25,14 @@ export type SuggestRequest =
       labelStart: number | null;
     }
   | {
-      kind: "heading";
+      /** `#` 之后是标题查询；`#^` 之后是块查询。 */
+      kind: "heading" | "block";
       syntax: LinkKind;
       from: number;
       /** 触发串（`[[` / `](`）的绝对起点；wiki 补全连触发一起替换。 */
       triggerFrom: number;
       query: string;
-      /** `#` 之前的目标原文，交给调用方解析成文件后取标题。 */
+      /** `#` 之前的目标原文，交给调用方解析成文件后取标题或块；空串表示本笔记。 */
       target: string;
       closeAfter: boolean;
       /** md 语法时标签 `[` 的绝对位置；wiki 或找不到配对时为 `null`。 */
@@ -77,12 +78,13 @@ export function suggestRequest(state: EditorState): SuggestRequest | null {
   const queryFrom = triggerFrom + 2;
   const hash = query.lastIndexOf("#");
   if (hash >= 0) {
+    const block = query[hash + 1] === "^";
     return {
-      kind: "heading",
+      kind: block ? "block" : "heading",
       syntax,
-      from: queryFrom + hash + 1,
+      from: queryFrom + hash + (block ? 2 : 1),
       triggerFrom,
-      query: query.slice(hash + 1),
+      query: query.slice(hash + (block ? 2 : 1)),
       target: query.slice(0, hash),
       closeAfter,
       labelStart,

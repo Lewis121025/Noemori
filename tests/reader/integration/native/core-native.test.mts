@@ -296,7 +296,8 @@ test("queued writes stay in their original vault and shutdown drains the final s
   assert.deepEqual(await restored.call("vaultRestore"), {
     root: second,
     documents: { panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }], active: 0, split: false },
-    sourceViews: [],
+    viewModes: {},
+    recentFiles: [],
   });
   assert.equal((await restored.call("readerSessionLoad")).filesCollapsed, true);
   const panes = await restored.call("readerSessionLoad");
@@ -427,9 +428,10 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
   const { core } = start();
   await core.call("vaultOpen", root);
 
-  const empty = { terms: [], tags: [], attributes: [], pathContains: null, limit: 100 };
+  const term = (value: string) => ({ expr: { kind: "term" as const, value }, limit: 100 });
+  const tag = (value: string) => ({ expr: { kind: "tag" as const, value }, limit: 100 });
   // 长词走 trigram MATCH；命中标题的文件排在仅命中正文之前。
-  const fulltext = await core.call("searchQuery", { ...empty, terms: ["全文检索"] });
+  const fulltext = await core.call("searchQuery", term("全文检索"));
   assert.deepEqual(
     fulltext.map((hit) => hit.path),
     ["note.md"],
@@ -437,25 +439,41 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
   assert.ok(fulltext[0]?.snippet.includes("全文检索"));
   assert.equal(fulltext[0]?.title, "设计笔记");
   // 1 字中文短词走 LIKE 回落，结果一致。
-  const short = await core.call("searchQuery", { ...empty, terms: ["笔"] });
+  const short = await core.call("searchQuery", term("笔"));
   assert.deepEqual(
     short.map((hit) => hit.path),
     ["note.md"],
   );
   // 标签谓词：frontmatter 与行内标签同表可查。
-  for (const tag of ["project", "inline-tag", "#PROJECT"]) {
-    const hits = await core.call("searchQuery", { ...empty, tags: [tag] });
+  for (const name of ["project", "inline-tag", "#PROJECT"]) {
+    const hits = await core.call("searchQuery", tag(name));
     assert.deepEqual(
       hits.map((hit) => hit.path),
       ["note.md"],
-      `标签 ${tag} 应命中`,
+      `标签 ${name} 应命中`,
     );
   }
   // 属性谓词大小写不敏感。
   const byAttribute = await core.call("searchQuery", {
-    ...empty,
-    attributes: [{ key: "STATUS", value: "Draft" }],
+    expr: { kind: "attr", key: "STATUS", value: "Draft" },
+    limit: 100,
   });
+  // 表达式树穿过原生线程：OR、取反与正则组合。
+  const composed = await core.call("searchQuery", {
+    expr: {
+      kind: "or",
+      children: [
+        { kind: "regex", value: "无关正." },
+        { kind: "and", children: [{ kind: "term", value: "笔记" }, { kind: "not", child: { kind: "term", value: "无关" } }] },
+      ],
+    },
+    limit: 100,
+  });
+  assert.deepEqual(composed.map((hit) => hit.path).sort(), ["note.md", "other.md"]);
+  await assert.rejects(
+    core.call("searchQuery", { expr: { kind: "regex", value: "(" }, limit: 100 }),
+    /正则表达式无效/,
+  );
   assert.deepEqual(
     byAttribute.map((hit) => hit.path),
     ["note.md"],
@@ -475,22 +493,82 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
     ],
   );
   assert.ok(headings[0] && headings[0].endByte > headings[0].startByte);
+  // 笔记身份供快速切换器：文首一级标题作为展示标题。
+  const noteKeys = await core.call("indexNoteKeys");
+  assert.deepEqual(
+    noteKeys.map((note) => [note.path, note.title]),
+    [
+      ["note.md", "设计笔记"],
+      ["other.md", "其它"],
+    ],
+  );
 
   // 保存后派生索引增量更新：旧词消失、新词可查、标题与标签同步。
   assert.deepEqual(await core.call("fileWrite", "note.md", bytes("# 设计笔记\n\n重写之后的正文\n"), bytes(source)), {
     status: "saved",
     warning: null,
   });
-  assert.deepEqual(await core.call("searchQuery", { ...empty, terms: ["全文检索"] }), []);
+  assert.deepEqual(await core.call("searchQuery", term("全文检索")), []);
   assert.deepEqual(
-    (await core.call("searchQuery", { ...empty, terms: ["重写之后"] })).map((hit) => hit.path),
+    (await core.call("searchQuery", term("重写之后"))).map((hit) => hit.path),
     ["note.md"],
   );
-  assert.deepEqual(await core.call("searchQuery", { ...empty, tags: ["project"] }), []);
+  assert.deepEqual(await core.call("searchQuery", tag("project")), []);
   assert.deepEqual(
     (await core.call("indexHeadings", "note.md")).map((heading) => heading.text),
     ["设计笔记"],
   );
+});
+
+test("native bookmarks round-trip through the worker and follow renames", async (t) => {
+  const {
+    roots: [root],
+    start,
+  } = await fixture(t);
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  assert.deepEqual(await core.call("bookmarksList"), []);
+  await core.call("entryCreate", "notes", "directory");
+  await writeFile(join(root, "notes", "a.md"), "# 甲\n");
+  await core.call("bookmarksSet", [
+    { kind: "file", path: "notes/a.md", title: null },
+    { kind: "heading", path: "notes/a.md", heading: "甲", title: "标题" },
+    { kind: "search", query: "tag:#x", title: null },
+  ]);
+  assert.deepEqual(await core.call("entryRename", "notes", "archive"), { warning: null });
+  assert.deepEqual(await core.call("bookmarksList"), [
+    { kind: "file", path: "archive/a.md", title: null },
+    { kind: "heading", path: "archive/a.md", heading: "甲", title: "标题" },
+    { kind: "search", query: "tag:#x", title: null },
+  ]);
+  // 书签是点目录里的用户数据，不能出现在文件树或全文索引里。
+  assert.deepEqual(await core.call("vaultList"), ["archive/a.md"]);
+  await core.shutdown();
+});
+
+test("native graph crosses the worker with aggregated edges and optional dead nodes", async (t) => {
+  const {
+    roots: [root],
+    start,
+  } = await fixture(t);
+  const { core } = start();
+  await writeFile(join(root, "a.md"), "# 甲\n\n#主题 [[b]] [[b#节]] [[未写]]\n");
+  await writeFile(join(root, "b.md"), "[[a]]\n");
+  await core.call("vaultOpen", root);
+  assert.deepEqual(await core.call("indexGraph", false), {
+    nodes: [
+      { path: "a.md", title: "甲", tags: ["主题"], dead: false },
+      { path: "b.md", title: "b", tags: [], dead: false },
+    ],
+    edges: [
+      { from: "a.md", to: "b.md", count: 2 },
+      { from: "b.md", to: "a.md", count: 1 },
+    ],
+  });
+  const withDead = await core.call("indexGraph", true);
+  assert.deepEqual(withDead.nodes.at(-1), { path: "未写", title: "未写", tags: [], dead: true });
+  assert.deepEqual(withDead.edges.at(1), { from: "a.md", to: "未写", count: 1 });
+  await core.shutdown();
 });
 
 test("native watcher refreshes the active vault and releases it on close", async (t) => {

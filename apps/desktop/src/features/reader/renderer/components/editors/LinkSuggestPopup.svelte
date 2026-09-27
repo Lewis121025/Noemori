@@ -48,7 +48,8 @@
   style:top={top === null ? undefined : `${top}px`}
   style:bottom={bottom === null ? undefined : `${bottom}px`}
 >
-  {#each items as item, index (item.value)}
+  <!-- 别名候选与其文件候选共用插入值，键需带上别名。 -->
+  {#each items as item, index (`${item.value}|${item.alias ?? ""}`)}
     <li
       role="option"
       aria-selected={index === selected}

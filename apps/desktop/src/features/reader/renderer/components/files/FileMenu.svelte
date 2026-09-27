@@ -1,13 +1,27 @@
+<script module lang="ts">
+  /** 文件菜单可以发出的动作；`bookmark` 切换条目的收藏状态。 */
+  export type FileMenuAction =
+    | "file"
+    | "directory"
+    | "rename"
+    | "move"
+    | "trash"
+    | "reveal"
+    | "collapse"
+    | "locate"
+    | "bookmark";
+</script>
+
 <script lang="ts">
   import { tick } from "svelte";
   import type { VaultEntry } from "../../../shared/api";
   let {
     onAction,
+    bookmarked,
   }: {
-    onAction: (
-      action: "file" | "directory" | "rename" | "move" | "trash" | "reveal" | "collapse" | "locate",
-      entry: VaultEntry | null,
-    ) => void;
+    onAction: (action: FileMenuAction, entry: VaultEntry | null) => void;
+    /** 条目是否已收藏；决定菜单显示「加入」还是「移出」书签。 */
+    bookmarked: (entry: VaultEntry) => boolean;
   } = $props();
   let element: HTMLDivElement;
   let target = $state<VaultEntry | null>(null);
@@ -40,7 +54,7 @@
   function dismissOutside(event: PointerEvent): void {
     if (event.target instanceof Node && !element.contains(event.target)) close(false);
   }
-  function choose(action: Parameters<typeof onAction>[0]): void {
+  function choose(action: FileMenuAction): void {
     close(true);
     onAction(action, target);
   }
@@ -90,6 +104,9 @@
     <div class="separator" role="separator"></div>
     <button role="menuitem" onclick={() => choose("rename")}>重命名…</button>
     <button role="menuitem" onclick={() => choose("move")}>移动到…</button>
+    <button role="menuitem" onclick={() => choose("bookmark")}
+      >{bookmarked(target) ? "移出书签" : "加入书签"}</button
+    >
     <button role="menuitem" onclick={() => choose("reveal")}>在系统文件夹中显示</button>
     <div class="separator" role="separator"></div>
     <button role="menuitem" class="danger" onclick={() => choose("trash")}>移到废纸篓…</button>
