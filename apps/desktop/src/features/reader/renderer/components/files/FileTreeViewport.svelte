@@ -112,8 +112,9 @@
    * @param path 可见目录模型中的完整相对路径；已消失的条目不产生操作。
    */
   export async function focusPath(path: string): Promise<void> {
+    const viewport = element;
     const index = positions.get(path);
-    if (index === undefined) return;
+    if (index === undefined || !viewport?.isConnected) return;
     const top = index * rowHeight;
     const bottom = top + rowHeight;
     if (top < element.scrollTop) element.scrollTop = top;
@@ -121,7 +122,9 @@
       element.scrollTop = bottom - element.clientHeight;
     rememberPosition();
     await tick();
-    Array.from(element.querySelectorAll<HTMLButtonElement>("[data-path]"))
+    // 搜索、标签切换或卸载可能发生在布局等待期间，焦点请求只属于发起时的视口。
+    if (element !== viewport || !viewport.isConnected) return;
+    Array.from(viewport.querySelectorAll<HTMLButtonElement>("[data-path]"))
       .find((button) => button.dataset.path === path)
       ?.focus({ preventScroll: true });
   }

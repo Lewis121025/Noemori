@@ -52,7 +52,9 @@ function activatePane(id: number): void {
 }
 
 function clickPath(path: string): void {
-  const button = target.querySelector<HTMLButtonElement>(`button[data-path="${path}"]`);
+  const button = target.querySelector<HTMLButtonElement>(
+    `.quick-navigation button[data-path="${path}"]`,
+  );
   expect(button, path).not.toBeNull();
   button!.click();
   flushSync();
@@ -67,6 +69,8 @@ async function editPane(id: number, text: string): Promise<void> {
 }
 
 beforeEach(() => {
+  Range.prototype.getClientRects = () => Object.assign([], { item: () => null });
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
   const proto = HTMLElement.prototype as HTMLElement & { hidePopover?: () => void };
   if (typeof proto.hidePopover !== "function") {
     const previous = proto.hidePopover;
@@ -230,13 +234,13 @@ describe("双栏编辑", () => {
       return spy;
     });
     expect(
-      target.querySelector("button[aria-label='文本格式']")?.getAttribute("popovertarget"),
+      target.querySelector("button[aria-label='文本格式']")?.getAttribute("aria-controls"),
     ).toBe("editor-formatting-1");
 
     activatePane(0);
     expect(hide[1]).toHaveBeenCalled();
     expect(
-      target.querySelector("button[aria-label='文本格式']")?.getAttribute("popovertarget"),
+      target.querySelector("button[aria-label='文本格式']")?.getAttribute("aria-controls"),
     ).toBe("editor-formatting-0");
   });
 

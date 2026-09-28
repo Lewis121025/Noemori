@@ -1,3 +1,4 @@
+import { noteAction, openLibrary } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,6 +58,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
       });
     const commit = (text: string) => cdp.send("Input.insertText", { text });
 
+    await openLibrary(page);
     const fileSearch = page.getByRole("searchbox", { name: "搜索文件和全文" });
     await fileSearch.fill("");
     await compose("输入");
@@ -101,7 +103,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     await page.getByRole("treeitem", { name: "输入.md", exact: true }).click();
     await page.getByRole("heading", { name: "输入验收" }).waitFor();
 
-    await page.getByRole("button", { name: "文内查找", exact: true }).click();
+    await noteAction(page, "文内查找");
     const search = page.getByRole("form", { name: "文内查找替换" });
     await search.getByLabel("查找", { exact: true }).fill("");
     await compose("中文目标");

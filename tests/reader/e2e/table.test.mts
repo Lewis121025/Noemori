@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,10 +48,10 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const editor = page.locator(".ProseMirror");
-    const format = page.getByRole("button", { name: "文本格式", exact: true });
+
     const panel = page.getByRole("group", { name: "文本格式", exact: true });
     const run = async (name: string) => {
-      await format.click();
+      await noteAction(page, "文本格式");
       await panel.getByRole("button", { name, exact: true }).click();
       expect(await panel.isVisible()).toBe(false);
       expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
@@ -112,7 +113,7 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
         }, viewport);
         await expect.poll(() => page.evaluate(() => innerWidth)).toBe(viewport.width);
         await editor.locator("td").last().click();
-        await format.click();
+        await noteAction(page, "文本格式");
         expect(await panel.getByRole("button", { name: "插入表格", exact: true }).count()).toBe(0);
         const bounds = await panel.boundingBox();
         if (bounds === null) throw new Error("表格面板不可见");

@@ -26,6 +26,7 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
       fileTree: null,
     })),
     vaultOpen: vi.fn(async () => null),
+    vaultCreateDefault: vi.fn(async () => "/notes"),
     vaultClose: vi.fn(async () => {}),
     vaultList: vi.fn(async () => []),
     vaultEntries: vi.fn(async () => []),

@@ -3,8 +3,12 @@ import type { VaultEntry } from "./api";
 /** 以首个可见条目和行内偏移恢复位置，前方新增文件不会把视口推到别处。 */
 export type FileTreePosition = { path: string; offset: number };
 
-/** 目录的持久化工作现场；查询与临时结果不写入会话。 */
+/** 资料管理的浏览入口；只保存查询文本，结果恢复时从当前索引重新读取。 */
+export type LibraryBrowse = { query: string; section: "files" | "tags" | "bookmarks" };
+
+/** 目录的持久化工作现场；旧会话缺少 browse 时显示全部资料。 */
 export type FileTreeState = {
+  browse?: LibraryBrowse;
   expanded: string[];
   selected: string[];
   focused: string | null;
@@ -26,6 +30,18 @@ export function isEntryPath(value: unknown): value is string {
   );
 }
 
+/** 损坏的浏览现场回退到全部资料；IPC 调用方另行拒绝非法输入。 */
+function parseBrowse(value: unknown): LibraryBrowse | null {
+  if (typeof value !== "object" || value === null || !("query" in value) || !("section" in value))
+    return null;
+  if (
+    typeof value.query !== "string" ||
+    (value.section !== "files" && value.section !== "tags" && value.section !== "bookmarks")
+  )
+    return null;
+  return { query: value.query, section: value.section };
+}
+
 /** 损坏的会话字段逐项丢弃；缺失状态返回 null，供首次打开时定位当前文档。 */
 export function parseFileTreeState(value: unknown): FileTreeState | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -33,7 +49,9 @@ export function parseFileTreeState(value: unknown): FileTreeState | null {
   const paths = (input: unknown): string[] =>
     Array.isArray(input) ? [...new Set(input.filter(isEntryPath))] : [];
   const scroll = record.scroll;
+  const browse = parseBrowse(record.browse);
   return {
+    ...(browse === null ? {} : { browse }),
     expanded: paths(record.expanded),
     selected: paths(record.selected),
     focused: isEntryPath(record.focused) ? record.focused : null,
@@ -62,7 +80,8 @@ export function parseFileTreeMessage(value: unknown): FileTreeState {
     !Array.isArray(item.selected) ||
     !item.selected.every(isEntryPath) ||
     (item.focused !== null && !isEntryPath(item.focused)) ||
-    (item.scroll !== null && state.scroll === null)
+    (item.scroll !== null && state.scroll === null) ||
+    (item.browse !== undefined && parseBrowse(item.browse) === null)
   )
     throw new Error("目录会话无效");
   return state;
@@ -83,6 +102,7 @@ export function mapFileTreeState(
   ];
   const scrollPath = state.scroll === null ? null : map(state.scroll.path);
   return {
+    ...(state.browse === undefined ? {} : { browse: { ...state.browse } }),
     expanded: paths(state.expanded),
     selected: paths(state.selected),
     focused: state.focused === null ? null : map(state.focused),

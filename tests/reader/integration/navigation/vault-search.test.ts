@@ -57,7 +57,7 @@ async function startList(api: ReaderApi): Promise<void> {
   onEdit = vi.fn();
   component = mount(FileList, {
     target,
-    props: { workspace, width: 232, onWidth: () => {}, onEdit, onOpen },
+    props: { workspace, readFile: api.fileRead, onEdit, onOpen },
   });
   await workspace.restore();
   flushSync();

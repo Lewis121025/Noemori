@@ -109,9 +109,9 @@ test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与�
     const outlinks = page.locator(".outlinks");
     await outlinks.locator("summary").click();
     const summary = await outlinks.locator("summary").textContent();
-    expect(summary).toContain("链出 4 处");
+    expect(summary).toContain("本文引用 4 处");
     // 四条出链：两条唯一解析、一条同名歧义、一条纯锚点（self，不算未解析）。
-    expect(summary).toContain("1 处未唯一解析");
+    expect(summary).toContain("1 处需要查看");
     await outlinks.locator(".hit", { hasText: "a/foo#深入小节" }).first().click();
     await documentReady("foo.md");
     await page

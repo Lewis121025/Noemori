@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +96,7 @@ test("关系图谱：全局图谱过滤与点击打开，局部图谱随库变�
     await expect.poll(documentName).toBe("丙.md");
 
     // 局部图谱：丙只有甲一条入链；外部新增一篇链接丙的笔记后增量刷新。
+    await noteAction(page, "关联图谱…");
     await page.getByText("局部图谱", { exact: true }).click();
     const local = page.getByRole("region", { name: "局部关系图谱" });
     await expect.poll(() => local.locator(".stats").textContent()).toBe("2 个节点 · 1 条链接");

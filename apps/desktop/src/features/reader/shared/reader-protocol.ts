@@ -232,10 +232,15 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     typeof value.leftWidth !== "number" ||
     !Number.isFinite(value.leftWidth) ||
     value.leftWidth < SIDEBAR_LAYOUT.minWidth ||
-    value.leftWidth > SIDEBAR_LAYOUT.maxWidth
+    value.leftWidth > SIDEBAR_LAYOUT.maxWidth ||
+    (value.space !== undefined && value.space !== "writing" && value.space !== "library")
   )
     throw new Error("文件栏布局参数无效");
-  return { filesCollapsed: value.filesCollapsed, leftWidth: Math.round(value.leftWidth) };
+  return {
+    filesCollapsed: value.filesCollapsed,
+    leftWidth: Math.round(value.leftWidth),
+    ...(value.space === undefined ? {} : { space: value.space }),
+  };
 }
 
 /** 链接种类不允许回退；错误种类可能把双链按另一种语法解析到错误文件。 */

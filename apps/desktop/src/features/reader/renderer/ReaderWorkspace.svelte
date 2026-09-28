@@ -2,6 +2,7 @@
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
   import ReaderToolbar from "./components/workspace/ReaderToolbar.svelte";
   import FileList from "./components/files/FileList.svelte";
+  import QuickNavigation from "./components/navigation/QuickNavigation.svelte";
   import PaneColumn from "./components/workspace/PaneColumn.svelte";
   import FileEntryDialog from "./components/files/FileEntryDialog.svelte";
   import LinkCandidatesDialog from "./components/workspace/LinkCandidatesDialog.svelte";
@@ -10,9 +11,10 @@
   import CommandPalette from "./components/workspace/CommandPalette.svelte";
   import GraphDialog from "./components/graph/GraphDialog.svelte";
   import { parentDirectory, type FileEntryChange } from "./engine/navigation/file-tree";
+  import { untitledNotePath } from "./engine/navigation/library";
   import { ReaderWorkspaceController } from "./state/workspace.svelte";
   import { createBrowserMediaIo } from "./engine/media/media";
-  import { SIDEBAR_LAYOUT, type ReaderApi } from "../shared/api";
+  import { SIDEBAR_LAYOUT, type ReaderApi, type ReaderSpace } from "../shared/api";
   import "./styles/controls.css";
   import type { GraphNode, HistoryAction, HistoryAvailability } from "../shared/api";
   import {
@@ -32,6 +34,11 @@
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
   const doc = $derived(workspace.document);
   let filesCollapsed = $state(false);
+  let space = $state<ReaderSpace>("writing");
+  let readingSpace: HTMLDivElement | undefined = $state();
+  let changingSpace = $state(false);
+  let creatingNote = false;
+  let layoutWrites = Promise.resolve();
   let narrow = $state(false);
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
   let entryDialog: FileEntryDialog | undefined = $state();
@@ -48,17 +55,18 @@
   function commandContext(): CommandContext {
     return {
       vaultOpen: workspace.vaultRoot !== null,
-      hasDocument: doc.path !== null,
-      canEdit: doc.canEdit,
+      hasDocument: space === "writing" && doc.path !== null,
+      canEdit: space === "writing" && doc.canEdit,
       reading: workspace.viewMode === "reading",
       markdown: doc.content?.kind === "markdown",
-      canBack: workspace.history.canBack,
-      canForward: workspace.history.canForward,
+      canBack: space === "writing" && workspace.history.canBack,
+      canForward: space === "writing" && workspace.history.canForward,
     };
   }
 
   /** 组词与切换期间消费但不执行命令；模态输入框保留自身历史，不修改背后的正文。 */
   export function executeHistory(action: HistoryAction): boolean {
+    if (space === "library") return false;
     if (workspace.isComposing || workspace.switching) return true;
     if (document.querySelector("dialog[open]")) return false;
     return workspace.navigation.applyHistory(action);
@@ -66,6 +74,7 @@
 
   /** 与执行门禁一致的响应式历史投影；null 交由外壳查询当前原生输入控件。 */
   export function historyAvailability(): HistoryAvailability | null {
+    if (space === "library") return null;
     if (workspace.isComposing || workspace.switching) return { undo: false, redo: false };
     if (document.querySelector("dialog[open]")) return null;
     return workspace.navigation.historyAvailability;
@@ -89,13 +98,19 @@
         picker = "palette";
         break;
       case "open-vault":
-        void workspace.openVault();
+        void openVault();
+        break;
+      case "open-library":
+        void showLibrary();
         break;
       case "new-note":
-        fileList?.beginCreate("file");
+        if (space === "library") fileList?.beginCreate("file");
+        else void startNote();
         break;
       case "new-folder":
-        fileList?.beginCreate("directory");
+        void showLibrary().then(() => {
+          if (space === "library") fileList?.beginCreate("directory");
+        });
         break;
       case "save":
         workspace.requestSave();
@@ -112,7 +127,8 @@
         workspace.navigation.openAttachments();
         break;
       case "toggle-files":
-        toggleFilesPane();
+        if (space === "library") resumeWriting();
+        else toggleFilesPane();
         break;
       case "go-back":
         void workspace.navigateBack();
@@ -153,7 +169,7 @@
     if (node.dead) await workspace.openLink("wiki", node.path);
     else {
       await workspace.openFile(node.path);
-      if (doc.path === node.path) finishFileNavigation(true);
+      if (doc.path === node.path) finishFileNavigation();
     }
   }
 
@@ -179,6 +195,7 @@
       const panes = await readerApi.sessionGetPanes();
       filesCollapsed = panes.filesCollapsed;
       leftWidth = panes.leftWidth;
+      space = panes.space ?? "writing";
     } catch (error) {
       workspace.report(
         "文件栏布局未能恢复，已使用默认布局。可重新调整布局；若问题持续，请查看详细原因。",
@@ -188,12 +205,61 @@
   }
 
   function persistPanes(): void {
-    void readerApi.sessionSetPanes({ filesCollapsed, leftWidth }).catch((error: unknown) => {
-      workspace.report(
-        "文件栏布局未能保存，下次打开可能恢复为原布局。请检查磁盘空间及应用数据目录是否可写，再重新调整布局。",
-        error,
-      );
-    });
+    const snapshot = { filesCollapsed, leftWidth, space };
+    layoutWrites = layoutWrites
+      .then(() => readerApi.sessionSetPanes(snapshot))
+      .catch((error: unknown) => {
+        workspace.report(
+          "文件栏布局未能保存，下次打开可能恢复为原布局。请检查磁盘空间及应用数据目录是否可写，再重新调整布局。",
+          error,
+        );
+      });
+  }
+
+  async function showLibrary(): Promise<void> {
+    if (space === "library" || changingSpace) return;
+    changingSpace = true;
+    try {
+      // 键盘进入管理也先结束普通输入控件的编辑，与点击入口的失焦提交保持一致。
+      // 组词中的内容由保存门禁拒绝，不能通过 blur 擅自确认候选文字。
+      if (!workspace.isComposing && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+        await tick();
+      }
+      if (!(await workspace.prepareLibrary())) return;
+      space = "library";
+      persistPanes();
+      await tick();
+      fileList?.focusSearch();
+    } finally {
+      changingSpace = false;
+    }
+  }
+
+  function resumeWriting(): void {
+    finishFileNavigation();
+  }
+
+  async function openVault(): Promise<void> {
+    const before = workspace.vaultRoot;
+    await workspace.openVault();
+    if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) await showLibrary();
+  }
+
+  async function startNote(): Promise<void> {
+    if (creatingNote || workspace.isComposing) return;
+    creatingNote = true;
+    try {
+      if (workspace.vaultRoot === null) await workspace.openVault("default");
+      if (workspace.vaultRoot === null) return;
+      const parent = doc.path === null ? "" : parentDirectory(doc.path);
+      const path = untitledNotePath(workspace.entries, parent);
+      const error = await workspace.createEntry(path, "file");
+      if (error !== null) workspace.report(error);
+      else finishFileNavigation();
+    } finally {
+      creatingNote = false;
+    }
   }
 
   function updateViewport(): void {
@@ -230,33 +296,49 @@
   }
 
   async function searchFiles(): Promise<void> {
-    if (filesCollapsed) {
-      filesCollapsed = false;
-      persistPanes();
-      await tick();
-    }
+    await showLibrary();
+    if (space !== "library") return;
     fileList?.focusSearch();
   }
 
   async function showBookmarks(): Promise<void> {
-    if (filesCollapsed) {
-      filesCollapsed = false;
-      persistPanes();
-      await tick();
-    }
+    await showLibrary();
+    if (space !== "library") return;
     await fileList?.showBookmarks();
   }
 
-  function finishFileNavigation(focusEditor = false): void {
-    const revealed = prepareDocumentAction();
-    if (focusEditor || revealed) void tick().then(() => workspace.navigation.focusEditor());
+  function finishFileNavigation(): void {
+    if (space !== "writing") {
+      space = "writing";
+      persistPanes();
+    }
+    // 所有打开共用焦点交接：先解除 inert 并聚焦活动栏，文本表面再接续选区。
+    // 图片、PDF 与空白页也因此有可用的键盘落点。
+    prepareDocumentAction();
+    const surface = readingSpace;
+    const pane = workspace.activePane;
+    const epoch = pane.document.epoch;
+    void tick().then(() => {
+      // 焦点请求只属于发起时的页面、分栏和文档；卸载或新的导航会使它失效。
+      if (
+        !surface?.isConnected ||
+        space !== "writing" ||
+        workspace.activePane !== pane ||
+        pane.document.epoch !== epoch
+      )
+        return;
+      surface
+        .querySelector<HTMLElement>(`[data-pane="${pane.id}"]`)
+        ?.focus({ preventScroll: true });
+      pane.navigation.focusEditor();
+    });
   }
 
   async function finishEntryOperation(change: FileEntryChange): Promise<void> {
     const writing =
       change.action === "create" && change.entry.kind === "file" && doc.path === change.entry.path;
-    await fileList?.reflectChange(change, !filesCollapsed && !writing);
-    if (writing) finishFileNavigation(true);
+    await fileList?.reflectChange(change, space === "library" && !writing);
+    if (writing) finishFileNavigation();
   }
 
   function onWorkspaceShortcut(event: KeyboardEvent): void {
@@ -264,6 +346,7 @@
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     if (
       event.key === "Escape" &&
+      space === "writing" &&
       narrow &&
       !filesCollapsed &&
       !(event.target instanceof Element && event.target.closest("[popover]"))
@@ -282,7 +365,8 @@
   }
 
   /** @returns 当前编辑已安全保存时允许关闭；冲突或写入失败时由应用外壳保留窗口。 */
-  export function flushBeforeClose(): Promise<boolean> {
+  export async function flushBeforeClose(): Promise<boolean> {
+    await layoutWrites;
     return workspace.flushBeforeClose();
   }
 </script>
@@ -297,40 +381,67 @@
   <ReaderToolbar
     bind:this={toolbar}
     {workspace}
+    {space}
+    {changingSpace}
     {filesCollapsed}
+    onLibrary={() => void showLibrary()}
+    onResume={resumeWriting}
+    onSearch={() => {
+      picker = "switcher";
+    }}
+    onNewNote={() => void startNote()}
+    onOpenVault={() => void openVault()}
     onToggleFiles={toggleFilesPane}
     onRename={beginRename}
     onDocumentAction={prepareDocumentAction}
     {applicationMenu}
   />
   <div class="panes">
-    {#if !filesCollapsed}
-      <button class="files-scrim" type="button" aria-label="收起文件栏" onclick={closeFilesPane}
-      ></button>
-    {/if}
+    <div
+      class="reading-space"
+      bind:this={readingSpace}
+      inert={space !== "writing"}
+      aria-hidden={space !== "writing"}
+    >
+      {#if !filesCollapsed && space === "writing"}
+        <button class="files-scrim" type="button" aria-label="收起文件栏" onclick={closeFilesPane}
+        ></button>
+      {/if}
+      <QuickNavigation
+        {workspace}
+        hidden={filesCollapsed}
+        width={leftWidth}
+        onLibrary={() => void showLibrary()}
+        onOpen={(path) =>
+          void workspace.openFile(path).then(() => {
+            if (workspace.document.path === path) finishFileNavigation();
+          })}
+        onWidth={(width) => {
+          leftWidth = width;
+          persistPanes();
+        }}
+      />
+      {#each workspace.panes as pane (pane.id)}
+        <PaneColumn
+          {workspace}
+          {pane}
+          {mediaIo}
+          narrowInert={narrow && !filesCollapsed}
+          {filesCollapsed}
+          onToggleFiles={toggleFilesPane}
+          onNewNote={() => void startNote()}
+          onOpenVault={() => void openVault()}
+        />
+      {/each}
+    </div>
     <FileList
       bind:this={fileList}
       onOpen={finishFileNavigation}
       {workspace}
-      hidden={filesCollapsed}
-      width={leftWidth}
+      hidden={space !== "library"}
+      readFile={readerApi.fileRead}
       onEdit={(action, entry, parent) => void entryDialog?.open(action, entry, parent)}
-      onWidth={(width) => {
-        leftWidth = width;
-        persistPanes();
-      }}
     />
-    {#each workspace.panes as pane (pane.id)}
-      <PaneColumn
-        {workspace}
-        {pane}
-        {mediaIo}
-        narrowInert={narrow && !filesCollapsed}
-        {filesCollapsed}
-        onToggleFiles={toggleFilesPane}
-        onNewNote={() => fileList?.beginCreate("file")}
-      />
-    {/each}
   </div>
   {#if workspace.deadLinkOffer !== null}
     <DeadLinkDialog
@@ -352,7 +463,7 @@
       onClose={() => {
         picker = null;
       }}
-      onOpened={() => finishFileNavigation(true)}
+      onOpened={() => finishFileNavigation()}
       onCreated={(path) =>
         void finishEntryOperation({ action: "create", entry: { path, kind: "file" } })}
     />
@@ -396,6 +507,20 @@
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
+    position: relative;
+  }
+  .reading-space {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .reading-space[inert] {
+    /* 保持滚动容器尺寸，资料管理期间保存的阅读锚点不能来自零尺寸布局。 */
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
   }
   .files-scrim {
     display: none;

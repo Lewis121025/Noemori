@@ -433,10 +433,11 @@ export class ReaderWorkspaceController {
   }
 
   /** 打开用户选择的库；取消选择、冲突或保存失败时保留原库与编辑。 */
-  openVault = async (): Promise<void> => {
+  openVault = async (kind: "choose" | "default" = "choose"): Promise<void> => {
     try {
       await this.withAllPanesSaved(async () => {
-        const root = await this.api.vaultOpen();
+        const root =
+          kind === "default" ? await this.api.vaultCreateDefault() : await this.api.vaultOpen();
         if (root === null) return;
         this.fileTree.reset();
         this.root = root;
@@ -668,6 +669,28 @@ export class ReaderWorkspaceController {
       return ready === true && (await this.fileTree.flush());
     } catch (error) {
       this.report(`阅读现场未能保存，请重试关闭：${errorText(error)}`);
+      return false;
+    }
+  }
+
+  /**
+   * 进入资料管理前保存全部编辑与阅读位置；失败时保留可见文档供用户处理。
+   * @returns 输入法组词、并发操作或保存冲突时返回 false；错误通过工作区显示。
+   */
+  async prepareLibrary(): Promise<boolean> {
+    if (this.composing) {
+      this.report("请先完成输入，再打开资料管理。");
+      return false;
+    }
+    try {
+      return (
+        (await this.withAllPanesSaved(async () => {
+          await this.persistDocuments();
+          return true;
+        })) === true
+      );
+    } catch (error) {
+      this.report("阅读现场未能保存，请重试。", error);
       return false;
     }
   }

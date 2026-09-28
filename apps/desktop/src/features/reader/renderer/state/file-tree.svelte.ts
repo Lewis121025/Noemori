@@ -68,6 +68,8 @@ export class ReaderFileTree {
       left === right ||
       (left.length === right.length && left.every((path, index) => path === right[index]));
     if (
+      next.browse?.query === this.value.browse?.query &&
+      next.browse?.section === this.value.browse?.section &&
       next.focused === this.value.focused &&
       next.scroll?.path === this.value.scroll?.path &&
       next.scroll?.offset === this.value.scroll?.offset &&

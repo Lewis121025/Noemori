@@ -3,9 +3,17 @@
   import OutlineTree from "../navigation/OutlineTree.svelte";
   import WorkspaceFeedback from "./WorkspaceFeedback.svelte";
   import type { ReaderWorkspaceController } from "../../state/workspace.svelte";
+  import type { ReaderSpace } from "../../../shared/api";
 
   let {
     workspace,
+    space,
+    changingSpace,
+    onLibrary,
+    onResume,
+    onSearch,
+    onNewNote,
+    onOpenVault,
     filesCollapsed,
     onToggleFiles,
     onRename,
@@ -13,6 +21,13 @@
     applicationMenu,
   }: {
     workspace: ReaderWorkspaceController;
+    space: ReaderSpace;
+    changingSpace: boolean;
+    onLibrary: () => void;
+    onResume: () => void;
+    onSearch: () => void;
+    onNewNote: () => void;
+    onOpenVault: () => void;
     filesCollapsed: boolean;
     onToggleFiles: () => void;
     onRename: () => void;
@@ -23,6 +38,8 @@
   const navigation = $derived(workspace.navigation);
   let outlinePopover: HTMLElement | undefined = $state();
   let filesToggle: HTMLButtonElement;
+  let noteMenu: HTMLDivElement;
+  let noteMenuButton: HTMLButtonElement | undefined = $state();
   const saveStatus = $derived(
     workspace.copying
       ? "正在保存副本…"
@@ -44,6 +61,15 @@
     outlinePopover?.hidePopover();
     navigation.jumpOutline(pos);
   }
+  /** 辅助面板独立于菜单；先把焦点交回稳定入口，关闭面板时不会返回隐藏的菜单项。 */
+  function openDocumentPanel(id: string): void {
+    const panel = document.getElementById(id);
+    if (!(panel instanceof HTMLElement)) return;
+    onDocumentAction();
+    noteMenu.hidePopover();
+    noteMenuButton?.focus();
+    panel.showPopover();
+  }
   /** 窄窗口关闭文件栏后，焦点回到稳定可见的入口，避免落在隐藏控件上。 */
   export function focusFilesToggle(): void {
     filesToggle.focus();
@@ -59,10 +85,19 @@
     aria-pressed={!filesCollapsed}
     onclick={onToggleFiles}
     title="显示或隐藏文件栏"
+    hidden={space !== "writing"}
   >
     <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
       ><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M9 5v14" /></svg
     >
+  </button>
+  <button
+    class="reader-button space-button"
+    type="button"
+    disabled={changingSpace || workspace.switching || workspace.copying}
+    onclick={space === "writing" ? onLibrary : onResume}
+  >
+    {space === "writing" ? "资料管理" : "返回阅读与写作"}
   </button>
   <button
     type="button"
@@ -76,9 +111,9 @@
   </button>
   <div class="document-heading">
     <span class="document-name" title={doc.path ?? undefined}
-      >{doc.path === null ? "" : basename(doc.path)}</span
+      >{space === "library" || doc.path === null ? "" : basename(doc.path)}</span
     >
-    {#if doc.path !== null}
+    {#if space === "writing" && doc.path !== null}
       <span
         class="save-status"
         class:quiet={!doc.dirty &&
@@ -91,115 +126,55 @@
     {/if}
   </div>
   <WorkspaceFeedback {workspace} />
-  {#if doc.content?.kind === "markdown" && workspace.viewMode === "wysiwyg"}
+  {#if space === "writing"}
     <button
-      class="reader-button format-button"
+      class="reader-button"
       type="button"
-      popovertarget="editor-formatting-{workspace.activePane.id}"
-      aria-label="文本格式"
-      title="文本格式"
-      onclick={onDocumentAction}
-      onmousedown={(event) => event.preventDefault()}
-      disabled={workspace.switching || workspace.copying}>Aa</button
-    >
-  {/if}
-  {#if doc.content?.kind === "markdown" && doc.canEdit}
-    <button
-      class="reader-button icon-button"
-      type="button"
-      aria-label={workspace.viewMode === "source" ? "切换排版视图" : "切换源码视图"}
-      aria-pressed={workspace.viewMode === "source"}
-      title={workspace.viewMode === "source" ? "切换排版视图" : "切换源码视图"}
-      onclick={() => {
-        onDocumentAction();
-        void workspace.toggleViewMode();
-      }}
-      disabled={workspace.switching || workspace.copying}
-      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 6l-2 12" /></svg
-      ></button
+      onclick={onSearch}
+      disabled={workspace.vaultRoot === null || workspace.switching}>查找</button
     >
     <button
-      class="reader-button icon-button"
+      class="reader-button"
       type="button"
-      aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
-      aria-pressed={workspace.viewMode === "reading"}
-      title={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
-      onclick={() => {
-        onDocumentAction();
-        void workspace.toggleReadingMode();
-      }}
-      disabled={workspace.switching || workspace.copying}
-      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><path
-          d="M3 5.5C5.5 4 9 4 12 6c3-2 6.5-2 9-.5v13c-2.5-1.5-6-1.5-9 .5-3-2-6.5-2-9-.5z"
-        /><path d="M12 6v13" /></svg
-      ></button
+      aria-label="新建笔记"
+      onclick={onNewNote}
+      disabled={workspace.switching}>新建</button
     >
-  {/if}
-  {#if workspace.vaultRoot !== null}
-    <button
-      class="reader-button icon-button"
-      type="button"
-      aria-label={workspace.split ? "合并分栏" : "拆分为两栏"}
-      aria-pressed={workspace.split}
-      title={workspace.split ? "合并分栏" : "拆分为两栏"}
-      onclick={() => void workspace.toggleSplit()}
-      disabled={workspace.switching || workspace.copying || workspace.isComposing}
-      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M12 5v14" /></svg
-      ></button
-    >
-  {/if}
-  {#if doc.canEdit}
-    <button
-      class="reader-button icon-button"
-      type="button"
-      aria-label="文内查找"
-      title="文内查找"
-      onclick={() => {
-        onDocumentAction();
-        navigation.openSearch();
-      }}
-      disabled={workspace.switching || workspace.copying}
-      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg
-      ></button
-    >
-  {/if}
-  {#if navigation.hasOutline}
-    <button
-      class="reader-button icon-button"
-      type="button"
-      popovertarget="outline-panel"
-      aria-label="目录"
-      title="目录"
-      onclick={onDocumentAction}
-      disabled={workspace.switching || workspace.copying}
-    >
-      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
+    {#if navigation.hasOutline}
+      <button
+        class="reader-button icon-button"
+        type="button"
+        popovertarget="outline-panel"
+        aria-label="目录"
+        title="目录"
+        onclick={onDocumentAction}
+        disabled={workspace.switching || workspace.copying}
       >
-    </button>
-  {/if}
-  {#if doc.path !== null}
-    <button
-      type="button"
-      class="reader-button icon-button"
-      popovertarget="note-menu"
-      aria-label="笔记操作"
-      disabled={workspace.switching || workspace.copying}
-      title="笔记操作"
-      onclick={onDocumentAction}
-    >
-      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle
-          cx="19"
-          cy="12"
-          r="1"
-        /></svg
+        <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
+        >
+      </button>
+    {/if}
+    {#if doc.path !== null}
+      <button
+        type="button"
+        class="reader-button icon-button"
+        popovertarget="note-menu"
+        aria-label="笔记操作"
+        bind:this={noteMenuButton}
+        disabled={workspace.switching || workspace.copying}
+        title="笔记操作"
+        onclick={onDocumentAction}
       >
-    </button>
+        <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle
+            cx="19"
+            cy="12"
+            r="1"
+          /></svg
+        >
+      </button>
+    {/if}
   {/if}
 </header>
 
@@ -209,12 +184,80 @@
     type="button"
     popovertarget="library-menu"
     popovertargetaction="hide"
-    onclick={() => void workspace.openVault()}
+    onclick={onOpenVault}
     disabled={workspace.switching || workspace.copying}>打开笔记库…</button
   >
   {@render applicationMenu()}
 </div>
-<div id="note-menu" popover="auto" class="reader-popover action-popover note-menu">
+<div
+  id="note-menu"
+  bind:this={noteMenu}
+  popover="auto"
+  class="reader-popover action-popover note-menu"
+>
+  {#if doc.content?.kind === "markdown"}
+    {#if workspace.viewMode !== "source"}<button
+        class="reader-button"
+        type="button"
+        onclick={() => openDocumentPanel(`properties-editor-formatting-${workspace.activePane.id}`)}
+        >笔记属性…</button
+      >{/if}
+    <button
+      class="reader-button"
+      type="button"
+      onclick={() => openDocumentPanel(`document-graph-${workspace.activePane.id}`)}
+      >关联图谱…</button
+    >
+  {/if}
+  {#if doc.content?.kind === "markdown" && workspace.viewMode === "wysiwyg"}
+    <button
+      class="reader-button"
+      type="button"
+      aria-label="文本格式"
+      aria-controls="editor-formatting-{workspace.activePane.id}"
+      onclick={() => openDocumentPanel(`editor-formatting-${workspace.activePane.id}`)}
+      onmousedown={(event) => event.preventDefault()}>文本格式…</button
+    >
+  {/if}
+  {#if doc.content?.kind === "markdown" && doc.canEdit}
+    <button
+      class="reader-button"
+      type="button"
+      popovertarget="note-menu"
+      popovertargetaction="hide"
+      aria-label={workspace.viewMode === "source" ? "切换排版视图" : "切换源码视图"}
+      onclick={() => void workspace.toggleViewMode()}
+      >{workspace.viewMode === "source" ? "返回排版" : "查看 Markdown 源码"}</button
+    >
+    <button
+      class="reader-button"
+      type="button"
+      popovertarget="note-menu"
+      popovertargetaction="hide"
+      aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
+      onclick={() => void workspace.toggleReadingMode()}
+      >{workspace.viewMode === "reading" ? "允许编辑" : "只读阅读"}</button
+    >
+  {/if}
+  <button
+    class="reader-button"
+    type="button"
+    popovertarget="note-menu"
+    popovertargetaction="hide"
+    aria-label={workspace.split ? "合并分栏" : "拆分为两栏"}
+    onclick={() => void workspace.toggleSplit()}
+    disabled={workspace.switching || workspace.copying || workspace.isComposing}
+    >{workspace.split ? "关闭另一栏" : "并排查看另一篇"}</button
+  >
+  {#if doc.canEdit}<button
+      class="reader-button"
+      type="button"
+      popovertarget="note-menu"
+      popovertargetaction="hide"
+      aria-label="文内查找"
+      onclick={() => navigation.openSearch()}>查找文中内容…</button
+    >{/if}
+
   <button
     class="reader-button"
     type="button"
@@ -270,11 +313,10 @@
   .toolbar button[aria-pressed="true"] {
     background: var(--selected);
   }
-  .toolbar .format-button {
-    font-weight: 500;
-    font-size: 1.05rem;
-    padding: 0.3rem 0.45rem;
+  .toolbar button[hidden] {
+    display: none;
   }
+
   .toolbar .icon-button {
     padding: 0.4rem;
   }

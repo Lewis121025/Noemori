@@ -21,6 +21,7 @@
     filesCollapsed,
     onToggleFiles,
     onNewNote,
+    onOpenVault,
   }: {
     workspace: ReaderWorkspaceController;
     /** 本栏状态；实例存活期间不变（分栏列表按 id 键控）。 */
@@ -31,6 +32,7 @@
     filesCollapsed: boolean;
     onToggleFiles: () => void;
     onNewNote: () => void;
+    onOpenVault: () => void;
   } = $props();
 
   let scrollElement: HTMLElement | undefined = $state();
@@ -57,6 +59,7 @@
   class="main"
   class:active={workspace.activePane.id === pane.id}
   role="group"
+  tabindex="-1"
   aria-label={workspace.split ? `编辑分栏 ${pane.id + 1}` : "编辑区"}
   bind:this={scrollElement}
   inert={narrowInert || pane.switching}
@@ -93,7 +96,7 @@
         </h1>
         <p>
           {workspace.vaultRoot === null
-            ? "打开一个本地文件夹，开始阅读和写作。"
+            ? "写下此刻的想法，或打开已有的资料。"
             : workspace.files.length === 0
               ? "创建笔记后，就可以直接开始写作。"
               : workspace.split
@@ -101,12 +104,21 @@
                 : "打开已有笔记，或写下此刻的想法。"}
         </p>
         {#if workspace.vaultRoot === null}
-          <button
-            type="button"
-            class="reader-button primary"
-            onclick={() => void workspace.openVault()}
-            disabled={workspace.switching}>打开笔记库…</button
-          >
+          <div class="welcome-actions">
+            <button
+              type="button"
+              class="reader-button primary"
+              onclick={onNewNote}
+              disabled={workspace.switching}>开始记录</button
+            >
+            <button
+              type="button"
+              class="reader-button"
+              onclick={onOpenVault}
+              disabled={workspace.switching}>打开已有资料…</button
+            >
+          </div>
+          <p class="local-storage">笔记保存在本机的“文稿 / Nous”文件夹。</p>
         {:else}
           <div class="welcome-actions">
             <button
@@ -127,6 +139,9 @@
 </section>
 
 <style>
+  .main:focus {
+    outline: none;
+  }
   .main {
     /* 查找栏复用滚动区内边距，吸顶时对齐真实视口边缘。 */
     --reader-inset: 1.5rem;
@@ -187,6 +202,10 @@
     flex-wrap: wrap;
     justify-content: center;
     gap: 0.65rem;
+  }
+  .welcome .local-storage {
+    font-size: 0.75rem;
+    margin-top: 1.25rem;
   }
   @media (max-width: 640px) {
     .main {

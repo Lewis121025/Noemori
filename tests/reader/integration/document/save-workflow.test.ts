@@ -59,6 +59,7 @@ beforeEach(() => {
       recentFiles: [],
     })),
     vaultOpen: vi.fn(async () => null),
+    vaultCreateDefault: vi.fn(async () => "/notes"),
     vaultClose: vi.fn(async () => {}),
     vaultList: vi.fn(async () => [...disk.keys()]),
     vaultEntries: vi.fn(async () =>
@@ -160,7 +161,7 @@ async function start(): Promise<void> {
 function click(label: string): void {
   const scope = target.querySelector("dialog[open]") ?? target;
   const button = [...scope.querySelectorAll("button")].find(
-    (item) => item.textContent?.trim() === label,
+    (item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label,
   );
   expect(button, label).toBeDefined();
   button!.click();
@@ -210,7 +211,7 @@ function selectAttachment(): void {
 
 function beginTrash(path: string): void {
   target
-    .querySelector(`[data-path="${path}"]`)!
+    .querySelector(`.library [data-path="${path}"]`)!
     .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
   flushSync();
   click("移到废纸篓…");
@@ -423,16 +424,13 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       "当前编辑尚未保存，请先处理保存问题后重试。",
     );
     click("取消");
-    target.querySelector<HTMLButtonElement>('[aria-label="新建笔记"]')!.click();
+    onCommand("new-note");
     flushSync();
-    click("创建");
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector('.entry-dialog [role="alert"]')?.textContent).toBe(
-        "当前编辑尚未保存，请先处理保存问题后重试。",
-      );
+      expect(target.querySelector(".message")?.textContent).toContain("当前编辑尚未保存");
     });
-    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(true);
+    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
     expect(api.entryCreate).not.toHaveBeenCalled();
     expect(target.querySelector(".ProseMirror")?.textContent).toBe("my unsaved work");
     expect(disk.has("note.md")).toBe(true);
@@ -473,7 +471,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     vi.mocked(api.entryCreate).mockRejectedValue(new Error("父文件夹不存在"));
     await start();
     click("失踪");
-    target.querySelector<HTMLButtonElement>('[aria-label="新建笔记"]')!.click();
+    target.querySelector<HTMLButtonElement>(".library-heading .primary")!.click();
     flushSync();
     expect(target.querySelector(".entry-dialog .hint")?.textContent).toBe("位置：失踪");
     click("创建");
@@ -566,7 +564,9 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     click("archive.zip");
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector(".file.active")?.textContent?.trim()).toBe("archive.zip");
+      expect(
+        target.querySelector(".quick-navigation .file.active")?.getAttribute("aria-label"),
+      ).toBe("archive.zip");
     });
     expect(target.querySelector(".cm-editor")).toBeNull();
     expect(target.textContent).toContain("暂不支持预览此文件");
@@ -629,7 +629,9 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     renameTo("renamed.md");
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector(".file.active")?.textContent?.trim()).toBe("renamed.md");
+      expect(
+        target.querySelector(".quick-navigation .file.active")?.getAttribute("aria-label"),
+      ).toBe("renamed.md");
       expect(target.textContent).toContain("操作已完成。链接索引更新失败");
     });
     expect(api.sessionSetDocuments).toHaveBeenLastCalledWith(
@@ -649,7 +651,9 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       flushSync();
       expect(target.textContent).toContain("重命名或移动失败：写入失败，已恢复原文件");
     });
-    expect(target.querySelector(".file.active")?.textContent?.trim()).toBe("note.md");
+    expect(target.querySelector(".quick-navigation .file.active")?.getAttribute("aria-label")).toBe(
+      "note.md",
+    );
     expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(true);
     click("取消");
     await edit("after failure");
@@ -1214,7 +1218,7 @@ describe("原生菜单与输入法", () => {
 
   it("新建对话框在组词中不提交、不取消，也不显示保存门禁错误", async () => {
     await start();
-    onCommand("new-note");
+    target.querySelector<HTMLButtonElement>(".library-heading .primary")!.click();
     flushSync();
     const dialog = target.querySelector(".entry-dialog");
     const input = target.querySelector("#entry-name");

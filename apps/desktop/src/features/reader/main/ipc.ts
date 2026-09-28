@@ -1,4 +1,6 @@
-import { dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { externalUrl } from "../shared/link-target";
 import type { PaneLayout } from "../shared/api";
 import { parseAttachmentRequest, type AttachmentReply } from "../shared/attachments";
@@ -55,6 +57,12 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   });
 
   ipcMain.handle("reader.vault.restore", () => core.call("vaultRestore"));
+  ipcMain.handle("reader.vault.createDefault", async () => {
+    // 只有用户选择开始记录才创建；固定在系统文稿目录，渲染层不能指定任意路径。
+    const root = join(app.getPath("documents"), "Nous");
+    await mkdir(root, { recursive: true });
+    return core.call("vaultOpen", root);
+  });
 
   ipcMain.handle("reader.session.setDocuments", (_event, documents: unknown) =>
     core.call("readerSessionPatch", { documents: parseSessionDocumentsMessage(documents) }),
@@ -73,7 +81,11 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
 
   ipcMain.handle("reader.session.getPanes", async (): Promise<PaneLayout> => {
     const session = await core.call("readerSessionLoad");
-    return { filesCollapsed: session.filesCollapsed, leftWidth: session.leftWidth };
+    return {
+      filesCollapsed: session.filesCollapsed,
+      leftWidth: session.leftWidth,
+      ...(session.space === undefined ? {} : { space: session.space }),
+    };
   });
 
   ipcMain.handle("reader.session.setPanes", (_event, panes: unknown) => {

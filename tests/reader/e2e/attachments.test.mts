@@ -67,10 +67,17 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       await files.getByRole("treeitem", { name, exact: true }).click();
       await page.waitForFunction(
         (path) =>
-          document.querySelector(".file.active")?.textContent?.trim() === path &&
-          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
+          document.querySelector(".quick-navigation .file.active")?.getAttribute("aria-label") ===
+            path && !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
+      await expect
+        .poll(() =>
+          page
+            .locator("section[data-pane]")
+            .evaluate((node) => node.contains(document.activeElement)),
+        )
+        .toBe(true);
     };
     const ready = (number: number) =>
       page.waitForFunction(
@@ -167,10 +174,14 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     await open("note.md");
     const embeddedImage = page.locator(".note-image");
     await embeddedImage.click();
-    expect(await page.locator(".file.active").innerText()).toBe("note.md");
+    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+      "note.md",
+    );
     await embeddedImage.click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("region", { name: "图片画布" }).waitFor();
-    expect(await page.locator(".file.active").innerText()).toBe("preview.svg");
+    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+      "preview.svg",
+    );
     await open("note.md");
     // 图片打开即加载后，PDF 可能在屏外；先滚到嵌入段落，再等待按需预览。
     await page.locator(".ProseMirror > p").last().scrollIntoViewIfNeeded();
@@ -180,7 +191,9 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     expect(await page.locator(".save-status").innerText()).toBe("已保存");
     await page.getByRole("button", { name: "打开附件", exact: true }).click();
     await ready(1);
-    expect(await page.locator(".file.active").innerText()).toBe("preview.pdf");
+    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+      "preview.pdf",
+    );
 
     await open("note.md");
     await page

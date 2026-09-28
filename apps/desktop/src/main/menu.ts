@@ -71,6 +71,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
     {
       label: "导航",
       submenu: [
+        command("open-library"),
         command("quick-switcher"),
         command("command-palette"),
         { type: "separator" },

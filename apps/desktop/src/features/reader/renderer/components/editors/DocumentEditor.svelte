@@ -655,7 +655,14 @@
       targets={linkTargets}
       onClose={() => (showLink = false)}
     />{/if}
-  <PropertiesPanel view={editor} state={editorState} {readOnly} />
+  <div
+    id="properties-{formattingId}"
+    popover="auto"
+    class="reader-popover properties-popover"
+    aria-label="笔记属性"
+  >
+    <PropertiesPanel view={editor} state={editorState} {readOnly} />
+  </div>
 {/if}
 <div class="surface" class:reading={readOnly} bind:this={host}></div>
 {#if suggest !== null && suggest.items.length > 0}
@@ -674,6 +681,12 @@
 {/if}
 
 <style>
+  .properties-popover {
+    width: min(32rem, calc(100vw - 2rem));
+    max-height: 70vh;
+    overflow: auto;
+    padding: 0.75rem;
+  }
   .surface,
   .surface :global(> .markdown-content) {
     min-height: 16rem;

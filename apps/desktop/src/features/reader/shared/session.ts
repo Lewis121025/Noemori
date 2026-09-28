@@ -123,6 +123,7 @@ export function parsePaneLayout(value: unknown): PaneLayout | null {
   return {
     filesCollapsed: parseCollapsed(record.filesCollapsed),
     leftWidth: clampWidth(record.leftWidth, DEFAULT_LEFT_WIDTH),
+    ...(record.space === "writing" || record.space === "library" ? { space: record.space } : {}),
   };
 }
 

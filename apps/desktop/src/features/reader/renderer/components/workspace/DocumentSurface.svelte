@@ -99,16 +99,27 @@
     />
   {/key}
   {#if doc.content?.kind === "markdown"}
-    <LocalGraphPane
-      {workspace}
-      path={doc.path}
-      onOpen={(node) =>
-        void (node.dead ? pane.openLink("wiki", node.path) : pane.openFile(node.path))}
-    />
+    <div
+      id="document-graph-{pane.id}"
+      popover="auto"
+      class="reader-popover graph-popover"
+      aria-label="关联图谱"
+    >
+      <LocalGraphPane
+        {workspace}
+        path={doc.path}
+        onOpen={(node) =>
+          void (node.dead ? pane.openLink("wiki", node.path) : pane.openFile(node.path))}
+      />
+    </div>
   {/if}
 {/if}
 
 <style>
+  .graph-popover {
+    width: min(48rem, calc(100vw - 2rem));
+    padding: 1rem;
+  }
   .unsupported {
     padding: 3rem 1rem;
     text-align: center;

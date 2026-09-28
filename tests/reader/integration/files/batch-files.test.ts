@@ -85,7 +85,7 @@ beforeEach(async () => {
   edit = vi.fn();
   component = mount(FileList, {
     target,
-    props: { workspace, width: 232, onWidth: () => {}, onEdit: edit, onOpen: vi.fn() },
+    props: { workspace, readFile: api.fileRead, onEdit: edit, onOpen: vi.fn() },
   });
   flushSync();
   const menu = target.querySelector<HTMLDivElement>(".file-menu")!;
@@ -322,7 +322,7 @@ describe("文件树多选与批量整理", () => {
     );
     component = mount(FileList, {
       target,
-      props: { workspace, width: 232, onWidth: () => {}, onEdit: vi.fn(), onOpen: vi.fn() },
+      props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
     });
     flushSync();
     expect(row("folder").getAttribute("aria-expanded")).toBe("false");

@@ -1,3 +1,4 @@
+import { openLibrary } from "../support/workspace-actions";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +48,9 @@ test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, as
   });
   try {
     const page = await app.firstWindow();
+    // 首次索引仍沿用原有 120 秒准备预算，交互采样在进入资料管理后开始。
+    page.setDefaultTimeout(120_000);
+    await openLibrary(page);
     page.setDefaultTimeout(15_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -114,7 +118,7 @@ test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, as
       await search.press("ArrowDown");
       if (index === 0) {
         const edge = await files.locator(".file").evaluateAll((nodes) => {
-          const tree = document.querySelector<HTMLElement>('[role="tree"]')!;
+          const tree = document.querySelector<HTMLElement>('.library [role="tree"]')!;
           const viewport = tree.getBoundingClientRect();
           const last = nodes
             .filter((node) => {
@@ -154,9 +158,7 @@ test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, as
           ),
       );
       await page.keyboard.press(process.platform === "darwin" ? "Meta+a" : "Control+a");
-      expect(await files.getByRole("toolbar", { name: "批量文件操作" }).innerText()).toContain(
-        "10100",
-      );
+      expect(await page.getByRole("toolbar", { name: "资料整理" }).innerText()).toContain("10100");
       expect(await files.getByRole("treeitem").count()).toBeLessThan(100);
       await page.evaluate(
         () =>
@@ -223,9 +225,8 @@ test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, as
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
-    const toggle = page.getByRole("button", { name: "显示或隐藏文件栏", exact: true });
-    await toggle.click();
-    await toggle.click();
+    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await openLibrary(page);
     expect(await tree.evaluate((node) => node.scrollTop)).toBe(beforeHide);
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]!.setSize(640, 480);

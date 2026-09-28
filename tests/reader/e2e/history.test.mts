@@ -1,3 +1,4 @@
+import { noteAction, openLibrary } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,7 +110,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     await page.keyboard.press("Escape");
     await expect.poll(historyState).toEqual({ undo: true, redo: false });
 
-    await page.getByRole("button", { name: "文内查找", exact: true }).click();
+    await noteAction(page, "文内查找");
     const query = page
       .getByRole("form", { name: "文内查找替换" })
       .getByLabel("查找", { exact: true });
@@ -153,6 +154,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     const saved = original.replace("。", "。续写").replace("$x$", "$x+y$");
     await expect.poll(() => readFile(join(vault, "笔记.md"), "utf8")).toBe(saved);
 
+    await openLibrary(page);
     const note = page.getByRole("treeitem", { name: "笔记.md", exact: true });
     await note.focus();
     await page.keyboard.press("F2");
@@ -170,7 +172,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     expect(await filename.inputValue()).toBe("笔记.md");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("treeitem", { name: "文本.txt", exact: true }).click();
+    await page.getByRole("treeitem", { name: "文本.txt", exact: true }).dblclick();
     const code = page.locator(".cm-content");
     await code.locator(".cm-line").first().click();
     await expect.poll(historyState).toEqual({ undo: false, redo: false });

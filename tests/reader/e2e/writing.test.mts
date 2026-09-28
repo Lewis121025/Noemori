@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +63,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await editor.waitFor();
     const formatting = page.getByRole("group", { name: "文本格式", exact: true });
     const formatButton = page.getByRole("button", { name: "文本格式", exact: true });
+
     expect(await formatting.isVisible()).toBe(false);
     expect(await page.getByRole("form", { name: "文内查找替换" }).isVisible()).toBe(false);
     await editor.click();
@@ -89,7 +91,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
 
-    await formatButton.click();
+    await noteAction(page, "文本格式");
     await formatting.getByRole("button", { name: "链接…", exact: true }).click();
     const link = page.getByRole("dialog", { name: "插入链接" });
     await link.getByLabel("链接目标").fill("参考.md");
@@ -126,7 +128,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await search.getByRole("button", { name: "关闭查找" }).click();
     await page.keyboard.press("ControlOrMeta+z");
     expect(await editor.locator("strong").innerText()).toBe("重点");
-    await formatButton.click();
+    await noteAction(page, "文本格式");
     await formatting.getByRole("button", { name: "重做", exact: true }).click();
     expect(await editor.locator("strong").innerText()).toBe("关键");
     await page.keyboard.press("ControlOrMeta+s");
@@ -148,7 +150,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       .click();
     await ready("文本.txt");
     expect(await formatButton.isVisible()).toBe(false);
-    await page.getByRole("button", { name: "文内查找", exact: true }).click();
+    await noteAction(page, "文内查找");
     const textSearch = page.locator(".cm-search");
     await textSearch.getByLabel("查找", { exact: true }).fill("查找目标");
     await textSearch.getByLabel("替换为").fill("已替换");
@@ -181,11 +183,11 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       selection?.addRange(range);
       document.dispatchEvent(new Event("selectionchange"));
     });
-    await formatButton.click();
+    await noteAction(page, "文本格式");
     await formatting.getByRole("button", { name: "斜体", exact: true }).click();
     expect(await editor.locator("em").innerText()).toBe("关键");
     expect(await formatting.isVisible()).toBe(false);
-    await formatButton.click();
+    await noteAction(page, "文本格式");
     expect(
       await formatting
         .getByRole("button", { name: "斜体", exact: true })
@@ -209,6 +211,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       await page.screenshot({ path: process.env.NOUS_WRITING_SCREENSHOT });
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-narrow.png") });
     // 原生弹层支持键盘进入与 Escape 返回入口，不能让隐藏控件挤占正文。
+    await page.getByRole("button", { name: "笔记操作", exact: true }).click();
     await formatButton.focus();
     await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
@@ -220,8 +223,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-formatting.png") });
     await page.keyboard.press("Escape");
     expect(await formatting.isVisible()).toBe(false);
-    expect(await formatButton.evaluate((element) => element === document.activeElement)).toBe(true);
-    await page.keyboard.press("Enter");
+    await noteAction(page, "文本格式");
     expect(await formatting.isVisible()).toBe(true);
     await page.keyboard.press("ControlOrMeta+f");
     await search.waitFor();
@@ -251,7 +253,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await ready("长文.md");
     expect(await search.isVisible()).toBe(false);
     await expect.poll(() => files.isVisible()).toBe(false);
-    await page.getByRole("button", { name: "文内查找", exact: true }).click();
+    await noteAction(page, "文内查找");
     await search.getByLabel("查找", { exact: true }).fill("定位目标");
     const searchStatus = search.getByRole("status");
     await expect.poll(() => searchStatus.textContent()).toBe("共 4 处");

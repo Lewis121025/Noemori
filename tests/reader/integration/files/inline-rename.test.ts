@@ -52,7 +52,7 @@ beforeEach(async () => {
   document.body.append(target);
   component = mount(FileList, {
     target,
-    props: { workspace, width: 232, onWidth: () => {}, onEdit: vi.fn(), onOpen: vi.fn() },
+    props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
   });
   flushSync();
 });

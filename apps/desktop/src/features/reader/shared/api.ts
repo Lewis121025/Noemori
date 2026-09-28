@@ -242,8 +242,13 @@ export const SIDEBAR_LAYOUT = {
   maxWidth: 480,
 };
 
-/** 文件栏布局；目录和引用是临时展开内容，不写入会话。 */
+/** 用户所在的工作空间；文档与资料管理共享同一份笔记库。 */
+export type ReaderSpace = "writing" | "library";
+
+/** 工作空间与轻量导航布局；旧会话缺少 space 时恢复读写空间。 */
 export type PaneLayout = {
+  /** 当前空间；可缺省以读取旧版会话。 */
+  space?: ReaderSpace;
   /** 文件栏是否收起。 */
   filesCollapsed: boolean;
   /** 文件栏宽度（像素）。 */
@@ -304,6 +309,8 @@ export type VaultEntry = {
 export type ReaderApi = {
   /** 弹出选目录对话框并打开库；取消时返回 `null`。 */
   vaultOpen: () => Promise<string | null>;
+  /** 用户首次开始记录时打开 Documents/Nous；已有目录和内容保持原样，创建失败时拒绝。 */
+  vaultCreateDefault: () => Promise<string>;
   /**
    * 用主进程记下的库路径恢复会话，不弹对话框。
    *

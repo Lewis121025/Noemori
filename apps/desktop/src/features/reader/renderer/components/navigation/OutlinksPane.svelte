@@ -17,7 +17,7 @@
 {#if links.length > 0}
   <section class="outlinks" aria-label="本文出链">
     <details>
-      <summary>链出 {links.length} 处{pending > 0 ? `（${pending} 处未唯一解析）` : ""}</summary>
+      <summary>本文引用 {links.length} 处{pending > 0 ? `（${pending} 处需要查看）` : ""}</summary>
       <ul>
         {#each groups.resolved as link, index (`r${index}:${link.startByte}`)}
           <li>
@@ -36,7 +36,7 @@
           <li>
             <button type="button" class="hit unresolved" onclick={() => onOpen(link)}>
               <span class="raw">{link.toRaw}</span>
-              <span class="target">同名歧义</span>
+              <span class="target">有多个同名文件，请选择</span>
             </button>
           </li>
         {/each}
@@ -44,7 +44,7 @@
           <li>
             <button type="button" class="hit unresolved" onclick={() => onOpen(link)}>
               <span class="raw">{link.toRaw}</span>
-              <span class="target">死链，点击创建笔记</span>
+              <span class="target">尚未创建，点击开始记录</span>
             </button>
           </li>
         {/each}

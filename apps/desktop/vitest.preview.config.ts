@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     setupFiles: ["../../tests/desktop/support/window-mode.ts"],
     include: [
+      "../../tests/reader/e2e/spaces.test.mts",
       "../../tests/reader/e2e/attachments.test.mts",
       "../../tests/reader/e2e/attachment-import.test.mts",
       "../../tests/reader/e2e/workspace.test.mts",

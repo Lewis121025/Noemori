@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +76,7 @@ test("源码视图：排版表达不了的语法逐字节保真，[[ 补全与�
     );
 
     // 切到源码视图：工具栏按钮 + 原始字节完整呈现。
-    await page.getByRole("button", { name: "切换源码视图", exact: true }).click();
+    await noteAction(page, "切换源码视图");
     const code = page.locator(".cm-content");
     await code.waitFor();
     await expect.poll(() => code.textContent()).toContain("__强调__");
@@ -112,7 +113,7 @@ test("源码视图：排版表达不了的语法逐字节保真，[[ 补全与�
     expect(saved).not.toContain("**强调**");
 
     // 切回排版视图：文档模型重新挂载，强调按 strong 渲染。
-    await page.getByRole("button", { name: "切换排版视图", exact: true }).click();
+    await noteAction(page, "切换排版视图");
     const editor = page.locator(".ProseMirror");
     await editor.waitFor();
     await expect.poll(() => editor.locator("strong").textContent()).toBe("强调");

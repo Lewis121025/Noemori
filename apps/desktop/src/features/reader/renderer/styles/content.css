@@ -409,3 +409,8 @@
 .markdown-content.reading .mermaid-source {
   display: none;
 }
+
+/* 正文的键盘位置由插入光标和选区表达，避免把整篇文章画成表单输入框。 */
+.ProseMirror:focus-visible {
+  outline: none;
+}

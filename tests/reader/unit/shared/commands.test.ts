@@ -99,7 +99,14 @@ describe("可用性门禁", () => {
     const available = READER_COMMANDS.filter((command) => commandAvailable(command.id, closed)).map(
       (command) => command.id,
     );
-    expect(available).toEqual(["command-palette", "open-vault", "toggle-files", "toggle-split"]);
+    expect(available).toEqual([
+      "command-palette",
+      "open-vault",
+      "open-library",
+      "new-note",
+      "toggle-files",
+      "toggle-split",
+    ]);
   });
 
   it("文档相关命令随文档状态开关", () => {

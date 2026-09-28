@@ -11,6 +11,12 @@ import {
 } from "@reader/shared/session";
 
 describe("阅读器会话边界", () => {
+  it("恢复独立的资料管理空间，旧会话和损坏值保留默认读写入口", () => {
+    expect(parsePaneLayout({ space: "library" })?.space).toBe("library");
+    expect(parsePaneLayout({ space: "writing" })?.space).toBe("writing");
+    expect(parsePaneLayout({ space: "unknown" })?.space).toBeUndefined();
+    expect(parseReaderSession({ space: "library" }).space).toBe("library");
+  });
   it("宽度限制在安全范围，缺失和非法值使用默认值", () => {
     expect(parsePaneLayout({ leftWidth: 12 })?.leftWidth).toBe(192);
     expect(parsePaneLayout({ leftWidth: 999 })?.leftWidth).toBe(480);

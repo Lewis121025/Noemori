@@ -16,6 +16,7 @@ import {
   parseMentions,
   parseNoteKeys,
   parseNullablePath,
+  parsePathArgument,
   parsePaneLayoutMessage,
   parseSavedCopy,
   parseSearchPage,
@@ -34,6 +35,8 @@ export function createReaderApi(): ReaderApi {
     openExternal: async (url) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.links.openExternal", url)),
     vaultOpen: async () => parseNullablePath(await ipcRenderer.invoke("reader.vault.open")),
+    vaultCreateDefault: async () =>
+      parsePathArgument(await ipcRenderer.invoke("reader.vault.createDefault")),
     vaultRestore: async () => parseVaultRestore(await ipcRenderer.invoke("reader.vault.restore")),
     sessionSetDocuments: async (documents) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.session.setDocuments", documents)),

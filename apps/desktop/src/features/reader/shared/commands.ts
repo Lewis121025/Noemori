@@ -24,6 +24,7 @@ export const READER_COMMANDS = [
   { id: "quick-switcher", label: "快速切换…", shortcut: cmd("o") },
   { id: "command-palette", label: "命令面板…", shortcut: cmd("p") },
   { id: "open-vault", label: "打开笔记库…", shortcut: cmdShift("o") },
+  { id: "open-library", label: "资料管理", shortcut: cmdShift("l") },
   { id: "new-note", label: "新建笔记", shortcut: cmd("n") },
   { id: "new-folder", label: "新建文件夹", shortcut: cmdShift("n") },
   { id: "save", label: "保存", shortcut: cmd("s") },
@@ -143,11 +144,12 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
   switch (id) {
     case "command-palette":
     case "open-vault":
+    case "open-library":
+    case "new-note":
     case "toggle-files":
     case "toggle-split":
       return true;
     case "quick-switcher":
-    case "new-note":
     case "new-folder":
     case "find-files":
     case "show-bookmarks":

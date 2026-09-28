@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +66,7 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
         document.querySelector(".ProseMirror") !== null &&
         !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
+    await noteAction(page, "笔记属性…");
     const properties = page.locator(".properties");
     await expect
       .poll(() => properties.locator(".row .key").allTextContents())

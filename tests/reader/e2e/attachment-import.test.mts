@@ -1,3 +1,4 @@
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,14 +26,31 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
   await Promise.all([
     writeFile(note, source),
     writeFile(join(folder, "attachments"), "同名文件必须保留"),
-    writeFile(join(userData, "session.json"), JSON.stringify({ vaultRoot: vault, currentPath: `${folderName}/笔记.md`, filesCollapsed: true })),
+    writeFile(
+      join(userData, "session.json"),
+      JSON.stringify({
+        vaultRoot: vault,
+        currentPath: `${folderName}/笔记.md`,
+        filesCollapsed: true,
+      }),
+    ),
   ]);
   const executable: unknown = require("electron");
   if (typeof executable !== "string") throw new Error("缺少 Electron 可执行文件");
   const environment: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env))
     if (value !== undefined && name !== "ELECTRON_RENDERER_URL") environment[name] = value;
-  const launch = () => electron.launch({ executablePath: executable, args: [fileURLToPath(new URL("out/main/index.js", desktop)), `--user-data-dir=${userData}`, "--no-sandbox"], colorScheme: null, env: environment });
+  const launch = () =>
+    electron.launch({
+      executablePath: executable,
+      args: [
+        fileURLToPath(new URL("out/main/index.js", desktop)),
+        `--user-data-dir=${userData}`,
+        "--no-sandbox",
+      ],
+      colorScheme: null,
+      env: environment,
+    });
   let app = await launch();
   try {
     const page = await app.firstWindow();
@@ -45,18 +63,27 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const editor = page.locator(".ProseMirror");
-    await editor.locator("p").filter({ hasText: /^正文$/ }).click();
+    await editor
+      .locator("p")
+      .filter({ hasText: /^正文$/ })
+      .click();
     await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowRight" : "End");
     await expect.poll(() => page.evaluate(() => window.getSelection()?.focusOffset)).toBe(2);
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
     const choose = async (files: { name: string; mimeType: string; buffer: Buffer }[]) => {
-      await page.getByRole("button", { name: "文本格式", exact: true }).click();
+      await noteAction(page, "文本格式");
       const panel = page.getByRole("group", { name: "文本格式", exact: true });
       const bounds = await panel.boundingBox();
-      const lastAction = await panel.getByRole("button", { name: "重做", exact: true }).boundingBox();
+      const lastAction = await panel
+        .getByRole("button", { name: "重做", exact: true })
+        .boundingBox();
       if (!bounds || !lastAction) throw new Error("格式操作不可见");
       expect(lastAction.y + lastAction.height).toBeLessThanOrEqual(bounds.y + bounds.height);
-      expect(await panel.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+      expect(await panel.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
+        true,
+      );
       const chooser = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "插入附件…", exact: true }).click();
       await (await chooser).setFiles(files);
@@ -99,18 +126,35 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
     // Chromium 的真实 File / DataTransfer 穿过粘贴和拖入事件，不调用编辑器私有状态。
     await editor.evaluate((element) => {
       const transfer = new DataTransfer();
-      transfer.items.add(new File([new Uint8Array([80, 75, 0, 255])], "资料.zip", { type: "application/zip" }));
-      element.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
+      transfer.items.add(
+        new File([new Uint8Array([80, 75, 0, 255])], "资料.zip", { type: "application/zip" }),
+      );
+      element.dispatchEvent(
+        new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }),
+      );
     });
     await editor.getByRole("link", { name: "资料.zip" }).waitFor();
     const paragraph = editor.locator("p").last();
     await paragraph.scrollIntoViewIfNeeded();
-    await paragraph.evaluate((element, bytes) => {
-      const transfer = new DataTransfer();
-      transfer.items.add(new File([new Uint8Array(bytes)], "报告.pdf", { type: "application/pdf" }));
-      const rect = element.getBoundingClientRect();
-      element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: rect.left + 8, clientY: rect.top + 10 }));
-    }, [...pdf]);
+    await paragraph.evaluate(
+      (element, bytes) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(
+          new File([new Uint8Array(bytes)], "报告.pdf", { type: "application/pdf" }),
+        );
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: transfer,
+            clientX: rect.left + 8,
+            clientY: rect.top + 10,
+          }),
+        );
+      },
+      [...pdf],
+    );
     await page.getByRole("button", { name: "打开附件", exact: true }).waitFor();
     await page.keyboard.press("ControlOrMeta+s");
     await expect.poll(() => page.locator(".save-status").textContent()).toBe("已保存");
@@ -119,7 +163,9 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
     expect(saved).toContain("./attachments/%E5%9B%BE%E7%89%87%20%231.svg");
     expect(saved).toContain("./attachments/%E6%8A%A5%E5%91%8A.pdf");
     expect(await readFile(join(folder, "attachments/报告.pdf"))).toEqual(pdf);
-    expect(await readFile(join(folder, "attachments/资料.zip"))).toEqual(Buffer.from([80, 75, 0, 255]));
+    expect(await readFile(join(folder, "attachments/资料.zip"))).toEqual(
+      Buffer.from([80, 75, 0, 255]),
+    );
     expect((await readdir(join(folder, "attachments"))).length).toBe(4);
     expect(errors).toEqual([]);
     await app.close();

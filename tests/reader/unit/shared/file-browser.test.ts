@@ -8,6 +8,18 @@ import {
 } from "@reader/shared/file-browser";
 
 describe("目录会话边界", () => {
+  it("资料管理的查询和浏览分类随现场保存，改名不清空当前查询", () => {
+    const state = {
+      ...emptyFileTreeState(),
+      browse: { query: "设计", section: "files" as const },
+    };
+    expect(parseFileTreeMessage(state)).toEqual(state);
+    expect(mapFileTreeState(state, (path) => path)).toEqual(state);
+    expect(reconcileFileTreeState(state, [])).toEqual(state);
+    expect(() =>
+      parseFileTreeMessage({ ...state, browse: { query: 1, section: "files" } }),
+    ).toThrow();
+  });
   it("Unix 文件名里的反斜杠沿目录会话原样往返，不阻止关窗保存", () => {
     const state = {
       expanded: ["资料\\原稿"],

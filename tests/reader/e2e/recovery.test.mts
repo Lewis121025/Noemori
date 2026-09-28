@@ -1,3 +1,4 @@
+import { openLibrary } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,10 +36,13 @@ test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安�
         new TextEncoder().encode("# 恢复的想法\n\n这些编辑需要保留。\n"),
         new TextEncoder().encode("原始版本"),
       );
-    await core.call(
-      "readerSessionPatch",
-      { documents: { panes: [{ currentPath: "欢迎.md", history: { back: [], forward: [] } }], active: 0, split: false } },
-    );
+    await core.call("readerSessionPatch", {
+      documents: {
+        panes: [{ currentPath: "欢迎.md", history: { back: [], forward: [] } }],
+        active: 0,
+        split: false,
+      },
+    });
   } finally {
     await core.shutdown();
   }
@@ -67,6 +71,7 @@ test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安�
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.getByRole("heading", { name: "欢迎", exact: true }).waitFor();
+    await openLibrary(page);
     const recovery = page.getByRole("region", { name: "待恢复的笔记" });
     expect(await recovery.getByRole("button").count()).toBe(2);
     const files = page.getByRole("navigation", { name: "文件列表" });
@@ -111,12 +116,13 @@ test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安�
       () => document.querySelector(".document-name")?.textContent === "笔记 (副本).md",
     );
     expect(await readFile(join(vault, "笔记 (副本).md"), "utf8")).toContain("继续写下新内容");
+    await openLibrary(page);
     expect(await recovery.getByRole("button").count()).toBe(1);
     await recovery.locator('[data-path="旧笔记.md"]').click();
     await page.getByRole("button", { name: "处理保存问题", exact: true }).click();
     await notice.waitFor();
     await notice.getByRole("button", { name: "另存为副本", exact: true }).click();
-    await recovery.waitFor({ state: "hidden" });
+    await expect.poll(() => page.locator(".document-name").textContent()).toBe("旧笔记 (副本).md");
     expect(await readFile(join(vault, "旧笔记 (副本).md"), "utf8")).toContain("这些编辑需要保留");
     expect(await readFile(join(vault, "归档"), "utf8")).toBe("真实文件，不能覆盖");
     expect(await readFile(join(vault, "旧笔记.md/child.md"), "utf8")).toBe("真实目录中的内容");
