@@ -1,0 +1,40 @@
+[package]
+name = "nous-ink"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+autotests = false
+description = "独立的笔迹预测、平滑、几何修正与吸附内核"
+
+[lib]
+name = "nous_ink"
+path = "src/lib.rs"
+doctest = false
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[[test]]
+name = "ink_unit_smoothing"
+path = "../../../../test/whiteboard/ink/unit/smoothing.rs"
+
+[[test]]
+name = "ink_unit_prediction"
+path = "../../../../test/whiteboard/ink/unit/prediction.rs"
+
+[[test]]
+name = "ink_unit_correction"
+path = "../../../../test/whiteboard/ink/unit/correction.rs"
+
+[[test]]
+name = "ink_unit_snapping"
+path = "../../../../test/whiteboard/ink/unit/snapping.rs"
+
+[[test]]
+name = "ink_integration_replay"
+path = "../../../../test/whiteboard/ink/integration/replay.rs"
