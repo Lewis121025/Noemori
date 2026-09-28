@@ -1,7 +1,8 @@
 <script lang="ts">
   /** 侧栏全文检索结果：命中列表、状态与键盘导航；查询执行由 ReaderSearch 负责。 */
   import type { SearchHit, SearchMatch } from "../../shared/api";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { snippetParts } from "./query";
   import type { ReaderSearch } from "./state.svelte";
 
@@ -10,6 +11,7 @@
     activePath,
     onActivate,
     onExit,
+    onFocusSearch,
   }: {
     /** 工作区持有的检索状态；结果只在最近一次成功检索后更新。 */
     search: ReaderSearch;
@@ -19,26 +21,73 @@
     onActivate: (hit: SearchHit, match?: SearchMatch) => void;
     /** 退出结果模式（Escape），焦点交回搜索框。 */
     onExit: () => void;
+    /** 刷新后结果清空时回到查询框；保留查询，不触发退出或重新提交。 */
+    onFocusSearch: () => void;
   } = $props();
 
   let listElement: HTMLElement | undefined = $state();
-  let focusedIndex = $state(0);
+  let focusedPath = $state<string | null>(null);
   let expanded = $state<Record<string, boolean>>({});
   const hits = $derived(search.hits);
+  const tabPath = $derived(
+    hits.some((hit) => hit.path === focusedPath) ? focusedPath : (hits[0]?.path ?? null),
+  );
   const matchCount = $derived(hits.reduce((total, hit) => total + hit.matchCount, 0));
   const status = $derived(
-    search.busy
-      ? "正在搜索…"
-      : search.error !== null
-        ? search.error
-        : search.hasMore
-          ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
-          : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
+    search.error !== null
+      ? `${search.error}${search.stale ? "；当前显示的是上次结果。" : ""}`
+      : search.stale
+        ? "笔记库已变化，正在更新搜索结果…"
+        : search.busy
+          ? "正在搜索…"
+          : search.hasMore
+            ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
+            : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
   );
+
+  $effect.pre(() => {
+    const revision = search.revision;
+    untrack(() => {
+      const list = listElement;
+      const active = document.activeElement;
+      if (!list || !(active instanceof HTMLButtonElement) || !list.contains(active)) return;
+      const identity = { ...active.dataset };
+      const previous = Array.from(list.querySelectorAll<HTMLButtonElement>(".hit"));
+      const paths = previous.map((button) => button.dataset.path);
+      const index = identity.path === undefined ? paths.length : paths.indexOf(identity.path);
+      void tick().then(() => {
+        if (
+          search.revision !== revision ||
+          !list.isConnected ||
+          list.closest("[hidden], [inert]") ||
+          (document.activeElement !== active && document.activeElement !== document.body)
+        )
+          return;
+        const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>("[data-search-focus]"));
+        const exact = buttons.find((button) =>
+          ["searchFocus", "path", "version", "occurrence"].every(
+            (key) => button.dataset[key] === identity[key],
+          ),
+        );
+        const files = buttons.filter((button) => button.dataset.searchFocus === "hit");
+        const byPath = new SvelteMap(files.map((button) => [button.dataset.path, button]));
+        // 原目标不在新快照中时，优先所属文件，再找原顺序中的后继、前驱，最后用新首项。
+        const neighbors = [
+          identity.path,
+          ...paths.slice(index + 1),
+          ...paths.slice(0, index).reverse(),
+        ];
+        const fallback = byPath.get(neighbors.find((path) => byPath.has(path))) ?? files[0];
+        const next = exact ?? fallback;
+        if (next) next.focus({ preventScroll: true });
+        else onFocusSearch();
+      });
+    });
+  });
 
   /** 提交检索后键盘从列表第一项继续。 */
   export function focusFirst(): void {
-    focusedIndex = 0;
+    focusedPath = hits[0]?.path ?? null;
     listElement?.querySelector<HTMLButtonElement>("[data-index='0']")?.focus();
   }
 
@@ -100,11 +149,19 @@
   }
 </script>
 
-<section class="results" aria-label="全文搜索结果" bind:this={listElement}>
+<section
+  class="results"
+  aria-label="全文搜索结果"
+  bind:this={listElement}
+  onfocusin={(event) => {
+    if (event.target instanceof HTMLButtonElement && event.target.dataset.path !== undefined)
+      focusedPath = event.target.dataset.path;
+  }}
+>
   <div class="status" role="status">{status}</div>
-  {#if search.busy}
-    <!-- 在途检索期间隐藏旧结果，避免把上一个查询的命中当作当前查询的。 -->
-  {:else if search.error === null && hits.length === 0}
+  {#if search.busy && hits.length === 0}
+    <!-- 新查询不显示旧内容；同一查询的后台刷新保留已显示的节点和焦点。 -->
+  {:else if !search.stale && search.error === null && hits.length === 0}
     <div class="empty">
       <strong>没有匹配的笔记</strong>
       <p>试试记得的其他词，或按标题、标签查找。</p>
@@ -118,10 +175,11 @@
             class="hit"
             class:active={hit.path === activePath}
             data-index={index}
-            tabindex={focusedIndex === index ? 0 : -1}
+            data-search-focus="hit"
+            data-path={hit.path}
+            tabindex={tabPath === hit.path ? 0 : -1}
             title={hit.path}
             onclick={() => onActivate(hit)}
-            onfocus={() => (focusedIndex = index)}
             onkeydown={keydown}
           >
             <span class="title">{hit.title}</span>
@@ -137,6 +195,8 @@
           {#if hit.matchCount > 0}
             <button
               class="expand"
+              data-search-focus="expand"
+              data-path={hit.path}
               aria-label={`${expanded[hit.path] ? "收起" : "展开"} ${hit.title} 的 ${hit.matchCount} 处命中`}
               aria-expanded={expanded[hit.path] ?? false}
               onclick={() => (expanded[hit.path] = !expanded[hit.path])}
@@ -152,6 +212,9 @@
                     <button
                       class="occurrence"
                       data-occurrence={matchIndex}
+                      data-search-focus="match"
+                      data-path={hit.path}
+                      data-version={hit.contentHash}
                       onclick={() => onActivate(hit, match)}
                       onkeydown={keydown}
                     >
@@ -169,19 +232,25 @@
               </ol>
               {#if search.matchError(hit.path) !== null}
                 <p class="match-error" role="alert">{search.matchError(hit.path)}</p>
-                <button class="expand" onclick={() => void search.refresh()} onkeydown={keydown}
-                  >重新搜索</button
-                >
-              {:else if hit.matchesCursor !== null}
+              {/if}
+              {#if hit.matchesCursor !== null}
                 <button
                   class="expand"
-                  aria-disabled={search.loadingMatches(hit.path)}
-                  onclick={(event) => loadMatches(hit, event)}
+                  data-search-focus="more-matches"
+                  data-path={hit.path}
+                  aria-disabled={search.stale || search.busy || search.loadingMatches(hit.path)}
+                  onclick={(event) => {
+                    if (search.stale || search.busy) return;
+                    if (search.matchError(hit.path) !== null) void search.refresh();
+                    else void loadMatches(hit, event);
+                  }}
                   onkeydown={keydown}
                 >
-                  {search.loadingMatches(hit.path)
-                    ? "正在加载命中…"
-                    : `显示更多 · 还有 ${hit.matchCount - hit.matches.length} 处`}
+                  {search.matchError(hit.path) !== null
+                    ? "重新搜索"
+                    : search.loadingMatches(hit.path)
+                      ? "正在加载命中…"
+                      : `显示更多 · 还有 ${hit.matchCount - hit.matches.length} 处`}
                 </button>
               {/if}
             {/if}
@@ -190,13 +259,22 @@
       {/each}
     </ul>
   {/if}
-  {#if !search.busy && search.error !== null}
-    <button class="expand" onclick={() => void search.refresh()} onkeydown={keydown}
-      >重新搜索</button
-    >
-  {:else if search.hasMore}
-    <button class="expand" aria-disabled={search.loadingMore} onclick={loadMore} onkeydown={keydown}
-      >{search.loadingMore ? "正在加载…" : "加载更多结果"}</button
+  {#if search.error !== null || search.hasMore}
+    <button
+      class="expand"
+      data-search-focus="more"
+      aria-disabled={search.busy || search.loadingMore || (search.stale && search.error === null)}
+      onclick={(event) => {
+        if (search.busy || search.loadingMore) return;
+        if (search.error !== null) void search.refresh();
+        else void loadMore(event);
+      }}
+      onkeydown={keydown}
+      >{search.error !== null
+        ? "重新搜索"
+        : search.loadingMore
+          ? "正在加载…"
+          : "加载更多结果"}</button
     >
   {/if}
 </section>

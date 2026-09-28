@@ -3,8 +3,18 @@
  *
  * 只在内核工作线程读写；渲染进程不能提交任意库路径。损坏或缺失的文件视为空会话。
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 import { parseAppearance, type Appearance } from "../shared/api";
 import {
   emptyReaderSession,
@@ -126,15 +136,42 @@ export function loadSession(file: string): Session {
 }
 
 /**
- * 覆盖写入会话。
+ * 在同目录暂存并同步完整会话，以原子替换作为唯一提交点。
  *
  * @param file 会话文件绝对路径。
  * @param session 要保存的完整会话。
- * @throws 创建目录或写入文件失败时，保留底层文件系统错误。
+ * @throws 提交前失败时保留旧文件；清理也失败时合并报告原因。
+ * 所有同步和关闭操作均在替换前完成，成功替换后不会因收尾步骤误报保存失败。
  */
 export function saveSession(file: string, session: Session): void {
+  const contents = serializeSession(session);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, serializeSession(session));
+  const temporary = join(dirname(file), `.${basename(file)}.${randomUUID()}.tmp`);
+  let owned = false;
+  try {
+    const fd = openSync(temporary, "wx", 0o600);
+    owned = true;
+    try {
+      writeFileSync(fd, contents);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(temporary, file);
+  } catch (error) {
+    if (owned) {
+      try {
+        unlinkSync(temporary);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `会话提交失败，暂存文件清理也失败：${temporary}`,
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 /**

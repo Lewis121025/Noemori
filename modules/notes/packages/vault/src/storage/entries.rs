@@ -221,18 +221,31 @@ pub(crate) fn validate_entry_path(rel: &str) -> Result<(), Error> {
 
 /// 浏览时跳过不可管理条目；移动扫描包含隐藏内容，并拒绝无法完整迁移的条目。
 pub(crate) fn scan_entries(root: &Path, include_hidden: bool) -> Result<Vec<VaultEntry>, Error> {
+    scan_entries_observed(root, include_hidden, &mut |_| Ok(()))
+}
+
+pub(crate) fn scan_entries_observed(
+    root: &Path,
+    include_hidden: bool,
+    progress: &mut dyn FnMut(usize) -> Result<(), Error>,
+) -> Result<Vec<VaultEntry>, Error> {
     fn visit(
         root: &Path,
         directory: &Path,
         include_hidden: bool,
         entries: &mut Vec<VaultEntry>,
+        progress: &mut dyn FnMut(usize) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
+        for entry in
+            fs::read_dir(directory).map_err(|error| crate::opening::access(directory, error))?
+        {
+            let entry = entry.map_err(|error| crate::opening::access(directory, error))?;
             if !include_hidden && entry.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
-            let kind = entry.file_type()?;
+            let kind = entry
+                .file_type()
+                .map_err(|error| crate::opening::access(entry.path(), error))?;
             if kind.is_symlink() {
                 if include_hidden {
                     return Err(Error::Io(io::Error::other(
@@ -262,14 +275,18 @@ pub(crate) fn scan_entries(root: &Path, include_hidden: bool) -> Result<Vec<Vaul
                 },
                 recovery_only: false,
             });
+            if entries.len().is_multiple_of(256) {
+                progress(entries.len())?;
+            }
             if kind.is_dir() {
-                visit(root, &entry.path(), include_hidden, entries)?;
+                visit(root, &entry.path(), include_hidden, entries, progress)?;
             }
         }
         Ok(())
     }
     let mut entries = Vec::new();
-    visit(root, root, include_hidden, &mut entries)?;
+    visit(root, root, include_hidden, &mut entries, progress)?;
+    progress(entries.len())?;
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(entries)
 }

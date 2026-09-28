@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "vitest";
 import { Worker } from "node:worker_threads";
 import { CoreClient } from "../../../../../modules/notes/packages/desktop/src/main/core-client";
+import { VaultOpenControl } from "../../../../../modules/notes/packages/desktop/src/features/reader/main/vault-open-control";
 import type { SearchQuery, VaultEvent } from "../../../../../modules/notes/packages/desktop/src/features/reader/shared/api";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -13,7 +14,70 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const workerUrl = new URL("../../../../../modules/notes/packages/desktop/out/main/core-worker.js", import.meta.url);
+
+test("候选监视器已有事件时取消复核仍能退出，并保留原库", async (t) => {
+  const { roots: [first, second], userData } = await fixture(t);
+  await writeFile(join(first, "old.md"), "原库");
+  await writeFile(join(second, "new.md"), "新库");
+  const script = `
+    const assert = require("node:assert/strict");
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const native = require(process.argv[1]);
+    native.vaultOpen(process.argv[2], path.join(process.argv[4], "first"), () => {});
+    let reached = false;
+    try {
+      const opened = native.vaultOpen(process.argv[3], path.join(process.argv[4], "second"), () => {}, progress => {
+        if (progress.phase !== "verifying") return true;
+        reached = true;
+        fs.writeFileSync(path.join(process.argv[3], "change.md"), "打开期间新增");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 650);
+        return false;
+      });
+      assert.equal(reached, true);
+      assert.equal(opened, false);
+      assert.equal(native.fileRead("old.md").toString(), "原库");
+    } finally { native.vaultClose(); }
+  `;
+  await promisify(execFile)(process.execPath, ["-e", script,
+    fileURLToPath(new URL("../../../../../modules/notes/packages/vault-node/index.js", import.meta.url)),
+    first, second, userData,
+  ], { timeout: 10000, killSignal: "SIGKILL" });
+});
 const bytes = (text: string) => new TextEncoder().encode(text);
+
+test("同步开库期间共享取消立即生效，原库与会话仍可继续使用", async (t) => {
+  const {
+    roots: [first, second],
+    start,
+  } = await fixture(t);
+  await writeFile(join(first, "原笔记.md"), "原工作区");
+  await Promise.all(
+    Array.from({ length: 1500 }, (_, i) =>
+      writeFile(join(second, `${i}.md`), `# 笔记 ${i}\n\n${"中文索引与连续内容。\n".repeat(80)}`),
+    ),
+  );
+  const { core } = start();
+  await core.call("vaultOpen", first);
+  const control = new VaultOpenControl();
+  let observed = false;
+  const timer = setInterval(() => {
+    if (control.progress.phase === "reading") {
+      observed = true;
+      control.cancel();
+    }
+  }, 1);
+  try {
+    assert.equal(await core.call("vaultOpen", second, control.buffer), null);
+    assert.equal(observed, true);
+    assert.equal(new TextDecoder().decode(await core.call("fileRead", "原笔记.md")), "原工作区");
+    assert.equal((await core.call("readerSessionLoad")).vaultRoot, first);
+    assert.equal((await core.call("vaultOpen", second))?.root, second);
+  } finally {
+    clearInterval(timer);
+  }
+});
+
 const text = (data: Uint8Array | null): string => {
   assert.ok(data, "此场景应返回文件内容");
   return new TextDecoder().decode(data);
@@ -380,7 +444,7 @@ test("built worker preserves native save, conflict, copy, rename and link contra
   await writeFile(join(root, "a.md"), "original");
   await writeFile(join(root, "ref.md"), "[[a]]\n");
   const { core } = start();
-  assert.equal(await core.call("vaultOpen", root), root);
+  assert.equal((await core.call("vaultOpen", root))?.root, root);
   assert.deepEqual(await core.call("linksResolve", "ref.md", "a", "wiki"), {
     status: "resolved",
     path: "a.md",
@@ -464,6 +528,7 @@ test("queued writes stay in their original vault and shutdown drains the final s
   const { core: restored } = start();
   assert.deepEqual(await restored.call("vaultRestore"), {
     root: second,
+    entries: [{ path: "a.md", kind: "file" }],
     documents: { panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }], active: 0, split: false },
     viewModes: {},
     recentFiles: [],

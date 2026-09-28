@@ -60,6 +60,8 @@ export type PaneHost = {
   announce(pane: ReaderPane, message: string): void;
   /** 保存结果的警告/清理走宿主消息通道，来源栏与保存动作绑定。 */
   noticeSaveWarning(warning: string | null): void;
+  /** 保存门禁拒绝离开时报告所属笔记；成功保存后撤下该保存提示。 */
+  noticeSaveBlocked(pane: ReaderPane): void;
   /** 死链创建确认（工作区级对话框）；记住来源栏。 */
   offerDeadLink(pane: ReaderPane, offer: DeadLinkOffer): void;
   /** 歧义候选选择（工作区级对话框）；记住来源栏。 */
@@ -151,14 +153,14 @@ export class ReaderPane {
     this.autosave.dispose();
   }
 
-  /** 组词期间暂停停键计时；结束后由 resumeAutosave 重新计时。 */
+  /** 组词期间暂停提交，但保留持续输入的保存期限。 */
   pauseAutosave(): void {
-    this.autosave.dispose();
+    this.autosave.pause();
   }
 
   /** 组词结束后恢复本栏的停键保存。 */
   resumeAutosave(): void {
-    if (this.document.dirty) this.autosave.touch();
+    this.autosave.resume();
   }
 
   /** @param path 待打开的库内路径；保存门禁拒绝时保持当前文档。 */
@@ -477,7 +479,7 @@ export class ReaderPane {
   markDirty = (): void => {
     if (!this.document.canEdit) return;
     this.document.markDirty();
-    if (!this.host.composing) this.autosave.touch();
+    this.autosave.touch();
   };
 
   /** 手动保存与快捷键复用同一串行调度。 */
@@ -516,7 +518,7 @@ export class ReaderPane {
     )
       return;
     this.duplicating = true;
-    this.autosave.dispose();
+    this.autosave.pause();
     let savedPath: string | null = null;
     try {
       if (!(await this.navigation.settleEditing())) {
@@ -546,7 +548,7 @@ export class ReaderPane {
     } finally {
       this.duplicating = false;
       this.host.resumeVaultRefresh();
-      if (doc.dirty) this.autosave.touch();
+      this.autosave.resume();
       this.notifyIdle();
     }
   };
@@ -572,7 +574,11 @@ export class ReaderPane {
       return false;
     }
     await this.autosave.flush();
-    return !this.document.dirty && !this.host.composing;
+    if (this.document.dirty) {
+      this.host.noticeSaveBlocked(this);
+      return false;
+    }
+    return !this.host.composing;
   }
 
   /** 进入门禁（工作区级操作用）；已在门禁或组词中返回 false。 */

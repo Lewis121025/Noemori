@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LibraryBrowser from "@reader/renderer/library/LibraryBrowser.svelte";
 import { ReaderWorkspaceController } from "@reader/renderer/workspace/state.svelte";
-import type { ReaderApi, SearchHit, SearchPage } from "@reader/shared/api";
+import type { ReaderApi, SearchHit, SearchPage, VaultEvent } from "@reader/shared/api";
 import { SEARCH_DEPTH_LIMIT } from "@reader/shared/reader-protocol";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
@@ -83,6 +83,71 @@ async function typeAndSubmit(text: string): Promise<void> {
 }
 
 describe("侧栏全文搜索", () => {
+  it.each([false, true])(
+    "库变化自动更新结果（包含命中：%s），刷新期间保留查询和焦点",
+    async (hasHit) => {
+      let changed: ((event: VaultEvent) => void) | undefined;
+      const hit: SearchHit = {
+        path: "alpha.md",
+        title: "Alpha",
+        snippet: "needle",
+        contentHash: "a".repeat(64),
+        matches: [{ snippet: "needle", location: { startByte: 0, endByte: 6, line: 1 } }],
+        matchCount: 1,
+        matchesCursor: null,
+      };
+      const searchQuery = vi
+        .fn<ReaderApi["searchQuery"]>()
+        .mockResolvedValueOnce({ hits: hasHit ? [hit] : [], nextCursor: null })
+        .mockResolvedValueOnce({ hits: [hit], nextCursor: null });
+      await startList(
+        createApi({
+          searchQuery,
+          subscribeVaultChanged: (callback) => {
+            changed = callback;
+            return () => {};
+          },
+        }),
+      );
+      const dispose = workspace.start();
+      try {
+        await typeAndSubmit("needle");
+        if (hasHit)
+          target.querySelector<HTMLButtonElement>('[aria-label="展开 Alpha 的 1 处命中"]')!.click();
+        flushSync();
+        const occurrence = target.querySelector<HTMLButtonElement>(".occurrence");
+        const focused = occurrence ?? searchBox();
+        focused.focus();
+        // 编辑器正在组词也应立即标记检索过期，不能等正文刷新门禁释放。
+        workspace.setComposing(true);
+        changed?.({ status: "changed", paths: ["notes/beta.md"], healthy: true });
+        flushSync();
+        expect(target.querySelector('.results [role="status"]')?.textContent).toContain(
+          "笔记库已变化",
+        );
+        expect(searchQuery).toHaveBeenCalledOnce();
+        expect(document.activeElement).toBe(focused);
+        expect(target.querySelector(".occurrence")).toBe(occurrence);
+        expect(searchBox().value).toBe("needle");
+        workspace.setComposing(false);
+        await settle();
+        flushSync();
+        await vi.waitFor(() => {
+          flushSync();
+          expect(target.querySelector('.results [role="status"]')?.textContent).toContain(
+            "共 1 篇",
+          );
+          expect(searchQuery).toHaveBeenCalledTimes(2);
+        });
+        expect(searchQuery).toHaveBeenCalledTimes(2);
+        expect(document.activeElement).toBe(focused);
+        if (hasHit) expect(target.querySelector(".occurrence")).toBe(occurrence);
+      } finally {
+        dispose();
+      }
+    },
+  );
+
   it("解析失败在结果区显示原因并保留输入焦点，修正查询后可继续搜索", async () => {
     const searchQuery = vi.fn(async () => ({ hits: [], nextCursor: null }));
     await startList(createApi({ searchQuery }));

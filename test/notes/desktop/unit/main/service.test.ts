@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VaultEvent } from "@reader/shared/api";
 import { createReaderService } from "@reader/main/service";
 import { emptyReaderSession, type ReaderSession } from "@reader/shared/session";
+import { VaultOpenControl } from "@reader/main/vault-open-control";
 
 const { native, session } = vi.hoisted(() => ({
   native: {
@@ -49,6 +50,18 @@ function documents(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  native.vaultOpen
+    .mockReset()
+    .mockImplementation(
+      (
+        _root: string,
+        _index: string,
+        _changed: unknown,
+        _progress: unknown,
+        commit: (entries: unknown[]) => boolean,
+      ) => commit([]),
+    );
+  session.saveSession.mockReset();
   session.loadSession.mockReturnValue({
     vaultRoot: "/first",
     documents: documents("a.md"),
@@ -516,12 +529,63 @@ it("返回的字节独立于原生 Buffer，可转移而不影响其他结果或
 });
 
 describe("vault watcher ownership", () => {
+  it("候选目录无效时在会话提交之前拒绝", () => {
+    native.vaultOpen.mockImplementationOnce(
+      (
+        _root: string,
+        _index: string,
+        _changed: unknown,
+        _progress: unknown,
+        commit: (entries: unknown) => boolean,
+      ) => commit([{ path: "a.md", kind: "invalid" }]),
+    );
+    const service = createReaderService("/state", vi.fn(), {
+      load: session.loadSession,
+      save: session.saveSession,
+    });
+    expect(() => service.vaultOpen("/second")).toThrow();
+    expect(session.saveSession).not.toHaveBeenCalled();
+  });
+
+  it("准备完成前不改会话，取消准备后保持原会话与库归属", () => {
+    const control = new VaultOpenControl();
+    native.vaultOpen.mockImplementationOnce(
+      (
+        _root: string,
+        _index: string,
+        _changed: unknown,
+        progress?: (value: unknown) => boolean,
+        commit?: (entries: unknown[]) => boolean,
+      ) => {
+        expect(session.saveSession).not.toHaveBeenCalled();
+        expect(progress).toBeTypeOf("function");
+        control.cancel();
+        expect(progress?.({ phase: "reading", completed: 0, total: 10 })).toBe(false);
+        expect(commit?.([])).toBe(false);
+        return false;
+      },
+    );
+    const service = createReaderService("/state", vi.fn(), {
+      load: session.loadSession,
+      save: session.saveSession,
+    });
+    expect(service.vaultOpen("/second", control.buffer)).toBeNull();
+    expect(session.saveSession).not.toHaveBeenCalled();
+  });
+
   it("ignores queued callbacks from the old vault and from a closed vault", () => {
     const changed = vi.fn();
     const callbacks: ((event: VaultEvent) => void)[] = [];
     native.vaultOpen.mockImplementation(
-      (_root: string, _index: string, callback: (event: VaultEvent) => void) => {
+      (
+        _root: string,
+        _index: string,
+        callback: (event: VaultEvent) => void,
+        _progress: unknown,
+        commit: (entries: unknown[]) => boolean,
+      ) => {
         callbacks.push(callback);
+        return commit([]);
       },
     );
     const service = createReaderService("/state", changed, {
@@ -545,8 +609,15 @@ describe("vault watcher ownership", () => {
     const changed = vi.fn();
     let originalCallback: (event: VaultEvent) => void = () => {};
     native.vaultOpen.mockImplementation(
-      (_root: string, _index: string, callback: (event: VaultEvent) => void) => {
+      (
+        _root: string,
+        _index: string,
+        callback: (event: VaultEvent) => void,
+        _progress: unknown,
+        commit: (entries: unknown[]) => boolean,
+      ) => {
         originalCallback = callback;
+        return commit([]);
       },
     );
     const service = createReaderService("/state", changed, {
@@ -560,7 +631,8 @@ describe("vault watcher ownership", () => {
     expect(() => service.vaultOpen("/second")).toThrow("恢复事务被外部修改阻止");
     originalCallback({ status: "changed", paths: [], healthy: true });
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(session.saveSession).toHaveBeenLastCalledWith(session.loadSession());
+    expect(session.saveSession).toHaveBeenCalledTimes(1);
+    expect(session.saveSession.mock.calls[0]?.[0].vaultRoot).toBe("/first");
   });
 
   it("keeps the active vault when persisting the new session fails", () => {
@@ -572,6 +644,6 @@ describe("vault watcher ownership", () => {
       throw new Error("会话目录不可写");
     });
     expect(() => service.vaultOpen("/second")).toThrow("会话目录不可写");
-    expect(native.vaultOpen).not.toHaveBeenCalled();
+    expect(native.vaultOpen).toHaveBeenCalledOnce();
   });
 });

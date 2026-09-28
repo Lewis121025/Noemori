@@ -1,6 +1,7 @@
 import { ipcRenderer } from "electron";
 import type { ReaderApi, VaultEvent } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
+import { parseVaultOpenProgress, type VaultOpenProgress } from "../shared/vault-opening";
 import { parseEntryBatchProgress, parseEntryBatchResult } from "../shared/entry-batch";
 import { parseAttachmentReply } from "../shared/attachments";
 import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
@@ -15,8 +16,6 @@ import {
   parseLinkTarget,
   parseMentions,
   parseNoteKeys,
-  parseNullablePath,
-  parsePathArgument,
   parsePaneLayoutMessage,
   parseSavedCopy,
   parseSearchPage,
@@ -25,19 +24,45 @@ import {
   parseVaultEntries,
   parseVaultList,
   parseVaultRestore,
+  parseVaultOpen,
   parseWriteResult,
 } from "../shared/reader-protocol";
 
 /** 创建阅读器受限桥接；只开放已知命令与订阅，错误由对应 Promise 返回。 */
 export function createReaderApi(): ReaderApi {
   let batch: { id: string; root: string } | null = null;
+  let opening: string | null = null;
+  async function open<T>(
+    channel: string,
+    parse: (value: unknown) => T,
+    onProgress?: (progress: VaultOpenProgress) => void,
+  ): Promise<T> {
+    if (opening !== null) throw new Error("已有资料库正在打开");
+    const id = crypto.randomUUID();
+    opening = id;
+    const listener = (_event: Electron.IpcRendererEvent, eventId: unknown, value: unknown) => {
+      if (eventId === id && opening === id) onProgress?.(parseVaultOpenProgress(value));
+    };
+    ipcRenderer.on("reader.vault.progress", listener);
+    try {
+      return parse(await ipcRenderer.invoke(channel, id));
+    } finally {
+      ipcRenderer.removeListener("reader.vault.progress", listener);
+      opening = null;
+    }
+  }
   return {
     openExternal: async (url) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.links.openExternal", url)),
-    vaultOpen: async () => parseNullablePath(await ipcRenderer.invoke("reader.vault.open")),
-    vaultCreateDefault: async () =>
-      parsePathArgument(await ipcRenderer.invoke("reader.vault.createDefault")),
-    vaultRestore: async () => parseVaultRestore(await ipcRenderer.invoke("reader.vault.restore")),
+    vaultOpen: (progress) => open("reader.vault.open", parseVaultOpen, progress),
+    vaultCreateDefault: (progress) => open("reader.vault.createDefault", parseVaultOpen, progress),
+    vaultRestore: (progress) => open("reader.vault.restore", parseVaultRestore, progress),
+    vaultOpenCancel: async () => {
+      if (opening === null) return false;
+      const result: unknown = await ipcRenderer.invoke("reader.vault.cancel", opening);
+      if (typeof result !== "boolean") throw new Error("取消打开响应无效");
+      return result;
+    },
     sessionSetDocuments: async (documents) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.session.setDocuments", documents)),
     sessionSetViewModes: async (modes) =>

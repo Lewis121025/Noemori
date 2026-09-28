@@ -50,6 +50,7 @@ beforeEach(() => {
   api = {
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: "note.md", history: { back: [], forward: [] } }],
         active: 0,
@@ -59,7 +60,8 @@ beforeEach(() => {
       recentFiles: [],
     })),
     vaultOpen: vi.fn(async () => null),
-    vaultCreateDefault: vi.fn(async () => "/notes"),
+    vaultOpenCancel: vi.fn(async () => true),
+    vaultCreateDefault: vi.fn(async () => ({ root: "/notes", entries: await api.vaultEntries() })),
     vaultClose: vi.fn(async () => {}),
     vaultList: vi.fn(async () => [...disk.keys()]),
     vaultEntries: vi.fn(async () =>
@@ -824,6 +826,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(appApi.closeBlocked).not.toHaveBeenCalled();
     restored.resolve({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: "note.md", history: { back: [], forward: [] } }],
         active: 0,
@@ -1255,6 +1258,24 @@ describe("原生菜单与输入法", () => {
     window.dispatchEvent(new CompositionEvent("compositionend"));
     await vi.advanceTimersByTimeAsync(2000);
     expect(api.fileWrite).toHaveBeenCalledWith("note.md", encode("中文输入\n"), encode("base\n"));
+  });
+
+  it("连续中文组词超过十秒后在确认时保存，反复组词不能重置期限", async () => {
+    await start();
+    vi.useFakeTimers();
+    for (let second = 0; second < 11; second++) {
+      window.dispatchEvent(new CompositionEvent("compositionstart"));
+      const editing = edit(`中文输入${second}`);
+      await vi.advanceTimersByTimeAsync(0);
+      await editing;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(api.fileWrite).not.toHaveBeenCalled();
+      if (second < 9) window.dispatchEvent(new CompositionEvent("compositionend"));
+    }
+    window.dispatchEvent(new CompositionEvent("compositionend"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.fileWrite).toHaveBeenCalledOnce();
+    expect(api.fileWrite).toHaveBeenCalledWith("note.md", encode("中文输入10\n"), encode("base\n"));
   });
 
   it("副本写入完成也等待正在进行的组词，再切换副本并保留最终输入", async () => {

@@ -16,6 +16,7 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
   const api: ReaderApi = {
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: null, history: { back: [], forward: [] } }],
         active: 0,
@@ -26,7 +27,8 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
       fileTree: null,
     })),
     vaultOpen: vi.fn(async () => null),
-    vaultCreateDefault: vi.fn(async () => "/notes"),
+    vaultOpenCancel: vi.fn(async () => true),
+    vaultCreateDefault: vi.fn(async () => ({ root: "/notes", entries: await api.vaultEntries() })),
     vaultClose: vi.fn(async () => {}),
     vaultList: vi.fn(async () => []),
     vaultEntries: vi.fn(async () => []),
@@ -73,5 +75,5 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
     entryRename: vi.fn(async () => ({ warning: null })),
     subscribeVaultChanged: () => () => {},
   };
-  return { ...api, ...overrides };
+  return Object.assign(api, overrides);
 }

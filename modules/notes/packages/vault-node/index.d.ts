@@ -453,6 +453,15 @@ export interface JsSearchLocation {
   /** 一基行号。 */
   line: number
 }
+/** 开库阶段计数；准备期间可取消，提交会话后的状态替换不可中断。 */
+export interface JsOpenProgress {
+  /** recovering、scanning、checking、reading、indexing、ranking 或 verifying。 */
+  phase: string
+  /** 当前阶段已完成条目数。 */
+  completed: number
+  /** 未知总量时缺省，不生成虚构的总体百分比。 */
+  total?: number
+}
 /** 监视通知携带受影响路径及健康状态；失败不能伪装成一次成功刷新。 */
 export interface JsVaultEvent {
   /** changed、watch-error 或 index-error。 */
@@ -470,12 +479,14 @@ export interface JsVaultEvent {
  * `root` 是库目录，`index_dir` 是库外的派生索引与恢复目录。
  * 监视线程在防抖与索引刷新后，将 `on_changed` 投递给持有内核的 JS 线程。
  * 成功后替换当前库及其监视器；失败时保留原库。
+ * `progress` 返回 false 时取消准备；`before_commit` 接收已准备目录并提交外部会话，
+ * 返回 false 同样取消。两个回调都不可重入内核。返回 true 表示已切库，false 表示取消。
  *
  * # Errors
  *
  * 打不开目录、索引或监视器时失败。
  */
-export declare function vaultOpen(root: string, indexDir: string, onChanged: (...args: any[]) => any): void
+export declare function vaultOpen(root: string, indexDir: string, onChanged: (...args: any[]) => any, progress?: ((progress: JsOpenProgress) => boolean) | undefined | null, beforeCommit?: ((entries: JsVaultEntry[]) => boolean) | undefined | null): boolean
 /**
  * 关闭当前库并停止监视。
  *

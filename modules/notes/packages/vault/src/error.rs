@@ -14,6 +14,10 @@ pub enum Error {
     NotFound { path: PathBuf },
     /// 底层 IO。
     Io(io::Error),
+    /// 读取或核对文件失败，必须保留具体路径供修正后重试。
+    FileAccess { path: PathBuf, source: io::Error },
+    /// 打开准备已取消，原库尚未切换。
+    OpenCancelled,
     /// `SQLite` 索引失败。
     Index(rusqlite::Error),
     /// 编辑草稿或文件操作恢复记录的持久化、读取失败。
@@ -40,6 +44,8 @@ impl std::fmt::Display for Error {
             Self::PathEscape => write!(f, "路径逃出库根"),
             Self::NotFound { path } => write!(f, "文件不存在: {}", path.display()),
             Self::Io(err) => write!(f, "{err}"),
+            Self::FileAccess { path, source } => write!(f, "无法读取 {}：{source}", path.display()),
+            Self::OpenCancelled => write!(f, "打开已取消"),
             Self::Index(err) => write!(f, "索引: {err}"),
             Self::Recovery(err) => write!(f, "恢复记录: {err}"),
             Self::AlreadyExists { path } => write!(f, "目标已存在: {}", path.display()),
@@ -57,6 +63,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
+            Self::FileAccess { source, .. } => Some(source),
             Self::Index(err) | Self::Recovery(err) => Some(err),
             Self::PathEscape
             | Self::NotFound { .. }
@@ -65,6 +72,7 @@ impl std::error::Error for Error {
             | Self::RenameRecovery { .. }
             | Self::InvalidQuery { .. }
             | Self::SearchCancelled
+            | Self::OpenCancelled
             | Self::SearchExpired
             | Self::InvalidBookmarks { .. } => None,
         }

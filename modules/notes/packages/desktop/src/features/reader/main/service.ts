@@ -20,6 +20,7 @@ import type {
   SearchQuery,
   TagCount,
   VaultRestore,
+  VaultOpenSnapshot,
   WriteResult,
   VaultEntry,
   VaultEvent,
@@ -28,6 +29,8 @@ import type {
 import { parseVaultEvent } from "../shared/api";
 import { createSerialEntryBatchRunner, executeEntryBatch } from "./entry-batch";
 import { EntryBatchControl } from "./entry-batch-control";
+import { VaultOpenControl } from "./vault-open-control";
+import { parseVaultOpenProgress } from "../shared/vault-opening";
 import {
   parseEntryBatchRequest,
   mapEntryPath,
@@ -219,20 +222,43 @@ export function createReaderService(
     );
   }
 
-  function openVault(root: string): void {
+  function openVault(
+    root: string,
+    commit: () => void,
+    control?: VaultOpenControl,
+  ): VaultOpenSnapshot | null {
     const vault = {};
+    let prepared: VaultOpenSnapshot | null = null;
     const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
-    native.vaultOpen(root, join(userData, "vaults", hash), (event: unknown) => {
-      if (activeVault === vault) {
-        try {
-          onChanged(parseVaultEvent(event));
-        } catch (error) {
-          onChanged({ status: "index-error", paths: [], message: String(error) });
+    const opened = native.vaultOpen(
+      root,
+      join(userData, "vaults", hash),
+      (event: unknown) => {
+        if (activeVault === vault) {
+          try {
+            onChanged(parseVaultEvent(event));
+          } catch (error) {
+            onChanged({ status: "index-error", paths: [], message: String(error) });
+          }
         }
-      }
-    });
+      },
+      (progress) => {
+        control?.update(parseVaultOpenProgress({ ...progress, total: progress.total ?? null }));
+        return !control?.cancelled;
+      },
+      (entries) => {
+        const snapshot = { root, entries: parseVaultEntries(entries) };
+        if (control !== undefined && !control.commit()) return false;
+        commit();
+        prepared = snapshot;
+        return true;
+      },
+    );
     // 打开失败时保留原库及其回调归属。
+    if (!opened) return null;
+    if (prepared === null) throw new Error("内核未提供已准备的开库快照");
     activeVault = vault;
+    return prepared;
   }
 
   function rememberEntryChange(
@@ -271,41 +297,43 @@ export function createReaderService(
   }
 
   return {
-    vaultOpen(root: string): string {
-      const previous = sessions.load();
-      // 先确认会话可写，避免内核已切库、界面却因会话写入失败而留在原库。
-      // 阅读栈属于旧库，切库即清空。
-      sessions.save({
-        ...previous,
-        vaultRoot: root,
-        documents: emptySessionDocuments(),
-        viewModes: {},
-        recentFiles: [],
-        fileTree: null,
-      });
-      try {
-        openVault(root);
-      } catch (error) {
-        try {
-          sessions.save(previous);
-        } catch (restoreError) {
-          throw new Error(`${String(error)}；恢复上次会话失败：${String(restoreError)}`);
-        }
-        throw error;
-      }
-      return root;
+    vaultOpen(root: string, buffer?: SharedArrayBuffer): VaultOpenSnapshot | null {
+      const control = buffer === undefined ? undefined : new VaultOpenControl(buffer);
+      // 候选库准备完成后才写会话；回调失败时原生层保留旧库，无需猜测性回滚。
+      const opened = openVault(
+        root,
+        () =>
+          sessions.save({
+            ...sessions.load(),
+            vaultRoot: root,
+            documents: emptySessionDocuments(),
+            viewModes: {},
+            recentFiles: [],
+            fileTree: null,
+          }),
+        control,
+      );
+      return opened;
     },
-    vaultRestore(): VaultRestore | null {
+    vaultRestore(buffer?: SharedArrayBuffer): VaultRestore | null {
       const stored = sessions.load();
       const root = stored.vaultRoot;
-      if (root === null || !isDirectory(root)) return null;
-      openVault(root);
-      return {
+      if (root === null) return null;
+      if (!isDirectory(root))
+        throw new Error(`上次的资料目录无法访问：${root}。请恢复目录后重试，或打开其他资料库。`);
+      const fileTree = parseFileTreeState(stored.fileTree);
+      const opened = openVault(
         root,
+        () => {},
+        buffer === undefined ? undefined : new VaultOpenControl(buffer),
+      );
+      if (opened === null) return null;
+      return {
+        ...opened,
         documents: stored.documents,
         viewModes: stored.viewModes,
         recentFiles: stored.recentFiles,
-        fileTree: parseFileTreeState(stored.fileTree),
+        fileTree,
       };
     },
     vaultClose(): void {

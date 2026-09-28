@@ -1,4 +1,5 @@
 <script lang="ts">
+  import VaultOpening from "./workspace/VaultOpening.svelte";
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
   import ReaderToolbar from "./workspace/ReaderToolbar.svelte";
   import LibraryBrowser from "./library/LibraryBrowser.svelte";
@@ -416,6 +417,7 @@
     onDocumentAction={prepareDocumentAction}
     {applicationMenu}
   />
+  <VaultOpening {workspace} />
   <div class="panes">
     <div
       class="reading-space"

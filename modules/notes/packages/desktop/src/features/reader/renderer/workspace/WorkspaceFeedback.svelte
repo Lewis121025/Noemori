@@ -1,12 +1,15 @@
 <script lang="ts">
   import type { ReaderWorkspaceController } from "./state.svelte";
+  import type { ReaderPane } from "./pane.svelte";
   import SaveNotice from "./SaveNotice.svelte";
 
   let { workspace }: { workspace: ReaderWorkspaceController } = $props();
-  const doc = $derived(workspace.document);
-  const saveIssue = $derived(
-    doc.path !== null && (doc.conflict !== null || doc.saveError !== null),
+  const savePanes = $derived(
+    workspace.panes.filter(
+      ({ document: doc }) => doc.path !== null && (doc.conflict !== null || doc.saveError !== null),
+    ),
   );
+  const saveIssue = $derived(savePanes.length > 0);
   const hasFeedback = $derived(
     saveIssue || workspace.healthMessage !== "" || workspace.message !== "",
   );
@@ -18,21 +21,28 @@
   );
   const summary = $derived(
     saveIssue
-      ? "保存需要处理，当前内容仍保留。打开工具栏的“处理保存问题”查看原因和处理方式。"
+      ? `${savePanes.map((pane) => pane.document.path).join("、")} 保存需要处理，当前内容仍保留。打开工具栏的“处理保存问题”查看原因和处理方式。`
       : workspace.healthMessage || workspace.message,
   );
   let panel: HTMLElement | undefined = $state();
-  let openEpoch: number | null = $state(null);
+  let panelOpen = $state(false);
   let returnFocus: HTMLElement | null = null;
 
   $effect(() => {
-    // 完成处理或换文档后关闭旧面板；通知从不自动展开，也不夺取写作焦点。
-    if (openEpoch !== null && (!hasFeedback || openEpoch !== doc.epoch)) panel?.hidePopover();
+    // 问题按分栏归属，切换活动栏不撤掉其他栏的处理入口，也不自动抢走写作焦点。
+    if (panelOpen && !hasFeedback) panel?.hidePopover();
   });
+
+  /** 用户明确定位时才改变活动栏；保存操作始终直接绑定问题所属的栏。 */
+  function showPane(pane: ReaderPane): void {
+    panel?.hidePopover();
+    workspace.activatePane(pane.id);
+    pane.navigation.focusEditor();
+  }
 
   function onToggle(event: ToggleEvent): void {
     if (event.newState !== "closed") return;
-    openEpoch = null;
+    panelOpen = false;
     const active = document.activeElement;
     // 点击别处关闭时尊重新目标；Esc、关闭按钮或处理成功时回到原来的写作位置。
     if (active !== document.body && active !== null && !panel?.contains(active)) return;
@@ -67,7 +77,7 @@
   aria-label="工作区消息"
   onbeforetoggle={(event) => {
     if (event.newState !== "open") return;
-    openEpoch = doc.epoch;
+    panelOpen = true;
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }}
   ontoggle={onToggle}
@@ -87,17 +97,28 @@
       ></button
     >
   </div>
-  {#if saveIssue}
-    {#key doc.epoch}
-      <SaveNotice
-        {doc}
-        copying={workspace.copying}
-        saveCopy={workspace.saveCopy}
-        requestSave={workspace.requestSave}
-        snapshot={workspace.navigation.snapshot}
-      />
-    {/key}
-  {/if}
+  {#each savePanes as pane (pane.id)}
+    <section class="save-issue" aria-label={`保存问题：${pane.document.path}`}>
+      <h3>{pane.document.path}</h3>
+      {#if pane.id !== workspace.activePane.id}
+        <button
+          class="reader-button"
+          type="button"
+          aria-label={`前往笔记：${pane.document.path}`}
+          onclick={() => showPane(pane)}>前往笔记</button
+        >
+      {/if}
+      {#key pane.document.epoch}
+        <SaveNotice
+          doc={pane.document}
+          copying={pane.copying}
+          saveCopy={pane.saveCopy}
+          requestSave={pane.requestSave}
+          snapshot={pane.navigation.snapshot}
+        />
+      {/key}
+    </section>
+  {/each}
   {#if workspace.healthMessage}
     <p class="health-notice">{workspace.healthMessage}</p>
   {/if}
@@ -153,6 +174,19 @@
     margin: 0;
     font-size: 14px;
     font-weight: 600;
+  }
+  .save-issue {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+  .save-issue h3 {
+    margin: 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  .save-issue > button {
+    justify-self: start;
   }
   .close-button {
     display: inline-flex;

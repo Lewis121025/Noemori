@@ -24,6 +24,7 @@ afterEach(() => {
 function restoring(currentPath: string | null, viewModes: ViewModes) {
   return vi.fn(async () => ({
     root: "/notes",
+    entries: ["a.md", "b.md", "c.md"].map((path) => ({ path, kind: "file" as const })),
     documents: {
       panes: [{ currentPath, history: { back: [], forward: [] } }],
       active: 0,

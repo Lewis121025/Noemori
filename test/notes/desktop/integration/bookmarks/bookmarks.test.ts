@@ -10,6 +10,7 @@ function setup(initial: Bookmark[] = []) {
   const api = createReaderApiMock({
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }],
         active: 0,
@@ -90,7 +91,7 @@ describe("书签状态", () => {
     });
     expect(await workspace.renameEntry("a.md", "c.md")).toBeNull();
     await vi.waitFor(() => expect(workspace.bookmarks.items).toEqual([fileMark("c.md")]));
-    vi.mocked(api.vaultOpen).mockResolvedValueOnce("/other");
+    vi.mocked(api.vaultOpen).mockResolvedValueOnce({ root: "/other", entries: [] });
     vi.mocked(api.bookmarksList).mockImplementation(() => new Promise(() => {}));
     await workspace.openVault();
     expect(workspace.bookmarks.items).toEqual([]);

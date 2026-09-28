@@ -260,6 +260,15 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
       expect(await status.textContent()).toContain("共 1 篇 · 46 处命中");
     }
     expect(await files.getByRole("button", { name: /显示更多 · 还有/ }).count()).toBe(0);
+    const lastOccurrence = await files.locator(".occurrence").last().elementHandle();
+    await files.locator(".occurrence").last().focus();
+    const trigger = join(vault, "刷新触发.md");
+    await writeFile(trigger, "denseneedle\n");
+    await expect.poll(() => status.textContent()).toContain("共 2 篇 · 47 处命中");
+    expect(await files.locator(".occurrence").count()).toBe(46);
+    expect(await lastOccurrence!.evaluate((node) => node === document.activeElement)).toBe(true);
+    await rm(trigger);
+    await expect.poll(() => status.textContent()).toContain("共 1 篇 · 46 处命中");
     await openLibrary(page);
     await files.locator(".occurrence").last().click();
     await expect
@@ -290,6 +299,44 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     expect(await files.locator(".hit").count()).toBe(105);
     expect(new Set(await hitPaths()).size).toBe(105);
     expect(await files.getByRole("button", { name: "加载更多结果", exact: true }).count()).toBe(0);
+
+    // 已加载的后续页跨刷新保留；排序变化按路径恢复焦点，删除后落到邻近文件。
+    const focusedPath = await files.locator(".hit").last().getAttribute("title");
+    if (focusedPath === null) throw new Error("搜索结果缺少路径");
+    await files.locator(".hit").last().focus();
+    await writeFile(trigger, "# pageproof\n\npageproof\n");
+    await expect.poll(() => status.textContent()).toContain("共 106 篇");
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("title"))).toBe(
+      focusedPath,
+    );
+    expect(await files.locator('.hit[tabindex="0"]').getAttribute("title")).toBe(focusedPath);
+    const beforeRemoval = await hitPaths();
+    const focusedIndex = beforeRemoval.indexOf(focusedPath);
+    const neighbor = beforeRemoval[focusedIndex + 1] ?? beforeRemoval[focusedIndex - 1];
+    await rm(join(vault, focusedPath));
+    await expect.poll(() => status.textContent()).toContain("共 105 篇");
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute("title")))
+      .toBe(neighbor);
+
+    // 外部新增、修改与删除都自动更新当前查询，保留仍存在的命中节点和焦点。
+    await search.fill("autorefreshproof");
+    await search.press("Enter");
+    await expect.poll(() => status.textContent()).toContain("共 0 篇");
+    const external = join(vault, "自动刷新.md");
+    await writeFile(external, "autorefreshproof\n");
+    await expect.poll(() => status.textContent()).toContain("共 1 篇 · 1 处命中");
+    const retained = await files.locator(".hit").first().elementHandle();
+    await files.locator(".hit").first().focus();
+    await writeFile(external, "autorefreshproof\n\nautorefreshproof\n");
+    await expect.poll(() => status.textContent()).toContain("共 1 篇 · 2 处命中");
+    expect(
+      await retained!.evaluate((node) => node.isConnected && node === document.activeElement),
+    ).toBe(true);
+    expect(await search.inputValue()).toBe("autorefreshproof");
+    await rm(external);
+    await expect.poll(() => status.textContent()).toContain("共 0 篇");
+    await expect.poll(() => search.evaluate((node) => node === document.activeElement)).toBe(true);
     expect(errors).toEqual([]);
   } finally {
     await app.close();

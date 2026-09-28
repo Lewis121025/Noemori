@@ -5,6 +5,7 @@
  */
 
 import type { ImportedAttachment } from "./attachments";
+import type { VaultOpenProgress } from "./vault-opening";
 import type { SessionDocuments, ViewModes } from "./session";
 import type { FileTreeState } from "./file-browser";
 import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./entry-batch";
@@ -255,14 +256,16 @@ export type PaneLayout = {
   leftWidth: number;
 };
 
-/**
- * 经 IPC 暴露给渲染进程的命令。
- *
- * 打开库走系统对话框或主进程会话恢复；渲染进程拿不到任意路径读写。
- */
-export type VaultRestore = {
+/** 已提交的库根与完整目录；界面以同一次响应发布，避免二次读取导致半切换。 */
+export type VaultOpenSnapshot = {
   /** 库根绝对路径。 */
   root: string;
+  /** 提交前已准备并校验的完整目录，界面直接发布，无需再次读取。 */
+  entries: VaultEntry[];
+};
+
+/** 已打开的库与用于恢复阅读现场的同一次响应。 */
+export type VaultRestore = VaultOpenSnapshot & {
   /** 上次会话的分栏文档与阅读栈；渲染端按当前文件列表过滤失效条目。 */
   documents: SessionDocuments;
   /** 上次会话按文件记住的源码或阅读视图。 */
@@ -308,15 +311,23 @@ export type VaultEntry = {
  */
 export type ReaderApi = {
   /** 弹出选目录对话框并打开库；取消时返回 `null`。 */
-  vaultOpen: () => Promise<string | null>;
-  /** 用户首次开始记录时打开 Documents/Nous；已有目录和内容保持原样，创建失败时拒绝。 */
-  vaultCreateDefault: () => Promise<string>;
+  vaultOpen: (
+    onProgress?: (progress: VaultOpenProgress) => void,
+  ) => Promise<VaultOpenSnapshot | null>;
+  /** 用户首次开始记录时打开 Documents/Nous；取消返回 null，创建失败时拒绝。 */
+  vaultCreateDefault: (
+    onProgress?: (progress: VaultOpenProgress) => void,
+  ) => Promise<VaultOpenSnapshot | null>;
   /**
    * 用主进程记下的库路径恢复会话，不弹对话框。
    *
-   * 没有可用会话时返回 `null`。
+   * 没有保存的会话或用户取消时返回 `null`；已保存目录不可用时报告原因。
    */
-  vaultRestore: () => Promise<VaultRestore | null>;
+  vaultRestore: (
+    onProgress?: (progress: VaultOpenProgress) => void,
+  ) => Promise<VaultRestore | null>;
+  /** 取消当前窗口的开库准备；提交已开始或没有活动请求时返回 false。 */
+  vaultOpenCancel: () => Promise<boolean>;
   /** 持久化各分栏的当前文档、阅读栈与分栏布局；路径与条目由主进程校验。 */
   sessionSetDocuments: (documents: SessionDocuments) => Promise<void>;
   /** 持久化视图记忆（源码/阅读）；损坏条目由会话解析丢弃。 */

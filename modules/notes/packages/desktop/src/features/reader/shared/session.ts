@@ -335,7 +335,7 @@ export function parseReaderSession(value: unknown): ReaderSession {
   };
 }
 
-/** 工作线程注入的阅读器会话存储；写入失败必须抛出，供切库事务恢复原状态。 */
+/** 工作线程注入的会话存储；提交前失败必须保留旧会话并抛错，成功返回后不能再误报未提交。 */
 export type ReaderSessionStore = {
   load: () => ReaderSession;
   save: (session: ReaderSession) => void;

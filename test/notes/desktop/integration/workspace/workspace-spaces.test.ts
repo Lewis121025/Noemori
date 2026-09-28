@@ -37,6 +37,7 @@ beforeEach(() => {
   api = createReaderApiMock({
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: "note.md", history: { back: [], forward: [] } }],
         active: 0,

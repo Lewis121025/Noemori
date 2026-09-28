@@ -26,12 +26,9 @@ pub struct JsVaultEntry {
     pub recovery_only: Option<bool>,
 }
 
-/// 列出完整目录；未打开库或目录读取失败时返回错误。
-#[napi]
-pub fn vault_entries() -> Result<Vec<JsVaultEntry>> {
-    Ok(with_vault(Vault::list_entries)?
-        .into_iter()
-        .map(|entry| JsVaultEntry {
+impl From<nous_vault::VaultEntry> for JsVaultEntry {
+    fn from(entry: nous_vault::VaultEntry) -> Self {
+        Self {
             path: entry.path,
             kind: match entry.kind {
                 nous_vault::EntryKind::File => "file",
@@ -39,7 +36,16 @@ pub fn vault_entries() -> Result<Vec<JsVaultEntry>> {
             }
             .into(),
             recovery_only: entry.recovery_only.then_some(true),
-        })
+        }
+    }
+}
+
+/// 列出完整目录；未打开库或目录读取失败时返回错误。
+#[napi]
+pub fn vault_entries() -> Result<Vec<JsVaultEntry>> {
+    Ok(with_vault(Vault::list_entries)?
+        .into_iter()
+        .map(JsVaultEntry::from)
         .collect())
 }
 

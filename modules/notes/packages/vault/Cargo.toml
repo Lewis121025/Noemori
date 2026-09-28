@@ -30,6 +30,10 @@ name = "vault_integration_save_recovery"
 path = "../../../../test/notes/vault/integration/storage/save_recovery.rs"
 
 [[test]]
+name = "vault_integration_opening"
+path = "../../../../test/notes/vault/integration/storage/opening.rs"
+
+[[test]]
 name = "vault_integration_path_identity"
 path = "../../../../test/notes/vault/integration/storage/path_identity.rs"
 
@@ -136,6 +140,10 @@ path = "../../../../test/notes/vault/integration/search/paging.rs"
 [[test]]
 name = "vault_performance_files"
 path = "../../../../test/notes/vault/performance/storage/files.rs"
+
+[[test]]
+name = "vault_performance_opening"
+path = "../../../../test/notes/vault/performance/storage/opening.rs"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }

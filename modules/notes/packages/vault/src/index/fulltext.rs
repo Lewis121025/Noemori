@@ -77,6 +77,33 @@ pub(crate) struct SearchIndex {
 impl SearchIndex {
     /// 打开版本化派生目录；目录丢失时创建空索引，损坏或不可写时返回可见错误。
     pub fn open(index_dir: &Path) -> Result<Self, Error> {
+        match Self::open_existing(index_dir) {
+            Err(Error::Io(error))
+                if error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<tantivy::TantivyError>())
+                    .is_some_and(|error| {
+                        matches!(
+                            error,
+                            tantivy::TantivyError::DataCorruption(_)
+                                | tantivy::TantivyError::DeserializeError(_)
+                                | tantivy::TantivyError::IncompatibleIndex(_)
+                                | tantivy::TantivyError::SchemaError(_)
+                                | tantivy::TantivyError::OpenReadError(
+                                    tantivy::directory::error::OpenReadError::FileDoesNotExist(_)
+                                )
+                        )
+                    }) =>
+            {
+                // 排名目录完全由 SQLite 正文派生；仅识别到损坏或版本不兼容时重建。
+                std::fs::remove_dir_all(index_dir.join("search-v1"))?;
+                Self::open_existing(index_dir)
+            }
+            result => result,
+        }
+    }
+
+    fn open_existing(index_dir: &Path) -> Result<Self, Error> {
         let directory = index_dir.join("search-v1");
         std::fs::create_dir_all(&directory)?;
         let mut schema = Schema::builder();
@@ -130,6 +157,7 @@ impl SearchIndex {
         &mut self,
         conn: &Connection,
         cancellation: &SearchCancellation,
+        progress: &mut dyn FnMut(usize, Option<usize>) -> Result<(), Error>,
     ) -> Result<(), Error> {
         cancellation.check()?;
         let (epoch, revision): (String, i64) = conn.query_row(
@@ -150,7 +178,7 @@ impl SearchIndex {
                         .as_deref()
                         .and_then(|value| value.split_once(':'))
                         .is_none_or(|(identity, _)| identity != epoch);
-                self.publish(conn, &revision, rebuild, cancellation)?;
+                self.publish(conn, &revision, rebuild, cancellation, progress)?;
             }
             self.reader.reload().map_err(io::Error::other)?;
             self.revision = Some(revision);
@@ -169,7 +197,19 @@ impl SearchIndex {
         revision: &str,
         rebuild: bool,
         cancellation: &SearchCancellation,
+        progress: &mut dyn FnMut(usize, Option<usize>) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        let total: i64 = conn.query_row(
+            if rebuild {
+                "SELECT count(*) FROM search_sources"
+            } else {
+                "SELECT count(*) FROM search_pending"
+            },
+            [],
+            |row| row.get(0),
+        )?;
+        let total = usize::try_from(total).map_err(io::Error::other)?;
+        progress(0, Some(total))?;
         let mut writer: IndexWriter<TantivyDocument> = self
             .index
             .writer_with_num_threads(1, 50_000_000)
@@ -184,30 +224,36 @@ impl SearchIndex {
         };
         let mut statement = conn.prepare(sql)?;
         let mut rows = statement.query([])?;
+        let mut completed = 0_usize;
         while let Some(row) = rows.next()? {
             cancellation.check()?;
+            completed += 1;
             let path: String = row.get(0)?;
             if !rebuild {
                 writer.delete_term(Term::from_field_text(self.path, &path));
             }
-            let Some(source) = row.get::<_, Option<i64>>(3)? else {
-                continue;
-            };
-            let source = u64::try_from(source).map_err(io::Error::other)?;
-            let title: String = row.get(1)?;
-            let body: String = row.get(2)?;
-            let mut document = TantivyDocument::new();
-            document.add_text(self.path, path);
-            document.add_u64(self.source, source);
-            document.add_text(self.title, fold(&title));
-            document.add_text(self.body, fold(&body));
-            writer.add_document(document).map_err(io::Error::other)?;
+            if let Some(source) = row.get::<_, Option<i64>>(3)? {
+                let source = u64::try_from(source).map_err(io::Error::other)?;
+                let title: String = row.get(1)?;
+                let body: String = row.get(2)?;
+                let mut document = TantivyDocument::new();
+                document.add_text(self.path, path);
+                document.add_u64(self.source, source);
+                document.add_text(self.title, fold(&title));
+                document.add_text(self.body, fold(&body));
+                writer.add_document(document).map_err(io::Error::other)?;
+            }
+            if completed.is_multiple_of(32) {
+                progress(completed, Some(total))?;
+            }
         }
         cancellation.check()?;
+        progress(completed, Some(total))?;
         let mut commit = writer.prepare_commit().map_err(io::Error::other)?;
         commit.set_payload(revision);
         commit.commit().map_err(io::Error::other)?;
         writer.wait_merging_threads().map_err(io::Error::other)?;
+        progress(completed, Some(total))?;
         Ok(())
     }
 

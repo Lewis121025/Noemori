@@ -1,9 +1,12 @@
 /**
- * 停键自动保存：2 秒闲置后写盘，切走时冲刷，写盘不重叠。
+ * 自动保存：停键 2 秒或持续编辑 10 秒后提交，组词期间暂停，写盘始终串行。
  */
 
 /** 停键后写盘的等待（毫秒），对齐 Obsidian `requestSave`。 */
 export const AUTOSAVE_DELAY_MS = 2000;
+
+/** 持续输入的最长等待（毫秒）；组词或在途写盘可延后提交，但不能重置编辑期限。 */
+export const AUTOSAVE_MAX_DELAY_MS = 10000;
 
 /** `createAutosave` 的依赖。 */
 export type AutosaveOptions = {
@@ -21,7 +24,11 @@ export type AutosaveController = {
   touch: () => void;
   /** 取消计时并立刻保存；若正在写则等写完，仍脏再写一次。 */
   flush: () => Promise<void>;
-  /** 取消未触发的计时。 */
+  /** 暂停自动及手动提交，保留最早编辑时间；用于组词和副本交接。 */
+  pause: () => void;
+  /** 恢复计时；已经超期的编辑在下一次调度提交，不在组词事件内部写盘。 */
+  resume: () => void;
+  /** 释放计时器并取消排队但尚未开始的提交；控制器不再使用。 */
   dispose: () => void;
 };
 
@@ -35,6 +42,10 @@ export function createAutosave(options: AutosaveOptions): AutosaveController {
   const delayMs = options.delayMs ?? AUTOSAVE_DELAY_MS;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let chain = Promise.resolve();
+  let firstEditAt: number | null = null;
+  let paused = false;
+  let disposed = false;
+  let automaticQueued = false;
 
   function clearTimer(): void {
     if (timer !== null) {
@@ -52,31 +63,50 @@ export function createAutosave(options: AutosaveOptions): AutosaveController {
     return run;
   }
 
-  function armIdle(): void {
+  async function saveCurrent(): Promise<void> {
+    automaticQueued = false;
+    if (disposed || paused) return;
     clearTimer();
+    // 以本次快照为分界；在途写盘期间的新输入会建立下一轮期限。
+    firstEditAt = null;
+    if (options.isDirty()) await options.save();
+  }
+
+  function arm(): void {
+    clearTimer();
+    if (disposed || paused || automaticQueued || firstEditAt === null) return;
+    const wait = Math.min(delayMs, Math.max(0, firstEditAt + AUTOSAVE_MAX_DELAY_MS - Date.now()));
     timer = setTimeout(() => {
       timer = null;
-      void enqueue(async () => {
-        if (options.isDirty()) {
-          await options.save();
-        }
-      });
-    }, delayMs);
+      automaticQueued = true;
+      void enqueue(saveCurrent);
+    }, wait);
   }
 
   return {
     touch(): void {
-      armIdle();
+      if (disposed) return;
+      firstEditAt ??= Date.now();
+      arm();
     },
     flush(): Promise<void> {
       clearTimer();
-      return enqueue(async () => {
-        if (options.isDirty()) {
-          await options.save();
-        }
-      });
+      return enqueue(saveCurrent);
+    },
+    pause(): void {
+      paused = true;
+      clearTimer();
+    },
+    resume(): void {
+      if (disposed) return;
+      paused = false;
+      if (options.isDirty()) firstEditAt ??= Date.now();
+      else firstEditAt = null;
+      arm();
     },
     dispose(): void {
+      disposed = true;
+      firstEditAt = null;
       clearTimer();
     },
   };

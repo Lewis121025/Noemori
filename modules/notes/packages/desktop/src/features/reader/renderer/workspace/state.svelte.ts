@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import type { VaultOpenProgress } from "../../shared/vault-opening";
 import { parseReadingBookmark } from "../../shared/reading-position";
 import type {
   Bookmark,
@@ -68,6 +69,9 @@ export class ReaderWorkspaceController {
   /** 笔记身份读取的请求序号；只有最新一次的结果生效。 */
   private keysRequest = 0;
   private root = $state<string | null>(null);
+  private opening = $state<VaultOpenProgress | null>(null);
+  private openGeneration = 0;
+  private stoppingOpen = $state(false);
   private listed = $state<VaultEntry[]>([]);
   /** 目录刷新次数；每次库变更后递增，派生视图（图谱）据此重读索引。 */
   private revision = $state(0);
@@ -119,6 +123,14 @@ export class ReaderWorkspaceController {
       },
       announce: (pane, message) => this.announceFor(pane, message),
       noticeSaveWarning: (warning) => this.noticeSaveWarning(warning),
+      noticeSaveBlocked: (pane) => {
+        this.notice = {
+          kind: "attention",
+          source: "save",
+          message: `「${pane.document.path}」尚未保存，请通过“处理保存问题”处理后重试。`,
+          detail: "",
+        };
+      },
       offerDeadLink: (pane, offer) => {
         this.deadLink = { offer, paneId: pane.id };
       },
@@ -155,6 +167,47 @@ export class ReaderWorkspaceController {
   /** 当前库根路径。 */
   get vaultRoot() {
     return this.root;
+  }
+  /** 当前开库准备的真实阶段；null 表示没有进行中的打开。 */
+  get openingProgress() {
+    return this.opening;
+  }
+  /** 已请求协作取消，等待当前安全边界返回。 */
+  get cancellingOpen() {
+    return this.stoppingOpen;
+  }
+
+  /** 取消只作用于当前打开；提交赢得边界后由成功结果完成界面切换。 */
+  cancelOpening = async (): Promise<void> => {
+    if (this.opening === null || this.stoppingOpen || this.opening.phase === "committing") return;
+    const generation = this.openGeneration;
+    this.stoppingOpen = true;
+    try {
+      const cancelled = await this.api.vaultOpenCancel();
+      if (generation === this.openGeneration && !cancelled) this.stoppingOpen = false;
+    } catch (error) {
+      if (generation === this.openGeneration) {
+        this.stoppingOpen = false;
+        this.report("取消打开未能完成，请重试。", error);
+      }
+    }
+  };
+
+  private beginOpening() {
+    const generation = ++this.openGeneration;
+    this.opening = { phase: "preparing", completed: 0, total: null };
+    this.stoppingOpen = false;
+    return {
+      report: (progress: VaultOpenProgress) => {
+        if (generation === this.openGeneration) this.opening = progress;
+      },
+      finish: () => {
+        if (generation !== this.openGeneration) return;
+        this.openGeneration += 1;
+        this.opening = null;
+        this.stoppingOpen = false;
+      },
+    };
   }
   /** 当前库的文件列表。 */
   get files() {
@@ -364,6 +417,8 @@ export class ReaderWorkspaceController {
    */
   start(): () => void {
     const unsubscribe = this.api.subscribeVaultChanged((event) => {
+      // 检索结果的版本立即失效，不能等输入法、写盘或正文重载的门禁释放。
+      this.search.markStale();
       if (event.status === "changed") {
         if (event.healthy) this.backgroundError = "";
         void this.onVaultChanged();
@@ -378,6 +433,7 @@ export class ReaderWorkspaceController {
       }
     });
     return () => {
+      this.search.reset();
       this.fileTree.reset();
       for (const pane of this.paneList) pane.dispose();
       unsubscribe();
@@ -386,13 +442,14 @@ export class ReaderWorkspaceController {
 
   /** 恢复上次笔记库、分栏与文档；失败显示原因，最终释放启动门禁。 */
   async restore(): Promise<void> {
+    const opening = this.beginOpening();
     try {
-      const restored = await this.api.vaultRestore();
+      const restored = await this.api.vaultRestore(opening.report);
       if (restored === null) return;
       this.root = restored.root;
       this.search.reset();
       this.bookmarks.reset();
-      await this.refreshList();
+      this.publishEntries(restored.entries);
       // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
       this.clearViewModes();
       Object.assign(this.viewModes, restored.viewModes);
@@ -428,6 +485,7 @@ export class ReaderWorkspaceController {
     } catch (error) {
       this.report(error instanceof Error ? error.message : "恢复会话失败");
     } finally {
+      opening.finish();
       for (const pane of this.paneList) pane.finishTransition();
     }
   }
@@ -436,28 +494,34 @@ export class ReaderWorkspaceController {
   openVault = async (kind: "choose" | "default" = "choose"): Promise<void> => {
     try {
       await this.withAllPanesSaved(async () => {
-        const root =
-          kind === "default" ? await this.api.vaultCreateDefault() : await this.api.vaultOpen();
-        if (root === null) return;
-        this.fileTree.reset();
-        this.root = root;
-        this.backgroundError = "";
-        // 切库重置为单栏：旧库的文档、阅读栈与分栏布局都不跨库携带。
-        for (const pane of this.paneList) pane.dispose();
-        this.paneSeq = 1;
-        this.paneList = [new ReaderPane(0, this.api, this.host, false)];
-        this.activeId = 0;
-        this.search.reset();
-        this.bookmarks.reset();
-        this.candidateSelection = null;
-        this.deadLink = null;
-        this.clearViewModes();
-        this.recent = [];
-        this.report("");
-        this.listGeneration += 1;
-        await this.refreshList();
-        this.fileTree.restore(null, this.listed);
-        await this.persistDocuments();
+        const opening = this.beginOpening();
+        try {
+          const opened =
+            kind === "default"
+              ? await this.api.vaultCreateDefault(opening.report)
+              : await this.api.vaultOpen(opening.report);
+          if (opened === null) return;
+          this.fileTree.reset();
+          this.root = opened.root;
+          this.backgroundError = "";
+          // 切库重置为单栏：旧库的文档、阅读栈与分栏布局都不跨库携带。
+          for (const pane of this.paneList) pane.dispose();
+          this.paneSeq = 1;
+          this.paneList = [new ReaderPane(0, this.api, this.host, false)];
+          this.activeId = 0;
+          this.search.reset();
+          this.bookmarks.reset();
+          this.candidateSelection = null;
+          this.deadLink = null;
+          this.clearViewModes();
+          this.recent = [];
+          this.report("");
+          this.listGeneration += 1;
+          this.publishEntries(opened.entries);
+          this.fileTree.restore(null, this.listed);
+        } finally {
+          opening.finish();
+        }
       });
     } catch (error) {
       this.report(`打开库失败：${errorText(error)}`);
@@ -1107,6 +1171,11 @@ export class ReaderWorkspaceController {
     const files = await this.api.vaultEntries();
     if (root !== this.root || generation !== this.listGeneration || request !== this.listRequest)
       return;
+    this.publishEntries(files);
+  }
+
+  /** 完整目录在请求边界已校验；发布期间不执行会导致半切换的磁盘读取或会话写入。 */
+  private publishEntries(files: VaultEntry[]): void {
     this.listed = files;
     this.fileTree.reconcile(files);
     this.revision += 1;

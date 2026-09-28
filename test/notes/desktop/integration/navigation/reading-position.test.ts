@@ -119,6 +119,7 @@ describe("关窗阅读现场", () => {
       fileSnapshot: async () => ({ disk: bytes, draft: null }),
       vaultRestore: async () => ({
         root: "/notes",
+      entries: await api.vaultEntries(),
         documents: {
           panes: [280, 640].map((offset) => ({
             currentPath: "长文.md",

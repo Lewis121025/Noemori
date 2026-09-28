@@ -22,6 +22,7 @@ import type {
   VaultEntry,
   VaultGraph,
   VaultRestore,
+  VaultOpenSnapshot,
   WriteResult,
 } from "./api";
 import { SIDEBAR_LAYOUT } from "./api";
@@ -117,11 +118,6 @@ export function parseEmptyReply(value: unknown): void {
   if (value !== undefined) throw new Error("未收到有效的操作确认，请检查操作结果后重试");
 }
 
-/** 路径只接受明确文本或 null；错误参数不能被解释成关闭文档、取消或未命中。 */
-export function parseNullablePath(value: unknown): string | null {
-  return value === null ? null : parsePathArgument(value);
-}
-
 /**
  * 链接解析响应按状态判别：resolved 必须带有效库内路径，ambiguous 必须带
  * 非空候选列表；空锚点归一化为 null，损坏响应整体拒绝而不是退化成死链。
@@ -180,6 +176,7 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
     }
     return {
       root: value.root,
+      entries: parseVaultEntries(value.entries),
       documents,
       // 视图记忆与最近列表是恢复性数据：损坏条目按会话解析规则丢弃，不拒绝整个恢复。
       viewModes: parseViewModes(value.viewModes),
@@ -188,6 +185,13 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
     };
   }
   throw new Error("笔记库恢复响应无效，请重新打开笔记库");
+}
+
+/** 打开结果必须携带已准备目录；缺失或损坏时拒绝，不能当作空库发布。 */
+export function parseVaultOpen(value: unknown): VaultOpenSnapshot | null {
+  if (value === null) return null;
+  if (!record(value) || !path(value.root)) throw new Error("笔记库打开响应无效");
+  return { root: value.root, entries: parseVaultEntries(value.entries) };
 }
 
 /** 文件列表逐项校验，拒绝半份无效结果，避免文件栏漏项或指向错误条目。 */

@@ -15,7 +15,9 @@ use crate::links::link::LinkRecord;
 use crate::links::mention::{self, MentionKind, MentionRecord, Mentions};
 use crate::storage::path::{path_to_slashes, resolve_in_root};
 use crate::markdown::scan;
+use crate::opening::{access, report};
 use crate::search::{SearchHit, SearchQuery};
+use crate::{OpenObserver, OpenPhase};
 
 /// 已打开的笔记库。
 ///
@@ -44,17 +46,61 @@ impl Vault {
     ///
     /// 根不是目录、状态目录不可用、改名恢复受阻或索引写入失败时返回错误。
     pub fn open(root: impl AsRef<Path>, index_dir: impl AsRef<Path>) -> Result<Self, Error> {
-        let root = root.as_ref().to_path_buf();
-        let metadata = fs::metadata(&root)?;
+        Self::open_with_progress(root, index_dir, &mut |_| Ok(true))
+    }
+
+    /// 准备笔记库并报告实际阶段；回调返回 false 在安全边界取消，不发布部分库。
+    /// `root` 是资料目录，`index_dir` 是独立状态目录；`observer` 仅在调用线程执行。
+    /// # Errors
+    /// 取消、文件不可读、事务恢复或索引错误；保留具体文件身份，允许修正后重试。
+    pub fn open_with_progress(
+        root: impl AsRef<Path>,
+        index_dir: impl AsRef<Path>,
+        observer: &mut OpenObserver<'_>,
+    ) -> Result<Self, Error> {
+        let root = root.as_ref();
+        let index_dir = index_dir.as_ref();
+        match Self::prepare_opening(root, index_dir, observer) {
+            Err(Error::Index(rusqlite::Error::SqliteFailure(error, _)))
+                if matches!(
+                    error.code,
+                    rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+                ) =>
+            {
+                report(observer, OpenPhase::Recovering, 0, None)?;
+                let operation = lock_open_operation(index_dir, observer)?;
+                // 只重建可派生的 SQLite 文件；恢复草稿、书签与原始笔记不属于缓存。
+                for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
+                    match fs::remove_file(index_dir.join(name)) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                drop(operation);
+                Self::prepare_opening(root, index_dir, observer)
+            }
+            result => result,
+        }
+    }
+
+    fn prepare_opening(
+        root: &Path,
+        index_dir: &Path,
+        observer: &mut OpenObserver<'_>,
+    ) -> Result<Self, Error> {
+        let root = root.to_path_buf();
+        let metadata = fs::metadata(&root).map_err(|error| access(&root, error))?;
         if !metadata.is_dir() {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "库根必须是目录",
             )));
         }
-        let index_dir = index_dir.as_ref().to_path_buf();
+        let index_dir = index_dir.to_path_buf();
         fs::create_dir_all(&index_dir)?;
-        let _operation = lock_operation(&index_dir)?;
+        report(observer, OpenPhase::Recovering, 0, None)?;
+        let _operation = lock_open_operation(&index_dir, observer)?;
         let recovery = crate::storage::recovery::RecoveryStore::open(&index_dir.join("recovery.sqlite"))?;
         crate::rename::recover_pending(&root, &recovery)?;
         let conn = index::open_connection(&index_dir.join("index.sqlite"))?;
@@ -69,9 +115,13 @@ impl Vault {
             writes: Mutex::new(()),
             recovery,
         };
-        let _ = vault.refresh_index_locked()?;
+        let _ = vault.refresh_index_contents(false, observer)?;
         // 首次建库将完整索引成本计入打开过程；正常重开只核对已提交版本。
-        let _ = vault.search(&SearchQuery::default())?;
+        report(observer, OpenPhase::Ranking, 0, None)?;
+        let _ = vault.search_snapshot_observed(
+            &crate::SearchCancellation::default(),
+            &mut |completed, total| report(observer, OpenPhase::Ranking, completed, total),
+        )?;
         Ok(vault)
     }
 
@@ -95,16 +145,54 @@ impl Vault {
     }
 
     pub(super) fn refresh_index_locked(&self) -> Result<bool, Error> {
-        self.refresh_index_contents(false)
+        self.refresh_index_contents(false, &mut |_| Ok(true))
     }
 
     /// 批次结束时重验内容，覆盖批次期间保留时间戳的外部编辑；仍按哈希复用解析事实。
     pub(super) fn refresh_index_after_batch(&self) -> Result<bool, Error> {
-        self.refresh_index_contents(true)
+        self.refresh_index_contents(true, &mut |_| Ok(true))
     }
 
-    fn refresh_index_contents(&self, verify_content: bool) -> Result<bool, Error> {
-        let entries = crate::storage::entries::scan_entries(&self.root, false)?;
+    /// 监视器安装后的开库复核；检查准备期间的外部变化，再同步同版本排名索引。
+    /// # Errors
+    /// 取消、具体文件读盘或索引提交失败；调用方仍须保留旧工作区。
+    pub fn verify_opening(&self, observer: &mut OpenObserver<'_>) -> Result<(), Error> {
+        {
+            let local = loop {
+                report(observer, OpenPhase::Checking, 0, None)?;
+                match self.writes.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        return Err(Error::Io(io::Error::other("文件写入锁已毒化")))
+                    }
+                }
+            };
+            let _guard = WriteGuard {
+                _local: local,
+                _operation: lock_open_operation(&self.index_dir, observer)?,
+            };
+            self.refresh_index_contents(false, observer)?;
+        }
+        let _ = self.search_snapshot_observed(
+            &crate::SearchCancellation::default(),
+            &mut |completed, total| report(observer, OpenPhase::Ranking, completed, total),
+        )?;
+        Ok(())
+    }
+
+    fn refresh_index_contents(
+        &self,
+        verify_content: bool,
+        observer: &mut OpenObserver<'_>,
+    ) -> Result<bool, Error> {
+        report(observer, OpenPhase::Scanning, 0, None)?;
+        let entries =
+            crate::storage::entries::scan_entries_observed(&self.root, false, &mut |count| {
+                report(observer, OpenPhase::Scanning, count, None)
+            })?;
         let files: Vec<_> = entries
             .iter()
             .filter(|entry| entry.kind == crate::EntryKind::File)
@@ -134,9 +222,15 @@ impl Vault {
         let set_changed = disk_set != indexed_set;
 
         let mut mtimes = Vec::with_capacity(files.len());
-        for rel in &files {
+        report(observer, OpenPhase::Checking, 0, Some(files.len()))?;
+        for (position, rel) in files.iter().enumerate() {
             let abs = resolve_in_root(&self.root, rel)?;
-            mtimes.push(mtime_stamp(&fs::metadata(&abs)?));
+            mtimes.push(mtime_stamp(
+                &fs::metadata(&abs).map_err(|error| access(&abs, error))?,
+            ));
+            if position.is_multiple_of(256) {
+                report(observer, OpenPhase::Checking, position, Some(files.len()))?;
+            }
         }
 
         if !verify_content && !stale_scan && !set_changed {
@@ -174,13 +268,16 @@ impl Vault {
             mut links,
             derived,
         } = collect_refresh_rows(
-            &self.root,
+            &RefreshContext {
+                root: &self.root,
+                by_path: &by_path,
+                links_by: &links_by,
+                stale_scan,
+                verify_content,
+            },
             &files,
             &mtimes,
-            &by_path,
-            &links_by,
-            stale_scan,
-            verify_content,
+            observer,
         )?;
         let inventory = identity_inventory(&files, &file_rows, &mut aliases, &removals, &derived);
         // 标题和别名变了也要重绑其它文件的链接，不能只在文件集合变化时重算。
@@ -188,6 +285,7 @@ impl Vault {
             assign_target(link, &inventory);
         }
 
+        report(observer, OpenPhase::Indexing, 0, None)?;
         let conn = self.lock_conn()?;
         index::replace_all(&conn, &file_rows, &links, &removals, &derived)?;
         drop(conn);
@@ -643,6 +741,14 @@ impl Vault {
         &self,
         cancellation: &crate::SearchCancellation,
     ) -> Result<(Connection, crate::index::fulltext::SearchSnapshot), Error> {
+        self.search_snapshot_observed(cancellation, &mut |_, _| Ok(()))
+    }
+
+    fn search_snapshot_observed(
+        &self,
+        cancellation: &crate::SearchCancellation,
+        progress: &mut dyn FnMut(usize, Option<usize>) -> Result<(), Error>,
+    ) -> Result<(Connection, crate::index::fulltext::SearchSnapshot), Error> {
         let conn = self.lock_conn()?;
         cancellation.check()?;
         let tx =
@@ -651,7 +757,7 @@ impl Vault {
             .search_index
             .lock()
             .map_err(|_| Error::Io(io::Error::other("排名索引锁已失效")))?;
-        search_index.synchronize(&tx, cancellation)?;
+        search_index.synchronize(&tx, cancellation, progress)?;
         cancellation.check()?;
         let snapshot = search_index.snapshot()?;
         let reader = index::open_search_reader(&self.index_dir.join("index.sqlite"))?;
@@ -736,14 +842,36 @@ pub(super) struct WriteGuard<'a> {
 }
 
 fn lock_operation(index_dir: &Path) -> Result<fs::File, Error> {
-    let file = fs::OpenOptions::new()
+    let file = operation_file(index_dir)?;
+    file.lock()?;
+    Ok(file)
+}
+
+/// 准备库时允许在等待另一实例期间取消；只有取得锁后才进入恢复或索引事务。
+fn lock_open_operation(
+    index_dir: &Path,
+    observer: &mut OpenObserver<'_>,
+) -> Result<fs::File, Error> {
+    let file = operation_file(index_dir)?;
+    loop {
+        report(observer, OpenPhase::Recovering, 0, None)?;
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
+    }
+}
+
+fn operation_file(index_dir: &Path) -> Result<fs::File, Error> {
+    Ok(fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(index_dir.join("operations.lock"))?;
-    file.lock()?;
-    Ok(file)
+        .open(index_dir.join("operations.lock"))?)
 }
 
 /// 库内路径名单与 wiki 名到路径的映射。
@@ -929,62 +1057,93 @@ struct RefreshRows {
     derived: Vec<(String, crate::index::DerivedRows)>,
 }
 
-/// 未改文件沿用索引行；内容变了才重读并抽出派生数据。
-fn collect_refresh_rows(
-    root: &Path,
-    files: &[String],
-    mtimes: &[i64],
-    by_path: &HashMap<String, FileRow>,
-    links_by: &HashMap<String, Vec<LinkRecord>>,
+/// 一次刷新使用同版本旧索引事实；所有解析分片只借用，不发布部分结果。
+struct RefreshContext<'a> {
+    root: &'a Path,
+    by_path: &'a HashMap<String, FileRow>,
+    links_by: &'a HashMap<String, Vec<LinkRecord>>,
     stale_scan: bool,
     verify_content: bool,
+}
+
+/// 有限大小的并行批次之间回报进度并检查取消，回调不进入解析线程。
+fn collect_refresh_rows(
+    context: &RefreshContext<'_>,
+    files: &[String],
+    mtimes: &[i64],
+    observer: &mut OpenObserver<'_>,
 ) -> Result<RefreshRows, Error> {
     let changed = files
         .iter()
         .zip(mtimes)
         .filter(|(path, mtime)| {
-            verify_content || stale_scan || by_path.get(*path).is_none_or(|old| old.mtime != **mtime)
+            context.verify_content
+                || context.stale_scan
+                || context
+                    .by_path
+                    .get(*path)
+                    .is_none_or(|old| old.mtime != **mtime)
         })
         .count();
-    // 少量变化留在当前线程；大批解析最多占用四个核心，避免打开库耗尽桌面资源。
-    let workers = std::thread::available_parallelism().map_or(1, |count| count.get().min(4));
-    if changed < 128 || workers == 1 {
-        return collect_refresh_chunk(
-            root, files, mtimes, by_path, links_by, stale_scan, verify_content,
-        );
-    }
-    let size = files.len().div_ceil(workers);
-    let chunks = std::thread::scope(|scope| {
-        let handles: Vec<_> = files
-            .chunks(size)
-            .zip(mtimes.chunks(size))
-            .map(|(paths, stamps)| {
-                scope.spawn(move || {
-                    collect_refresh_chunk(
-                        root, paths, stamps, by_path, links_by, stale_scan, verify_content,
-                    )
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle
-                    .join()
-                    .map_err(|_| Error::Io(io::Error::other("索引解析线程意外退出")))?
-            })
-            .collect::<Result<Vec<_>, Error>>()
-    })?;
+    let workers = if changed < 128 {
+        1
+    } else {
+        std::thread::available_parallelism().map_or(1, |count| count.get().min(4))
+    };
     let mut rows = RefreshRows {
         files: Vec::new(),
         links: Vec::new(),
         derived: Vec::new(),
     };
-    // 按原始路径顺序归并，全部读取成功后才交给调用方提交同一索引事务。
-    for chunk in chunks {
-        rows.files.extend(chunk.files);
-        rows.links.extend(chunk.links);
-        rows.derived.extend(chunk.derived);
+    report(observer, OpenPhase::Reading, 0, Some(files.len()))?;
+    for (paths, stamps) in files
+        .chunks(workers * 256)
+        .zip(mtimes.chunks(workers * 256))
+    {
+        let collect = |paths: &[String], stamps: &[i64]| {
+            collect_refresh_chunk(
+                context.root,
+                paths,
+                stamps,
+                context.by_path,
+                context.links_by,
+                context.stale_scan,
+                context.verify_content,
+            )
+        };
+        let chunks = if workers == 1 {
+            vec![collect(paths, stamps)?]
+        } else {
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = paths
+                    .chunks(256)
+                    .zip(stamps.chunks(256))
+                    .map(|(part, times)| {
+                        let collect = &collect;
+                        scope.spawn(move || collect(part, times))
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle
+                            .join()
+                            .map_err(|_| Error::Io(io::Error::other("索引解析线程意外退出")))?
+                    })
+                    .collect::<Result<Vec<_>, Error>>()
+            })?
+        };
+        for chunk in chunks {
+            rows.files.extend(chunk.files);
+            rows.links.extend(chunk.links);
+            rows.derived.extend(chunk.derived);
+        }
+        report(
+            observer,
+            OpenPhase::Reading,
+            rows.files.len(),
+            Some(files.len()),
+        )?;
     }
     Ok(rows)
 }
@@ -1014,7 +1173,8 @@ fn collect_refresh_chunk(
                 }
             }
         }
-        let bytes = fs::read(resolve_in_root(root, rel)?)?;
+        let path = resolve_in_root(root, rel)?;
+        let bytes = fs::read(&path).map_err(|error| access(&path, error))?;
         let hash = hex_sha256(&bytes);
         if !stale_scan {
             if let Some(old) = by_path.get(rel) {

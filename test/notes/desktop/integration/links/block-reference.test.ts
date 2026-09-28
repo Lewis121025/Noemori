@@ -10,6 +10,7 @@ function setup(target: string) {
   const api = createReaderApiMock({
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents: {
         panes: [{ currentPath: "host.md", history: { back: [], forward: [] } }],
         active: 0,

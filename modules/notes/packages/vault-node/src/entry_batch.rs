@@ -12,10 +12,10 @@ thread_local! {
     static IN_PROGRESS_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
-struct ProgressCallback;
+pub(crate) struct ProgressCallback;
 
 impl ProgressCallback {
-    fn enter() -> Self {
+    pub(crate) fn enter() -> Self {
         IN_PROGRESS_CALLBACK.set(true);
         Self
     }
@@ -30,7 +30,7 @@ impl Drop for ProgressCallback {
 /// 状态锁入口在获取互斥锁前拒绝同步回调重入，避免同一线程永远等待自身。
 pub(crate) fn check_callback_reentry() -> Result<()> {
     if IN_PROGRESS_CALLBACK.get() {
-        return Err(Error::from_reason("批次进度回调不能重新调用内核接口"));
+        return Err(Error::from_reason("内核进度回调不能重新调用内核接口"));
     }
     Ok(())
 }

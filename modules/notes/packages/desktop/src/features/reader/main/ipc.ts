@@ -1,6 +1,4 @@
-import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { ipcMain, shell, type BrowserWindow } from "electron";
 import { externalUrl } from "../shared/link-target";
 import type { PaneLayout } from "../shared/api";
 import { parseAttachmentRequest, type AttachmentReply } from "../shared/attachments";
@@ -8,6 +6,7 @@ import { parseDraftRequest, type DraftReply } from "../shared/editor-recovery";
 import { parseRecentFiles, parseViewModes } from "../shared/session";
 import { parseFileTreeMessage } from "../shared/file-browser";
 import { registerEntryBatchIpc } from "./entry-batch-ipc";
+import { registerVaultOpenIpc } from "./vault-open-ipc";
 import type { ReaderService } from "./service";
 import {
   parseBookmarks,
@@ -44,25 +43,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.links.openExternal", (_event, url: unknown) =>
     shell.openExternal(externalUrl(url)),
   );
-  ipcMain.handle("reader.vault.open", async () => {
-    const window = getWindow();
-    const result = window
-      ? await dialog.showOpenDialog(window, { properties: ["openDirectory"] })
-      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
-    const root = result.filePaths[0];
-    if (result.canceled || root === undefined) {
-      return null;
-    }
-    return core.call("vaultOpen", root);
-  });
-
-  ipcMain.handle("reader.vault.restore", () => core.call("vaultRestore"));
-  ipcMain.handle("reader.vault.createDefault", async () => {
-    // 只有用户选择开始记录才创建；固定在系统文稿目录，渲染层不能指定任意路径。
-    const root = join(app.getPath("documents"), "Nous");
-    await mkdir(root, { recursive: true });
-    return core.call("vaultOpen", root);
-  });
+  registerVaultOpenIpc(getWindow, core);
 
   ipcMain.handle("reader.session.setDocuments", (_event, documents: unknown) =>
     core.call("readerSessionPatch", { documents: parseSessionDocumentsMessage(documents) }),

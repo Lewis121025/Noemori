@@ -865,6 +865,7 @@
         activePath={active}
         onActivate={(hit, match) => void openHit(hit, match)}
         onExit={escapeSearch}
+        onFocusSearch={() => searchInput.focus()}
       />
     {/if}
   </nav>

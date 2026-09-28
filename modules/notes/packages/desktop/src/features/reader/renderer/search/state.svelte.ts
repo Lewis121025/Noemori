@@ -1,6 +1,34 @@
-import type { ReaderApi, SearchHit, SearchQuery } from "../../shared/api";
-import { SvelteSet } from "svelte/reactivity";
+import type {
+  ReaderApi,
+  SearchHit,
+  SearchQuery,
+  SearchPage,
+  SearchMatchesPage,
+} from "../../shared/api";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { isEmptyQuery, parseSearchQuery } from "./query";
+
+/** 文件续页只能追加同一次读取中尚未出现的路径，失败前不改变已发布内容。 */
+function appendPage(previous: SearchPage, next: SearchPage): SearchPage {
+  const paths = new SvelteSet(previous.hits.map((hit) => hit.path));
+  if (next.hits.some((hit) => paths.has(hit.path)) || next.nextCursor === previous.nextCursor)
+    throw new Error("搜索续页未前进，请重新搜索");
+  return { hits: [...previous.hits, ...next.hits], nextCursor: next.nextCursor };
+}
+
+/** 单篇续页与精确总数共用校验，手动展开和后台补齐不能形成不同契约。 */
+function appendMatches(hit: SearchHit, page: SearchMatchesPage): void {
+  const loaded = hit.matches.length + page.matches.length;
+  if (
+    page.matches.length === 0 ||
+    page.matches.length > 20 ||
+    page.nextCursor === hit.matchesCursor ||
+    (page.nextCursor === null ? loaded !== hit.matchCount : loaded >= hit.matchCount)
+  )
+    throw new Error("搜索命中续页与总数不一致，请重新搜索");
+  hit.matches = [...hit.matches, ...page.matches];
+  hit.matchesCursor = page.nextCursor;
+}
 
 /**
  * 全库搜索状态：请求 ID 负责内核取消，代次负责丢弃已经在传输途中的旧响应。
@@ -13,10 +41,13 @@ export class ReaderSearch {
   private failure = $state<string | null>(null);
   private running = $state(false);
   private paging = $state(false);
+  private outdated = $state(false);
+  private published = $state(0);
   private cursor = $state<string | null>(null);
   private matchRequests = $state<Record<string, { busy: boolean; error: string | null }>>({});
   private generation = 0;
   private requestId: string | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private text = "";
 
   /** @param api 检索与取消命令；report 让退出搜索后发生的取消失败仍可见。 */
@@ -37,9 +68,17 @@ export class ReaderSearch {
   get hits(): SearchHit[] {
     return this.results;
   }
+  /** 完整结果替换的发布版本；分页追加不变，供界面迁移阅读位置和焦点身份。 */
+  get revision(): number {
+    return this.published;
+  }
   /** 解析、首屏或续页失败原因；续页失败保留已有结果。 */
   get error(): string | null {
     return this.failure;
+  }
+  /** 已知库有变化；保留上次结果供阅读，但不能继续消费旧游标。 */
+  get stale(): boolean {
+    return this.outdated;
   }
   /** 首屏在途；此时不展示旧查询的命中。 */
   get busy(): boolean {
@@ -68,6 +107,7 @@ export class ReaderSearch {
   async loadMatches(path: string): Promise<boolean> {
     const hit = this.results.find((item) => item.path === path);
     if (
+      this.outdated ||
       this.running ||
       this.submitted === null ||
       this.requestId === null ||
@@ -82,16 +122,7 @@ export class ReaderSearch {
     try {
       const page = await this.api.searchMatches(this.submitted, this.requestId, cursor);
       if (generation !== this.generation) return false;
-      const loaded = hit.matches.length + page.matches.length;
-      if (
-        page.matches.length === 0 ||
-        page.matches.length > 20 ||
-        page.nextCursor === cursor ||
-        (page.nextCursor === null ? loaded !== hit.matchCount : loaded >= hit.matchCount)
-      )
-        throw new Error("搜索命中续页与总数不一致，请重新搜索");
-      hit.matches = [...hit.matches, ...page.matches];
-      hit.matchesCursor = page.nextCursor;
+      appendMatches(hit, page);
       return true;
     } catch (error) {
       if (generation === this.generation)
@@ -109,8 +140,14 @@ export class ReaderSearch {
   async run(text: string): Promise<boolean> {
     // 新提交先结束旧代次；解析失败也必须使旧首屏、文件续页与命中续页失效。
     this.reset();
+    return this.execute(text);
+  }
+
+  private async execute(text: string): Promise<boolean> {
     const generation = this.generation;
+    const coverage = new SvelteMap(this.results.map((hit) => [hit.path, hit.matches.length]));
     this.text = text;
+    this.failure = null;
     try {
       const query = parseSearchQuery(text);
       if (isEmptyQuery(query)) return false;
@@ -118,10 +155,12 @@ export class ReaderSearch {
       this.requestId = id;
       this.submitted = query;
       this.running = true;
-      const page = await this.api.searchQuery(query, id, null);
-      if (generation !== this.generation) return false;
+      const page = await this.readSnapshot(query, id, generation, coverage);
+      if (page === null || generation !== this.generation) return false;
       this.results = page.hits;
       this.cursor = page.nextCursor;
+      this.outdated = false;
+      this.published += 1;
       return true;
     } catch (error) {
       if (generation === this.generation) this.failure = this.message(error);
@@ -131,9 +170,35 @@ export class ReaderSearch {
     }
   }
 
+  /** 新版本按原已加载范围补齐后一次发布；任何页面失败或代次变化都保留旧快照。 */
+  private async readSnapshot(
+    query: SearchQuery,
+    id: string,
+    generation: number,
+    coverage: ReadonlyMap<string, number>,
+  ): Promise<SearchPage | null> {
+    let page = await this.api.searchQuery(query, id, null);
+    if (generation !== this.generation) return null;
+    while (page.nextCursor !== null && page.hits.length < coverage.size) {
+      const next = await this.api.searchQuery(query, id, page.nextCursor);
+      if (generation !== this.generation) return null;
+      page = appendPage(page, next);
+    }
+    for (const hit of page.hits) {
+      const loaded = coverage.get(hit.path) ?? 0;
+      while (hit.matchesCursor !== null && hit.matches.length < loaded) {
+        const next = await this.api.searchMatches(query, id, hit.matchesCursor);
+        if (generation !== this.generation) return null;
+        appendMatches(hit, next);
+      }
+    }
+    return page;
+  }
+
   /** 加载下一页；无游标或已有请求时不执行。失败保留当前列表并提供重新搜索入口。 */
   async loadMore(): Promise<void> {
     if (
+      this.outdated ||
       this.running ||
       this.paging ||
       this.cursor === null ||
@@ -147,11 +212,9 @@ export class ReaderSearch {
     try {
       const page = await this.api.searchQuery(this.submitted, this.requestId, this.cursor);
       if (generation !== this.generation) return;
-      const paths = new SvelteSet(this.results.map((hit) => hit.path));
-      if (page.hits.some((hit) => paths.has(hit.path)) || page.nextCursor === this.cursor)
-        throw new Error("搜索续页未前进，请重新搜索");
-      this.results = [...this.results, ...page.hits];
-      this.cursor = page.nextCursor;
+      const merged = appendPage({ hits: this.results, nextCursor: this.cursor }, page);
+      this.results = merged.hits;
+      this.cursor = merged.nextCursor;
     } catch (error) {
       if (generation === this.generation) this.failure = this.message(error);
     } finally {
@@ -159,23 +222,49 @@ export class ReaderSearch {
     }
   }
 
-  /** 按已提交原文建立新版本结果，用于库变化或读取失败后的恢复。 */
+  /** 按已提交原文刷新已加载的文件和命中范围；全部就绪后替换，失败保留旧内容。 */
   async refresh(): Promise<void> {
-    if (this.active) await this.run(this.text);
+    if (!this.active) return;
+    this.outdated = this.submitted !== null;
+    this.cancelReads();
+    await this.execute(this.text);
+  }
+
+  /**
+   * 收到库变化后立即取消旧版本读取，合并 250 毫秒内的通知后自动刷新。
+   * 首屏、文件续页与命中续页共用代次，迟到响应不能重新发布为最新结果。
+   * 没有有效查询时不进入结果模式；取消失败仍通过工作区消息报告。
+   */
+  markStale(): void {
+    if (this.submitted === null || this.refreshTimer !== null) return;
+    this.outdated = true;
+    this.cancelReads();
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refresh();
+    }, 250);
   }
 
   /** 退出结果模式，立即请求内核取消并丢弃在途响应；取消失败由工作区报告。 */
   reset(): void {
-    this.cancelCurrent();
-    this.generation += 1;
+    this.cancelReads();
     this.text = "";
     this.submitted = null;
     this.results = [];
-    this.matchRequests = {};
     this.cursor = null;
     this.failure = null;
+    this.outdated = false;
+    this.published += 1;
+  }
+
+  private cancelReads(): void {
+    if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.cancelCurrent();
+    this.generation += 1;
     this.running = false;
     this.paging = false;
+    this.matchRequests = {};
   }
 
   private cancelCurrent(): void {

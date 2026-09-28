@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
 import { ReaderSearch } from "@reader/renderer/search/state.svelte";
-import type { ReaderApi, SearchHit, SearchPage } from "@reader/shared/api";
+import type { ReaderApi, SearchHit, SearchPage, SearchMatchesPage } from "@reader/shared/api";
 import { parseSearchQuery } from "@reader/renderer/search/query";
 import { SEARCH_DEPTH_LIMIT } from "@reader/shared/reader-protocol";
 
@@ -30,6 +30,108 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe("ReaderSearch", () => {
+  it("命中续页跨越库变化时丢弃响应，退出搜索取消尚未触发的自动刷新", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<SearchMatchesPage>();
+    const first = { ...hit("a.md"), matchCount: 1, matchesCursor: "matches" };
+    const searchQuery = vi
+      .fn<ReaderApi["searchQuery"]>()
+      .mockResolvedValue({ hits: [first], nextCursor: null });
+    searchMatches.mockReturnValueOnce(pending.promise);
+    const search = create(searchQuery);
+    try {
+      await search.run("alpha");
+      const reading = search.loadMatches("a.md");
+      search.markStale();
+      pending.resolve({ matches: [{ snippet: "late", location: null }], nextCursor: null });
+      expect(await reading).toBe(false);
+      expect(search.hits[0]?.matches).toEqual([]);
+      expect(search.loadingMatches("a.md")).toBe(false);
+      search.reset();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(searchQuery).toHaveBeenCalledOnce();
+    } finally {
+      search.reset();
+      vi.useRealTimers();
+    }
+  });
+
+  it("短时间内多次库变化只自动刷新一次，失败保留旧结果并允许重试", async () => {
+    vi.useFakeTimers();
+    const searchQuery = vi
+      .fn<ReaderApi["searchQuery"]>()
+      .mockResolvedValueOnce(page("a.md"))
+      .mockRejectedValueOnce(new Error("索引暂不可用"))
+      .mockResolvedValueOnce(page("b.md"));
+    const search = create(searchQuery);
+    try {
+      await search.run("alpha");
+      search.markStale();
+      await vi.advanceTimersByTimeAsync(100);
+      search.markStale();
+      await vi.advanceTimersByTimeAsync(150);
+      expect(searchQuery).toHaveBeenCalledTimes(2);
+      expect(search.hits.map((item) => item.path)).toEqual(["a.md"]);
+      expect(search.stale).toBe(true);
+      expect(search.error).toContain("索引暂不可用");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(searchQuery).toHaveBeenCalledTimes(2);
+      await search.refresh();
+      expect(search.stale).toBe(false);
+      expect(search.hits.map((item) => item.path)).toEqual(["b.md"]);
+    } finally {
+      search.reset();
+      vi.useRealTimers();
+    }
+  });
+
+  it("库变化保留旧结果和查询，但取消续页；刷新后使用新任务和新结果", async () => {
+    const searchQuery = vi
+      .fn<ReaderApi["searchQuery"]>()
+      .mockResolvedValueOnce({ hits: [hit("a.md")], nextCursor: "next" })
+      .mockResolvedValueOnce(page("b.md"));
+    const search = create(searchQuery);
+    await search.run("alpha");
+    const previous = search.hits[0];
+    search.markStale();
+    expect(search.stale).toBe(true);
+    expect(search.hits[0]).toBe(previous);
+    expect(search.query).toEqual(parseSearchQuery("alpha"));
+    expect(searchCancel).toHaveBeenCalledWith(searchQuery.mock.calls[0]?.[1]);
+    await search.loadMore();
+    expect(searchQuery).toHaveBeenCalledOnce();
+    await search.refresh();
+    expect(search.stale).toBe(false);
+    expect(search.hits.map((item) => item.path)).toEqual(["b.md"]);
+    expect(searchQuery.mock.calls[1]?.[1]).not.toBe(searchQuery.mock.calls[0]?.[1]);
+  });
+
+  it.each(["首屏", "续页"])("库变化时取消在途%s，迟到响应不能清除过期标记", async (phase) => {
+    const pending = deferred<SearchPage>();
+    const searchQuery = vi.fn<ReaderApi["searchQuery"]>();
+    if (phase === "续页")
+      searchQuery.mockResolvedValueOnce({ hits: [hit("a.md")], nextCursor: "next" });
+    searchQuery.mockReturnValueOnce(pending.promise);
+    const search = create(searchQuery);
+    let loading: Promise<unknown>;
+    if (phase === "续页") {
+      await search.run("alpha");
+      loading = search.loadMore();
+    } else loading = search.run("alpha");
+    search.markStale();
+    pending.resolve(page("late.md"));
+    await loading;
+    expect(search.stale).toBe(true);
+    expect(search.busy).toBe(false);
+    expect(search.loadingMore).toBe(false);
+    expect(search.hits.map((item) => item.path)).toEqual(phase === "续页" ? ["a.md"] : []);
+    search.reset();
+    expect(search.stale).toBe(false);
+    expect(search.active).toBe(false);
+    search.markStale();
+    expect(search.active).toBe(false);
+  });
+
   it("首屏和续页参数均能结构化克隆，响应式状态不能直接跨进程", async () => {
     const searchQuery = vi.fn<ReaderApi["searchQuery"]>(async (query, _id, cursor) => {
       structuredClone(query);

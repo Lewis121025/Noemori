@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     setupFiles: ["../../../../test/notes/desktop/support/window-mode.ts"],
     include: [
+      "../../../../test/notes/desktop/e2e/vault-opening.test.mts",
       "../../../../test/notes/desktop/e2e/spaces.test.mts",
       "../../../../test/notes/desktop/e2e/attachments.test.mts",
       "../../../../test/notes/desktop/e2e/attachment-import.test.mts",

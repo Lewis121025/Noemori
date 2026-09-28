@@ -7,13 +7,13 @@ import {
   parseLinkRecords,
   parseLinkTarget,
   parseMentions,
-  parseNullablePath,
   parsePaneLayoutMessage,
   parseSavedCopy,
   parseSearchHits,
   parseSearchQueryArgument,
   parseVaultEntries,
   parseVaultRestore,
+  parseVaultOpen,
   parseWriteRequest,
   parseWriteResult,
 } from "@reader/shared/reader-protocol";
@@ -33,8 +33,8 @@ it("空文件与不存在的磁盘基准有效，但缺失基准和伪字节不�
     expect(() => parseWriteRequest("笔记.md", bytes, invalid)).toThrow();
   }
   for (const invalid of [undefined, false, "", "路径\0.md"])
-    expect(() => parseNullablePath(invalid)).toThrow();
-  expect(parseNullablePath(null)).toBeNull();
+    expect(() => parseVaultOpen({ root: invalid, entries: [] })).toThrow();
+  expect(parseVaultOpen(null)).toBeNull();
 });
 
 it("保存确认严格区分提交、冲突和未知响应，警告不会丢失", () => {
@@ -78,8 +78,9 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
     active: 0,
     split: false,
   };
-  expect(parseVaultRestore({ root: "/笔记", documents })).toEqual({
+  expect(parseVaultRestore({ root: "/笔记", documents, entries: [] })).toEqual({
     root: "/笔记",
+    entries: [],
     documents,
     viewModes: {},
     recentFiles: [],
@@ -89,6 +90,7 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
   expect(
     parseVaultRestore({
       root: "/笔记",
+      entries: [],
       documents: {
         panes: [
           {
@@ -110,6 +112,9 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
     recentFiles: ["c.md", "d.md"],
   });
   expect(parseVaultRestore(null)).toBeNull();
+  expect(parseVaultOpen({ root: "/笔记", entries: [] })).toEqual({ root: "/笔记", entries: [] });
+  expect(() => parseVaultOpen({ root: "/笔记" })).toThrow();
+  expect(() => parseVaultRestore({ root: "/笔记", documents })).toThrow();
   expect(() => parseVaultRestore({ root: "/笔记" })).toThrow();
   const entries = [
     { path: "目录", kind: "directory" },

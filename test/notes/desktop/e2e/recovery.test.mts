@@ -12,6 +12,85 @@ import { CoreClient } from "../../../../modules/notes/packages/desktop/src/main/
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
+test("非活动分栏的保存冲突可以定位并另存，操作始终属于冲突笔记", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nous-split-recovery-"));
+  t.onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const vault = join(root, "vault");
+  const userData = join(root, "state");
+  await Promise.all([mkdir(vault), mkdir(userData)]);
+  await Promise.all([
+    writeFile(join(vault, "左栏.md"), "左栏原文\n"),
+    writeFile(join(vault, "右栏.md"), "右栏原文\n"),
+    writeFile(
+      join(userData, "session.json"),
+      JSON.stringify({
+        vaultRoot: vault,
+        filesCollapsed: true,
+        documents: {
+          panes: [
+            { currentPath: "左栏.md", history: { back: [], forward: [] } },
+            { currentPath: "右栏.md", history: { back: [], forward: [] } },
+          ],
+          active: 0,
+          split: true,
+        },
+      }),
+    ),
+  ]);
+  const executable: unknown = require("electron");
+  if (typeof executable !== "string") throw new Error("缺少 Electron 可执行文件");
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && entry[0] !== "ELECTRON_RENDERER_URL",
+    ),
+  );
+  const app = await electron.launch({
+    executablePath: executable,
+    args: [
+      fileURLToPath(new URL("out/main/index.js", desktop)),
+      `--user-data-dir=${userData}`,
+      "--no-sandbox",
+    ],
+    env,
+  });
+  try {
+    const page = await app.firstWindow();
+    const left = page.locator('[data-pane="0"] .ProseMirror');
+    const right = page.locator('[data-pane="1"] .ProseMirror');
+    await right.waitFor();
+    await left.click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.insertText("，保留这段编辑");
+    await writeFile(join(vault, "左栏.md"), "外部版本\n");
+    await right.click();
+    const feedback = page.getByRole("button", { name: "处理保存问题", exact: true });
+    await feedback.waitFor();
+    expect(await page.locator(".document-name").textContent()).toBe("右栏.md");
+    await feedback.click();
+    const issue = page.getByRole("region", { name: "保存问题：左栏.md", exact: true });
+    await issue.waitFor();
+    await issue.getByRole("button", { name: "前往笔记：左栏.md", exact: true }).click();
+    await expect.poll(() => page.locator(".document-name").textContent()).toBe("左栏.md");
+    await expect
+      .poll(() => left.evaluate((node) => node.contains(document.activeElement)))
+      .toBe(true);
+    await feedback.click();
+    await issue.getByRole("button", { name: "另存为副本", exact: true }).click();
+    await expect.poll(() => page.locator(".document-name").textContent()).toBe("左栏 (副本).md");
+    expect(await readFile(join(vault, "左栏 (副本).md"), "utf8")).toContain("保留这段编辑");
+    expect(await readFile(join(vault, "左栏.md"), "utf8")).toBe("外部版本\n");
+    expect(await readFile(join(vault, "右栏.md"), "utf8")).toBe("右栏原文\n");
+  } finally {
+    const child = app.process();
+    if (child.exitCode === null) {
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      child.kill("SIGKILL");
+      await exited;
+    }
+  }
+});
+
 test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安全另存", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nous-recovery-e2e-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));

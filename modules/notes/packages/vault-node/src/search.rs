@@ -170,16 +170,6 @@ pub fn search_cancel(id: String) -> Result<()> {
     Ok(())
 }
 
-/// 切库开始即终止旧查询；打开失败时原库仍可接受后续新查询。
-pub(super) fn cancel_current() -> Result<()> {
-    if let Some(state) = lock_state()?.as_mut() {
-        if let Some((_, token)) = state.search.take() {
-            token.cancel();
-        }
-    }
-    Ok(())
-}
-
 fn map_hit(hit: nous_vault::SearchHit) -> JsSearchHit {
     JsSearchHit {
         path: hit.path,

@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
 import type { AppApi, AppCommand } from "../../../../../modules/notes/packages/desktop/src/shared/api";
-import type { FileSnapshot, ReaderApi } from "@reader/shared/api";
+import type { FileSnapshot, ReaderApi, WriteResult } from "@reader/shared/api";
 import type { SessionDocuments } from "@reader/shared/session";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
@@ -99,6 +99,7 @@ beforeEach(() => {
   api = createReaderApiMock({
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
+      entries: await api.vaultEntries(),
       documents,
       viewModes: {},
       recentFiles: [],
@@ -160,6 +161,75 @@ async function openInPane(id: number, path: string, text: string): Promise<void>
 }
 
 describe("双栏编辑", () => {
+  it("非活动栏的在途保存发生冲突后仍可见，重试只保存所属笔记", async () => {
+    await start();
+    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
+    flushSync();
+    await openInPane(1, "other.md", "other");
+    const saving = deferred<WriteResult>();
+    vi.mocked(api.fileWrite).mockReturnValueOnce(saving.promise);
+    activatePane(0);
+    await editPane(0, "需要保留的编辑");
+    onCommand("save");
+    await vi.waitFor(() => expect(api.fileWrite).toHaveBeenCalledOnce());
+    activatePane(1);
+    saving.resolve({ status: "conflict", disk: encode("外部版本\n") });
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="处理保存问题"]')).not.toBeNull();
+    });
+    expect(target.querySelector(".document-name")?.textContent).toBe("other.md");
+    expect(target.querySelector(".save-status")?.textContent).toBe("已保存");
+    const issue = target.querySelector<HTMLElement>('[aria-label="保存问题：note.md"]');
+    expect(issue).not.toBeNull();
+    const retry = [...issue!.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "重试保存",
+    )!;
+    retry.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="处理保存问题"]')).toBeNull();
+    });
+    expect(api.fileWrite).toHaveBeenLastCalledWith(
+      "note.md",
+      encode("需要保留的编辑\n"),
+      encode("base\n"),
+    );
+    expect(target.querySelector(".document-name")?.textContent).toBe("other.md");
+    expect(prose(1)).toBe("other");
+  });
+
+  it("进入资料管理被另一栏保存失败阻止时，说明文件名并允许定位该栏", async () => {
+    await start();
+    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
+    flushSync();
+    await openInPane(1, "other.md", "other");
+    await editPane(0, "尚未保存");
+    activatePane(1);
+    vi.mocked(api.fileWrite).mockRejectedValue(new Error("磁盘暂不可写"));
+    [...target.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "资料管理")!
+      .click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".message")?.textContent).toContain("note.md");
+      expect(target.querySelector('[aria-label="处理保存问题"]')).not.toBeNull();
+    });
+    expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false");
+    target.querySelector<HTMLButtonElement>('[aria-label="前往笔记：note.md"]')!.click();
+    flushSync();
+    expect(target.querySelector(".document-name")?.textContent).toBe("note.md");
+    expect(prose(0)).toBe("尚未保存");
+    expect(prose(1)).toBe("other");
+    vi.mocked(api.fileWrite).mockResolvedValue({ status: "saved", warning: null });
+    onCommand("save");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="处理保存问题"]')).toBeNull();
+      expect(target.querySelector(".message")).toBeNull();
+    });
+  });
+
   it("两栏同时打开不同笔记，各自编辑不互相改写", async () => {
     await start();
     target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
