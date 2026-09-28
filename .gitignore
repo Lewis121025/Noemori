@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 target/
+.artifacts/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

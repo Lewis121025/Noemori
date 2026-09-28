@@ -1,0 +1,141 @@
+[package]
+name = "nous-vault"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nous 库内核：磁盘、链接索引与改名事务"
+
+[lints]
+workspace = true
+
+[lib]
+name = "nous_vault"
+path = "src/lib.rs"
+
+[[test]]
+name = "vault_unit_identity_write"
+path = "../../../../test/vault/unit/identity_write.rs"
+
+[[test]]
+name = "vault_unit_index_refresh"
+path = "../../../../test/vault/unit/index_refresh.rs"
+
+[[test]]
+name = "vault_integration_watch"
+path = "../../../../test/vault/integration/watch.rs"
+
+[[test]]
+name = "vault_integration_save_recovery"
+path = "../../../../test/vault/integration/save_recovery.rs"
+
+[[test]]
+name = "vault_integration_path_identity"
+path = "../../../../test/vault/integration/path_identity.rs"
+
+[[test]]
+name = "links_unit_scan"
+path = "../../../../test/links/unit/scan.rs"
+
+[[test]]
+name = "links_unit_resolve"
+path = "../../../../test/links/unit/resolve.rs"
+
+[[test]]
+name = "links_unit_mentions"
+path = "../../../../test/links/unit/mentions.rs"
+
+[[test]]
+name = "links_unit_linkify"
+path = "../../../../test/links/unit/linkify.rs"
+
+[[test]]
+name = "links_unit_note_keys"
+path = "../../../../test/links/unit/note_keys.rs"
+
+[[test]]
+name = "links_unit_graph"
+path = "../../../../test/links/unit/graph.rs"
+
+[[test]]
+name = "links_integration_rename"
+path = "../../../../test/links/integration/rename.rs"
+
+[[test]]
+name = "links_integration_rename_recovery"
+path = "../../../../test/links/integration/rename_recovery.rs"
+
+[[test]]
+name = "links_integration_rename_batch"
+path = "../../../../test/links/integration/rename_batch.rs"
+
+[[test]]
+name = "search_unit_tags"
+path = "../../../../test/search/unit/tags.rs"
+
+[[test]]
+name = "search_unit_headings"
+path = "../../../../test/search/unit/headings.rs"
+
+[[test]]
+name = "search_integration_fulltext"
+path = "../../../../test/search/integration/fulltext.rs"
+
+[[test]]
+name = "search_integration_expr"
+path = "../../../../test/search/integration/expr.rs"
+
+[[test]]
+name = "search_integration_index_sync"
+path = "../../../../test/search/integration/index_sync.rs"
+
+[dev-dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+[[test]]
+name = "vault_unit_entries"
+path = "../../../../test/vault/unit/entries.rs"
+
+[[test]]
+name = "vault_unit_attachments"
+path = "../../../../test/vault/unit/attachments.rs"
+
+[[test]]
+name = "vault_unit_bookmarks"
+path = "../../../../test/vault/unit/bookmarks.rs"
+
+[dependencies]
+markdown = "1.0.0"
+notify = "8.2.0"
+percent-encoding = "2.3.2"
+regex = "1.13.1"
+rusqlite = { version = "0.40.2", features = ["bundled", "functions", "hooks"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tantivy = { version = "0.26.2", default-features = false, features = ["mmap"] }
+tempfile = "3.23.0"
+yaml-rust2 = "0.13"
+
+[[test]]
+name = "search_performance_scale"
+path = "../../../../test/search/performance/scale.rs"
+
+[[test]]
+name = "search_performance_occurrences"
+path = "../../../../test/search/performance/occurrences.rs"
+
+[[test]]
+name = "search_integration_engine"
+path = "../../../../test/search/integration/engine.rs"
+
+[[test]]
+name = "search_integration_paging"
+path = "../../../../test/search/integration/paging.rs"
+
+[[test]]
+name = "vault_performance_files"
+path = "../../../../test/vault/performance/files.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }

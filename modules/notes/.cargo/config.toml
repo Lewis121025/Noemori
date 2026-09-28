@@ -1,0 +1,4 @@
+# Cargo 从执行目录向上查找配置；仓库命令先进入 notes，原生包构建也继承此目录。
+# NAPI 2 的产物查找不读取本配置，vault-node 的构建脚本同时传递 CARGO_TARGET_DIR。
+[build]
+target-dir = ".artifacts/target"

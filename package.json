@@ -4,19 +4,22 @@
   "type": "module",
   "packageManager": "pnpm@12.5.1",
   "scripts": {
-    "dev": "pnpm build:native && pnpm --filter @nous/desktop dev",
-    "build": "pnpm --filter @nous/native build:debug && pnpm --filter @nous/desktop build",
-    "build:native": "pnpm --filter @nous/native build",
+    "dev": "pnpm build:vault-node && pnpm --filter @nous/desktop dev",
+    "build": "pnpm --filter @nous/vault-node build:debug && pnpm --filter @nous/desktop build",
+    "build:vault-node": "pnpm --filter @nous/vault-node build",
     "check": "pnpm --filter @nous/desktop check",
     "lint": "pnpm --filter @nous/desktop lint",
     "test": "pnpm --filter @nous/desktop test",
     "test:core": "pnpm build && pnpm --filter @nous/desktop test:core",
     "test:preview": "pnpm build && pnpm --filter @nous/desktop test:preview",
     "test:performance": "pnpm build && pnpm --filter @nous/desktop test:performance",
-    "test:watch": "vitest"
+    "test:watch": "pnpm --filter @nous/desktop exec vitest --config ../../../../test/vitest.config.ts",
+    "test:rust": "cd modules/notes && cargo test --workspace --locked",
+    "lint:rust": "cd modules/notes && cargo clippy --workspace --all-targets --locked -- -D warnings"
   },
   "devDependencies": {
     "@codemirror/state": "^6.7.5",
+    "@sveltejs/vite-plugin-svelte": "^6.1.4",
     "@types/node": "^24.5.2",
     "playwright-core": "^1.63.0",
     "prettier": "^3.6.2",
@@ -27,7 +30,26 @@
     "prosemirror-search": "^1.1.1",
     "prosemirror-state": "^1.4.4",
     "prosemirror-view": "^1.42.4",
+    "svelte": "^5.38.10",
     "typescript": "^5.9.2",
+    "vite": "^7.1.5",
     "vitest": "^3.2.4"
+  },
+  "prettier": {
+    "singleQuote": false,
+    "semi": true,
+    "trailingComma": "all",
+    "printWidth": 100,
+    "plugins": [
+      "prettier-plugin-svelte"
+    ],
+    "overrides": [
+      {
+        "files": "*.svelte",
+        "options": {
+          "parser": "svelte"
+        }
+      }
+    ]
   }
 }

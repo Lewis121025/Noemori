@@ -1,6 +1,6 @@
 packages:
-  - apps/desktop
-  - crates/nous-napi
+  - modules/notes/packages/desktop
+  - modules/notes/packages/vault-node
 
 allowBuilds:
   electron: true

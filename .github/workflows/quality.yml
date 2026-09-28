@@ -27,12 +27,14 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: modules/notes -> .artifacts/target
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test
-      - run: cargo test --workspace --locked
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: pnpm test:rust
+      - run: pnpm lint:rust
       - run: pnpm build
       - run: pnpm --filter @nous/desktop test:core
       - if: runner.os == 'macOS'

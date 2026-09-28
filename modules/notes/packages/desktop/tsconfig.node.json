@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "types": ["electron-vite/node"]
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "../../../../test/vitest.core.config.ts",
+    "../../../../test/vitest.preview.config.ts",
+    "../../../../test/vitest.performance.config.ts",
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/shared/**/*.ts",
+    "../../../../test/desktop/unit/core-protocol.types.ts",
+    "../../../../test/reader/integration/native/core-native.test.mts",
+    "../../../../test/reader/e2e/*.test.mts",
+    "../../../../test/reader/performance/*.test.mts",
+    "src/features/*/main/**/*.ts",
+    "src/features/*/preload/**/*.ts",
+    "src/features/*/shared/**/*.ts"
+  ]
+}
