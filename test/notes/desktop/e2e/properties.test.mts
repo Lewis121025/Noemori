@@ -10,7 +10,7 @@ import { _electron as electron } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字节保留", async (t) => {
+test("属性与正文分离：隐藏配置，编辑与源码往返保持属性字节", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nous-properties-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -62,7 +62,6 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => { if(message.text().startsWith("frontmatter-")) console.info(message.text()); });
     await page.waitForFunction(
       () =>
         document.querySelector(".document-name")?.textContent === "笔记.md" &&
@@ -72,6 +71,12 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
     const editor = page.locator(".ProseMirror");
     expect(await editor.locator('pre[data-markdown-source="block"]').isVisible()).toBe(false);
     expect(await editor.innerText()).not.toContain("cssclasses");
+    expect(
+      await editor.evaluate((node) => {
+        const title = node.querySelector("h1")!;
+        return title.getBoundingClientRect().top - node.getBoundingClientRect().top;
+      }),
+    ).toBeLessThanOrEqual(24);
     await editor.locator("h1").click();
     await page.keyboard.press("Home");
     await page.keyboard.press("Backspace");
@@ -122,6 +127,8 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
     await expect
       .poll(() => properties.locator(".row .key").allTextContents())
       .toEqual(["cssclasses", "status", "author", "due"]);
+    const beforeBodyEdit = await readFile(join(vault, "笔记.md"), "utf8");
+    const prefix = beforeBodyEdit.slice(0, beforeBodyEdit.indexOf("# 标题"));
 
     await page.keyboard.press("Escape");
     await noteAction(page, "切换阅读视图");
@@ -129,12 +136,10 @@ test("属性面板：行级外科编辑，注释、顺序与嵌套结构逐字�
     await noteAction(page, "退出阅读视图");
     await editor.locator("p").last().click();
     await page.keyboard.press("ControlOrMeta+a");
-    console.info("frontmatter-selection", await editor.evaluate((node) => ({ text: window.getSelection()?.toString(), editable: node.getAttribute("contenteditable"), focus: document.activeElement?.className })));
     await page.keyboard.type("替换正文。");
-    console.info("frontmatter-after-input", await editor.innerText(), await page.locator(".save-status").innerText());
     await page.keyboard.press("ControlOrMeta+s");
     await expect.poll(() => readFile(join(vault, "笔记.md"), "utf8")).toContain("替换正文。");
-    expect(await readFile(join(vault, "笔记.md"), "utf8")).toContain("  - nndl-bilingual");
+    expect((await readFile(join(vault, "笔记.md"), "utf8")).startsWith(prefix)).toBe(true);
     await page.keyboard.press("ControlOrMeta+z");
     await expect.poll(() => editor.innerText()).toContain("正文。");
     await noteAction(page, "切换源码视图");

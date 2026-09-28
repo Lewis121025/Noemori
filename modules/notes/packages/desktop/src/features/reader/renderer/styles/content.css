@@ -26,7 +26,8 @@
 .markdown-content :is(h4, h5, h6) {
   font-size: 17px;
 }
-.markdown-content > :first-child {
+.markdown-content > :first-child,
+.markdown-content > [data-frontmatter] + * {
   margin-top: 0.5rem;
 }
 .markdown-content p {

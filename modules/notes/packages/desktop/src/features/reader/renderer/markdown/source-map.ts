@@ -19,8 +19,8 @@ export type SourceNode = {
     kind: "code" | "inlineCode" | "atom";
     value: string;
   }>;
-  /** 无原始字节的空段：true 为列表首段，trailing 为仅属性文档的正文入口。 */
-  implicit?: boolean | "trailing";
+  /** 无原始字节的空段：leading 为列表首段，trailing 为仅属性文档的正文入口。 */
+  implicit?: "leading" | "trailing";
 };
 type Edit = { start: number; end: number; text: string };
 
@@ -76,7 +76,7 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
       children: [],
       text: [],
       inline: [],
-      implicit: true,
+      implicit: "leading",
     });
   }
   const text: SourceNode["text"] = [];

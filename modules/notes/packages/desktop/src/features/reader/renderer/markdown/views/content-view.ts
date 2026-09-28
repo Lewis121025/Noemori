@@ -17,7 +17,10 @@ import { resolveMediaUrl, type MediaIo } from "../../preview/media";
 import { parseMarkdown } from "../parse";
 import { sliceEmbed } from "../../links/block-anchor";
 import { documentAccess } from "../../editor/read-only";
-import { frontmatterPresentation } from "../../editor/properties/frontmatter-presentation";
+import {
+  frontmatterPresentation,
+  frontmatterSourceView,
+} from "../../editor/properties/frontmatter-presentation";
 import { linkInteraction, type OpenContentLink } from "../../editor/links/link-interaction";
 import { mathNodeViews } from "./math-view";
 import { createHtmlNodeViews } from "./html-view";
@@ -52,6 +55,7 @@ export function createContentNodeViews(
 ): Record<string, NodeViewConstructor> {
   const open = (kind: "wiki" | "md", raw: string) => openLink(kind, raw, from);
   return {
+    markdown_block: frontmatterSourceView,
     list_item: taskItemView,
     ...mathNodeViews,
     ...commentNodeViews,

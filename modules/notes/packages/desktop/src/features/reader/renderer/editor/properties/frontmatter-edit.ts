@@ -45,7 +45,7 @@ type Model = {
  * 找到文档的 YAML frontmatter 块。
  *
  * @param doc 当前文档。
- * @returns 首个子节点是 `---` 开头的源码保留块时给出位置与文本；否则 `null`。
+ * @returns 首个子节点是完整 YAML 属性块时给出位置与文本；否则 `null`。
  */
 export function frontmatterBlock(doc: PmNode): { pos: number; size: number; text: string } | null {
   const first = doc.firstChild;

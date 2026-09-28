@@ -1,11 +1,41 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { Plugin, PluginKey, Selection, TextSelection } from "prosemirror-state";
 import { isHistoryTransaction } from "prosemirror-history";
-import { Decoration, DecorationSet } from "prosemirror-view";
+import { Decoration, DecorationSet, type NodeViewConstructor } from "prosemirror-view";
 import { frontmatterBlock } from "./frontmatter-edit";
 
 /** 属性面板的显式写入许可；正文输入不得修改隐藏的 YAML，撤销仍由统一历史处理。 */
 export const frontmatterEditKey = new PluginKey("frontmatter-edit");
+
+/**
+ * 属性由不透明节点视图承载，浏览器重新解析相邻正文时直接复用原内容，保留 CRLF。
+ * 普通源码保留块继续提供 contentDOM，保持原有就地编辑行为。
+ * @param node 当前源码保留块；更新只接受同类节点。
+ * @param decorations 属性呈现插件标记的只读展示边界。
+ * @returns 属性块无可编辑 DOM，普通源码块保留文本编辑入口。
+ */
+export const frontmatterSourceView: NodeViewConstructor = (node, _view, _getPos, decorations) => {
+  const opaque = decorations.some((decoration) => decoration.spec.frontmatter === true);
+  const dom = document.createElement("pre");
+  dom.dataset.markdownSource = "block";
+  const code = document.createElement("code");
+  dom.append(code);
+  if (opaque) code.textContent = node.textContent;
+  return {
+    dom,
+    ...(opaque ? {} : { contentDOM: code }),
+    update(next, nextDecorations) {
+      if (
+        next.type !== node.type ||
+        nextDecorations.some((decoration) => decoration.spec.frontmatter === true) !== opaque
+      )
+        return false;
+      if (opaque) code.textContent = next.textContent;
+      return true;
+    },
+    ignoreMutation: () => opaque,
+  };
+};
 
 /**
  * 将排版选区限定到可见正文，保留选区方向；源码模式继续访问完整文件。
@@ -34,12 +64,17 @@ export function frontmatterPresentation(): Plugin {
         return block === null
           ? null
           : DecorationSet.create(state.doc, [
-              Decoration.node(0, block.size, {
-                hidden: "",
-                "aria-hidden": "true",
-                contenteditable: "false",
-                "data-frontmatter": "",
-              }),
+              Decoration.node(
+                0,
+                block.size,
+                {
+                  hidden: "",
+                  "aria-hidden": "true",
+                  contenteditable: "false",
+                  "data-frontmatter": "",
+                },
+                { frontmatter: true },
+              ),
             ]);
       },
     },
@@ -48,7 +83,6 @@ export function frontmatterPresentation(): Plugin {
         return true;
       const block = frontmatterBlock(state.doc);
       const after = tr.doc.firstChild;
-      if (block !== null && !(after !== null && state.doc.firstChild?.eq(after) === true)) console.info("frontmatter-blocked", JSON.stringify({selection: state.selection.toJSON(), steps: tr.steps.map((step) => { const value = step.toJSON(); return {type: value.stepType, from: value.from, to: value.to}; }), beforeSize: state.doc.firstChild?.nodeSize, afterSize: after?.nodeSize}));
       // 正文退格、剪切和跨边界替换不能顺带删掉或改写属性；面板操作显式声明意图。
       return block === null || (after !== null && state.doc.firstChild?.eq(after) === true);
     },
