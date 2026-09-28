@@ -3,9 +3,22 @@ import {
   libraryEntryKind,
   libraryExcerpt,
   untitledNotePath,
+  untitledWhiteboardPath,
 } from "@reader/renderer/library/library";
 
 describe("资料管理与直接记录", () => {
+  it("白板创建沿用同一套文件、目录和大小写冲突规则", () => {
+    expect(
+      untitledWhiteboardPath(
+        [
+          { path: "资料/白板.nousboard", kind: "file" },
+          { path: "资料/白板 2.NOUSBOARD", kind: "directory" },
+        ],
+        "资料",
+      ),
+    ).toBe("资料/白板 3.nousboard");
+    expect(untitledWhiteboardPath([], "")).toBe("白板.nousboard");
+  });
   it("新笔记避开文件与文件夹占用，沿用当前目录而不覆盖已有内容", () => {
     expect(
       untitledNotePath(

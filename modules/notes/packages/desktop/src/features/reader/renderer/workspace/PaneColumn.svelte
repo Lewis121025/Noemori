@@ -57,6 +57,7 @@
 
 <section
   class="main"
+  class:whiteboard-pane={doc.content?.kind === "whiteboard"}
   class:active={workspace.activePane.id === pane.id}
   role="group"
   tabindex="-1"
@@ -77,7 +78,10 @@
       onclick={() => void workspace.closePane(pane.id)}>×</button
     >
   {/if}
-  <div class:document-body={doc.content?.kind === "markdown"}>
+  <div
+    class:document-body={doc.content?.kind === "markdown"}
+    class:whiteboard-body={doc.content?.kind === "whiteboard"}
+  >
     {#if doc.path !== null}
       <DocumentSurface {workspace} {pane} {mediaIo} />
       {#if scrollElement !== undefined}
@@ -139,6 +143,18 @@
 </section>
 
 <style>
+  .main.whiteboard-pane {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .whiteboard-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .main:focus {
     outline: none;
   }

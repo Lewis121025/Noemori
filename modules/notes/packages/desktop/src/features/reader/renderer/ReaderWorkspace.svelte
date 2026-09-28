@@ -11,7 +11,8 @@
   import CommandPalette from "./workspace/CommandPalette.svelte";
   import GraphDialog from "./graph/GraphDialog.svelte";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
-  import { untitledNotePath } from "./library/library";
+  import { untitledNotePath, untitledWhiteboardPath } from "./library/library";
+  import { emptyWhiteboard, serializeWhiteboard } from "./whiteboard/model";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
   import { createBrowserMediaIo } from "./preview/media";
   import { SIDEBAR_LAYOUT, type ReaderApi, type ReaderSpace } from "../shared/api";
@@ -37,7 +38,7 @@
   let space = $state<ReaderSpace>("writing");
   let readingSpace: HTMLDivElement | undefined = $state();
   let changingSpace = $state(false);
-  let creatingNote = false;
+  let creatingDocument = false;
   let layoutWrites = Promise.resolve();
   let narrow = $state(false);
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
@@ -59,6 +60,8 @@
       canEdit: space === "writing" && doc.canEdit,
       reading: workspace.viewMode === "reading",
       markdown: doc.content?.kind === "markdown",
+      source: workspace.viewMode === "source",
+      whiteboard: doc.content?.kind === "whiteboard",
       canBack: space === "writing" && workspace.history.canBack,
       canForward: space === "writing" && workspace.history.canForward,
     };
@@ -105,7 +108,14 @@
         break;
       case "new-note":
         if (space === "library") fileList?.beginCreate("file");
-        else void startNote();
+        else void startDocument("note");
+        break;
+      case "new-whiteboard":
+        void startDocument("whiteboard");
+        break;
+      case "insert-whiteboard":
+        prepareDocumentAction();
+        workspace.navigation.insertWhiteboard();
         break;
       case "new-folder":
         void showLibrary().then(() => {
@@ -246,19 +256,29 @@
     if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) await showLibrary();
   }
 
-  async function startNote(): Promise<void> {
-    if (creatingNote || workspace.isComposing) return;
-    creatingNote = true;
+  /** 笔记与白板共用创建门禁、路径冲突规则和焦点交接，只在初始内容上分流。 */
+  async function startDocument(kind: "note" | "whiteboard"): Promise<void> {
+    if (creatingDocument || workspace.isComposing) return;
+    creatingDocument = true;
     try {
       if (workspace.vaultRoot === null) await workspace.openVault("default");
       if (workspace.vaultRoot === null) return;
       const parent = doc.path === null ? "" : parentDirectory(doc.path);
-      const path = untitledNotePath(workspace.entries, parent);
-      const error = await workspace.createEntry(path, "file");
+      const path =
+        kind === "note"
+          ? untitledNotePath(workspace.entries, parent)
+          : untitledWhiteboardPath(workspace.entries, parent);
+      const error = await workspace.createEntry(
+        path,
+        "file",
+        kind === "whiteboard"
+          ? new TextEncoder().encode(serializeWhiteboard(emptyWhiteboard()))
+          : undefined,
+      );
       if (error !== null) workspace.report(error);
       else finishFileNavigation();
     } finally {
-      creatingNote = false;
+      creatingDocument = false;
     }
   }
 
@@ -389,7 +409,7 @@
     onSearch={() => {
       picker = "switcher";
     }}
-    onNewNote={() => void startNote()}
+    onNewNote={() => void startDocument("note")}
     onOpenVault={() => void openVault()}
     onToggleFiles={toggleFilesPane}
     onRename={beginRename}
@@ -429,7 +449,7 @@
           narrowInert={narrow && !filesCollapsed}
           {filesCollapsed}
           onToggleFiles={toggleFilesPane}
-          onNewNote={() => void startNote()}
+          onNewNote={() => void startDocument("note")}
           onOpenVault={() => void openVault()}
         />
       {/each}

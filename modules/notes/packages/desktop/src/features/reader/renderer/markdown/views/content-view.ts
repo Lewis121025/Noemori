@@ -36,6 +36,8 @@ import {
   footnoteNavigation,
 } from "./dialect-view";
 import "../../styles/content.css";
+import { isWhiteboardPath } from "../../whiteboard/model";
+import { mountWhiteboardPreview } from "../../whiteboard/embed-preview";
 
 /**
  * 装配完整内容渲染器；资源与链接始终以该表面的笔记路径为基准。
@@ -72,8 +74,11 @@ export function createContentNodeViews(
 /** 嵌入嵌套上限（宿主文档的直接嵌入算第 1 层）。 */
 export const EMBED_DEPTH_LIMIT = 3;
 
-/** 读取结果：取消为 `null`，失败带给界面的短句，成功是待渲染文档与已解析路径。 */
-type LoadedEmbed = { doc: PmNode; path: string } | { message: string };
+/** 取消为 null，失败携带说明；白板只解析路径，由自己的预览生命周期先订阅再读取。 */
+type LoadedEmbed =
+  | { kind: "markdown"; doc: PmNode; path: string }
+  | { kind: "whiteboard"; path: string }
+  | { message: string };
 
 /** 一次只读笔记渲染的目标与上下文；嵌入块与悬停预览共用。 */
 export type NotePreviewRequest = {
@@ -105,38 +110,51 @@ export function mountNotePreview(
 ): { destroy: () => void } {
   let view: EditorView | null = null;
   let cancelled = false;
-  void loadEmbed(request, () => cancelled).then((loaded) => {
-    if (loaded === null || cancelled) return;
-    if ("message" in loaded) {
-      body.textContent = loaded.message;
-      return;
-    }
-    body.textContent = "";
-    view = new EditorView(body, {
-      // 悬停事件会冒泡到宿主；路径归属必须留在各自的内容根节点上。
-      attributes: { "data-content-path": loaded.path },
-      state: EditorState.create({
-        doc: loaded.doc,
-        plugins: [
-          documentAccess(true),
-          frontmatterPresentation(),
-          linkInteraction((kind, raw) => request.openLink(kind, raw, loaded.path)),
-          calloutRevealPlugin(),
-          footnoteNavigation(),
-        ],
-      }),
-      nodeViews: createContentNodeViews(
-        loaded.path,
-        request.openLink,
-        request.io,
-        request.depth + 1,
-        [...request.chain, loaded.path],
-      ),
+  let boardPreview: { destroy: () => void } | null = null;
+  void loadEmbed(request, () => cancelled)
+    .then((loaded) => {
+      if (loaded === null || cancelled) return;
+      if ("message" in loaded) {
+        body.textContent = loaded.message;
+        return;
+      }
+      body.textContent = "";
+      if (loaded.kind === "whiteboard") {
+        boardPreview = mountWhiteboardPreview(body, loaded.path, request.io, () =>
+          request.openLink(request.kind, request.target, request.from),
+        );
+        return;
+      }
+      view = new EditorView(body, {
+        // 悬停事件会冒泡到宿主；路径归属必须留在各自的内容根节点上。
+        attributes: { "data-content-path": loaded.path },
+        state: EditorState.create({
+          doc: loaded.doc,
+          plugins: [
+            documentAccess(true),
+            frontmatterPresentation(),
+            linkInteraction((kind, raw) => request.openLink(kind, raw, loaded.path)),
+            calloutRevealPlugin(),
+            footnoteNavigation(),
+          ],
+        }),
+        nodeViews: createContentNodeViews(
+          loaded.path,
+          request.openLink,
+          request.io,
+          request.depth + 1,
+          [...request.chain, loaded.path],
+        ),
+      });
+    })
+    .catch((error: unknown) => {
+      if (!cancelled)
+        body.textContent = `无法创建预览：${error instanceof Error ? error.message : String(error)}`;
     });
-  });
   return {
     destroy() {
       cancelled = true;
+      boardPreview?.destroy();
       view?.destroy();
       view = null;
     },
@@ -212,13 +230,18 @@ async function loadEmbed(
     if (cancelled()) return null;
     if (path === null) return { message: "无法嵌入：目标不存在或同名歧义" };
     if (chain.includes(path)) return { message: "检测到循环嵌入，已停止展开；点击标题打开原文" };
+    if (isWhiteboardPath(path)) {
+      if (anchor !== null && anchor !== "")
+        return { message: "白板暂不支持局部锚点，请打开完整白板" };
+      return { kind: "whiteboard", path };
+    }
     const bytes = await io.readFile(path);
     if (cancelled()) return null;
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     const doc = sliceEmbed(parseMarkdown(text), anchor);
     if (cancelled()) return null;
     if (doc === null) return { message: anchor?.startsWith("^") ? "未找到块" : "未找到标题" };
-    return { doc, path };
+    return { kind: "markdown", doc, path };
   } catch {
     return cancelled() ? null : { message: "无法嵌入此笔记" };
   }

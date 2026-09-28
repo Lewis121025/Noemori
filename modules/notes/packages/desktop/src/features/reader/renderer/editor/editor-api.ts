@@ -11,25 +11,36 @@ import type {
 import type { EditorSnapshot } from "../markdown/source-session";
 import type { EditorPositionApi } from "./editor-position";
 
-/** 两种文本表面的公共契约；导航只依赖快照、定位与交互能力，不依赖具体编辑器。 */
-export type TextEditorApi = EditorPositionApi & {
+/** 所有可编辑表面共有的保存与历史契约，不要求内容具有文本位置。 */
+export type ContentEditorApi = {
   /** 操作所属文档的历史；焦点属于普通输入框时返回 false，由输入框处理。 */
   history: (action: HistoryAction) => boolean;
   /** 响应式读取历史可用性；焦点属于普通输入框时返回 null。 */
   historyAvailability: () => HistoryAvailability | null;
-  /** 将键盘焦点交给文本表面，保留已有选区。 */
+  /** 将键盘焦点交给当前内容表面，保留已有选区。 */
   focus: () => void;
-  /** 打开文内查找并聚焦查询输入，不改变文档选区。 */
-  openSearch: () => void;
-  /** 获取当前内容的字节快照与修订号，保留源码格式；无法安全映射时抛错。 */
+  /** 获取当前内容的字节快照与修订号；无法安全序列化时抛错，不生成替代内容。 */
   snapshot: () => EditorSnapshot;
-  /**
-   * 选中经过内容哈希核对的搜索范围；编辑版本变化或无法精确映射时抛错，保留原选区。
-   * @param location 索引返回的 UTF-8 范围。
-   * @param snapshot 导航器已核对内容哈希的编辑快照。
-   */
-  jumpToSearch: (location: SearchLocation, snapshot: EditorSnapshot) => void;
 };
+
+/** 白板只提供内容快照与历史，不伪造文本搜索或源码位置能力。 */
+export type WhiteboardEditorApi = ContentEditorApi & {
+  /** 离开文档前把尚未抬笔的输入提交为完整事务；失败抛出并阻止离开。 */
+  finishInput: () => void;
+};
+
+/** 文本表面额外提供源码位置和查找，不将具体编辑器实例暴露给导航。 */
+export type TextEditorApi = ContentEditorApi &
+  EditorPositionApi & {
+    /** 打开文内查找并聚焦查询输入，不改变文档选区。 */
+    openSearch: () => void;
+    /**
+     * 选中经过内容哈希核对的搜索范围；编辑版本变化或无法精确映射时抛错，保留原选区。
+     * @param location 索引返回的 UTF-8 范围。
+     * @param snapshot 导航器已核对内容哈希的编辑快照。
+     */
+    jumpToSearch: (location: SearchLocation, snapshot: EditorSnapshot) => void;
+  };
 
 /**
  * Markdown 文档表面：普通正文和就地源码共用历史，支持附件、大纲与引用导航。
@@ -38,6 +49,8 @@ export type TextEditorApi = EditorPositionApi & {
 export type MarkdownEditorApi = TextEditorApi & {
   /** 从当前文档选区打开附件选择器，取消不改动正文。 */
   openAttachments: () => void;
+  /** 在当前正文位置创建独立白板并插入引用，复用附件异步插入与保存门禁。 */
+  insertWhiteboard: () => void;
   /** 等待附件导入与引用插入；失败返回 false，必须先重试或关闭失败提示。 */
   settleAttachments: () => Promise<boolean>;
   /** 把选区移到标题内，并把该标题滚到阅读区顶部。 */

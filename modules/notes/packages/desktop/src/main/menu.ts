@@ -45,6 +45,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
       label: "文件",
       submenu: [
         command("new-note"),
+        command("new-whiteboard"),
         command("new-folder"),
         command("open-vault"),
         { type: "separator" },
@@ -63,6 +64,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
         { role: "paste", label: "粘贴" },
         { role: "selectAll", label: "全选" },
         command("insert-attachment"),
+        command("insert-whiteboard"),
         { type: "separator" },
         command("find"),
         command("find-files"),

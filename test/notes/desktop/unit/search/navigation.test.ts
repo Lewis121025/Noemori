@@ -45,6 +45,7 @@ describe("搜索导航时序", () => {
     const surface: MarkdownEditorApi = {
       ...api,
       openAttachments: () => {},
+      insertWhiteboard: () => {},
       settleAttachments: async () => true,
       jumpTo: () => {},
       jumpToMention: jump,

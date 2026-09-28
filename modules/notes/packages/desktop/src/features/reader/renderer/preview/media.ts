@@ -12,6 +12,8 @@ export type MediaIo = {
   resolveLink: (from: string, raw: string, kind: MediaKind) => Promise<string | null>;
   readFile: (rel: string) => Promise<Uint8Array>;
   createUrl: (bytes: Uint8Array, mime: string) => string;
+  /** 只读嵌入按目标文件刷新；测试或静态预览可不提供监听。 */
+  watchFile?: (path: string, changed: () => void) => () => void;
 };
 
 /**
@@ -137,7 +139,10 @@ export async function resolveMediaUrl(
  * @param api 由阅读器入口注入的文件与链接能力。
  * @returns 资源访问接口；解析与读取失败由调用方处理。
  */
-export function createBrowserMediaIo(api: Pick<ReaderApi, "linksResolve" | "fileRead">): MediaIo {
+export function createBrowserMediaIo(
+  api: Pick<ReaderApi, "linksResolve" | "fileRead"> &
+    Partial<Pick<ReaderApi, "subscribeVaultChanged">>,
+): MediaIo {
   return {
     // 媒体加载只认唯一解析；歧义与死链按不可加载处理，锚点对媒体无意义。
     resolveLink: async (from, raw, kind) => {
@@ -145,6 +150,10 @@ export function createBrowserMediaIo(api: Pick<ReaderApi, "linksResolve" | "file
       return target.status === "resolved" ? target.path : null;
     },
     readFile: (rel) => api.fileRead(rel),
+    watchFile: (path, changed) =>
+      api.subscribeVaultChanged?.((event) => {
+        if (event.paths.includes(path)) changed();
+      }) ?? (() => {}),
     createUrl: (bytes, mime) => {
       const copy = new Uint8Array(bytes.byteLength);
       copy.set(bytes);

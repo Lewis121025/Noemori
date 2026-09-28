@@ -1,5 +1,5 @@
 import type { FileSnapshot, ReaderApi, SavedCopy, WriteResult } from "../../shared/api";
-import { readFileContent, type FileContent } from "./file-content";
+import { isEditableContent, readFileContent, type FileContent } from "./file-content";
 import { bytesEqual } from "./reload";
 import { bytesForSave, commitSuccessfulWrite } from "./save";
 import type { EditorSnapshot } from "../markdown/source-session";
@@ -71,7 +71,7 @@ export class ReaderDocument {
   }
   /** 附件不能进入保存流程。 */
   get canEdit() {
-    return this.loaded?.kind === "markdown" || this.loaded?.kind === "text";
+    return isEditableContent(this.loaded);
   }
 
   /** 清空文档并使旧异步结果失效；不写磁盘或会话。 */
@@ -97,7 +97,7 @@ export class ReaderDocument {
     if (bytes === null) throw new Error("文件已不存在");
     const baseBytes = snapshot.draft?.base ?? bytes;
     const baseContent = readFileContent(path, baseBytes);
-    const editable = baseContent.kind === "markdown" || baseContent.kind === "text";
+    const editable = isEditableContent(baseContent);
     // 磁盘变为二进制时仍保留有效文本草稿；旧版本误建的附件草稿不参与编辑。
     if (!editable) bytes = snapshot.disk ?? baseBytes;
     let content = bytes === baseBytes ? baseContent : readFileContent(path, bytes);
@@ -140,9 +140,10 @@ export class ReaderDocument {
     } else if (disk === null) {
       this.clear();
     } else if (this.current !== null && !bytesEqual(disk, this.baseline)) {
+      const content = readFileContent(this.current, disk);
       this.version += 1;
       this.baseline = disk;
-      this.loaded = readFileContent(this.current, disk);
+      this.loaded = content;
     }
   }
 

@@ -519,7 +519,7 @@ export class ReaderPane {
     this.autosave.dispose();
     let savedPath: string | null = null;
     try {
-      if (!(await this.navigation.settleAttachments())) {
+      if (!(await this.navigation.settleEditing())) {
         this.host.report("附件尚未完成导入，请重试剩余附件，或关闭附件错误提示后再另存。");
         return;
       }
@@ -567,7 +567,7 @@ export class ReaderPane {
 
   /** 附件结算 + 保存冲刷 + 脏检查；调用方须已持有门禁。 */
   async settleForLeave(): Promise<boolean> {
-    if (!(await this.navigation.settleAttachments())) {
+    if (!(await this.navigation.settleEditing())) {
       this.host.report("附件尚未完成导入，请重试剩余附件，或关闭附件错误提示后再离开。");
       return false;
     }

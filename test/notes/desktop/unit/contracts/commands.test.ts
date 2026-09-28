@@ -26,6 +26,8 @@ const ready: CommandContext = {
   canEdit: true,
   reading: false,
   markdown: true,
+  source: false,
+  whiteboard: false,
   canBack: true,
   canForward: true,
 };
@@ -93,6 +95,8 @@ describe("可用性门禁", () => {
       canEdit: false,
       reading: false,
       markdown: false,
+      source: false,
+      whiteboard: false,
       canBack: false,
       canForward: false,
     };
@@ -104,12 +108,17 @@ describe("可用性门禁", () => {
       "open-vault",
       "open-library",
       "new-note",
+      "new-whiteboard",
       "toggle-files",
       "toggle-split",
     ]);
   });
 
   it("文档相关命令随文档状态开关", () => {
+    expect(commandAvailable("insert-whiteboard", ready)).toBe(true);
+    expect(commandAvailable("insert-whiteboard", { ...ready, source: true })).toBe(false);
+    expect(commandAvailable("insert-whiteboard", { ...ready, reading: true })).toBe(false);
+    expect(commandAvailable("find", { ...ready, whiteboard: true })).toBe(false);
     expect(commandAvailable("save", ready)).toBe(true);
     expect(commandAvailable("save", { ...ready, canEdit: false })).toBe(false);
     expect(commandAvailable("toggle-source", { ...ready, markdown: false })).toBe(false);

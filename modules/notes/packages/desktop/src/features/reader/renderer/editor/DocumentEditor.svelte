@@ -56,6 +56,7 @@
   import { bodySelection, frontmatterPresentation } from "./properties/frontmatter-presentation";
   import { createAttachmentEditing, type AttachmentProgress } from "./attachments/attachments";
   import type { AttachmentImporter } from "../../shared/attachments";
+  import { emptyWhiteboard, serializeWhiteboard } from "../whiteboard/model";
   import type { LinkKind, NoteKeys } from "../../shared/api";
   import {
     listDocBlocks,
@@ -506,6 +507,14 @@
         focus: () => focusDocument(created),
         openSearch,
         openAttachments,
+        insertWhiteboard: () => {
+          if (!attachmentEditing.prepare(created)) return;
+          const file = new File([serializeWhiteboard(emptyWhiteboard())], "白板.nousboard", {
+            type: "application/json",
+          });
+          void attachmentEditing.insertFiles(created, [file]);
+          created.focus();
+        },
         settleAttachments: attachmentEditing.settle,
         snapshot: () => session.snapshot(created.state.doc),
         jumpTo: (pos) => {

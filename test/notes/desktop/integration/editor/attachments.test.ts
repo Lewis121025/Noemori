@@ -43,6 +43,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("在段落中间插入白板会建立块级引用，撤销不删除独立文件", async () => {
+  const { view, editing, importer, save } = start();
+  const original = view.state.doc;
+  expect(editing.prepare(view)).toBe(true);
+  await editing.insertFiles(view, [file("白板.nousboard")]);
+  expect(importer).toHaveBeenCalledOnce();
+  expect(save()).toContain("![[资料/attachments/白板.nousboard]]");
+  expect(parseMarkdown(save().slice(1)).eq(view.state.doc)).toBe(true);
+  expect(undo(view.state, view.dispatch)).toBe(true);
+  expect(view.state.doc.eq(original)).toBe(true);
+});
+
 it("阅读态不启动附件导入；已开始的导入在切换后保留文件并报告未插入引用", async () => {
   const { view, editing, importer, report, save } = start();
   const original = save();

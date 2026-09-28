@@ -26,6 +26,8 @@ export const READER_COMMANDS = [
   { id: "open-vault", label: "打开笔记库…", shortcut: cmdShift("o") },
   { id: "open-library", label: "资料管理", shortcut: cmdShift("l") },
   { id: "new-note", label: "新建笔记", shortcut: cmd("n") },
+  { id: "new-whiteboard", label: "新建白板", shortcut: null },
+  { id: "insert-whiteboard", label: "插入白板", shortcut: null },
   { id: "new-folder", label: "新建文件夹", shortcut: cmdShift("n") },
   { id: "save", label: "保存", shortcut: cmd("s") },
   { id: "insert-attachment", label: "插入附件…", shortcut: cmdShift("i") },
@@ -129,6 +131,10 @@ export type CommandContext = {
   readonly reading: boolean;
   /** 活动栏文档是 Markdown。 */
   readonly markdown: boolean;
+  /** 活动栏正在编辑 Markdown 源码，块级插入命令由排版表面提供。 */
+  readonly source: boolean;
+  /** 白板没有文本查找入口。 */
+  readonly whiteboard: boolean;
   /** 活动栏阅读栈可后退。 */
   readonly canBack: boolean;
   /** 活动栏阅读栈可前进。 */
@@ -146,6 +152,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "open-vault":
     case "open-library":
     case "new-note":
+    case "new-whiteboard":
     case "toggle-files":
     case "toggle-split":
       return true;
@@ -159,7 +166,10 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
       return context.canEdit;
     case "insert-attachment":
       return context.canEdit && context.markdown && !context.reading;
+    case "insert-whiteboard":
+      return context.canEdit && context.markdown && !context.reading && !context.source;
     case "find":
+      return context.hasDocument && !context.whiteboard;
     case "rename-file":
     case "bookmark-file":
       return context.hasDocument;

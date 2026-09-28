@@ -9,7 +9,12 @@ import type {
   SearchHit,
   SearchMatch,
 } from "../../shared/api";
-import type { CodeEditorApi, MarkdownEditorApi, TextEditorApi } from "../editor/editor-api";
+import type {
+  CodeEditorApi,
+  MarkdownEditorApi,
+  TextEditorApi,
+  WhiteboardEditorApi,
+} from "../editor/editor-api";
 import { mentionOccurrenceIndex } from "../links/backlinks";
 import { normalizeHeadingText } from "../links/heading-anchor";
 import { buildOutlineTree, outlineEquals, type OutlineItem } from "./outline";
@@ -52,6 +57,7 @@ export class ReaderNavigation {
   private jumpGeneration = 0;
   private markdown = $state.raw<MarkdownEditorApi | null>(null);
   private code = $state.raw<CodeEditorApi | null>(null);
+  private whiteboard = $state.raw<WhiteboardEditorApi | null>(null);
   private markdownEpoch = -1;
   private codeEpoch = -1;
   private restoring: PositionRestore | null = null;
@@ -61,12 +67,22 @@ export class ReaderNavigation {
 
   /** 当前编辑器接管历史动作；没有编辑器或焦点属于普通输入框时交还外壳。 */
   applyHistory(action: HistoryAction): boolean {
-    return this.markdown?.history(action) ?? this.code?.history(action) ?? false;
+    return (
+      this.markdown?.history(action) ??
+      this.code?.history(action) ??
+      this.whiteboard?.history(action) ??
+      false
+    );
   }
 
   /** 当前已挂载输入表面的历史投影；null 表示交由外壳查询原生控件。 */
   get historyAvailability(): HistoryAvailability | null {
-    return this.markdown?.historyAvailability() ?? this.code?.historyAvailability() ?? null;
+    return (
+      this.markdown?.historyAvailability() ??
+      this.code?.historyAvailability() ??
+      this.whiteboard?.historyAvailability() ??
+      null
+    );
   }
 
   /** 打开活动 Markdown 文档的附件选择器；其他预览表面没有此动作。 */
@@ -74,8 +90,14 @@ export class ReaderNavigation {
     this.markdown?.openAttachments();
   }
 
-  /** 离开编辑器前等待附件引用进入文档，供保存门禁获取最终快照。 */
-  settleAttachments(): Promise<boolean> {
+  /** 在 Markdown 当前选区创建白板；其他表面不执行插入。 */
+  insertWhiteboard(): void {
+    this.markdown?.insertWhiteboard();
+  }
+
+  /** 离开编辑器前提交未完成笔迹并等待附件引用，供保存门禁获取完整快照。 */
+  settleEditing(): Promise<boolean> {
+    this.whiteboard?.finishInput();
     return this.markdown?.settleAttachments() ?? Promise.resolve(true);
   }
 
@@ -217,7 +239,13 @@ export class ReaderNavigation {
   /** 文件操作完成后恢复写作焦点；只操作当前已挂载的编辑器，不改变选区或滚动位置。 */
   focusEditor = (): void => {
     if (this.markdown !== null) this.markdown.focus();
-    else this.code?.focus();
+    else if (this.code !== null) this.code.focus();
+    else this.whiteboard?.focus();
+  };
+
+  /** 白板单独注册快照与历史，不进入源码定位通道。 */
+  registerWhiteboard = (api: WhiteboardEditorApi | null): void => {
+    this.whiteboard = api;
   };
 
   /** 注册与注销时不清目录，目录清理由编辑器 onOutline 负责，避免挂载时状态竞争。 */
@@ -297,6 +325,7 @@ export class ReaderNavigation {
   snapshot = (): EditorSnapshot => {
     if (this.markdown !== null) return this.markdown.snapshot();
     if (this.code !== null) return this.code.snapshot();
+    if (this.whiteboard !== null) return this.whiteboard.snapshot();
     throw new Error(
       this.document.content?.kind === "markdown" ? "文档编辑器尚未就绪" : "文本编辑器尚未就绪",
     );

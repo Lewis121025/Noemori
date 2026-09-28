@@ -5,6 +5,7 @@
   import { libraryEntryKind, libraryExcerpt } from "./library";
   import ImagePreview from "../preview/ImagePreview.svelte";
   import PdfPreview from "../preview/PdfPreview.svelte";
+  import WhiteboardPreview from "../whiteboard/WhiteboardPreview.svelte";
 
   let {
     entry,
@@ -97,6 +98,7 @@
     {:else if error}<p role="alert">无法预览：{error}</p>
     {:else if content?.kind === "image"}<ImagePreview path={entry.path} bytes={content.bytes} />
     {:else if content?.kind === "pdf"}<PdfPreview bytes={content.bytes} compact />
+    {:else if content?.kind === "whiteboard"}<WhiteboardPreview board={content.board} />
     {:else if content?.kind === "markdown"}
       <div class="excerpt">
         {#each excerpt as paragraph, index (index)}<p>

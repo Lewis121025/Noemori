@@ -1,0 +1,275 @@
+import {
+  BOARD_COORDINATE_LIMIT,
+  WhiteboardHistory,
+  type InkPoint,
+  type WhiteboardDocument,
+} from "./model";
+import {
+  DEFAULT_MIN_SCALE,
+  erasedStrokes,
+  inkBounds,
+  insideBounds,
+  lassoSelection,
+  toWorld,
+  translateViewport,
+  zoomAt,
+  type BoardViewport,
+  type InkBounds,
+} from "./geometry";
+
+type Gesture =
+  | { kind: "ink"; points: InkPoint[] }
+  | { kind: "move"; start: InkPoint; dx: number; dy: number }
+  | { kind: "pan"; start: InkPoint; view: BoardViewport }
+  | { kind: "selected" };
+
+function validateSample(point: InkPoint): void {
+  if (
+    ![point.x, point.y, point.pressure].every(Number.isFinite) ||
+    point.pressure < 0 ||
+    point.pressure > 1
+  )
+    throw new Error("白板输入包含无效坐标或压力");
+}
+
+/**
+ * 单指针输入状态机：预览与文档事务分离，落笔完成才提交一次历史。
+ * 坐标参数均为画布内屏幕坐标；组件负责指针捕获、定时器和键盘事件。
+ */
+export class WhiteboardInput {
+  private readonly history: WhiteboardHistory;
+  private camera: BoardViewport = { x: 0, y: 0, scale: 1 };
+  private minimumScale = DEFAULT_MIN_SCALE;
+  private selected = new Set<string>();
+  private gesture: Gesture | null = null;
+
+  /**
+   * @param document 已读取的白板；构造时重新校验并建立不可变快照。
+   * @param changed 同步画面通知；true 表示已提交内容事务，需要保存。回调应不抛错。
+   * @throws 初始文档违反格式契约时拒绝创建输入会话。
+   */
+  constructor(
+    document: WhiteboardDocument,
+    private readonly changed: (contentChanged: boolean) => void,
+  ) {
+    this.history = new WhiteboardHistory(document);
+  }
+
+  /** 当前不可变内容；外部不能通过历史对象绕过修改通知。 */
+  get document(): WhiteboardDocument {
+    return this.history.document;
+  }
+  /** 已提交内容的递增修订号，预览和相机移动不增加修订。 */
+  get revision(): number {
+    return this.history.revision;
+  }
+  /** 当前是否存在可撤销的内容事务。 */
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+  /** 当前是否存在可重做的内容事务。 */
+  get canRedo(): boolean {
+    return this.history.canRedo;
+  }
+
+  /** 当前相机；移动相机不会修改文档或进入撤销栈。 */
+  get viewport(): BoardViewport {
+    return this.camera;
+  }
+  /** 临时笔迹，尚未进入文档；取消手势可以直接丢弃。 */
+  get points(): readonly InkPoint[] {
+    return this.gesture?.kind === "ink" ? this.gesture.points : [];
+  }
+  /** 当前选择的稳定身份。 */
+  get selection(): ReadonlySet<string> {
+    return this.selected;
+  }
+  /** 拖动预览偏移，提交前不改原始坐标。 */
+  get displacement(): { x: number; y: number } {
+    return this.gesture?.kind === "move"
+      ? { x: this.gesture.dx, y: this.gesture.dy }
+      : { x: 0, y: 0 };
+  }
+  /** 当前选择范围，不包含拖动预览偏移。 */
+  get selectionBounds(): InkBounds | null {
+    return inkBounds(this.history.document.strokes.filter((s) => this.selected.has(s.id)));
+  }
+  /** 是否有尚未结束的指针事务。 */
+  get active(): boolean {
+    return this.gesture !== null;
+  }
+
+  private world(point: InkPoint): InkPoint {
+    const p = toWorld(this.camera, point.x, point.y);
+    if (Math.abs(p.x) > BOARD_COORDINATE_LIMIT || Math.abs(p.y) > BOARD_COORDINATE_LIMIT)
+      throw new Error("白板坐标超出可保存范围");
+    return { ...p, pressure: point.pressure };
+  }
+
+  /**
+   * 开始写画、拖动选择或平移；先校验新输入，再结束此前事务。
+   * @param point 有限屏幕坐标与 [0, 1] 压力。
+   * @param pan 是否仅移动相机；平移不受内容坐标范围限制。
+   * @throws 输入无效、内容坐标越界或此前事务无法提交时保留原状态并抛错。
+   */
+  begin(point: InkPoint, pan = false): void {
+    validateSample(point);
+    const world = pan ? null : this.world(point);
+    this.finish();
+    const bounds = this.selectionBounds;
+    if (world === null) this.gesture = { kind: "pan", start: point, view: this.camera };
+    else if (bounds && insideBounds(world, bounds, 6 / this.camera.scale))
+      this.gesture = { kind: "move", start: world, dx: 0, dy: 0 };
+    else {
+      this.selected = new Set();
+      this.gesture = { kind: "ink", points: [world] };
+    }
+    this.changed(false);
+  }
+
+  /**
+   * 追加屏幕采样或更新拖动；无活动手势时不修改内容。
+   * @param point 有限屏幕坐标与 [0, 1] 压力。
+   * @param terminal 保留抬笔末点，不受移动采样阈值影响。
+   * @throws 非法采样或坐标越界时拒绝本次更新，保留此前有效输入。
+   */
+  update(point: InkPoint, terminal = false): void {
+    validateSample(point);
+    const active = this.gesture;
+    if (!active || active.kind === "selected") return;
+    if (active.kind === "pan") {
+      this.camera = translateViewport(
+        active.view,
+        point.x - active.start.x,
+        point.y - active.start.y,
+      );
+      this.changed(false);
+      return;
+    }
+    const world = this.world(point);
+    if (active.kind === "ink") {
+      const last = active.points.at(-1)!;
+      const distance = Math.hypot(world.x - last.x, world.y - last.y);
+      if (
+        terminal
+          ? distance === 0 && world.pressure === last.pressure
+          : distance * this.camera.scale < 0.35
+      )
+        return;
+      active.points.push(world);
+    } else {
+      active.dx = world.x - active.start.x;
+      active.dy = world.y - active.start.y;
+    }
+    this.changed(false);
+  }
+
+  /** 闭合圈选且停笔后确认；普通闭合曲线在抬笔时仍保存为笔迹。 */
+  hold(): boolean {
+    if (this.gesture?.kind !== "ink") return false;
+    const ids = lassoSelection(
+      this.gesture.points,
+      this.history.document.strokes,
+      this.camera.scale,
+    );
+    if (ids.length === 0) return false;
+    this.selected = new Set(ids);
+    this.gesture = { kind: "selected" };
+    this.changed(false);
+    return true;
+  }
+
+  /**
+   * 抬笔或离开文档时结束事务；一次涂划删除、圈选移动或落笔只占一次撤销。
+   * @param terminal 真实抬笔事件的屏幕采样；失焦或保存门禁不提供虚构坐标。
+   * @throws 原始输入超出文件契约时不提交，调用方应展示错误。
+   */
+  finish(terminal?: InkPoint): void {
+    if (terminal) this.update(terminal, true);
+    const active = this.gesture;
+    if (!active) return;
+    let edited = false;
+    if (active.kind === "ink") {
+      const erased = erasedStrokes(active.points, this.history.document.strokes, this.camera.scale);
+      edited =
+        erased.length > 0
+          ? this.history.remove(new Set(erased))
+          : this.history.add({ id: crypto.randomUUID(), width: 2, points: active.points });
+    } else if (active.kind === "move")
+      edited = this.history.move(this.selected, active.dx, active.dy);
+    // 只有成功提交后才能清除临时输入；失败后重试仍应检查同一个事务。
+    this.gesture = null;
+    this.changed(edited);
+  }
+
+  /** 取消临时手势或选择，正式文档和历史保持不变。 */
+  cancel(): void {
+    this.gesture = null;
+    this.selected = new Set();
+    this.changed(false);
+  }
+
+  /** 删除选择；快捷键和辅助设备复用同一事务入口。 */
+  deleteSelection(): void {
+    this.finish();
+    const edited = this.history.remove(this.selected);
+    this.selected = new Set();
+    this.changed(edited);
+  }
+
+  /** 选择全部正式笔迹，不改变内容。 */
+  selectAll(): void {
+    this.finish();
+    this.selected = new Set(this.history.document.strokes.map((s) => s.id));
+    this.changed(false);
+  }
+
+  /** 撤销或重做前取消临时选择，避免删除或移动不存在的笔迹。 */
+  applyHistory(action: "undo" | "redo"): void {
+    this.finish();
+    this.selected = new Set();
+    this.changed(this.history[action]());
+  }
+
+  /** 以有限屏幕位移平移；手势期间忽略，数值无效或溢出时抛错且相机不变。 */
+  pan(dx: number, dy: number): void {
+    if (this.active) return;
+    this.camera = translateViewport(this.camera, dx, dy);
+    this.changed(false);
+  }
+
+  /** 按正的有限倍数围绕屏幕点缩放；手势期间忽略，非法参数抛错且相机不变。 */
+  zoom(x: number, y: number, factor: number): void {
+    if (this.active) return;
+    this.camera = zoomAt(this.camera, x, y, factor, this.minimumScale);
+    this.changed(false);
+  }
+
+  /**
+   * 根据画布屏幕尺寸完整适配内容，并允许缩放回适配比例；空白板保持一比一。
+   * @param width 画布宽度，单位为 CSS 像素。
+   * @param height 画布高度，单位为 CSS 像素。
+   * @throws 非有限尺寸抛错；不足一像素的未布局容器或活动手势不改变相机。
+   */
+  fit(width: number, height: number): void {
+    if (![width, height].every(Number.isFinite)) throw new Error("白板视口尺寸无效");
+    if (width < 1 || height < 1 || this.active) return;
+    const bounds = inkBounds(this.history.document.strokes);
+    if (!bounds) this.camera = { x: 0, y: 0, scale: 1 };
+    else {
+      const padding = Math.min(40, width / 4, height / 4);
+      const scale = Math.min(
+        1,
+        (width - padding * 2) / bounds.width,
+        (height - padding * 2) / bounds.height,
+      );
+      this.camera = {
+        x: width / 2 - (bounds.x + bounds.width / 2) * scale,
+        y: height / 2 - (bounds.y + bounds.height / 2) * scale,
+        scale,
+      };
+    }
+    this.minimumScale = Math.min(DEFAULT_MIN_SCALE, this.camera.scale);
+    this.changed(false);
+  }
+}

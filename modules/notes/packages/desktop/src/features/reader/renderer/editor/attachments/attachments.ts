@@ -8,6 +8,7 @@ import {
   type ImportedAttachment,
 } from "../../../shared/attachments";
 import { mimeFromPath, previewKindFromMime } from "../../preview/media";
+import { isWhiteboardPath } from "../../whiteboard/model";
 
 /** 导入进度与可重试错误；不包含正文或保存状态。 */
 export type AttachmentProgress =
@@ -137,10 +138,19 @@ export function createAttachmentEditing(io: {
             clear(view);
             return;
           }
-          const tr = closeHistory(view.state.tr).insert(
-            pos,
-            attachmentContent(view.state, imported),
-          );
+          const tr = closeHistory(view.state.tr);
+          if (isWhiteboardPath(imported.path)) {
+            // 白板是块级引用；段落中间插入时由 ProseMirror 合法拆分正文，不能塞进句中。
+            tr.replaceRangeWith(
+              pos,
+              pos,
+              view.state.schema.node("note_embed", {
+                target: imported.path,
+                anchor: null,
+                alias: null,
+              }),
+            );
+          } else tr.insert(pos, attachmentContent(view.state, imported));
           if (view.hasFocus() && view.state.selection.empty && view.state.selection.from === pos)
             tr.scrollIntoView();
           view.dispatch(tr);

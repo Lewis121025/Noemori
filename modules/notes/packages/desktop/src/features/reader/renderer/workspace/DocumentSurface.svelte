@@ -6,6 +6,8 @@
   import DocumentEditor from "../editor/DocumentEditor.svelte";
   import ImagePreview from "../preview/ImagePreview.svelte";
   import PdfPreview from "../preview/PdfPreview.svelte";
+  import WhiteboardEditor from "../whiteboard/WhiteboardEditor.svelte";
+  import { isWhiteboardPath } from "../whiteboard/model";
   import type { MediaIo } from "../preview/media";
   import { markdownLinkCompletion } from "../editor/links/suggestions/codemirror";
   import type { ReaderPane } from "./pane.svelte";
@@ -36,13 +38,22 @@
 {#if doc.path !== null}
   {#key workspace.vaultRoot}
     {#key doc.path}
-      {#if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
+      {#if doc.content?.kind === "whiteboard"}
+        <WhiteboardEditor
+          board={doc.content.board}
+          epoch={doc.epoch}
+          register={navigation.registerWhiteboard}
+          onDirty={pane.markDirty}
+        />
+      {:else if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor
           epoch={doc.epoch}
           readOnly={pane.viewMode === "reading"}
           formattingId="editor-formatting-{pane.id}"
           active={workspace.activePane.id === pane.id}
-          linkTargets={workspace.files.filter((path) => path.toLowerCase().endsWith(".md"))}
+          linkTargets={workspace.files.filter(
+            (path) => path.toLowerCase().endsWith(".md") || isWhiteboardPath(path),
+          )}
           {mediaIo}
           importAttachment={pane.captureAttachmentImporter()}
           onAttachmentReport={(message) => workspace.report(message)}

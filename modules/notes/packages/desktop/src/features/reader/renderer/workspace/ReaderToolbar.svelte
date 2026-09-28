@@ -249,7 +249,7 @@
     disabled={workspace.switching || workspace.copying || workspace.isComposing}
     >{workspace.split ? "关闭另一栏" : "并排查看另一篇"}</button
   >
-  {#if doc.canEdit}<button
+  {#if doc.content?.kind === "markdown" || doc.content?.kind === "text"}<button
       class="reader-button"
       type="button"
       popovertarget="note-menu"

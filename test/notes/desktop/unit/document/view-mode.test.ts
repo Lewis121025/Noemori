@@ -15,6 +15,7 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
     history: () => false,
     historyAvailability: () => null,
     openAttachments: () => {},
+    insertWhiteboard: () => {},
     settleAttachments: () => Promise.resolve(true),
     focus: () => {},
     openSearch: () => {},
