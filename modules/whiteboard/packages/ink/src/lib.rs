@@ -5,6 +5,7 @@
 
 mod correction;
 mod geometry;
+mod numerical;
 mod prediction;
 mod smoothing;
 mod snapping;
@@ -12,11 +13,11 @@ mod types;
 mod validation;
 
 pub use correction::correct_stroke;
-pub use geometry::{fit_circle, fit_line, fit_rectangle};
+pub use geometry::{analyze_circle, fit_circle, fit_line, fit_rectangle};
 pub use prediction::{PredictionOptions, StrokePredictor};
 pub use smoothing::{OneEuroSmoother, SmoothingOptions};
 pub use snapping::{snap_axes, snap_point, Axis, AxisGuide, AxisSnap, PointSnap, SnapTarget};
 pub use types::{
-    Circle, CorrectionOptions, Fit, Geometry, InkError, Line, Point, Rectangle, Shape,
-    StrokeCorrection, StrokePrediction, StrokeSample,
+    Circle, CircleAnalysis, CircleSensitivity, CorrectionOptions, Fit, Geometry, InkError, Line,
+    Point, Rectangle, Shape, StrokeCorrection, StrokePrediction, StrokeSample,
 };

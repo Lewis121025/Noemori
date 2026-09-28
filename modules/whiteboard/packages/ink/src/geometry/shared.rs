@@ -6,7 +6,6 @@ pub(super) struct NormalizedStroke {
     origin: Point,
     pub scale: f64,
     pub points: Vec<Point>,
-    pub samples: Vec<Point>,
 }
 
 impl NormalizedStroke {
@@ -19,41 +18,32 @@ impl NormalizedStroke {
     }
 }
 
-fn sample_original_points(input: &[Point]) -> Vec<Point> {
+/// 原始位置及其邻接弧长的平方根权重，供加权最小二乘直接乘到残差和雅可比上。
+pub(super) struct WeightedPoint {
+    pub position: Point,
+    pub root_weight: f64,
+}
+
+/// 只在原始位置上积分；不插值制造圆弧弦内点，也不因固定点数阈值丢弃几何信息。
+pub(super) fn weighted_points(input: &[Point]) -> Vec<WeightedPoint> {
     let mut points = input.to_vec();
     points.dedup();
-    if points.len() <= 128 {
-        return points;
+    let mut weights = vec![0.0; points.len()];
+    let mut total = 0.0;
+    for (i, segment) in points.windows(2).enumerate() {
+        let length = (segment[1].x - segment[0].x).hypot(segment[1].y - segment[0].y);
+        weights[i] += length / 2.0;
+        weights[i + 1] += length / 2.0;
+        total += length;
     }
-    let mut lengths = Vec::with_capacity(points.len());
-    lengths.push(0.0);
-    for i in 1..points.len() {
-        let (a, b) = (points[i - 1], points[i]);
-        lengths.push(lengths[i - 1] + (b.x - a.x).hypot(b.y - a.y));
-    }
-    let total = lengths[points.len() - 1];
-    let mut result = vec![points[0]];
-    let (mut segment, mut previous) = (1, 0);
-    for i in 1..127 {
-        let target = f64::from(i) / 127.0 * total;
-        while segment < points.len() - 1 && lengths[segment] < target {
-            segment += 1;
-        }
-        // 弦上插值会破坏原始圆弧；这里只选择实际采样，不生成新的几何位置。
-        let index = if target - lengths[segment - 1] <= lengths[segment] - target {
-            segment - 1
-        } else {
-            segment
-        };
-        if index != previous {
-            result.push(points[index]);
-            previous = index;
-        }
-    }
-    if previous != points.len() - 1 {
-        result.push(points[points.len() - 1]);
-    }
-    result
+    points
+        .into_iter()
+        .zip(weights)
+        .map(|(position, weight)| WeightedPoint {
+            position,
+            root_weight: (weight / total).sqrt(),
+        })
+        .collect()
 }
 
 pub(super) fn normalize(points: &[Point]) -> Result<Option<NormalizedStroke>, InkError> {
@@ -82,12 +72,10 @@ pub(super) fn normalize(points: &[Point]) -> Result<Option<NormalizedStroke>, In
             y: (p.y - origin.y) / scale,
         })
         .collect();
-    let samples = sample_original_points(&normalized);
     Ok(Some(NormalizedStroke {
         origin,
         scale,
         points: normalized,
-        samples,
     }))
 }
 

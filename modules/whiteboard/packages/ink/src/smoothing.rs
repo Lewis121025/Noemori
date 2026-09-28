@@ -27,7 +27,7 @@ impl Default for SmoothingOptions {
 
 #[derive(Debug, Clone, Copy)]
 struct State {
-    raw: StrokeSample,
+    time_ms: f64,
     position: Point,
     velocity: Point,
 }
@@ -73,13 +73,13 @@ impl OneEuroSmoother {
     /// 非法采样、时间重复或倒退、算术溢出时返回错误，且不改变已有状态。
     pub fn push(&mut self, input: StrokeSample) -> Result<StrokeSample, InkError> {
         sample(input)?;
-        increasing_time(input.time_ms, self.state.map(|s| s.raw.time_ms))?;
+        increasing_time(input.time_ms, self.state.map(|s| s.time_ms))?;
         let next = match self.state {
-            Some(previous) if input.time_ms - previous.raw.time_ms <= self.options.reset_gap_ms => {
+            Some(previous) if input.time_ms - previous.time_ms <= self.options.reset_gap_ms => {
                 self.advance(previous, input)?
             }
             _ => State {
-                raw: input,
+                time_ms: input.time_ms,
                 position: input.position,
                 velocity: Point { x: 0.0, y: 0.0 },
             },
@@ -97,10 +97,12 @@ impl OneEuroSmoother {
     }
 
     fn advance(&self, previous: State, input: StrokeSample) -> Result<State, InkError> {
-        let dt = (input.time_ms - previous.raw.time_ms) / 1000.0;
+        let dt = (input.time_ms - previous.time_ms) / 1000.0;
+        // 跟随作者 2023 年修订的参考公式，以当前观测相对上一滤波位置估计变化率。
+        // 二维使用共同速度范数，保留旋转等变性，不逐轴采用不同截止频率。
         let derivative = checked_point(
-            (input.position.x - previous.raw.position.x) / dt,
-            (input.position.y - previous.raw.position.y) / dt,
+            (input.position.x - previous.position.x) / dt,
+            (input.position.y - previous.position.y) / dt,
         )?;
         let velocity = blend(
             previous.velocity,
@@ -110,7 +112,7 @@ impl OneEuroSmoother {
         let cutoff = self.options.min_cutoff + self.options.beta * velocity.x.hypot(velocity.y);
         positive(cutoff, "自适应截止频率")?;
         Ok(State {
-            raw: input,
+            time_ms: input.time_ms,
             velocity,
             position: blend(previous.position, input.position, alpha(dt, cutoff))?,
         })

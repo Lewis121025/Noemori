@@ -99,3 +99,65 @@ fn viewport_conversion_is_owned_by_the_caller() {
         .unwrap()
         .is_none());
 }
+
+#[test]
+fn prepared_motion_is_invalidated_only_by_accepted_history_changes() {
+    let mut predictor = StrokePredictor::default();
+    for (reset, start_time) in [(false, 0.0), (false, 500.0), (true, 0.0)] {
+        if reset {
+            predictor.reset();
+        }
+        let mut accepted = Vec::new();
+        for i in 0..20 {
+            let t = f64::from(i) * 2.0;
+            let input = sample(0.04 * t * t, 0.01 * t * t, start_time + t);
+            predictor.push(input).unwrap();
+            accepted.push(input);
+            // 重建参照实例，避免共享失效的模型；短历史下的远期查询还会触发线性回退。
+            for horizon in [24.0, 1.0, 8.0, 16.0, 1.0] {
+                let mut fresh = StrokePredictor::default();
+                for s in &accepted {
+                    fresh.push(*s).unwrap();
+                }
+                let time = input.time_ms + horizon;
+                assert_eq!(predictor.predict(time), fresh.predict(time));
+            }
+            let before = predictor.predict(input.time_ms + 8.0);
+            assert!(predictor.push(input).is_err());
+            assert!(predictor
+                .push(sample(f64::NAN, 0.0, input.time_ms + 1.0))
+                .is_err());
+            assert_eq!(predictor.predict(input.time_ms + 8.0), before);
+        }
+    }
+}
+
+#[test]
+fn simultaneous_first_queries_match_independent_predictions() {
+    let inputs: Vec<_> = (0..6)
+        .map(|i| {
+            let t = f64::from(i) * 2.0;
+            sample(0.04 * t * t, 0.01 * t * t, t)
+        })
+        .collect();
+    let mut predictor = StrokePredictor::default();
+    for input in &inputs {
+        predictor.push(*input).unwrap();
+    }
+    std::thread::scope(|scope| {
+        for horizon in [1.0, 8.0, 16.0, 24.0] {
+            let inputs = &inputs;
+            let predictor = &predictor;
+            scope.spawn(move || {
+                let mut fresh = StrokePredictor::default();
+                for input in inputs {
+                    fresh.push(*input).unwrap();
+                }
+                assert_eq!(
+                    predictor.predict(10.0 + horizon),
+                    fresh.predict(10.0 + horizon)
+                );
+            });
+        }
+    });
+}

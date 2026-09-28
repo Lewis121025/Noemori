@@ -7,6 +7,16 @@ publish = false
 autotests = false
 description = "独立的笔迹预测、平滑、几何修正与吸附内核"
 
+[dependencies]
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
+levenberg-marquardt = "0.15"
+
+[dev-dependencies]
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
 [lib]
 name = "nous_ink"
 path = "src/lib.rs"
@@ -32,9 +42,29 @@ name = "ink_unit_correction"
 path = "../../../../test/whiteboard/ink/unit/correction.rs"
 
 [[test]]
+name = "ink_unit_circle_analysis"
+path = "../../../../test/whiteboard/ink/unit/circle_analysis.rs"
+
+[[test]]
 name = "ink_unit_snapping"
 path = "../../../../test/whiteboard/ink/unit/snapping.rs"
 
 [[test]]
 name = "ink_integration_replay"
 path = "../../../../test/whiteboard/ink/integration/replay.rs"
+
+[[test]]
+name = "ink_integration_quality"
+path = "../../../../test/whiteboard/ink/integration/quality.rs"
+
+[[test]]
+name = "ink_integration_recorded"
+path = "../../../../test/whiteboard/ink/integration/recorded.rs"
+
+[[test]]
+name = "ink_performance_latency"
+path = "../../../../test/whiteboard/ink/performance/latency.rs"
+
+[[test]]
+name = "ink_evaluation_corpus"
+path = "../../../../test/whiteboard/ink/evaluation/corpus.rs"

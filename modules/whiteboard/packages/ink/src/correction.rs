@@ -9,7 +9,7 @@ use crate::{
 /// max_deviation 是所有原始点的硬上限。不可拟合或任一点超限时返回 None。
 ///
 /// # Errors
-/// 配置或坐标非法、算术溢出时返回错误；调用方按点下标保留真实时间与压感。
+/// 配置或坐标非法、数值分解失败或算术溢出时返回错误；调用方按点下标保留真实时间与压感。
 pub fn correct_stroke(
     points: &[Point],
     options: CorrectionOptions,

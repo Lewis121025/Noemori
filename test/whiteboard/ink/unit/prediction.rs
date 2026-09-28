@@ -5,6 +5,92 @@ use nous_ink::{PredictionOptions, StrokePredictor};
 use support::*;
 
 #[test]
+fn distance_budget_does_not_discard_representable_predictions_near_world_origin() {
+    for x in 1..20 {
+        for y in 1..20 {
+            let (x, y) = (f64::from(x), f64::from(y));
+            let length = x.hypot(y);
+            let endpoint = point(-24.0 * x / length, -24.0 * y / length);
+            let mut predictor = StrokePredictor::default();
+            predictor
+                .push(sample(endpoint.x * 2.0, endpoint.y * 2.0, 0.0))
+                .unwrap();
+            predictor.push(sample(endpoint.x, endpoint.y, 8.0)).unwrap();
+            let predicted = predictor
+                .predict(32.0)
+                .unwrap()
+                .unwrap_or_else(|| panic!("有效位移被舍弃，方向 ({x},{y})"));
+            assert!(
+                (predicted.position.x - endpoint.x).hypot(predicted.position.y - endpoint.y)
+                    <= 24.0
+            );
+            assert!(predicted.position.x.hypot(predicted.position.y) < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn extrapolation_remains_continuous_when_horizon_exceeds_history_span() {
+    let mut predictor = StrokePredictor::new(PredictionOptions {
+        max_distance: 100.0,
+        ..Default::default()
+    })
+    .unwrap();
+    for i in 0..6 {
+        let t = f64::from(i) * 2.0;
+        predictor.push(sample(0.04 * t * t, 0.0, t)).unwrap();
+    }
+    let position = |horizon| {
+        predictor
+            .predict(10.0 + horizon)
+            .unwrap()
+            .unwrap()
+            .position
+            .x
+    };
+    let step = 1e-4;
+    let (before, at, after) = (position(10.0 - step), position(10.0), position(10.0 + step));
+    assert!(
+        after >= at && at >= before,
+        "匀加速输入的未来轨迹不能回跳：{before}, {at}, {after}"
+    );
+    assert!((after - at).abs() < 0.001, "跨越历史跨度时位置发生跳变");
+    near((at - before) / step, (after - at) / step, 1e-4);
+    for horizon in [11.0, 16.0, 24.0] {
+        assert!(
+            position(horizon) >= after,
+            "超出支撑区间后应沿同一条轨迹延续"
+        );
+    }
+}
+
+#[test]
+fn curved_extension_is_bounded_rotation_equivariant_and_query_order_independent() {
+    let mut original = StrokePredictor::default();
+    let mut rotated = StrokePredictor::default();
+    let angle: f64 = 0.73;
+    let rotate = |x: f64, y: f64| {
+        point(
+            x * angle.cos() - y * angle.sin(),
+            x * angle.sin() + y * angle.cos(),
+        )
+    };
+    for i in 0..6 {
+        let t = f64::from(i) * 2.0;
+        let (x, y) = (0.03 * t * t, 0.4 * t);
+        original.push(sample(x, y, t)).unwrap();
+        let p = rotate(x, y);
+        rotated.push(sample(p.x, p.y, t)).unwrap();
+    }
+    for horizon in [24.0, 10.01, 4.0, 16.0, 10.0, 24.0] {
+        let p = original.predict(10.0 + horizon).unwrap().unwrap().position;
+        let q = rotated.predict(10.0 + horizon).unwrap().unwrap().position;
+        near_point(q, rotate(p.x, p.y), 1e-9);
+        assert!((p.x - 3.0).hypot(p.y - 4.0) <= 24.0);
+    }
+}
+
+#[test]
 fn insufficient_history_and_zero_horizon_produce_no_prediction() {
     let mut p = StrokePredictor::default();
     assert_eq!(p.predict(10.0).unwrap(), None);

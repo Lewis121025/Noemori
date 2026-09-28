@@ -84,7 +84,8 @@ pub enum Geometry {
     Rectangle(Rectangle),
 }
 
-/// 拟合结果；误差由全部原始采样计算，不只检查求解用的子集。
+/// 拟合结果；误差由全部原始采样等权计算，与求解时采用的弧长权重区分。
+/// 最大偏差始终覆盖每个原始点，作为修正的硬约束。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fit<G> {
     /// 拟合得到的几何。
@@ -103,6 +104,27 @@ impl<G> Fit<G> {
             max_deviation: self.max_deviation,
         }
     }
+}
+
+/// 圆心和半径对径向观测扰动的局部敏感性；使用相同长度单位，结果不随平移、旋转、缩放改变。
+/// 这些量描述可辨识性，不表示形状语义正确，也不是概率或统计置信区间。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CircleSensitivity {
+    /// 对圆心 x/y 与半径求导的弧长加权雅可比条件数；越大越接近参数不可辨识。
+    pub condition_number: f64,
+    /// 雅可比伪逆的谱范数；在线性近似内，将加权径向扰动 RMS 放大为参数向量长度的最坏系数。
+    pub parameter_amplification: f64,
+    /// 加权残差 RMS × 放大系数 / 半径；以已观测残差为扰动尺度，不是实际参数误差的上界。
+    pub relative_residual_sensitivity: f64,
+}
+
+/// 圆拟合及其局部可辨识性；保留候选几何，不按未经校准的阈值自动拒绝输入。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CircleAnalysis {
+    /// 与 fit_circle 相同的候选及全量观测误差。
+    pub fit: Fit<Circle>,
+    /// 雅可比数值秩不足，或采样与圆心重合导致导数未定义时为 None。
+    pub sensitivity: Option<CircleSensitivity>,
 }
 
 /// 几何修正的目标与硬限制。
@@ -136,6 +158,8 @@ pub enum InkError {
     OutOfRange(&'static str),
     /// 单笔采样时间重复或倒退。
     NonIncreasingTime,
+    /// 求解器未能完成数值分解或其内部状态无效，携带计算阶段。
+    NumericalFailure(&'static str),
 }
 
 impl fmt::Display for InkError {
@@ -144,6 +168,7 @@ impl fmt::Display for InkError {
             Self::NonFinite(name) => write!(f, "{name} 必须为有限数值"),
             Self::OutOfRange(name) => write!(f, "{name} 超出允许范围"),
             Self::NonIncreasingTime => write!(f, "单笔采样时间必须严格递增"),
+            Self::NumericalFailure(stage) => write!(f, "数值求解失败：{stage}"),
         }
     }
 }

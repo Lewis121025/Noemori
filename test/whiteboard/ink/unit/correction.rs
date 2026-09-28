@@ -79,6 +79,26 @@ fn rectangle_supports_rotation_and_square_symmetry() {
 }
 
 #[test]
+fn four_exact_rectangle_corners_need_no_iterative_adjustment() {
+    let points = [
+        point(-4.0, -2.0),
+        point(4.0, -2.0),
+        point(4.0, 2.0),
+        point(-4.0, 2.0),
+    ];
+    let result = correct_stroke(
+        &points,
+        CorrectionOptions {
+            shape: Shape::Rectangle,
+            max_deviation: 0.0,
+        },
+    )
+    .unwrap()
+    .expect("已经准确的矩形不应因样本少于优化参数而被拒绝");
+    assert_eq!(result.points, points);
+}
+
+#[test]
 fn degenerate_strokes_and_non_finite_points_are_distinct() {
     for shape in [Shape::Line, Shape::Circle, Shape::Rectangle] {
         let options = CorrectionOptions {

@@ -1,0 +1,1047 @@
+{
+  "scope": "修复同一历史下跨支撑区间的预测回跳；新增圆拟合局部敏感性诊断。",
+  "holdout_evaluated": false,
+  "limitations": [
+    "真实数据固定时距部分使用插值参考；与真实下一采样点、合成解析真值分别计分。",
+    "局部敏感度不是统计置信区间，不能据此保证语义正确或恢复缺失的圆弧信息。",
+    "部分高频带噪子组退化，不能声称预测精度全面提升。"
+  ],
+  "splits": {
+    "development": {
+      "before_report": "development-baseline.json",
+      "after_report": "development-candidate.json",
+      "before_report_sha256": "7716c08070aa277fb82d5e7ca57969bcc72aac08abce193107329050ade2852f",
+      "after_report_sha256": "ead2a50b4d1c174d55306b10c8399d4defef9587f8aac45485a189b009dc4224",
+      "kernel_source_sha256": "869556789d38e0fee77e20e58eff52274f7cca890d5bbee1f1761e258a416dbc",
+      "observed_next": {
+        "before": {
+          "queries": 1391506,
+          "rms": 13.1492451949409,
+          "predictions": 1324268,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 1391506,
+          "rms": 13.149231290470148,
+          "predictions": 1324265,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "observed_next/bicycle",
+            "queries": 98658,
+            "before_rms": 7.10961034715226,
+            "after_rms": 7.109808680238282,
+            "absolute_change": 0.00019833308602201782,
+            "change_percent": 0.002789647763212777,
+            "before_p99": 22.04854591629667,
+            "after_p99": 22.04854591629667
+          },
+          {
+            "group": "observed_next/face",
+            "queries": 89809,
+            "before_rms": 7.868973432268381,
+            "after_rms": 7.8690143702922635,
+            "absolute_change": 4.093802388283052e-05,
+            "change_percent": 0.0005202460554132315,
+            "before_p99": 27.018512172212592,
+            "after_p99": 27.018512172212592
+          },
+          {
+            "group": "observed_next/square",
+            "queries": 51662,
+            "before_rms": 10.027606279648815,
+            "after_rms": 10.02764400681126,
+            "absolute_change": 3.772716244476726e-05,
+            "change_percent": 0.0003762329851442203,
+            "before_p99": 31.46890058078432,
+            "after_p99": 31.46890058078432
+          },
+          {
+            "group": "observed_next/triangle",
+            "queries": 43127,
+            "before_rms": 8.521584511935208,
+            "after_rms": 8.521599515790625,
+            "absolute_change": 1.5003855416750866e-05,
+            "change_percent": 0.00017606884490373176,
+            "before_p99": 30.458925764666496,
+            "after_p99": 30.458925764666496
+          },
+          {
+            "group": "observed_next/flower",
+            "queries": 84295,
+            "before_rms": 7.973228655458955,
+            "after_rms": 7.97323469818792,
+            "absolute_change": 6.042728964317234e-06,
+            "change_percent": 7.57877294921272e-05,
+            "before_p99": 20.396078054371138,
+            "after_p99": 20.396078054371138
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "observed_next/bicycle",
+            "queries": 98658,
+            "before_rms": 7.10961034715226,
+            "after_rms": 7.109808680238282,
+            "absolute_change": 0.00019833308602201782,
+            "change_percent": 0.002789647763212777,
+            "before_p99": 22.04854591629667,
+            "after_p99": 22.04854591629667
+          },
+          {
+            "group": "observed_next/face",
+            "queries": 89809,
+            "before_rms": 7.868973432268381,
+            "after_rms": 7.8690143702922635,
+            "absolute_change": 4.093802388283052e-05,
+            "change_percent": 0.0005202460554132315,
+            "before_p99": 27.018512172212592,
+            "after_p99": 27.018512172212592
+          },
+          {
+            "group": "observed_next/square",
+            "queries": 51662,
+            "before_rms": 10.027606279648815,
+            "after_rms": 10.02764400681126,
+            "absolute_change": 3.772716244476726e-05,
+            "change_percent": 0.0003762329851442203,
+            "before_p99": 31.46890058078432,
+            "after_p99": 31.46890058078432
+          },
+          {
+            "group": "observed_next/triangle",
+            "queries": 43127,
+            "before_rms": 8.521584511935208,
+            "after_rms": 8.521599515790625,
+            "absolute_change": 1.5003855416750866e-05,
+            "change_percent": 0.00017606884490373176,
+            "before_p99": 30.458925764666496,
+            "after_p99": 30.458925764666496
+          },
+          {
+            "group": "observed_next/flower",
+            "queries": 84295,
+            "before_rms": 7.973228655458955,
+            "after_rms": 7.97323469818792,
+            "absolute_change": 6.042728964317234e-06,
+            "change_percent": 7.57877294921272e-05,
+            "before_p99": 20.396078054371138,
+            "after_p99": 20.396078054371138
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "observed_next/line",
+            "queries": 19697,
+            "before_rms": 26.808250655458725,
+            "after_rms": 26.807898994409033,
+            "absolute_change": -0.0003516610496916428,
+            "change_percent": -0.001311764255751413,
+            "before_p99": 106.25466834994161,
+            "after_p99": 106.25466834994161
+          },
+          {
+            "group": "observed_next/eye",
+            "queries": 78318,
+            "before_rms": 7.0690810465723635,
+            "after_rms": 7.069006448728438,
+            "absolute_change": -7.459784392516156e-05,
+            "change_percent": -0.0010552693261445256,
+            "before_p99": 23.600847442411894,
+            "after_p99": 23.600847442411894
+          },
+          {
+            "group": "observed_next/circle",
+            "queries": 45985,
+            "before_rms": 13.110675000574705,
+            "after_rms": 13.110580188641872,
+            "absolute_change": -9.481193283278344e-05,
+            "change_percent": -0.0007231659150175318,
+            "before_p99": 44.64151284856129,
+            "after_p99": 44.64151284856129
+          },
+          {
+            "group": "observed_next/house",
+            "queries": 83134,
+            "before_rms": 7.024111252621919,
+            "after_rms": 7.024067059861935,
+            "absolute_change": -4.419275998479577e-05,
+            "change_percent": -0.0006291580300410438,
+            "before_p99": 24.1501680514566,
+            "after_p99": 24.1501680514566
+          },
+          {
+            "group": "observed_next/tree",
+            "queries": 98565,
+            "before_rms": 10.599200791674384,
+            "after_rms": 10.599167596576812,
+            "absolute_change": -3.3195097572047416e-05,
+            "change_percent": -0.0003131849110604712,
+            "before_p99": 31.0,
+            "after_p99": 31.0
+          }
+        ]
+      },
+      "interpolated": {
+        "before": {
+          "queries": 5865890,
+          "rms": 16.41713488797432,
+          "predictions": 5561616,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 5865890,
+          "rms": 16.416429168501693,
+          "predictions": 5561597,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "interpolated/house/24ms",
+            "queries": 82596,
+            "before_rms": 18.051191032177506,
+            "after_rms": 18.052909683682927,
+            "absolute_change": 0.0017186515054206097,
+            "change_percent": 0.009520986744626647,
+            "before_p99": 71.52548958188721,
+            "after_p99": 71.52548958188721
+          },
+          {
+            "group": "interpolated/house/16ms",
+            "queries": 86925,
+            "before_rms": 10.685752033431832,
+            "after_rms": 10.686671923417006,
+            "absolute_change": 0.0009198899851732278,
+            "change_percent": 0.00860856570783497,
+            "before_p99": 41.688810580003484,
+            "after_p99": 41.70708639567325
+          },
+          {
+            "group": "interpolated/square/16ms",
+            "queries": 54043,
+            "before_rms": 15.052813860476025,
+            "after_rms": 15.054041708176232,
+            "absolute_change": 0.0012278477002070076,
+            "change_percent": 0.008156931398928258,
+            "before_p99": 53.30304853596046,
+            "after_p99": 53.30304853596046
+          },
+          {
+            "group": "interpolated/bicycle/16ms",
+            "queries": 104120,
+            "before_rms": 8.963864059393861,
+            "after_rms": 8.96442741517597,
+            "absolute_change": 0.0005633557821091983,
+            "change_percent": 0.0062847425884138275,
+            "before_p99": 31.162501164192367,
+            "after_p99": 31.163059155613833
+          },
+          {
+            "group": "interpolated/square/24ms",
+            "queries": 51666,
+            "before_rms": 24.71634744578296,
+            "after_rms": 24.71775506260201,
+            "absolute_change": 0.0014076168190477745,
+            "change_percent": 0.0056950842843406235,
+            "before_p99": 88.68770296534424,
+            "after_p99": 88.68770296534424
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "interpolated/house/24ms",
+            "queries": 82596,
+            "before_rms": 18.051191032177506,
+            "after_rms": 18.052909683682927,
+            "absolute_change": 0.0017186515054206097,
+            "change_percent": 0.009520986744626647,
+            "before_p99": 71.52548958188721,
+            "after_p99": 71.52548958188721
+          },
+          {
+            "group": "interpolated/square/24ms",
+            "queries": 51666,
+            "before_rms": 24.71634744578296,
+            "after_rms": 24.71775506260201,
+            "absolute_change": 0.0014076168190477745,
+            "change_percent": 0.0056950842843406235,
+            "before_p99": 88.68770296534424,
+            "after_p99": 88.68770296534424
+          },
+          {
+            "group": "interpolated/square/16ms",
+            "queries": 54043,
+            "before_rms": 15.052813860476025,
+            "after_rms": 15.054041708176232,
+            "absolute_change": 0.0012278477002070076,
+            "change_percent": 0.008156931398928258,
+            "before_p99": 53.30304853596046,
+            "after_p99": 53.30304853596046
+          },
+          {
+            "group": "interpolated/stairs/24ms",
+            "queries": 41493,
+            "before_rms": 20.891216705527807,
+            "after_rms": 20.892230438758354,
+            "absolute_change": 0.001013733230546876,
+            "change_percent": 0.004852437485269867,
+            "before_p99": 74.22922702306549,
+            "after_p99": 74.22922702306549
+          },
+          {
+            "group": "interpolated/house/16ms",
+            "queries": 86925,
+            "before_rms": 10.685752033431832,
+            "after_rms": 10.686671923417006,
+            "absolute_change": 0.0009198899851732278,
+            "change_percent": 0.00860856570783497,
+            "before_p99": 41.688810580003484,
+            "after_p99": 41.70708639567325
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "interpolated/tree/24ms",
+            "queries": 97662,
+            "before_rms": 24.632568493809547,
+            "after_rms": 24.61915440704116,
+            "absolute_change": -0.013414086768385403,
+            "change_percent": -0.05445671153520015,
+            "before_p99": 86.77526225000236,
+            "after_p99": 86.58136553347039
+          },
+          {
+            "group": "interpolated/bicycle/24ms",
+            "queries": 98582,
+            "before_rms": 14.292186754391658,
+            "after_rms": 14.285743220773869,
+            "absolute_change": -0.006443533617789043,
+            "change_percent": -0.0450843088501407,
+            "before_p99": 52.09202003920471,
+            "after_p99": 52.110338620812264
+          },
+          {
+            "group": "interpolated/triangle/16ms",
+            "queries": 45314,
+            "before_rms": 14.184994133437879,
+            "after_rms": 14.180565573289904,
+            "absolute_change": -0.004428560147974991,
+            "change_percent": -0.03122003510410698,
+            "before_p99": 60.66712454039667,
+            "after_p99": 60.64810676555517
+          },
+          {
+            "group": "interpolated/triangle/24ms",
+            "queries": 43496,
+            "before_rms": 24.08077010445708,
+            "after_rms": 24.073821675710988,
+            "absolute_change": -0.006948428746092361,
+            "change_percent": -0.02885467830119337,
+            "before_p99": 100.70036557800469,
+            "after_p99": 100.70036557800469
+          },
+          {
+            "group": "interpolated/sun/24ms",
+            "queries": 75376,
+            "before_rms": 19.007226076273803,
+            "after_rms": 19.00388252259267,
+            "absolute_change": -0.003343553681133926,
+            "change_percent": -0.017590960762592367,
+            "before_p99": 70.29580594619286,
+            "after_p99": 70.29580594619286
+          }
+        ]
+      },
+      "synthetic_motion": {
+        "before": {
+          "queries": 185472,
+          "rms": 4.257954214364822,
+          "predictions": 146377,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 185472,
+          "rms": 4.247644976531536,
+          "predictions": 146182,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "constant/500Hz/noise0.2/24ms",
+            "queries": 480,
+            "before_rms": 1.6751337729402416,
+            "after_rms": 1.7215821998207206,
+            "absolute_change": 0.04644842688047901,
+            "change_percent": 2.7728189611359477,
+            "before_p99": 5.3400579130128,
+            "after_p99": 5.352325337385707
+          },
+          {
+            "group": "wave/500Hz/noise0.2/16ms",
+            "queries": 504,
+            "before_rms": 1.3247854141205357,
+            "after_rms": 1.3608712685291127,
+            "absolute_change": 0.03608585440857692,
+            "change_percent": 2.7239018503636414,
+            "before_p99": 3.1505901328320234,
+            "after_p99": 3.861776793670254
+          },
+          {
+            "group": "wave/500Hz/noise0.2/24ms",
+            "queries": 504,
+            "before_rms": 2.2330226707563225,
+            "after_rms": 2.2866921671151994,
+            "absolute_change": 0.053669496358876856,
+            "change_percent": 2.403446102976603,
+            "before_p99": 4.7293533672326,
+            "after_p99": 5.804932650914433
+          },
+          {
+            "group": "constant/500Hz/noise0.2/16ms",
+            "queries": 480,
+            "before_rms": 1.1450247274549876,
+            "after_rms": 1.1715358539786598,
+            "absolute_change": 0.026511126523672157,
+            "change_percent": 2.3153322271561416,
+            "before_p99": 3.601711230590301,
+            "after_p99": 3.612502028556017
+          },
+          {
+            "group": "circle/500Hz/noise0.2/16ms",
+            "queries": 472,
+            "before_rms": 1.9691548914525665,
+            "after_rms": 2.0048358506864523,
+            "absolute_change": 0.03568095923388581,
+            "change_percent": 1.8119935302583157,
+            "before_p99": 3.508066510978267,
+            "after_p99": 3.8480989441007734
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "acceleration/500Hz/noise1/16ms",
+            "queries": 520,
+            "before_rms": 4.575218637035676,
+            "after_rms": 4.654069906384621,
+            "absolute_change": 0.07885126934894515,
+            "change_percent": 1.723442650601581,
+            "before_p99": 11.156030824056868,
+            "after_p99": 11.213714421348897
+          },
+          {
+            "group": "stop/240Hz/noise1/24ms",
+            "queries": 520,
+            "before_rms": 4.274449018350418,
+            "after_rms": 4.340697972315675,
+            "absolute_change": 0.06624895396525687,
+            "change_percent": 1.5498828897209105,
+            "before_p99": 14.802956356025382,
+            "after_p99": 15.338802089472253
+          },
+          {
+            "group": "wave/500Hz/noise0.2/24ms",
+            "queries": 504,
+            "before_rms": 2.2330226707563225,
+            "after_rms": 2.2866921671151994,
+            "absolute_change": 0.053669496358876856,
+            "change_percent": 2.403446102976603,
+            "before_p99": 4.7293533672326,
+            "after_p99": 5.804932650914433
+          },
+          {
+            "group": "circle/500Hz/noise0.2/24ms",
+            "queries": 472,
+            "before_rms": 3.6013425982054508,
+            "after_rms": 3.647977257056633,
+            "absolute_change": 0.04663465885118212,
+            "change_percent": 1.2949242561488106,
+            "before_p99": 5.828964658963532,
+            "after_p99": 6.031643507832585
+          },
+          {
+            "group": "constant/500Hz/noise0.2/24ms",
+            "queries": 480,
+            "before_rms": 1.6751337729402416,
+            "after_rms": 1.7215821998207206,
+            "absolute_change": 0.04644842688047901,
+            "change_percent": 2.7728189611359477,
+            "before_p99": 5.3400579130128,
+            "after_p99": 5.352325337385707
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "acceleration/500Hz/noise0/16ms",
+            "queries": 520,
+            "before_rms": 0.330425866734719,
+            "after_rms": 0.02859454615971538,
+            "absolute_change": -0.3018313205750036,
+            "change_percent": -91.34615384615986,
+            "before_p99": 0.5180308369845927,
+            "after_p99": 0.044829591661938166
+          },
+          {
+            "group": "circle/500Hz/noise0/16ms",
+            "queries": 472,
+            "before_rms": 1.6992972749070796,
+            "after_rms": 0.1978961394300666,
+            "absolute_change": -1.501401135477013,
+            "change_percent": -88.35423663932563,
+            "before_p99": 2.436148877246549,
+            "after_p99": 0.2837081333575914
+          },
+          {
+            "group": "stop/500Hz/noise0/16ms",
+            "queries": 520,
+            "before_rms": 0.2668939960075999,
+            "after_rms": 0.033320638272148144,
+            "absolute_change": -0.23357335773545174,
+            "change_percent": -87.5154035794798,
+            "before_p99": 0.5852082546648536,
+            "after_p99": 0.07315103183351061
+          },
+          {
+            "group": "wave/500Hz/noise0/16ms",
+            "queries": 504,
+            "before_rms": 0.7676426245737656,
+            "after_rms": 0.12329176488250958,
+            "absolute_change": -0.644350859691256,
+            "change_percent": -83.93891103285628,
+            "before_p99": 1.8362301545231863,
+            "after_p99": 0.26081920703331923
+          },
+          {
+            "group": "acceleration/500Hz/noise0/24ms",
+            "queries": 520,
+            "before_rms": 0.6481430462873352,
+            "after_rms": 0.15568141798075394,
+            "absolute_change": -0.49246162830658124,
+            "change_percent": -75.980392156867,
+            "before_p99": 1.0161374110082326,
+            "after_p99": 0.24407222127129652
+          }
+        ]
+      },
+      "geometric_results_unchanged": true
+    },
+    "validation": {
+      "before_report": "validation-baseline.json",
+      "after_report": "validation-candidate.json",
+      "before_report_sha256": "df4afc94102b69d7178950f9c83d6ea7418784e76e9ffd0692f2d0886c24bba1",
+      "after_report_sha256": "0865a342878a73ac8646315a6a77e1ccc24986a4218b3fb3852748c409ea7c6e",
+      "kernel_source_sha256": "869556789d38e0fee77e20e58eff52274f7cca890d5bbee1f1761e258a416dbc",
+      "observed_next": {
+        "before": {
+          "queries": 461265,
+          "rms": 15.451571194373836,
+          "predictions": 438230,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 461265,
+          "rms": 15.451556848033947,
+          "predictions": 438230,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "observed_next/square",
+            "queries": 16950,
+            "before_rms": 7.119380524633025,
+            "after_rms": 7.119668431455696,
+            "absolute_change": 0.0002879068226713244,
+            "change_percent": 0.004043986996826732,
+            "before_p99": 24.32240017007639,
+            "after_p99": 24.32240017007639
+          },
+          {
+            "group": "observed_next/house",
+            "queries": 25987,
+            "before_rms": 7.034623837912254,
+            "after_rms": 7.034727999614382,
+            "absolute_change": 0.00010416170212756981,
+            "change_percent": 0.0014807003832384424,
+            "before_p99": 24.44436537985071,
+            "after_p99": 24.44436537985071
+          },
+          {
+            "group": "observed_next/face",
+            "queries": 27435,
+            "before_rms": 7.312807613390961,
+            "after_rms": 7.3128976897681195,
+            "absolute_change": 9.007637715807704e-05,
+            "change_percent": 0.0012317618884649661,
+            "before_p99": 25.790711693943113,
+            "after_p99": 25.790711693943113
+          },
+          {
+            "group": "observed_next/bicycle",
+            "queries": 33213,
+            "before_rms": 6.534209864790039,
+            "after_rms": 6.534209864790039,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 21.768161463209427,
+            "after_p99": 21.768161463209427
+          },
+          {
+            "group": "observed_next/bridge",
+            "queries": 36780,
+            "before_rms": 9.442011112732445,
+            "after_rms": 9.442011112732445,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 34.27277150688513,
+            "after_p99": 34.27277150688513
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "observed_next/square",
+            "queries": 16950,
+            "before_rms": 7.119380524633025,
+            "after_rms": 7.119668431455696,
+            "absolute_change": 0.0002879068226713244,
+            "change_percent": 0.004043986996826732,
+            "before_p99": 24.32240017007639,
+            "after_p99": 24.32240017007639
+          },
+          {
+            "group": "observed_next/house",
+            "queries": 25987,
+            "before_rms": 7.034623837912254,
+            "after_rms": 7.034727999614382,
+            "absolute_change": 0.00010416170212756981,
+            "change_percent": 0.0014807003832384424,
+            "before_p99": 24.44436537985071,
+            "after_p99": 24.44436537985071
+          },
+          {
+            "group": "observed_next/face",
+            "queries": 27435,
+            "before_rms": 7.312807613390961,
+            "after_rms": 7.3128976897681195,
+            "absolute_change": 9.007637715807704e-05,
+            "change_percent": 0.0012317618884649661,
+            "before_p99": 25.790711693943113,
+            "after_p99": 25.790711693943113
+          },
+          {
+            "group": "observed_next/bicycle",
+            "queries": 33213,
+            "before_rms": 6.534209864790039,
+            "after_rms": 6.534209864790039,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 21.768161463209427,
+            "after_p99": 21.768161463209427
+          },
+          {
+            "group": "observed_next/bridge",
+            "queries": 36780,
+            "before_rms": 9.442011112732445,
+            "after_rms": 9.442011112732445,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 34.27277150688513,
+            "after_p99": 34.27277150688513
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "observed_next/flower",
+            "queries": 26042,
+            "before_rms": 8.631936930040865,
+            "after_rms": 8.631435970535524,
+            "absolute_change": -0.0005009595053415694,
+            "change_percent": -0.0058035584527771356,
+            "before_p99": 23.99999999999999,
+            "after_p99": 23.99999999999999
+          },
+          {
+            "group": "observed_next/zigzag",
+            "queries": 18450,
+            "before_rms": 17.586542281931965,
+            "after_rms": 17.58639156609482,
+            "absolute_change": -0.0001507158371438777,
+            "change_percent": -0.0008569952792747415,
+            "before_p99": 62.10797485969972,
+            "after_p99": 62.10797485969972
+          },
+          {
+            "group": "observed_next/tree",
+            "queries": 36246,
+            "before_rms": 10.44907917174092,
+            "after_rms": 10.44904591491467,
+            "absolute_change": -3.325682624932824e-05,
+            "change_percent": -0.00031827518677252087,
+            "before_p99": 28.0,
+            "after_p99": 28.0
+          },
+          {
+            "group": "observed_next/bicycle",
+            "queries": 33213,
+            "before_rms": 6.534209864790039,
+            "after_rms": 6.534209864790039,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 21.768161463209427,
+            "after_p99": 21.768161463209427
+          },
+          {
+            "group": "observed_next/bridge",
+            "queries": 36780,
+            "before_rms": 9.442011112732445,
+            "after_rms": 9.442011112732445,
+            "absolute_change": 0.0,
+            "change_percent": 0.0,
+            "before_p99": 34.27277150688513,
+            "after_p99": 34.27277150688513
+          }
+        ]
+      },
+      "interpolated": {
+        "before": {
+          "queries": 1945779,
+          "rms": 19.831172206122407,
+          "predictions": 1841203,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 1945779,
+          "rms": 19.83097034569674,
+          "predictions": 1841201,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "interpolated/house/16ms",
+            "queries": 27137,
+            "before_rms": 10.38083287318437,
+            "after_rms": 10.38464781880891,
+            "absolute_change": 0.003814945624538879,
+            "change_percent": 0.03674989927247019,
+            "before_p99": 43.34487025909503,
+            "after_p99": 43.34487025909503
+          },
+          {
+            "group": "interpolated/house/24ms",
+            "queries": 25766,
+            "before_rms": 17.654401485763255,
+            "after_rms": 17.6584528151192,
+            "absolute_change": 0.004051329355945654,
+            "change_percent": 0.02294798472330939,
+            "before_p99": 72.06516438406184,
+            "after_p99": 72.06516438406184
+          },
+          {
+            "group": "interpolated/square/16ms",
+            "queries": 17701,
+            "before_rms": 11.70336503361812,
+            "after_rms": 11.705968910896718,
+            "absolute_change": 0.0026038772785987874,
+            "change_percent": 0.02224896233791185,
+            "before_p99": 48.27657238039882,
+            "after_p99": 48.27657238039882
+          },
+          {
+            "group": "interpolated/face/16ms",
+            "queries": 29216,
+            "before_rms": 9.999919141278886,
+            "after_rms": 10.002132563538204,
+            "absolute_change": 0.0022134222593184205,
+            "change_percent": 0.02213440156912938,
+            "before_p99": 38.9211692958455,
+            "after_p99": 39.0
+          },
+          {
+            "group": "interpolated/face/8ms",
+            "queries": 29768,
+            "before_rms": 4.944720325637018,
+            "after_rms": 4.945678299524643,
+            "absolute_change": 0.0009579738876253074,
+            "change_percent": 0.019373671806244275,
+            "before_p99": 17.719426571809723,
+            "after_p99": 17.726580000450156
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "interpolated/house/24ms",
+            "queries": 25766,
+            "before_rms": 17.654401485763255,
+            "after_rms": 17.6584528151192,
+            "absolute_change": 0.004051329355945654,
+            "change_percent": 0.02294798472330939,
+            "before_p99": 72.06516438406184,
+            "after_p99": 72.06516438406184
+          },
+          {
+            "group": "interpolated/house/16ms",
+            "queries": 27137,
+            "before_rms": 10.38083287318437,
+            "after_rms": 10.38464781880891,
+            "absolute_change": 0.003814945624538879,
+            "change_percent": 0.03674989927247019,
+            "before_p99": 43.34487025909503,
+            "after_p99": 43.34487025909503
+          },
+          {
+            "group": "interpolated/square/16ms",
+            "queries": 17701,
+            "before_rms": 11.70336503361812,
+            "after_rms": 11.705968910896718,
+            "absolute_change": 0.0026038772785987874,
+            "change_percent": 0.02224896233791185,
+            "before_p99": 48.27657238039882,
+            "after_p99": 48.27657238039882
+          },
+          {
+            "group": "interpolated/face/16ms",
+            "queries": 29216,
+            "before_rms": 9.999919141278886,
+            "after_rms": 10.002132563538204,
+            "absolute_change": 0.0022134222593184205,
+            "change_percent": 0.02213440156912938,
+            "before_p99": 38.9211692958455,
+            "after_p99": 39.0
+          },
+          {
+            "group": "interpolated/square/24ms",
+            "queries": 17001,
+            "before_rms": 20.108820243060322,
+            "after_rms": 20.11101791656794,
+            "absolute_change": 0.002197673507616571,
+            "change_percent": 0.010928903242723997,
+            "before_p99": 83.04631475630741,
+            "after_p99": 83.04631475630741
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "interpolated/flower/8ms",
+            "queries": 29170,
+            "before_rms": 6.247332184000844,
+            "after_rms": 6.242673239049688,
+            "absolute_change": -0.004658944951155597,
+            "change_percent": -0.07457495157832117,
+            "before_p99": 16.337946099619607,
+            "after_p99": 16.337946099619607
+          },
+          {
+            "group": "interpolated/bicycle/24ms",
+            "queries": 33290,
+            "before_rms": 15.039540509282402,
+            "after_rms": 15.032269970371146,
+            "absolute_change": -0.0072705389112552865,
+            "change_percent": -0.04834282607748541,
+            "before_p99": 59.23792922983738,
+            "after_p99": 59.23792922983738
+          },
+          {
+            "group": "interpolated/tree/24ms",
+            "queries": 36229,
+            "before_rms": 21.40683675818008,
+            "after_rms": 21.39842093827229,
+            "absolute_change": -0.008415819907789057,
+            "change_percent": -0.039313701519083644,
+            "before_p99": 75.77947938769799,
+            "after_p99": 75.77239918697153
+          },
+          {
+            "group": "interpolated/flower/4ms",
+            "queries": 29268,
+            "before_rms": 3.9389908363794115,
+            "after_rms": 3.938013940106839,
+            "absolute_change": -0.0009768962725726915,
+            "change_percent": -0.02480067390739915,
+            "before_p99": 9.385821431979908,
+            "after_p99": 9.375650580634558
+          },
+          {
+            "group": "interpolated/face/24ms",
+            "queries": 27845,
+            "before_rms": 16.91906040943059,
+            "after_rms": 16.9158533713812,
+            "absolute_change": -0.003207038049389155,
+            "change_percent": -0.01895517819417991,
+            "before_p99": 65.07440172227909,
+            "after_p99": 65.07440172227909
+          }
+        ]
+      },
+      "synthetic_motion": {
+        "before": {
+          "queries": 66432,
+          "rms": 4.408143784451602,
+          "predictions": 51930,
+          "algorithm_errors": 0
+        },
+        "after": {
+          "queries": 66432,
+          "rms": 4.3989671342911825,
+          "predictions": 51852,
+          "algorithm_errors": 0
+        },
+        "largest_relative_regressions": [
+          {
+            "group": "wave/500Hz/noise0.2/16ms",
+            "queries": 144,
+            "before_rms": 1.3239603203681383,
+            "after_rms": 1.3872005327321126,
+            "absolute_change": 0.06324021236397437,
+            "change_percent": 4.77659423708332,
+            "before_p99": 3.020335157593123,
+            "after_p99": 3.0344548603691086
+          },
+          {
+            "group": "wave/500Hz/noise0.2/24ms",
+            "queries": 144,
+            "before_rms": 2.2029132757571634,
+            "after_rms": 2.302485269881273,
+            "absolute_change": 0.09957199412410933,
+            "change_percent": 4.520014256570559,
+            "before_p99": 4.435120832331704,
+            "after_p99": 4.525942961868996
+          },
+          {
+            "group": "pause/500Hz/noise0.2/16ms",
+            "queries": 208,
+            "before_rms": 1.041945649373726,
+            "after_rms": 1.077264817928731,
+            "absolute_change": 0.03531916855500494,
+            "change_percent": 3.389732331646478,
+            "before_p99": 3.6105564759453457,
+            "after_p99": 3.6488789619609205
+          },
+          {
+            "group": "pause/500Hz/noise0.2/24ms",
+            "queries": 208,
+            "before_rms": 2.5551682928570276,
+            "after_rms": 2.5887838378669503,
+            "absolute_change": 0.0336155450099227,
+            "change_percent": 1.3155902530527896,
+            "before_p99": 7.831001916597747,
+            "after_p99": 7.831001916597747
+          },
+          {
+            "group": "pause/240Hz/noise0.2/24ms",
+            "queries": 208,
+            "before_rms": 6.609168180221096,
+            "after_rms": 6.651626924813488,
+            "absolute_change": 0.04245874459239207,
+            "change_percent": 0.6424219120260366,
+            "before_p99": 22.386591883013644,
+            "after_p99": 22.386591883013644
+          }
+        ],
+        "largest_absolute_regressions": [
+          {
+            "group": "wave/500Hz/noise0.2/24ms",
+            "queries": 144,
+            "before_rms": 2.2029132757571634,
+            "after_rms": 2.302485269881273,
+            "absolute_change": 0.09957199412410933,
+            "change_percent": 4.520014256570559,
+            "before_p99": 4.435120832331704,
+            "after_p99": 4.525942961868996
+          },
+          {
+            "group": "wave/500Hz/noise0.2/16ms",
+            "queries": 144,
+            "before_rms": 1.3239603203681383,
+            "after_rms": 1.3872005327321126,
+            "absolute_change": 0.06324021236397437,
+            "change_percent": 4.77659423708332,
+            "before_p99": 3.020335157593123,
+            "after_p99": 3.0344548603691086
+          },
+          {
+            "group": "pause/240Hz/noise0.2/24ms",
+            "queries": 208,
+            "before_rms": 6.609168180221096,
+            "after_rms": 6.651626924813488,
+            "absolute_change": 0.04245874459239207,
+            "change_percent": 0.6424219120260366,
+            "before_p99": 22.386591883013644,
+            "after_p99": 22.386591883013644
+          },
+          {
+            "group": "pause/500Hz/noise0.2/16ms",
+            "queries": 208,
+            "before_rms": 1.041945649373726,
+            "after_rms": 1.077264817928731,
+            "absolute_change": 0.03531916855500494,
+            "change_percent": 3.389732331646478,
+            "before_p99": 3.6105564759453457,
+            "after_p99": 3.6488789619609205
+          },
+          {
+            "group": "pause/500Hz/noise0.2/24ms",
+            "queries": 208,
+            "before_rms": 2.5551682928570276,
+            "after_rms": 2.5887838378669503,
+            "absolute_change": 0.0336155450099227,
+            "change_percent": 1.3155902530527896,
+            "before_p99": 7.831001916597747,
+            "after_p99": 7.831001916597747
+          }
+        ],
+        "largest_relative_improvements": [
+          {
+            "group": "acceleration/500Hz/noise0/16ms",
+            "queries": 120,
+            "before_rms": 0.2866097128280102,
+            "after_rms": 0.02480276361018404,
+            "absolute_change": -0.26180694921782616,
+            "change_percent": -91.34615384613019,
+            "before_p99": 0.49320896669901765,
+            "after_p99": 0.042681545195672584
+          },
+          {
+            "group": "circle/500Hz/noise0/16ms",
+            "queries": 200,
+            "before_rms": 1.4356390355090562,
+            "after_rms": 0.1671911247888642,
+            "absolute_change": -1.268447910720192,
+            "change_percent": -88.35423663932482,
+            "before_p99": 2.353404326060507,
+            "after_p99": 0.2740718987327151
+          },
+          {
+            "group": "stop/500Hz/noise0/16ms",
+            "queries": 208,
+            "before_rms": 0.3359274713971693,
+            "after_rms": 0.04193918906958166,
+            "absolute_change": -0.2939882823275876,
+            "change_percent": -87.51540357948377,
+            "before_p99": 0.5859616124551875,
+            "after_p99": 0.07324520155682814
+          },
+          {
+            "group": "wave/500Hz/noise0/16ms",
+            "queries": 144,
+            "before_rms": 0.8238073635562974,
+            "after_rms": 0.13231243357861755,
+            "absolute_change": -0.6914949299776798,
+            "change_percent": -83.9389110328612,
+            "before_p99": 1.7054271303827733,
+            "after_p99": 0.2426488669559872
+          },
+          {
+            "group": "acceleration/500Hz/noise0/24ms",
+            "queries": 120,
+            "before_rms": 0.5621959751626411,
+            "after_rms": 0.13503726854407894,
+            "absolute_change": -0.42715870661856215,
+            "change_percent": -75.98039215684295,
+            "before_p99": 0.9674483577556606,
+            "after_p99": 0.232377301618549
+          }
+        ]
+      },
+      "geometric_results_unchanged": true
+    }
+  }
+}

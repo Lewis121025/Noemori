@@ -1,7 +1,7 @@
 use super::shared::{measure, normalize};
 use crate::{Fit, InkError, Line, Point};
 
-/// 正交最小二乘拟合有限线段，兼容垂直线；方向由有界原始位置子集估计。
+/// 以折线弧长为测度求正交最小二乘线段；同一路径的线性细分不改变拟合结果。
 /// 返回几何及全部采样的误差；位置不足或数值退化时返回 None，不修改输入。
 ///
 /// # Errors
@@ -10,18 +10,28 @@ pub fn fit_line(points: &[Point]) -> Result<Option<Fit<Line>>, InkError> {
     let Some(frame) = normalize(points)? else {
         return Ok(None);
     };
-    let n = frame.samples.len() as f64;
-    let mean_x = frame.samples.iter().map(|p| p.x).sum::<f64>() / n;
-    let mean_y = frame.samples.iter().map(|p| p.y).sum::<f64>() / n;
-    let (mut xx, mut xy, mut yy) = (0.0, 0.0, 0.0);
-    for p in &frame.samples {
-        let (x, y) = (p.x - mean_x, p.y - mean_y);
-        xx += x * x;
-        xy += x * y;
-        yy += y * y;
+    let mut total = 0.0;
+    let (mut mean_x, mut mean_y) = (0.0, 0.0);
+    for segment in frame.points.windows(2) {
+        let (a, b) = (segment[0], segment[1]);
+        let length = (b.x - a.x).hypot(b.y - a.y);
+        total += length;
+        mean_x += length * (a.x + b.x) / 2.0;
+        mean_y += length * (a.y + b.y) / 2.0;
     }
-    // 直接求主特征向量，避免 atan2/sin_cos 把精确竖线变成带横向误差的斜线。
-    // 选取相加的一侧构造向量，避免近轴方向发生相近数相减。
+    mean_x /= total;
+    mean_y /= total;
+    let (mut xx, mut xy, mut yy) = (0.0, 0.0, 0.0);
+    // 对每条线段解析积分二阶矩，避免顶点数量或局部采样速度充当统计权重。
+    for segment in frame.points.windows(2) {
+        let (a, b) = (segment[0], segment[1]);
+        let length = (b.x - a.x).hypot(b.y - a.y) / total;
+        let (ax, ay, bx, by) = (a.x - mean_x, a.y - mean_y, b.x - mean_x, b.y - mean_y);
+        xx += length * (ax * ax + ax * bx + bx * bx) / 3.0;
+        yy += length * (ay * ay + ay * by + by * by) / 3.0;
+        xy += length * (2.0 * ax * ay + ax * by + bx * ay + 2.0 * bx * by) / 6.0;
+    }
+    // 直接求主特征向量，保留精确轴线；选择相加的一侧避免相近数相减。
     let half_difference = (xx - yy) / 2.0;
     let radius = half_difference.hypot(xy);
     let (x, y) = if half_difference >= 0.0 {
@@ -30,7 +40,6 @@ pub fn fit_line(points: &[Point]) -> Result<Option<Fit<Line>>, InkError> {
         (xy, radius - half_difference)
     };
     let length = x.hypot(y);
-    // 各方向方差完全相同时没有唯一主轴，稳定选择 x 轴。
     let (mut dx, mut dy) = if length == 0.0 {
         (1.0, 0.0)
     } else {

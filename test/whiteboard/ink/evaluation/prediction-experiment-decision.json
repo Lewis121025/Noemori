@@ -1,0 +1,181 @@
+{
+  "status": "retain_current_default",
+  "tested_configurations": 19,
+  "holdout_evaluated": false,
+  "conclusion": "Two candidates improve validation averages but still substantially regress on important pause/resume and clean-curve groups. Do not replace the default predictor in this round.",
+  "promising_candidates": {
+    "time32_strict": {
+      "real_per_drawing": {
+        "paired_units": 3992,
+        "before_mean": 0.01936369083592616,
+        "after_mean": 0.01725957432906023,
+        "change_percent": -10.86629880994633,
+        "bootstrap_95_percentile_interval": [
+          -11.321160150839859,
+          -10.430435427117757
+        ]
+      },
+      "synthetic_per_base_scene": {
+        "paired_units": 173,
+        "before_mean": 3.910707599205184,
+        "after_mean": 3.83920916195469,
+        "change_percent": -1.8282736675333533,
+        "bootstrap_95_percentile_interval": [
+          -2.334513102033395,
+          -1.2905644858489738
+        ]
+      },
+      "real_next_rms_change_percent": -4.633354964413505,
+      "synthetic_pooled_rms_change_percent": -2.234073767881406,
+      "reforecast_p95_before": 19.76682946989265,
+      "reforecast_p95_after": 18.249419088760476,
+      "largest_synthetic_regressions": [
+        {
+          "group": "pause/500Hz/noise0/16ms",
+          "before_rms": 0.6302899297530693,
+          "after_rms": 2.434421889740471,
+          "absolute_change": 1.8041319599874017,
+          "before_p99": 2.4749058949520304,
+          "after_p99": 8.881708972955657,
+          "change_percent": 286.2384237511477
+        },
+        {
+          "group": "pause/500Hz/noise0.2/16ms",
+          "before_rms": 1.077264817928731,
+          "after_rms": 2.5643823537103123,
+          "absolute_change": 1.4871175357815813,
+          "before_p99": 3.6488789619609205,
+          "after_p99": 9.080230187827711,
+          "change_percent": 138.0456793011099
+        },
+        {
+          "group": "circle/120Hz/noise0/16ms",
+          "before_rms": 0.777306131614075,
+          "after_rms": 2.2056101884564376,
+          "absolute_change": 1.4283040568423626,
+          "before_p99": 2.728798895466326,
+          "after_p99": 3.700533740389637,
+          "change_percent": 183.75051974393816
+        },
+        {
+          "group": "circle/120Hz/noise0.2/16ms",
+          "before_rms": 1.2252460284229532,
+          "after_rms": 2.2241975684775106,
+          "absolute_change": 0.9989515400545574,
+          "before_p99": 3.2682655860584404,
+          "after_p99": 3.829356068962795,
+          "change_percent": 81.53068990889403
+        },
+        {
+          "group": "pause/240Hz/noise0/16ms",
+          "before_rms": 1.6301479885965753,
+          "after_rms": 2.5980375806661464,
+          "absolute_change": 0.9678895920695711,
+          "before_p99": 5.515504565893658,
+          "after_p99": 9.150564630286182,
+          "change_percent": 59.374338945928784
+        }
+      ]
+    },
+    "kalman32": {
+      "real_per_drawing": {
+        "paired_units": 3992,
+        "before_mean": 0.01936369083592616,
+        "after_mean": 0.017712961364240887,
+        "change_percent": -8.524870003721684,
+        "bootstrap_95_percentile_interval": [
+          -9.022477435437649,
+          -8.0165759856328
+        ]
+      },
+      "synthetic_per_base_scene": {
+        "paired_units": 173,
+        "before_mean": 3.910707599205184,
+        "after_mean": 3.4959478643832576,
+        "change_percent": -10.605746512631697,
+        "bootstrap_95_percentile_interval": [
+          -12.69657340993418,
+          -8.66623257219662
+        ]
+      },
+      "real_next_rms_change_percent": -4.3745236194321135,
+      "synthetic_pooled_rms_change_percent": -6.414493955381262,
+      "reforecast_p95_before": 19.76682946989265,
+      "reforecast_p95_after": 18.385729427729622,
+      "largest_synthetic_regressions": [
+        {
+          "group": "pause/500Hz/noise0/16ms",
+          "before_rms": 0.6302899297530693,
+          "after_rms": 1.64269265880934,
+          "absolute_change": 1.0124027290562707,
+          "before_p99": 2.4749058949520304,
+          "after_p99": 5.6377619933058964,
+          "change_percent": 160.62492533442554
+        },
+        {
+          "group": "pause/500Hz/noise0/24ms",
+          "before_rms": 2.521159719012399,
+          "after_rms": 3.513096932199086,
+          "absolute_change": 0.991937213186687,
+          "before_p99": 9.899623579808845,
+          "after_p99": 10.074640491064846,
+          "change_percent": 39.34448126020567
+        },
+        {
+          "group": "pause/500Hz/noise0.2/24ms",
+          "before_rms": 2.5887838378669503,
+          "after_rms": 3.5062836194031695,
+          "absolute_change": 0.9174997815362191,
+          "before_p99": 7.831001916597747,
+          "after_p99": 10.099544359971915,
+          "change_percent": 35.44134385094897
+        },
+        {
+          "group": "circle/500Hz/noise0/24ms",
+          "before_rms": 0.7251349471814912,
+          "after_rms": 1.6426182891206471,
+          "absolute_change": 0.9174833419391559,
+          "before_p99": 1.188694149061812,
+          "after_p99": 5.096066172454972,
+          "change_percent": 126.52587570152272
+        },
+        {
+          "group": "reversal/120Hz/noise1/16ms",
+          "before_rms": 6.339656304203074,
+          "after_rms": 7.125542631690932,
+          "absolute_change": 0.7858863274878578,
+          "before_p99": 26.322955936461288,
+          "after_p99": 27.410784038909693,
+          "change_percent": 12.39635541388624
+        }
+      ]
+    }
+  },
+  "default_predictor": "Current 6-observation linear/quadratic selection with continuous tangent extension. Only the reproduced displacement-budget rounding defect is fixed in production.",
+  "numerical_fix": "Project the realized displacement inward before testing the hard budget. Stepping absolute coordinates by one ULP near world origin could previously discard valid forecasts.",
+  "metric_scope": "Primary observed-next RMS uses actual future samples. Paired per-drawing normalized RMS uses fixed-horizon references from samples or interpolation (gap <=32ms), and is not exact hardware trajectory truth. Synthetic pooled RMS and mean per-base-scene RMS are separate. Bootstrap units are drawings/base scenes, never frames.",
+  "external_baseline_scope": "AndroidX mathematical-core adaptation, not Android system or on-device product performance. See androidx-provenance.json.",
+  "development_report": "prediction-experiments-final/development-summary.json",
+  "validation_report": "prediction-experiments-final/validation-summary.json",
+  "source_snapshot": {
+    "file": "prediction-experiment-sources.tar.gz",
+    "sha256": "ff90542238d1d739b5bc6f7f2bae8258d8ebef44a9b5148788dc3888e377f3a5",
+    "includes": "Kernel, Cargo lock, test/evaluation sources, data manifests. Reuse the immutable corpus-v1 and synthetic-v1 data files when replaying."
+  },
+  "rust_toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+  "next_focus": [
+    "Measurement/process-noise adaptation using observed evidence",
+    "Pause/resume state transitions without long-window lag or derivative overshoot"
+  ],
+  "verification": {
+    "rust_unit_integration_debug": 74,
+    "rust_unit_integration_release": 74,
+    "python_data_analysis_tests": 12,
+    "desktop_tests": 1056,
+    "notes_rust_tests": 266,
+    "strict_clippy": "passed",
+    "format_and_diff_checks": "passed",
+    "reports_verified": 22,
+    "algorithm_errors": 0
+  }
+}

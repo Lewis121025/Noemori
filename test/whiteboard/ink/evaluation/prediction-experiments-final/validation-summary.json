@@ -1,0 +1,382 @@
+{
+  "split": "validation",
+  "holdout_evaluated": false,
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 20260928,
+  "kernel_source_sha256": "aed808264f36ab84ec7c4c43ac1f02180612de94532eb2ab50c579bf3cf0e262",
+  "experimental_predictors_sha256": "f53d8c439536148beaa5a98021dfc8ff21bcd7c80affabd74037275065f6f951",
+  "interval_scope": "Exploratory paired percentile bootstrap by drawing/base scene; not author/device-independent and not simultaneous intervals across candidates.",
+  "candidates": {
+    "baseline": {
+      "report_sha256": "bd53ce037d5acd7895cdfd6c0518a03a8dcf83420c7d6ba3f9e5d070f8eba198",
+      "observed_next": {
+        "queries": 461265,
+        "rms": 15.451583800137351,
+        "prediction_fraction": 0.9500655805231266,
+        "algorithm_errors": 0
+      },
+      "interpolated": {
+        "queries": 1945779,
+        "rms": 19.830919629170076,
+        "prediction_fraction": 0.9462580282755647,
+        "algorithm_errors": 0
+      },
+      "synthetic": {
+        "queries": 66432,
+        "rms": 4.396914398355125,
+        "prediction_fraction": 0.7805575626204239,
+        "algorithm_errors": 0
+      },
+      "real_per_drawing": {
+        "paired_units": 3992,
+        "before_mean": 0.01936369083592616,
+        "after_mean": 0.01936369083592616,
+        "change_percent": 0.0,
+        "bootstrap_95_percentile_interval": [
+          0.0,
+          0.0
+        ]
+      },
+      "synthetic_per_base_scene": {
+        "paired_units": 173,
+        "before_mean": 3.910707599205184,
+        "after_mean": 3.910707599205184,
+        "change_percent": 0.0,
+        "bootstrap_95_percentile_interval": [
+          0.0,
+          0.0
+        ]
+      },
+      "real_subgroups": {
+        "improved_groups": 0,
+        "worsened_groups": 0,
+        "largest_absolute_regressions": []
+      },
+      "synthetic_subgroups": {
+        "improved_groups": 0,
+        "worsened_groups": 0,
+        "largest_absolute_regressions": []
+      },
+      "real_reforecast_change": {
+        "count": 429831,
+        "max": 687.4140857199351,
+        "p50": 4.152971908241543,
+        "p95": 19.76682946989265,
+        "p99": 49.696613169324266,
+        "rms": 17.579884576761994
+      }
+    },
+    "kalman32": {
+      "report_sha256": "939876c4085d0281f769241f3dd7086f9826f7f0f48ef62b5c9481b6cd33b836",
+      "observed_next": {
+        "queries": 461265,
+        "rms": 14.775650617223997,
+        "prediction_fraction": 0.9808786706123378,
+        "algorithm_errors": 0
+      },
+      "interpolated": {
+        "queries": 1945779,
+        "rms": 19.144565754719096,
+        "prediction_fraction": 0.9773848931456245,
+        "algorithm_errors": 0
+      },
+      "synthetic": {
+        "queries": 66432,
+        "rms": 4.114874590049347,
+        "prediction_fraction": 0.96875,
+        "algorithm_errors": 0
+      },
+      "real_per_drawing": {
+        "paired_units": 3992,
+        "before_mean": 0.01936369083592616,
+        "after_mean": 0.017712961364240887,
+        "change_percent": -8.524870003721684,
+        "bootstrap_95_percentile_interval": [
+          -9.022477435437649,
+          -8.0165759856328
+        ]
+      },
+      "synthetic_per_base_scene": {
+        "paired_units": 173,
+        "before_mean": 3.910707599205184,
+        "after_mean": 3.4959478643832576,
+        "change_percent": -10.605746512631697,
+        "bootstrap_95_percentile_interval": [
+          -12.69657340993418,
+          -8.66623257219662
+        ]
+      },
+      "real_subgroups": {
+        "improved_groups": 100,
+        "worsened_groups": 0,
+        "largest_absolute_regressions": []
+      },
+      "synthetic_subgroups": {
+        "improved_groups": 219,
+        "worsened_groups": 149,
+        "largest_absolute_regressions": [
+          {
+            "group": "pause/500Hz/noise0/16ms",
+            "before_rms": 0.6302899297530693,
+            "after_rms": 1.64269265880934,
+            "absolute_change": 1.0124027290562707,
+            "before_p99": 2.4749058949520304,
+            "after_p99": 5.6377619933058964,
+            "change_percent": 160.62492533442554
+          },
+          {
+            "group": "pause/500Hz/noise0/24ms",
+            "before_rms": 2.521159719012399,
+            "after_rms": 3.513096932199086,
+            "absolute_change": 0.991937213186687,
+            "before_p99": 9.899623579808845,
+            "after_p99": 10.074640491064846,
+            "change_percent": 39.34448126020567
+          },
+          {
+            "group": "pause/500Hz/noise0.2/24ms",
+            "before_rms": 2.5887838378669503,
+            "after_rms": 3.5062836194031695,
+            "absolute_change": 0.9174997815362191,
+            "before_p99": 7.831001916597747,
+            "after_p99": 10.099544359971915,
+            "change_percent": 35.44134385094897
+          },
+          {
+            "group": "circle/500Hz/noise0/24ms",
+            "before_rms": 0.7251349471814912,
+            "after_rms": 1.6426182891206471,
+            "absolute_change": 0.9174833419391559,
+            "before_p99": 1.188694149061812,
+            "after_p99": 5.096066172454972,
+            "change_percent": 126.52587570152272
+          },
+          {
+            "group": "reversal/120Hz/noise1/16ms",
+            "before_rms": 6.339656304203074,
+            "after_rms": 7.125542631690932,
+            "absolute_change": 0.7858863274878578,
+            "before_p99": 26.322955936461288,
+            "after_p99": 27.410784038909693,
+            "change_percent": 12.39635541388624
+          },
+          {
+            "group": "circle/240Hz/noise0/16ms",
+            "before_rms": 0.21534143868840983,
+            "after_rms": 0.974013565942052,
+            "absolute_change": 0.7586721272536422,
+            "before_p99": 0.3530034088338695,
+            "after_p99": 2.9068178813509373,
+            "change_percent": 352.31125596379496
+          },
+          {
+            "group": "pause/500Hz/noise0/8ms",
+            "before_rms": 1.2457355772101488e-13,
+            "after_rms": 0.7518049921891103,
+            "absolute_change": 0.7518049921889858,
+            "before_p99": 3.595093471822542e-13,
+            "after_p99": 2.476862363923078,
+            "change_percent": null
+          },
+          {
+            "group": "reversal/240Hz/noise0.2/16ms",
+            "before_rms": 6.211988413347333,
+            "after_rms": 6.957586735855199,
+            "absolute_change": 0.745598322507866,
+            "before_p99": 26.294027539376255,
+            "after_p99": 26.234594609393138,
+            "change_percent": 12.002571043208054
+          },
+          {
+            "group": "reversal/120Hz/noise1/24ms",
+            "before_rms": 11.641355503572992,
+            "after_rms": 12.378936326035056,
+            "absolute_change": 0.7375808224620641,
+            "before_p99": 39.50260660793586,
+            "after_p99": 40.993361579910655,
+            "change_percent": 6.335867178316845
+          },
+          {
+            "group": "circle/500Hz/noise0/16ms",
+            "before_rms": 0.1671911247888642,
+            "after_rms": 0.899765764661725,
+            "absolute_change": 0.7325746398728608,
+            "before_p99": 0.2740718987327151,
+            "after_p99": 2.7849491537689466,
+            "change_percent": 438.16598566340537
+          }
+        ]
+      },
+      "real_reforecast_change": {
+        "count": 429831,
+        "max": 682.8256948992929,
+        "p50": 3.55012662104621,
+        "p95": 18.385729427729622,
+        "p99": 50.01922366251535,
+        "rms": 17.250887495598338
+      }
+    },
+    "time32_strict": {
+      "report_sha256": "835722942de1663c502f3ce2f10affebb39f69e0570f02db469d2635ac0e0045",
+      "observed_next": {
+        "queries": 461265,
+        "rms": 14.735657075053174,
+        "prediction_fraction": 0.980028833750664,
+        "algorithm_errors": 0
+      },
+      "interpolated": {
+        "queries": 1945779,
+        "rms": 19.220034366901515,
+        "prediction_fraction": 0.9766201608713014,
+        "algorithm_errors": 0
+      },
+      "synthetic": {
+        "queries": 66432,
+        "rms": 4.298684087185272,
+        "prediction_fraction": 0.8065992292870906,
+        "algorithm_errors": 0
+      },
+      "real_per_drawing": {
+        "paired_units": 3992,
+        "before_mean": 0.01936369083592616,
+        "after_mean": 0.01725957432906023,
+        "change_percent": -10.86629880994633,
+        "bootstrap_95_percentile_interval": [
+          -11.321160150839859,
+          -10.430435427117757
+        ]
+      },
+      "synthetic_per_base_scene": {
+        "paired_units": 173,
+        "before_mean": 3.910707599205184,
+        "after_mean": 3.83920916195469,
+        "change_percent": -1.8282736675333533,
+        "bootstrap_95_percentile_interval": [
+          -2.334513102033395,
+          -1.2905644858489738
+        ]
+      },
+      "real_subgroups": {
+        "improved_groups": 99,
+        "worsened_groups": 1,
+        "largest_absolute_regressions": [
+          {
+            "group": "interpolated/bridge/4ms",
+            "before_rms": 4.330989672372124,
+            "after_rms": 4.343806830193025,
+            "absolute_change": 0.012817157820901315,
+            "before_p99": 15.75011678626549,
+            "after_p99": 17.08540637828404,
+            "change_percent": 0.2959406230558237
+          }
+        ]
+      },
+      "synthetic_subgroups": {
+        "improved_groups": 183,
+        "worsened_groups": 151,
+        "largest_absolute_regressions": [
+          {
+            "group": "pause/500Hz/noise0/16ms",
+            "before_rms": 0.6302899297530693,
+            "after_rms": 2.434421889740471,
+            "absolute_change": 1.8041319599874017,
+            "before_p99": 2.4749058949520304,
+            "after_p99": 8.881708972955657,
+            "change_percent": 286.2384237511477
+          },
+          {
+            "group": "pause/500Hz/noise0.2/16ms",
+            "before_rms": 1.077264817928731,
+            "after_rms": 2.5643823537103123,
+            "absolute_change": 1.4871175357815813,
+            "before_p99": 3.6488789619609205,
+            "after_p99": 9.080230187827711,
+            "change_percent": 138.0456793011099
+          },
+          {
+            "group": "circle/120Hz/noise0/16ms",
+            "before_rms": 0.777306131614075,
+            "after_rms": 2.2056101884564376,
+            "absolute_change": 1.4283040568423626,
+            "before_p99": 2.728798895466326,
+            "after_p99": 3.700533740389637,
+            "change_percent": 183.75051974393816
+          },
+          {
+            "group": "circle/120Hz/noise0.2/16ms",
+            "before_rms": 1.2252460284229532,
+            "after_rms": 2.2241975684775106,
+            "absolute_change": 0.9989515400545574,
+            "before_p99": 3.2682655860584404,
+            "after_p99": 3.829356068962795,
+            "change_percent": 81.53068990889403
+          },
+          {
+            "group": "pause/240Hz/noise0/16ms",
+            "before_rms": 1.6301479885965753,
+            "after_rms": 2.5980375806661464,
+            "absolute_change": 0.9678895920695711,
+            "before_p99": 5.515504565893658,
+            "after_p99": 9.150564630286182,
+            "change_percent": 59.374338945928784
+          },
+          {
+            "group": "wave/120Hz/noise0/16ms",
+            "before_rms": 0.4152884170803184,
+            "after_rms": 1.2780546374909052,
+            "absolute_change": 0.8627662204105868,
+            "before_p99": 0.7649016761669386,
+            "after_p99": 2.7139693144490953,
+            "change_percent": 207.75109175359555
+          },
+          {
+            "group": "pause/500Hz/noise0/24ms",
+            "before_rms": 2.521159719012399,
+            "after_rms": 3.3651267655611505,
+            "absolute_change": 0.8439670465487517,
+            "before_p99": 9.899623579808845,
+            "after_p99": 10.30777784407358,
+            "change_percent": 33.47535025981434
+          },
+          {
+            "group": "pause/500Hz/noise0/8ms",
+            "before_rms": 1.2457355772101488e-13,
+            "after_rms": 0.8256700511665309,
+            "absolute_change": 0.8256700511664063,
+            "before_p99": 3.595093471822542e-13,
+            "after_p99": 3.2420884111507666,
+            "change_percent": null
+          },
+          {
+            "group": "pause/500Hz/noise0.2/24ms",
+            "before_rms": 2.5887838378669503,
+            "after_rms": 3.4083297256218223,
+            "absolute_change": 0.819545887754872,
+            "before_p99": 7.831001916597747,
+            "after_p99": 10.17489208371782,
+            "change_percent": 31.657563515621433
+          },
+          {
+            "group": "circle/120Hz/noise0/24ms",
+            "before_rms": 7.068410333422999,
+            "after_rms": 7.843608212175341,
+            "absolute_change": 0.7751978787523424,
+            "before_p99": 22.432361475603443,
+            "after_p99": 22.432361475603443,
+            "change_percent": 10.967075228878787
+          }
+        ]
+      },
+      "real_reforecast_change": {
+        "count": 429831,
+        "max": 682.8073082984589,
+        "p50": 3.525820882344395,
+        "p95": 18.249419088760476,
+        "p99": 49.58643367325517,
+        "rms": 17.248874268833887
+      }
+    }
+  }
+}
