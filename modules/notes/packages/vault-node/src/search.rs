@@ -5,9 +5,7 @@ use napi_derive::napi;
 use nous_vault::{SearchCancellation, SearchMatchesPage, SearchPage, SearchQuery, Vault};
 use std::sync::Arc;
 
-use super::{
-    lock_state, search_expr, to_napi, JsSearchHit, JsSearchLocation, JsSearchMatch, JsSearchQuery,
-};
+use crate::runtime::{lock_state, to_napi};
 
 /// 一页已验证命中；续页游标只能用于相同表达式、页长与库版本。
 #[napi(object)]
@@ -205,4 +203,113 @@ fn map_match(item: nous_vault::SearchMatch) -> JsSearchMatch {
             })
         }),
     }
+}
+
+/// 检索表达式节点；查询文本解析在渲染层完成。
+///
+/// `kind` 为 `and`/`or`（`children` 为子条件）、`not`/`line`/`section`（恰好一个子条件）、
+/// `term`/`regex`/`tag`/`path`/`file`（`value` 为文本）或 `attr`（`key` 必填，`value` 可缺）。
+#[napi(object)]
+pub struct JsSearchExpr {
+    /// 节点种类。
+    pub kind: String,
+    /// 文本值；属性节点缺失表示只要求键存在。
+    pub value: Option<String>,
+    /// 属性名；只用于 `attr`。
+    pub key: Option<String>,
+    /// 子条件。
+    pub children: Option<Vec<JsSearchExpr>>,
+}
+
+/// 一次检索：表达式与每页文件数。
+#[napi(object)]
+pub struct JsSearchQuery {
+    /// 检索表达式。
+    pub expr: JsSearchExpr,
+    /// 每页文件数；非正数按内核默认值处理。
+    pub limit: i32,
+}
+
+/// 表达式嵌套深度上限；主进程已校验，这里是跨语言边界的最后一道防线。
+const SEARCH_DEPTH_LIMIT: usize = 32;
+
+fn search_expr(node: JsSearchExpr, depth: usize) -> Result<nous_vault::SearchExpr> {
+    use nous_vault::SearchExpr;
+    if depth > SEARCH_DEPTH_LIMIT {
+        return Err(Error::from_reason("检索条件嵌套过深"));
+    }
+    let children = |node: JsSearchExpr| -> Result<Vec<SearchExpr>> {
+        node.children
+            .unwrap_or_default()
+            .into_iter()
+            .map(|child| search_expr(child, depth + 1))
+            .collect()
+    };
+    let only = |node: JsSearchExpr| -> Result<Box<SearchExpr>> {
+        let mut list = children(node)?;
+        if list.len() != 1 {
+            return Err(Error::from_reason("检索条件的子条件数量无效"));
+        }
+        Ok(Box::new(list.remove(0)))
+    };
+    let text =
+        |value: Option<String>| value.ok_or_else(|| Error::from_reason("检索条件缺少文本值"));
+    Ok(match node.kind.as_str() {
+        "and" => SearchExpr::And(children(node)?),
+        "or" => SearchExpr::Or(children(node)?),
+        "not" => SearchExpr::Not(only(node)?),
+        "line" => SearchExpr::Line(only(node)?),
+        "section" => SearchExpr::Section(only(node)?),
+        "term" => SearchExpr::Term(text(node.value)?),
+        "regex" => SearchExpr::Regex(text(node.value)?),
+        "tag" => SearchExpr::Tag(text(node.value)?),
+        "path" => SearchExpr::Path(text(node.value)?),
+        "file" => SearchExpr::File(text(node.value)?),
+        "attr" => SearchExpr::Attr {
+            key: node
+                .key
+                .ok_or_else(|| Error::from_reason("属性条件缺少键"))?,
+            value: node.value,
+        },
+        _ => return Err(Error::from_reason("未知的检索条件种类")),
+    })
+}
+
+/// 一条搜索命中。
+#[napi(object)]
+pub struct JsSearchHit {
+    /// 命中文件库内相对路径。
+    pub path: String,
+    /// 展示标题。
+    pub title: String,
+    /// 正文摘要；命中词以 U+0001/U+0002 控制字符包围，可能为空串。
+    pub snippet: String,
+    /// 与命中范围同版本的文件 SHA-256。
+    pub content_hash: String,
+    /// 首批最多五处具体命中，按正文顺序排列。
+    pub matches: Vec<JsSearchMatch>,
+    /// 去重后的精确正文命中总数。
+    pub match_count: i64,
+    /// 单篇后续命中的游标，没有更多时明确为 null。
+    pub matches_cursor: Either<String, Null>,
+}
+
+/// 一处命中的源码位置与上下文。
+#[napi(object)]
+pub struct JsSearchMatch {
+    /// 无法证明源码映射时不返回位置，禁止用同名词猜测。
+    pub location: Either<JsSearchLocation, Null>,
+    /// 本处命中的高亮上下文。
+    pub snippet: String,
+}
+
+/// UTF-8 源码区间；范围仅对结果携带的内容版本有效。
+#[napi(object)]
+pub struct JsSearchLocation {
+    /// 起点（含）。
+    pub start_byte: i64,
+    /// 终点（不含）。
+    pub end_byte: i64,
+    /// 一基行号。
+    pub line: i64,
 }

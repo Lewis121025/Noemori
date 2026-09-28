@@ -2,6 +2,8 @@
 
 mod batch;
 mod commit;
+pub(crate) mod journal;
+pub(crate) mod rewrite;
 mod snapshot;
 
 pub use batch::{RenameBatchIssue, RenameBatchOutcome};
@@ -12,10 +14,10 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::pathutil::{path_to_slashes, resolve_in_root};
-use crate::recovery::RecoveryStore;
-use crate::rename_journal::{FileChange, RenameJournal};
-use crate::save::{read_optional, sync_parent};
+use crate::storage::path::{path_to_slashes, resolve_in_root};
+use crate::storage::recovery::RecoveryStore;
+use crate::rename::journal::{FileChange, RenameJournal};
+use crate::storage::save::{read_optional, sync_parent};
 use crate::vault::{resolve_against, Inventory};
 use crate::{EntryMutation, Error, LinkKind, LinkRecord, Vault};
 use commit::{apply_rename, replace_version};
@@ -53,7 +55,7 @@ impl Vault {
                 )));
             }
             if let Some(to) = &change.to {
-                crate::entries::validate_entry_path(to)?;
+                crate::storage::entries::validate_entry_path(to)?;
                 if !targets.insert(to) {
                     return Err(Error::Io(io::Error::other(format!("目标名称重复：{to}"))));
                 }
@@ -99,7 +101,7 @@ impl Vault {
     pub fn rename(&self, from: &str, to: &str) -> Result<RenameOutcome, Error> {
         let _guard = self.lock_writes()?;
         recover_pending(self.root(), &self.recovery)?;
-        crate::entries::validate_entry_path(to)?;
+        crate::storage::entries::validate_entry_path(to)?;
         let from = relative_path(self.root(), from)?;
         let to = relative_path(self.root(), to)?;
         if from == to {
@@ -298,12 +300,12 @@ fn rewrite_file(
         }
         let target_text = match link.kind {
             LinkKind::Wiki => {
-                let (original_target, _) = crate::link::split_resource(link.to_raw.trim());
+                let (original_target, _) = crate::links::link::split_resource(link.to_raw.trim());
                 if original_target.contains('/') {
                     // 路径形式保持路径形式：无歧义，不参与名称唯一性检查。
-                    crate::rewrite::wiki_target_path(original_target, &new_target)
+                    crate::rename::rewrite::wiki_target_path(original_target, &new_target)
                 } else {
-                    let stem = crate::rewrite::wiki_target_name(&new_target);
+                    let stem = crate::rename::rewrite::wiki_target_name(&new_target);
                     if resolve_against(after, &new_source, &stem, LinkKind::Wiki).as_deref()
                         != Some(new_target.as_str())
                     {
@@ -314,7 +316,7 @@ fn rewrite_file(
                     stem
                 }
             }
-            LinkKind::Markdown => crate::rewrite::relative_markdown_url(&new_source, &new_target)?,
+            LinkKind::Markdown => crate::rename::rewrite::relative_markdown_url(&new_source, &new_target)?,
         };
         let start = usize::try_from(link.start_byte)
             .map_err(|_| Error::Io(io::Error::other("链接起点溢出")))?;
@@ -323,7 +325,7 @@ fn rewrite_file(
         let span = source
             .get(start..end)
             .ok_or_else(|| Error::Io(io::Error::other("链接区间无效")))?;
-        let replacement = crate::rewrite::rewrite_span(link.kind, span, &target_text)?;
+        let replacement = crate::rename::rewrite::rewrite_span(link.kind, span, &target_text)?;
         let prefix = span
             .bytes()
             .zip(replacement.bytes())

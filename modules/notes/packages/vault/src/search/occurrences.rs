@@ -10,7 +10,7 @@ use super::{
     Node, SearchHit, SearchLocation, SearchMatch, SearchMatchesPage, SearchQuery, DOCUMENT_COLUMNS,
     INITIAL_MATCHES,
 };
-use crate::{search_index::SearchSnapshot, Error, SearchCancellation};
+use crate::{index::fulltext::SearchSnapshot, Error, SearchCancellation};
 
 const PAGE_SIZE: usize = 20;
 

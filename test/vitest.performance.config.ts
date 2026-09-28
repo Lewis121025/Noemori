@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   root: fileURLToPath(new URL("../modules/notes/packages/desktop/", import.meta.url)),
   test: {
-    setupFiles: ["../../../../test/desktop/support/window-mode.ts"],
+    setupFiles: ["../../../../test/notes/desktop/support/window-mode.ts"],
     environment: "node",
     env: {
       NOUS_PERFORMANCE_REPORT:
@@ -15,7 +15,7 @@ export default defineConfig({
         ),
     },
     fileParallelism: false,
-    include: ["../../../../test/reader/performance/*.test.mts"],
+    include: ["../../../../test/notes/desktop/performance/*.test.mts"],
     testTimeout: 30000,
   },
 });

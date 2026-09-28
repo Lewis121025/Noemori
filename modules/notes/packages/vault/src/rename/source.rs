@@ -5,8 +5,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::entries::scan_entries;
-use crate::pathutil::{path_to_slashes, resolve_in_root};
+use crate::storage::entries::scan_entries;
+use crate::storage::path::{path_to_slashes, resolve_in_root};
 use crate::{EntryKind, Error, VaultEntry};
 
 /// 同一次规划内的源条目集合；提交前复查目录快照以拒绝遗漏外部新增文件。

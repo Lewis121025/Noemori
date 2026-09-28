@@ -3,12 +3,14 @@
 //! 所有表都是磁盘 Markdown 的派生物，可随时全量重建；`user_version`
 //! 记录扫描器版本，落后即重扫。
 
+pub(crate) mod fulltext;
+
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 
 use crate::error::Error;
-use crate::link::{LinkKind, LinkRecord, LinkResolution};
+use crate::links::link::{LinkKind, LinkRecord, LinkResolution};
 
 /// 索引里的一行文件记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +58,7 @@ pub(crate) struct DerivedRows {
     /// 全文行 `(title, body)`；非 Markdown 为 `None`，正文不可解码时仅索引文件名标题。
     pub text: Option<(String, String)>,
     /// 与正文同版本的位置映射；写入时与全文行共同提交。
-    pub source_map: crate::search_text::SourceMap,
+    pub source_map: crate::markdown::source_map::SourceMap,
 }
 
 /// 打开或创建索引库并建表。
@@ -97,7 +99,7 @@ fn register_search_functions(conn: &Connection) -> Result<(), Error> {
         |context| {
             Ok(context
                 .get::<Option<String>>(0)?
-                .map(|text| crate::search_text::fold(&text)))
+                .map(|text| crate::markdown::source_map::fold(&text)))
         },
     )?;
     Ok(())
@@ -281,7 +283,7 @@ pub(crate) fn load_alias_keys(conn: &Connection) -> Result<HashMap<String, Vec<S
     }
     let mut out = HashMap::new();
     for (path, attributes) in grouped {
-        let keys = crate::identity::alias_keys(&attributes);
+        let keys = crate::links::identity::alias_keys(&attributes);
         if !keys.is_empty() {
             out.insert(path, keys);
         }
@@ -381,7 +383,7 @@ fn insert_derived(
         )?;
         tx.execute(
             "INSERT INTO search_short(rowid, terms) SELECT rowid, ?2 FROM search_sources WHERE path = ?1",
-            params![path, crate::search_text::short_terms(title, body)],
+            params![path, crate::markdown::source_map::short_terms(title, body)],
         )?;
     }
     Ok(())

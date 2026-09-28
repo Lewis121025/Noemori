@@ -15,94 +15,94 @@ path = "src/lib.rs"
 
 [[test]]
 name = "vault_unit_identity_write"
-path = "../../../../test/vault/unit/identity_write.rs"
+path = "../../../../test/notes/vault/unit/storage/identity_write.rs"
 
 [[test]]
 name = "vault_unit_index_refresh"
-path = "../../../../test/vault/unit/index_refresh.rs"
+path = "../../../../test/notes/vault/unit/storage/index_refresh.rs"
 
 [[test]]
 name = "vault_integration_watch"
-path = "../../../../test/vault/integration/watch.rs"
+path = "../../../../test/notes/vault/integration/storage/watch.rs"
 
 [[test]]
 name = "vault_integration_save_recovery"
-path = "../../../../test/vault/integration/save_recovery.rs"
+path = "../../../../test/notes/vault/integration/storage/save_recovery.rs"
 
 [[test]]
 name = "vault_integration_path_identity"
-path = "../../../../test/vault/integration/path_identity.rs"
+path = "../../../../test/notes/vault/integration/storage/path_identity.rs"
 
 [[test]]
 name = "links_unit_scan"
-path = "../../../../test/links/unit/scan.rs"
+path = "../../../../test/notes/vault/unit/links/scan.rs"
 
 [[test]]
 name = "links_unit_resolve"
-path = "../../../../test/links/unit/resolve.rs"
+path = "../../../../test/notes/vault/unit/links/resolve.rs"
 
 [[test]]
 name = "links_unit_mentions"
-path = "../../../../test/links/unit/mentions.rs"
+path = "../../../../test/notes/vault/unit/links/mentions.rs"
 
 [[test]]
 name = "links_unit_linkify"
-path = "../../../../test/links/unit/linkify.rs"
+path = "../../../../test/notes/vault/unit/links/linkify.rs"
 
 [[test]]
 name = "links_unit_note_keys"
-path = "../../../../test/links/unit/note_keys.rs"
+path = "../../../../test/notes/vault/unit/links/note_keys.rs"
 
 [[test]]
 name = "links_unit_graph"
-path = "../../../../test/links/unit/graph.rs"
+path = "../../../../test/notes/vault/unit/links/graph.rs"
 
 [[test]]
 name = "links_integration_rename"
-path = "../../../../test/links/integration/rename.rs"
+path = "../../../../test/notes/vault/integration/rename/rename.rs"
 
 [[test]]
 name = "links_integration_rename_recovery"
-path = "../../../../test/links/integration/rename_recovery.rs"
+path = "../../../../test/notes/vault/integration/rename/rename_recovery.rs"
 
 [[test]]
 name = "links_integration_rename_batch"
-path = "../../../../test/links/integration/rename_batch.rs"
+path = "../../../../test/notes/vault/integration/rename/rename_batch.rs"
 
 [[test]]
 name = "search_unit_tags"
-path = "../../../../test/search/unit/tags.rs"
+path = "../../../../test/notes/vault/unit/search/tags.rs"
 
 [[test]]
 name = "search_unit_headings"
-path = "../../../../test/search/unit/headings.rs"
+path = "../../../../test/notes/vault/unit/search/headings.rs"
 
 [[test]]
 name = "search_integration_fulltext"
-path = "../../../../test/search/integration/fulltext.rs"
+path = "../../../../test/notes/vault/integration/search/fulltext.rs"
 
 [[test]]
 name = "search_integration_expr"
-path = "../../../../test/search/integration/expr.rs"
+path = "../../../../test/notes/vault/integration/search/expr.rs"
 
 [[test]]
 name = "search_integration_index_sync"
-path = "../../../../test/search/integration/index_sync.rs"
+path = "../../../../test/notes/vault/integration/search/index_sync.rs"
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [[test]]
 name = "vault_unit_entries"
-path = "../../../../test/vault/unit/entries.rs"
+path = "../../../../test/notes/vault/unit/storage/entries.rs"
 
 [[test]]
 name = "vault_unit_attachments"
-path = "../../../../test/vault/unit/attachments.rs"
+path = "../../../../test/notes/vault/unit/storage/attachments.rs"
 
 [[test]]
 name = "vault_unit_bookmarks"
-path = "../../../../test/vault/unit/bookmarks.rs"
+path = "../../../../test/notes/vault/unit/storage/bookmarks.rs"
 
 [dependencies]
 markdown = "1.0.0"
@@ -119,23 +119,23 @@ yaml-rust2 = "0.13"
 
 [[test]]
 name = "search_performance_scale"
-path = "../../../../test/search/performance/scale.rs"
+path = "../../../../test/notes/vault/performance/search/scale.rs"
 
 [[test]]
 name = "search_performance_occurrences"
-path = "../../../../test/search/performance/occurrences.rs"
+path = "../../../../test/notes/vault/performance/search/occurrences.rs"
 
 [[test]]
 name = "search_integration_engine"
-path = "../../../../test/search/integration/engine.rs"
+path = "../../../../test/notes/vault/integration/search/engine.rs"
 
 [[test]]
 name = "search_integration_paging"
-path = "../../../../test/search/integration/paging.rs"
+path = "../../../../test/notes/vault/integration/search/paging.rs"
 
 [[test]]
 name = "vault_performance_files"
-path = "../../../../test/vault/performance/files.rs"
+path = "../../../../test/notes/vault/performance/storage/files.rs"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }

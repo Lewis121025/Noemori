@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   root: fileURLToPath(new URL("../modules/notes/packages/desktop/", import.meta.url)),
   test: {
-    include: ["../../../../test/reader/integration/native/core-native.test.mts"],
+    include: ["../../../../test/notes/desktop/integration/native/core-native.test.mts"],
     environment: "node",
     testTimeout: 15000,
   },

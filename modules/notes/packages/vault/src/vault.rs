@@ -11,10 +11,10 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 use crate::index::{self, DerivedRows, FileRow, HeadingRecord};
-use crate::link::LinkRecord;
-use crate::mention::{self, MentionKind, MentionRecord, Mentions};
-use crate::pathutil::{path_to_slashes, resolve_in_root};
-use crate::scan;
+use crate::links::link::LinkRecord;
+use crate::links::mention::{self, MentionKind, MentionRecord, Mentions};
+use crate::storage::path::{path_to_slashes, resolve_in_root};
+use crate::markdown::scan;
 use crate::search::{SearchHit, SearchQuery};
 
 /// 已打开的笔记库。
@@ -25,14 +25,14 @@ pub struct Vault {
     index_dir: PathBuf,
     conn: Mutex<Connection>,
     /// 排名快照在 `SQLite` 正文事务内同步并查询，不能与来源版本交叉使用。
-    search_index: Mutex<crate::search_index::SearchIndex>,
+    search_index: Mutex<crate::index::fulltext::SearchIndex>,
     /// 最近一次扫描的库内路径。列目录和解析链接走这里，避免每次下盘。
     inventory: Mutex<Option<Inventory>>,
     /// 空目录也参与监视变更判断，文件树不能依赖文件索引推断全部目录。
     directories: Mutex<Vec<String>>,
     /// 文件提交串行化，避免两次应用内保存同时通过版本检查。
     writes: Mutex<()>,
-    pub(super) recovery: crate::recovery::RecoveryStore,
+    pub(super) recovery: crate::storage::recovery::RecoveryStore,
 }
 
 impl Vault {
@@ -55,10 +55,10 @@ impl Vault {
         let index_dir = index_dir.as_ref().to_path_buf();
         fs::create_dir_all(&index_dir)?;
         let _operation = lock_operation(&index_dir)?;
-        let recovery = crate::recovery::RecoveryStore::open(&index_dir.join("recovery.sqlite"))?;
+        let recovery = crate::storage::recovery::RecoveryStore::open(&index_dir.join("recovery.sqlite"))?;
         crate::rename::recover_pending(&root, &recovery)?;
         let conn = index::open_connection(&index_dir.join("index.sqlite"))?;
-        let search_index = crate::search_index::SearchIndex::open(&index_dir)?;
+        let search_index = crate::index::fulltext::SearchIndex::open(&index_dir)?;
         let vault = Self {
             root,
             index_dir,
@@ -104,7 +104,7 @@ impl Vault {
     }
 
     fn refresh_index_contents(&self, verify_content: bool) -> Result<bool, Error> {
-        let entries = crate::entries::scan_entries(&self.root, false)?;
+        let entries = crate::storage::entries::scan_entries(&self.root, false)?;
         let files: Vec<_> = entries
             .iter()
             .filter(|entry| entry.kind == crate::EntryKind::File)
@@ -123,7 +123,7 @@ impl Vault {
                 index::scan_version(&conn)? != index::SCAN_VERSION,
             )
         };
-        let extras = crate::identity::extras_from_files(&indexed_files, &aliases);
+        let extras = crate::links::identity::extras_from_files(&indexed_files, &aliases);
         self.store_built_inventory(Inventory::with_extra(files.clone(), &extras))?;
         let by_path: HashMap<String, FileRow> = indexed_files
             .into_iter()
@@ -292,7 +292,7 @@ impl Vault {
     }
 
     pub(super) fn scan_files(&self) -> Result<Vec<String>, Error> {
-        Ok(crate::entries::scan_entries(&self.root, false)?
+        Ok(crate::storage::entries::scan_entries(&self.root, false)?
             .into_iter()
             .filter(|entry| entry.kind == crate::EntryKind::File)
             .map(|entry| entry.path)
@@ -432,11 +432,11 @@ impl Vault {
         out.extend_from_slice(&bytes[..start]);
         out.extend_from_slice(replacement.as_bytes());
         out.extend_from_slice(&bytes[end..]);
-        let staged = crate::save::stage(&path, &out)?;
+        let staged = crate::storage::save::stage(&path, &out)?;
         staged
             .persist(&path)
             .map_err(|err| Error::Io(io::Error::other(err.error.to_string())))?;
-        crate::save::sync_parent(&path)?;
+        crate::storage::save::sync_parent(&path)?;
         // 写盘已成事实；索引刷新失败降级为警告，与其余入口操作同一口径。
         let warning = match self.reindex_written(from, &out) {
             Ok(()) => None,
@@ -507,17 +507,17 @@ impl Vault {
         &self,
         from: &str,
         raw: &str,
-        kind: crate::link::LinkKind,
-    ) -> crate::link::LinkTarget {
-        use crate::link::LinkTarget;
+        kind: crate::links::link::LinkKind,
+    ) -> crate::links::link::LinkTarget {
+        use crate::links::link::LinkTarget;
         let Ok(guard) = self.lock_inventory() else {
             return LinkTarget::Dead;
         };
         let Some(inventory) = guard.as_ref() else {
             return LinkTarget::Dead;
         };
-        let (path, suffix) = crate::link::split_resource(raw.trim());
-        let anchor = crate::link::anchor_of(suffix, kind);
+        let (path, suffix) = crate::links::link::split_resource(raw.trim());
+        let anchor = crate::links::link::anchor_of(suffix, kind);
         if path.is_empty() {
             return match anchor {
                 Some(anchor) => LinkTarget::Resolved {
@@ -528,12 +528,12 @@ impl Vault {
             };
         }
         match kind {
-            crate::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
+            crate::links::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
                 WikiHits::One(path) => LinkTarget::Resolved { path, anchor },
                 WikiHits::Many(candidates) => LinkTarget::Ambiguous { candidates, anchor },
                 WikiHits::None => LinkTarget::Dead,
             },
-            crate::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
+            crate::links::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
                 Some(path) => LinkTarget::Resolved { path, anchor },
                 None => LinkTarget::Dead,
             },
@@ -565,11 +565,11 @@ impl Vault {
     /// # Errors
     ///
     /// 索引查询失败。
-    pub fn note_keys(&self) -> Result<Vec<crate::identity::NoteKeys>, Error> {
+    pub fn note_keys(&self) -> Result<Vec<crate::links::identity::NoteKeys>, Error> {
         let conn = self.lock_conn()?;
         let files = index::load_files(&conn)?;
         let aliases = index::load_alias_keys(&conn)?;
-        Ok(crate::identity::note_keys(&files, &aliases))
+        Ok(crate::links::identity::note_keys(&files, &aliases))
     }
 
     /// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
@@ -579,7 +579,7 @@ impl Vault {
     /// 索引查询失败。
     pub fn graph(&self, include_dead: bool) -> Result<crate::Graph, Error> {
         let conn = self.lock_conn()?;
-        crate::graph::load_graph(&conn, include_dead)
+        crate::links::graph::load_graph(&conn, include_dead)
     }
 
     /// 先将排名索引同步到正文版本，再执行结构化全文搜索；条件语义见 [`SearchQuery`]。
@@ -642,7 +642,7 @@ impl Vault {
     fn search_snapshot(
         &self,
         cancellation: &crate::SearchCancellation,
-    ) -> Result<(Connection, crate::search_index::SearchSnapshot), Error> {
+    ) -> Result<(Connection, crate::index::fulltext::SearchSnapshot), Error> {
         let conn = self.lock_conn()?;
         cancellation.check()?;
         let tx =
@@ -690,7 +690,7 @@ impl Vault {
         let indexed_set: HashSet<String> = rows.iter().map(|item| item.path.clone()).collect();
         aliases.insert(
             rel.to_string(),
-            crate::identity::alias_keys(&derived.attributes),
+            crate::links::identity::alias_keys(&derived.attributes),
         );
         if let Some(existing) = rows.iter_mut().find(|item| item.path == rel) {
             existing.title.clone_from(&row.title);
@@ -699,7 +699,7 @@ impl Vault {
             rows.push(row.clone());
         }
         rows.retain(|item| files.iter().any(|path| path == &item.path));
-        let extras = crate::identity::extras_from_files(&rows, &aliases);
+        let extras = crate::links::identity::extras_from_files(&rows, &aliases);
         let inventory = Inventory::with_extra(files, &extras);
         for link in &mut new_links {
             assign_target(link, &inventory);
@@ -887,7 +887,7 @@ fn empty_derived() -> DerivedRows {
         tags: Vec::new(),
         attributes: Vec::new(),
         text: None,
-        source_map: crate::search_text::SourceMap::default(),
+        source_map: crate::markdown::source_map::SourceMap::default(),
     }
 }
 
@@ -1053,16 +1053,16 @@ fn identity_inventory(
         aliases.remove(path);
     }
     for (path, rows) in derived {
-        aliases.insert(path.clone(), crate::identity::alias_keys(&rows.attributes));
+        aliases.insert(path.clone(), crate::links::identity::alias_keys(&rows.attributes));
     }
-    let extras = crate::identity::extras_from_files(file_rows, aliases);
+    let extras = crate::links::identity::extras_from_files(file_rows, aliases);
     Inventory::with_extra(files.to_vec(), &extras)
 }
 
 /// 把一条索引链接写成唯一路径或未解析状态。
 ///
-/// 纯锚点记为 [`crate::link::LinkResolution::SelfAnchor`]，不产生图边。
-pub(super) fn assign_target(link: &mut crate::link::LinkRecord, inventory: &Inventory) {
+/// 纯锚点记为 [`crate::links::link::LinkResolution::SelfAnchor`]，不产生图边。
+pub(super) fn assign_target(link: &mut crate::links::link::LinkRecord, inventory: &Inventory) {
     let (to_path, resolution) = indexed_target(inventory, &link.from_path, &link.to_raw, link.kind);
     link.to_path = to_path;
     link.resolution = resolution;
@@ -1072,12 +1072,12 @@ fn indexed_target(
     inventory: &Inventory,
     from: &str,
     raw: &str,
-    kind: crate::link::LinkKind,
-) -> (Option<String>, crate::link::LinkResolution) {
-    use crate::link::LinkResolution;
-    let (path, suffix) = crate::link::split_resource(raw.trim());
+    kind: crate::links::link::LinkKind,
+) -> (Option<String>, crate::links::link::LinkResolution) {
+    use crate::links::link::LinkResolution;
+    let (path, suffix) = crate::links::link::split_resource(raw.trim());
     if path.is_empty() {
-        let anchor = crate::link::anchor_of(suffix, kind);
+        let anchor = crate::links::link::anchor_of(suffix, kind);
         return (
             None,
             if anchor.is_some() {
@@ -1088,12 +1088,12 @@ fn indexed_target(
         );
     }
     match kind {
-        crate::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
+        crate::links::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
             WikiHits::One(hit) => (Some(hit), LinkResolution::Resolved),
             WikiHits::Many(_) => (None, LinkResolution::Ambiguous),
             WikiHits::None => (None, LinkResolution::Dead),
         },
-        crate::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
+        crate::links::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
             Some(hit) => (Some(hit), LinkResolution::Resolved),
             None => (None, LinkResolution::Dead),
         },
@@ -1104,19 +1104,19 @@ pub(super) fn resolve_against(
     inventory: &Inventory,
     from: &str,
     raw: &str,
-    kind: crate::link::LinkKind,
+    kind: crate::links::link::LinkKind,
 ) -> Option<String> {
-    let (path, _) = crate::link::split_resource(raw.trim());
+    let (path, _) = crate::links::link::split_resource(raw.trim());
     // 纯锚点链接指向源文件自身，不构成图边，索引里保持死链语义。
     if path.is_empty() {
         return None;
     }
     match kind {
-        crate::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
+        crate::links::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
             WikiHits::One(hit) => Some(hit),
             WikiHits::None | WikiHits::Many(_) => None,
         },
-        crate::link::LinkKind::Markdown => resolve_markdown(inventory, from, path),
+        crate::links::link::LinkKind::Markdown => resolve_markdown(inventory, from, path),
     }
 }
 
@@ -1181,7 +1181,7 @@ fn wiki_target_form(inventory: &Inventory, target: &str) -> String {
 /// 别名里的 `|` 按「首个分隔符」解析规则仍属于别名。
 fn wiki_link_text(mention_text: &str, target: &str, inventory: &Inventory) -> String {
     let form = wiki_target_form(inventory, target);
-    let encoded = crate::wiki::encode_text(&form);
+    let encoded = crate::markdown::wiki::encode_text(&form);
     let path = Path::new(target);
     let display = if is_markdown(target) {
         path.file_stem()
@@ -1195,7 +1195,7 @@ fn wiki_link_text(mention_text: &str, target: &str, inventory: &Inventory) -> St
     if mention_text == display {
         format!("[[{encoded}]]")
     } else {
-        format!("[[{encoded}|{}]]", crate::wiki::encode_text(mention_text))
+        format!("[[{encoded}|{}]]", crate::markdown::wiki::encode_text(mention_text))
     }
 }
 

@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use super::{check_version, moved_path, version_permissions};
-use crate::pathutil::resolve_in_root;
-use crate::recovery::RecoveryStore;
-use crate::rename_journal::{FileChange, RenameJournal};
-use crate::save::{sync_parent, write_staged_bytes};
+use crate::storage::path::resolve_in_root;
+use crate::storage::recovery::RecoveryStore;
+use crate::rename::journal::{FileChange, RenameJournal};
+use crate::storage::save::{sync_parent, write_staged_bytes};
 use crate::Error;
 
 // 限制同时打开的暂存文件和目录数量，避免大目录耗尽文件描述符。
@@ -229,5 +229,5 @@ fn sync_files(files: &[&fs::File]) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-#[path = "../../../../../../test/links/integration/rename_commit.rs"]
+#[path = "../../../../../../test/notes/vault/integration/rename/rename_commit.rs"]
 mod tests;

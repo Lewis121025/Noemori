@@ -5,7 +5,8 @@ use std::cell::Cell;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{with_vault, JsEntryMutation};
+use crate::entries::JsEntryMutation;
+use crate::runtime::with_vault;
 
 thread_local! {
     static IN_PROGRESS_CALLBACK: Cell<bool> = const { Cell::new(false) };

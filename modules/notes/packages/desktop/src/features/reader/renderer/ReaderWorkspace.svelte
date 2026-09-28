@@ -1,19 +1,19 @@
 <script lang="ts">
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
-  import ReaderToolbar from "./components/workspace/ReaderToolbar.svelte";
-  import FileList from "./components/files/FileList.svelte";
-  import QuickNavigation from "./components/navigation/QuickNavigation.svelte";
-  import PaneColumn from "./components/workspace/PaneColumn.svelte";
-  import FileEntryDialog from "./components/files/FileEntryDialog.svelte";
-  import LinkCandidatesDialog from "./components/workspace/LinkCandidatesDialog.svelte";
-  import DeadLinkDialog from "./components/workspace/DeadLinkDialog.svelte";
-  import QuickSwitcher from "./components/workspace/QuickSwitcher.svelte";
-  import CommandPalette from "./components/workspace/CommandPalette.svelte";
-  import GraphDialog from "./components/graph/GraphDialog.svelte";
-  import { parentDirectory, type FileEntryChange } from "./engine/navigation/file-tree";
-  import { untitledNotePath } from "./engine/navigation/library";
-  import { ReaderWorkspaceController } from "./state/workspace.svelte";
-  import { createBrowserMediaIo } from "./engine/media/media";
+  import ReaderToolbar from "./workspace/ReaderToolbar.svelte";
+  import LibraryBrowser from "./library/LibraryBrowser.svelte";
+  import QuickNavigation from "./navigation/QuickNavigation.svelte";
+  import PaneColumn from "./workspace/PaneColumn.svelte";
+  import FileEntryDialog from "./library/FileEntryDialog.svelte";
+  import LinkCandidatesDialog from "./links/LinkCandidatesDialog.svelte";
+  import DeadLinkDialog from "./links/DeadLinkDialog.svelte";
+  import QuickSwitcher from "./navigation/QuickSwitcher.svelte";
+  import CommandPalette from "./workspace/CommandPalette.svelte";
+  import GraphDialog from "./graph/GraphDialog.svelte";
+  import { parentDirectory, type FileEntryChange } from "./library/file-tree";
+  import { untitledNotePath } from "./library/library";
+  import { ReaderWorkspaceController } from "./workspace/state.svelte";
+  import { createBrowserMediaIo } from "./preview/media";
   import { SIDEBAR_LAYOUT, type ReaderApi, type ReaderSpace } from "../shared/api";
   import "./styles/controls.css";
   import type { GraphNode, HistoryAction, HistoryAvailability } from "../shared/api";
@@ -23,7 +23,7 @@
     type CommandContext,
     type ReaderCommand,
   } from "../shared/commands";
-  import { isCompositionKey } from "./engine/editing/composition";
+  import { isCompositionKey } from "./editor/composition";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
   let { api, applicationMenu }: { api: ReaderApi; applicationMenu: Snippet } = $props();
@@ -42,7 +42,7 @@
   let narrow = $state(false);
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
   let entryDialog: FileEntryDialog | undefined = $state();
-  let fileList: FileList | undefined = $state();
+  let fileList: LibraryBrowser | undefined = $state();
   let toolbar: ReaderToolbar | undefined = $state();
   /** 当前打开的选择弹层；同一时间至多一个。 */
   let picker = $state<"switcher" | "palette" | null>(null);
@@ -434,7 +434,7 @@
         />
       {/each}
     </div>
-    <FileList
+    <LibraryBrowser
       bind:this={fileList}
       onOpen={finishFileNavigation}
       {workspace}

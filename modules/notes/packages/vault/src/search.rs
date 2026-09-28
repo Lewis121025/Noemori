@@ -13,6 +13,7 @@
 //! 全文词语义是「大小写不敏感的子串匹配」；标签、属性、路径与文件名是整篇级谓词，
 //! 出现在 `line:`/`section:` 内部时仍按整篇判断。
 
+pub(crate) mod cancellation;
 mod evidence;
 mod occurrences;
 mod plan;
@@ -27,8 +28,8 @@ use regex::{Regex, RegexBuilder};
 use rusqlite::Connection;
 
 use crate::error::Error;
-use crate::search_index::SearchSnapshot;
-use crate::search_text::{fold, SourceMap};
+use crate::index::fulltext::SearchSnapshot;
+use crate::markdown::source_map::{fold, SourceMap};
 use crate::SearchCancellation;
 use plan::Plan;
 use serde::{Deserialize, Serialize};

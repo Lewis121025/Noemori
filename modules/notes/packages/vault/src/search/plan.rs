@@ -7,8 +7,8 @@ use tantivy::query::{BooleanQuery, Occur, Query};
 
 use super::Node;
 use crate::{
-    search_index::{RankedQuery, SearchSnapshot, SourceQuery},
-    search_text::{fold, short_token},
+    index::fulltext::{RankedQuery, SearchSnapshot, SourceQuery},
+    markdown::source_map::{fold, short_token},
     Error, SearchCancellation,
 };
 

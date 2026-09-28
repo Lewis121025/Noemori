@@ -3,10 +3,10 @@
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 
-use crate::rename_journal::RenameJournal;
+use crate::rename::journal::RenameJournal;
 use std::io;
 
-use crate::pathutil::resolve_in_root;
+use crate::storage::path::resolve_in_root;
 use crate::{Error, LinkRecord, Vault};
 
 /// 身份键、链接区间和正文来自同一次读取，不能混用不同版本。
@@ -36,8 +36,8 @@ impl RenameDocument {
     pub fn scan(path: &str, bytes: Vec<u8>) -> (Self, Vec<String>) {
         if crate::vault::is_markdown(path) {
             if let Ok(text) = std::str::from_utf8(&bytes) {
-                let scanned = crate::scan::scan_markdown(path, text);
-                let keys = crate::identity::keys_from_scan(&scanned);
+                let scanned = crate::markdown::scan::scan_markdown(path, text);
+                let keys = crate::links::identity::keys_from_scan(&scanned);
                 return (Self::new(bytes, scanned.links), keys);
             }
         }
@@ -143,8 +143,8 @@ impl Vault {
             let (keys, links) = if let Some(fact) = cached {
                 (fact.keys.clone(), fact.links.clone())
             } else if let Ok(text) = std::str::from_utf8(&read) {
-                let scanned = crate::scan::scan_markdown(path, text);
-                (crate::identity::keys_from_scan(&scanned), scanned.links)
+                let scanned = crate::markdown::scan::scan_markdown(path, text);
+                (crate::links::identity::keys_from_scan(&scanned), scanned.links)
             } else {
                 (Vec::new(), Vec::new())
             };
@@ -168,7 +168,7 @@ impl Vault {
         }
         let rows = crate::index::load_files(&conn)?;
         let aliases = crate::index::load_alias_keys(&conn)?;
-        let mut keys = crate::identity::extras_from_files(&rows, &aliases);
+        let mut keys = crate::links::identity::extras_from_files(&rows, &aliases);
         let mut facts: HashMap<_, _> = rows
             .into_iter()
             .map(|row| {
