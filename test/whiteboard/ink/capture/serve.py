@@ -2,7 +2,7 @@
 """仅在 127.0.0.1 提供独立采集页面；只有页面上的保存操作会写入原始记录。
 
 运行 python3 test/whiteboard/ink/capture/serve.py。API 只访问 UUID 记录和固定静态资源，
-不暴露仓库其他目录；原始记录可下载并由 replay.py 转换，不自动计入测试集。
+不暴露仓库其他目录；原始记录可下载，不自动计入测试集。
 """
 import argparse
 from datetime import datetime,timezone

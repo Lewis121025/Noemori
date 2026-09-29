@@ -89,14 +89,22 @@
   function move(event: PointerEvent): void {
     if (event.pointerId !== pointer) return;
     const samples = event.getCoalescedEvents?.() ?? [];
-    attempt(() => {
-      for (const sample of samples.length > 0 ? samples : [event]) input?.update(point(sample));
+    // 合并事件与父事件择一处理，不能把父事件重复作为额外观测。
+    const observed = samples.length > 0 ? samples : [event];
+    const accepted = attempt(() => {
+      for (const sample of observed) input?.update(point(sample));
     });
-    const at = point(event);
+    if (!accepted) {
+      stopHold();
+      return;
+    }
+    const at = point(observed.at(-1)!);
     if (holdAt === null || Math.hypot(at.x - holdAt.x, at.y - holdAt.y) > 3) {
       stopHold();
       holdAt = at;
-      holdTimer = setTimeout(() => input?.hold(), 450);
+      holdTimer = setTimeout(() => {
+        attempt(() => input?.hold());
+      }, 450);
     }
   }
   function finish(event?: PointerEvent): void {
@@ -178,6 +186,7 @@
       element.addEventListener("wheel", wheel, { passive: false });
       register({
         focus: () => element.focus({ preventScroll: true }),
+        waitForInput: () => session.waitForIdle(),
         finishInput: () => {
           stopHold();
           session.finish();
@@ -201,6 +210,7 @@
       });
       return () => {
         stopHold();
+        session.dispose();
         resize.disconnect();
         element.removeEventListener("wheel", wheel);
         register(null);

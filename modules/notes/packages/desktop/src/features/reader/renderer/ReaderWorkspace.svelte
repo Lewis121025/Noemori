@@ -411,6 +411,7 @@
       picker = "switcher";
     }}
     onNewNote={() => void startDocument("note")}
+    onNewWhiteboard={() => void startDocument("whiteboard")}
     onOpenVault={() => void openVault()}
     onToggleFiles={toggleFilesPane}
     onRename={beginRename}

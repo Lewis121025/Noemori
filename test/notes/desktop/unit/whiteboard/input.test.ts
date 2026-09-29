@@ -25,6 +25,46 @@ const loop = [
 ];
 
 describe("无工具栏手势状态机", () => {
+  it.each([1, 2])("原始采样在 %s 倍缩放下显示、提交与撤销重做时保持坐标和压力", (scale) => {
+    const changes: boolean[] = [];
+    const board = new WhiteboardInput(emptyWhiteboard(), (changed) => changes.push(changed));
+    board.zoom(0, 0, scale);
+    const samples = [
+      { x: 10, y: 20, pressure: 0.2 },
+      { x: 20, y: 30, pressure: 0.4 },
+      { x: 30, y: 15, pressure: 0.8 },
+      { x: 40, y: 35, pressure: 0.6 },
+    ];
+    const expected = samples.map((point) => ({
+      ...point,
+      x: point.x / scale,
+      y: point.y / scale,
+    }));
+    board.begin(samples[0]!);
+    for (const sample of samples.slice(1)) board.update(sample);
+    expect(board.points).toEqual(expected);
+    expect(board.document.strokes).toEqual([]);
+    expect(changes.filter(Boolean)).toHaveLength(0);
+    board.finish();
+    expect(board.document.strokes[0]?.points).toEqual(expected);
+    expect(changes.filter(Boolean)).toHaveLength(1);
+    board.applyHistory("undo");
+    expect(board.document.strokes).toEqual([]);
+    board.applyHistory("redo");
+    expect(board.document.strokes[0]?.points).toEqual(expected);
+  });
+
+  it("停笔保持原始轮廓，未圈选内容时不改成几何模板", () => {
+    const board = new WhiteboardInput(emptyWhiteboard(), () => {});
+    const samples = Array.from({ length: 13 }, (_, i) => p(10 + i * 8, 30 + Math.sin(i) * 0.8));
+    board.begin(samples[0]!);
+    for (const sample of samples.slice(1)) board.update(sample);
+    expect(board.hold()).toBe(false);
+    expect(board.points).toEqual(samples);
+    board.finish();
+    expect(board.document.strokes[0]?.points).toEqual(samples);
+  });
+
   it.each([
     { x: NaN, y: 0, pressure: 0.5 },
     { x: 0, y: Infinity, pressure: 0.5 },

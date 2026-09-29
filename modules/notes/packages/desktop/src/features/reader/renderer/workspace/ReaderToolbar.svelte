@@ -13,6 +13,7 @@
     onResume,
     onSearch,
     onNewNote,
+    onNewWhiteboard,
     onOpenVault,
     filesCollapsed,
     onToggleFiles,
@@ -27,6 +28,7 @@
     onResume: () => void;
     onSearch: () => void;
     onNewNote: () => void;
+    onNewWhiteboard: () => void;
     onOpenVault: () => void;
     filesCollapsed: boolean;
     onToggleFiles: () => void;
@@ -140,6 +142,15 @@
       onclick={onNewNote}
       disabled={workspace.switching}>新建</button
     >
+  {/if}
+  <button
+    class="reader-button"
+    type="button"
+    onclick={onNewWhiteboard}
+    disabled={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
+    >新建白板</button
+  >
+  {#if space === "writing"}
     {#if navigation.hasOutline}
       <button
         class="reader-button icon-button"

@@ -27,6 +27,8 @@ export type ContentEditorApi = {
 export type WhiteboardEditorApi = ContentEditorApi & {
   /** 离开文档前把尚未抬笔的输入提交为完整事务；失败抛出并阻止离开。 */
   finishInput: () => void;
+  /** 后台刷新等待当前指针事务结束或取消，不强制提交；卸载时也必须释放等待。 */
+  waitForInput: () => Promise<void>;
 };
 
 /** 文本表面额外提供源码位置和查找，不将具体编辑器实例暴露给导航。 */

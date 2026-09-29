@@ -95,9 +95,10 @@ export class ReaderNavigation {
     this.markdown?.insertWhiteboard();
   }
 
-  /** 离开编辑器前提交未完成笔迹并等待附件引用，供保存门禁获取完整快照。 */
-  settleEditing(): Promise<boolean> {
-    this.whiteboard?.finishInput();
+  /** 离开时提交未完成笔迹；后台刷新等待真实事务结束，不能由文件通知替用户抬笔。 */
+  async settleEditing(purpose: "leave" | "refresh" = "leave"): Promise<boolean> {
+    if (purpose === "refresh") await this.whiteboard?.waitForInput();
+    else this.whiteboard?.finishInput();
     return this.markdown?.settleAttachments() ?? Promise.resolve(true);
   }
 

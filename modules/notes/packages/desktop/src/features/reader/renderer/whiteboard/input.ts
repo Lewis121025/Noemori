@@ -42,6 +42,7 @@ export class WhiteboardInput {
   private minimumScale = DEFAULT_MIN_SCALE;
   private selected = new Set<string>();
   private gesture: Gesture | null = null;
+  private idleWaiters: Array<() => void> = [];
 
   /**
    * @param document 已读取的白板；构造时重新校验并建立不可变快照。
@@ -79,6 +80,21 @@ export class WhiteboardInput {
   /** 临时笔迹，尚未进入文档；取消手势可以直接丢弃。 */
   get points(): readonly InkPoint[] {
     return this.gesture?.kind === "ink" ? this.gesture.points : [];
+  }
+
+  /** 卸载时丢弃未提交的手势并释放空闲等待，不触发文档修改通知。 */
+  dispose(): void {
+    this.gesture = null;
+    this.notifyIdle();
+  }
+
+  /** 后台刷新等待真实事务结束；取消与卸载也释放等待，同步开始的新手势继续受保护。 */
+  async waitForIdle(): Promise<void> {
+    while (this.active) await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private notifyIdle(): void {
+    for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
   /** 当前选择的稳定身份。 */
   get selection(): ReadonlySet<string> {
@@ -164,7 +180,7 @@ export class WhiteboardInput {
     this.changed(false);
   }
 
-  /** 闭合圈选且停笔后确认；普通闭合曲线在抬笔时仍保存为笔迹。 */
+  /** 闭合圈选且停笔确认才选择已有内容；其他轮廓保持原始笔迹。 */
   hold(): boolean {
     if (this.gesture?.kind !== "ink") return false;
     const ids = lassoSelection(
@@ -200,11 +216,12 @@ export class WhiteboardInput {
     // 只有成功提交后才能清除临时输入；失败后重试仍应检查同一个事务。
     this.gesture = null;
     this.changed(edited);
+    this.notifyIdle();
   }
 
   /** 取消临时手势或选择，正式文档和历史保持不变。 */
   cancel(): void {
-    this.gesture = null;
+    this.dispose();
     this.selected = new Set();
     this.changed(false);
   }

@@ -170,10 +170,30 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
       .waitFor();
     expect(await page.locator(".whiteboard-preview path").count()).toBe(3);
     expect(await readFile(join(vault, "Home.md"), "utf8")).toContain("保留后文");
-    await command(app, "new-whiteboard");
+    await page.getByRole("button", { name: "新建白板", exact: true }).click();
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
     expect(await page.locator(".whiteboard button").count()).toBe(0);
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
+    // 停笔保留自由笔迹，抬笔提交相同轮廓且可整体撤销。
+    const inputBox = await page
+      .getByRole("application", { name: "白板", exact: true })
+      .boundingBox();
+    if (!inputBox) throw new Error("画布未显示");
+    await page.mouse.move(inputBox.x + 100, inputBox.y + 100);
+    await page.mouse.down();
+    for (let i = 1; i <= 16; i++)
+      await page.mouse.move(inputBox.x + 100 + i * 8, inputBox.y + 100 + Math.sin(i));
+    const pending = page.locator(".whiteboard .pending");
+    const original = await pending.getAttribute("d");
+    await page.waitForTimeout(550);
+    expect(await pending.getAttribute("d")).toBe(original);
+    expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
+    await page.mouse.up();
+    await expect
+      .poll(() => page.locator(".whiteboard [data-stroke-id]").getAttribute("d"))
+      .toBe(original);
+    await command(app, "undo");
+    await expect.poll(() => page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     // 通过浏览器输入协议发送真实 pen 类型事件，验证压力和未抬笔的离开门禁。
     const penBox = await page.getByRole("application", { name: "白板", exact: true }).boundingBox();
     if (!penBox) throw new Error("新白板未显示");

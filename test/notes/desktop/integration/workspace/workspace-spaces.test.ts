@@ -2,7 +2,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
-import type { AppApi, AppCommand } from "../../../../../modules/notes/packages/desktop/src/shared/api";
+import type {
+  AppApi,
+  AppCommand,
+} from "../../../../../modules/notes/packages/desktop/src/shared/api";
 import type { ReaderApi, VaultEntry } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
@@ -57,8 +60,8 @@ beforeEach(() => {
       disk.set(path, bytes);
       return { status: "saved", warning: null };
     }),
-    entryCreate: vi.fn(async (path) => {
-      disk.set(path, encode(""));
+    entryCreate: vi.fn(async (path, _kind, initial) => {
+      disk.set(path, initial ?? encode(""));
       return { warning: null };
     }),
   });
@@ -289,5 +292,24 @@ describe("资料管理与读写空间", () => {
       expect(api.entryCreate).toHaveBeenCalledWith("未命名 2.md", "file", undefined),
     );
     expect(api.vaultCreateDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each(["writing", "library"])("%s 顶部直接新建白板并打开空画布", async (space) => {
+    await start();
+    if (space === "library") await manage();
+    const button = [...target.querySelectorAll<HTMLButtonElement>(".toolbar button")].find(
+      (item) => item.textContent?.trim() === "新建白板",
+    );
+    expect(button).toBeDefined();
+    expect(button!.disabled).toBe(false);
+    button!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".whiteboard")).not.toBeNull();
+      expect(library().hidden).toBe(true);
+    });
+    const created = disk.get("白板.nousboard");
+    expect(created).toBeDefined();
+    expect(JSON.parse(new TextDecoder().decode(created))).toEqual({ version: 1, strokes: [] });
   });
 });

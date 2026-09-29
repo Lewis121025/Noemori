@@ -1141,7 +1141,7 @@ export class ReaderWorkspaceController {
     if (path === null || pane.switching) return;
     try {
       const snapshot = await this.api.fileSnapshot(path);
-      const attachmentsReady = await pane.navigation.settleEditing();
+      const attachmentsReady = await pane.navigation.settleEditing("refresh");
       if (epoch !== doc.epoch || request !== this.refreshEpoch) return;
       if (!attachmentsReady) {
         this.pendingRefresh = true;
