@@ -79,6 +79,8 @@ export class ReaderWorkspaceController {
     this.listed.filter((entry) => entry.kind === "file").map((entry) => entry.path),
   );
   private notice = $state<WorkspaceNotice | null>(null);
+  /** 会话失败独立于操作结果；成功加载或保存正文不能证明这次会话写入已恢复。 */
+  private sessionNotice = $state<WorkspaceNotice | null>(null);
   private backgroundError = $state("");
   private composing = $state(false);
   private candidateSelection = $state<{
@@ -153,6 +155,7 @@ export class ReaderWorkspaceController {
         this.persistViewModes();
       },
       persistDocuments: () => this.persistDocuments(),
+      rememberDocuments: () => this.persistDocumentsSafe(),
       refreshList: () => this.refreshList(),
       resumeVaultRefresh: () => this.resumeVaultRefresh(),
       onPaneIdle: () => {
@@ -242,9 +245,13 @@ export class ReaderWorkspaceController {
   get split(): boolean {
     return this.paneList.length > 1;
   }
+  /** 当前操作错误优先展示；普通确认不能覆盖尚未确认的会话故障。 */
+  private get visibleNotice(): WorkspaceNotice | null {
+    return this.notice?.kind === "attention" ? this.notice : (this.sessionNotice ?? this.notice);
+  }
   /** 文件操作的结果提示。 */
   get message() {
-    const notice = this.notice;
+    const notice = this.visibleNotice;
     if (notice === null) return "";
     if (notice.kind === "confirmation") {
       const pane = this.paneById(notice.paneId);
@@ -260,11 +267,12 @@ export class ReaderWorkspaceController {
   }
   /** 操作错误与警告使用明确提示；普通成功消息不抢占辅助技术的即时播报。 */
   get messageNeedsAttention() {
-    return this.notice?.kind === "attention";
+    return this.visibleNotice?.kind === "attention";
   }
   /** 技术详情仅在用户展开后显示；即时播报只包含影响和处理建议。 */
   get messageDetail() {
-    return this.notice?.kind === "attention" ? this.notice.detail : "";
+    const notice = this.visibleNotice;
+    return notice?.kind === "attention" ? notice.detail : "";
   }
   /** 后台失败单独展示，不能被普通文件操作或成功保存抹掉。 */
   get healthMessage() {
@@ -376,9 +384,10 @@ export class ReaderWorkspaceController {
           };
   }
 
-  /** 用户已查看操作消息；保存冲突与后台故障仍由各自状态保留。 */
+  /** 只确认当前展示的消息；尚未展示的会话故障和后台状态仍保留。 */
   dismissMessage = (): void => {
-    this.notice = null;
+    if (this.visibleNotice === this.sessionNotice) this.sessionNotice = null;
+    else this.notice = null;
   };
 
   /** 操作完成后的轻量确认；随当前文档变化失效，不使用错误提示样式。 */
@@ -480,7 +489,7 @@ export class ReaderWorkspaceController {
           pane.currentStep = null;
         }
       }
-      await this.persistDocuments();
+      await this.persistDocumentsSafe();
       this.fileTree.restore(restored.fileTree, this.listed);
     } catch (error) {
       this.report(error instanceof Error ? error.message : "恢复会话失败");
@@ -515,7 +524,8 @@ export class ReaderWorkspaceController {
           this.deadLink = null;
           this.clearViewModes();
           this.recent = [];
-          this.report("");
+          this.notice = null;
+          this.sessionNotice = null;
           this.listGeneration += 1;
           this.publishEntries(opened.entries);
           this.fileTree.restore(null, this.listed);
@@ -917,7 +927,7 @@ export class ReaderWorkspaceController {
       else if (path !== oldPath || action === "move") await pane.loadFile(path);
     }
     await this.refreshList();
-    await this.persistDocuments();
+    await this.persistDocumentsSafe();
   }
 
   /** 由主进程定位库内条目，错误通过工作区提示。 */
@@ -963,7 +973,6 @@ export class ReaderWorkspaceController {
           }
           this.persistViewModes();
           this.persistRecentFiles();
-          void this.persistDocuments().catch(() => {});
         }
         for (const [index, pane] of panes.entries()) {
           const target = after[index] ?? null;
@@ -973,7 +982,7 @@ export class ReaderWorkspaceController {
           }
         }
         await this.refreshList();
-        await this.persistDocuments();
+        await this.persistDocumentsSafe();
         this.report(result.warning === null ? "" : `操作已完成。${result.warning}`);
         return true;
       });
@@ -1052,21 +1061,39 @@ export class ReaderWorkspaceController {
     });
   }
 
-  /** 布局类持久化失败可见上报：没有加载链路替它暴露错误。 */
-  private persistDocumentsSafe(): void {
-    this.persistDocuments().catch((error: unknown) => {
-      this.report(`分栏状态未能写入会话：${errorText(error)}`);
-    });
+  /** 已完成的导航或布局不因会话失败回滚；关窗门禁仍直接等待 persistDocuments。 */
+  private persistDocumentsSafe(): Promise<void> {
+    return this.persistSession(
+      () => this.persistDocuments(),
+      "阅读现场未能保存，下次打开可能无法恢复当前位置。请检查文件权限后重试。",
+    );
   }
 
   /**
-   * 视图记忆写入会话；失败不打断切换。
-   *
-   * 与阅读栈同理：会话文件故障由同链路的文档持久化可见地上报，
-   * 这里不重复弹同一条错误。
+   * 已完成操作的会话写入独立报告失败，保留内存状态；不会向调用方抛出写入异常。
+   * 不同字段独立提交，后续正文或其他会话字段写入成功不能清除该错误。
    */
+  private async persistSession(write: () => Promise<void>, message: string): Promise<void> {
+    const generation = this.listGeneration;
+    try {
+      await write();
+    } catch (error) {
+      if (generation !== this.listGeneration) return;
+      this.sessionNotice = {
+        kind: "attention",
+        source: "operation",
+        message,
+        detail: errorText(error),
+      };
+    }
+  }
+
+  /** 视图记忆独立写入；失败不打断切换，并说明跨重启恢复的影响。 */
   private persistViewModes(): void {
-    void this.api.sessionSetViewModes({ ...this.viewModes }).catch(() => {});
+    void this.persistSession(
+      () => this.api.sessionSetViewModes({ ...this.viewModes }),
+      "视图记忆未能保存，下次打开可能恢复为原视图。请检查文件权限后重试。",
+    );
   }
 
   /** 改名/删除后视图记忆跟随路径迁移；`to === null` 时移除。 */
@@ -1081,10 +1108,13 @@ export class ReaderWorkspaceController {
     Object.assign(this.viewModes, mapped);
   }
 
-  /** 最近打开列表写入会话；失败口径与视图记忆一致，不重复弹错。 */
+  /** 最近打开列表独立写入；失败保留当前列表并报告，不能由文档会话代为补写。 */
   private persistRecentFiles(): void {
     // 响应式代理不能跨 contextBridge 结构化克隆，必须传普通数组。
-    void this.api.sessionSetRecentFiles([...this.recent]).catch(() => {});
+    void this.persistSession(
+      () => this.api.sessionSetRecentFiles([...this.recent]),
+      "最近打开列表未能保存，下次打开可能缺少最近记录。请检查文件权限后重试。",
+    );
   }
 
   /** 改名/删除后最近列表跟随路径迁移；`to === null` 时移除。 */
@@ -1156,7 +1186,7 @@ export class ReaderWorkspaceController {
       if (doc.path === null) {
         pane.navigation.clear();
         pane.currentStep = null;
-        await this.persistDocuments();
+        await this.persistDocumentsSafe();
       } else if (doc.path === path) await pane.refreshReferences();
     } catch (error) {
       if (epoch === doc.epoch && !pane.switching)

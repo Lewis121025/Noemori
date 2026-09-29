@@ -75,6 +75,8 @@ export type PaneHost = {
   setViewMode(path: string, mode: RememberedView | null): void;
   /** 分栏文档/阅读栈/布局的会话持久化；失败抛给调用方决定可见性。 */
   persistDocuments(): Promise<void>;
+  /** 完成导航后记住现场；写入失败由宿主显示，不抛错或回滚已完成的导航。 */
+  rememberDocuments(): Promise<void>;
   /** 目录快照刷新。 */
   refreshList(): Promise<void>;
   /** 写盘或切换结束后重放被推迟的外部变更。 */
@@ -173,7 +175,7 @@ export class ReaderPane {
         await this.loadFile(path, true);
         if (previous !== null) this.history.pushStep(previous);
         this.currentStep = { path, anchor: null };
-        await this.host.persistDocuments();
+        await this.host.rememberDocuments();
       });
     } catch (error) {
       this.host.report(`打开文件失败：${errorText(error)}`);
@@ -209,7 +211,7 @@ export class ReaderPane {
             this.host.report(missingAnchor(target.anchor, true)),
           );
         }
-        void this.host.persistDocuments().catch(() => {});
+        await this.host.rememberDocuments();
       });
     } catch (error) {
       this.host.report(`${direction === "back" ? "后退" : "前进"}失败：${errorText(error)}`);
@@ -283,7 +285,7 @@ export class ReaderPane {
       // 同文档锚点跳转也算阅读栈的一跳，后退可回到跳转前的位置。
       if (previous !== null) this.history.pushStep(previous);
       this.currentStep = { path, anchor };
-      void this.host.persistDocuments().catch(() => {});
+      await this.host.rememberDocuments();
       return;
     }
     await this.navigation.openHeadingAnchor(path, anchor, this.openFile, () =>
@@ -371,9 +373,7 @@ export class ReaderPane {
   /** 滚动结束时写入本栏阅读现场；保存失败可见提示，关窗时仍会重新冲刷。 */
   rememberReadingPosition = (): void => {
     if (!this.idle || this.host.composing || !this.document.canEdit) return;
-    void this.host.persistDocuments().catch((error: unknown) => {
-      this.host.report(`阅读位置未能写入会话：${errorText(error)}`);
-    });
+    void this.host.rememberDocuments();
   };
 
   /**
@@ -616,8 +616,9 @@ export class ReaderPane {
   }
 
   /**
-   * 加载文档：按源码视图记忆恢复视图，写会话并刷新引用。
-   * 调用方须已持有本栏门禁。
+   * 加载文档：按源码视图记忆恢复视图并刷新引用。
+   * 调用方须已持有本栏门禁，并在阅读栈及全部分栏状态更新完成后统一写入会话，
+   * 避免把新文档身份与旧阅读栈组合成可恢复的现场。
    * @param path 库内路径；读取或解析失败时保留原文档与滚动位置。
    * @param fromStart 新导航先归零，再由目标定位；改名和同文档重载不归零。
    * @param position 重启恢复的正文锚点；不用于普通文件打开或显式目标导航。
@@ -637,7 +638,6 @@ export class ReaderPane {
     if (position !== undefined && !this.document.needsSourceRepair)
       await this.navigation.restorePosition({ reading: position, selection: null });
     this.host.announce(this, this.document.dirty ? "已恢复上次未保存的编辑，请检查后保存。" : "");
-    await this.host.persistDocuments();
     await this.refreshReferences();
   }
 
