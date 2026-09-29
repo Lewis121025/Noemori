@@ -68,7 +68,7 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
     // 文件夹经右键菜单收藏。
     await page.getByRole("treeitem", { name: "项目" }).click({ button: "right" });
     await page.getByRole("menuitem", { name: "加入书签" }).click();
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     // 当前文件与光标所在章节经命令面板收藏。
     await runCommand("收藏或取消收藏当前文件");
     // 经目录跳到章节：选区由编辑器事务同步落进标题。

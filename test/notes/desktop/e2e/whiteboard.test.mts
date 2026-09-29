@@ -170,6 +170,7 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
       .waitFor();
     expect(await page.locator(".whiteboard-preview path").count()).toBe(3);
     expect(await readFile(join(vault, "Home.md"), "utf8")).toContain("保留后文");
+    await page.getByRole("button", { name: "关联与白板", exact: true }).click();
     await page.getByRole("button", { name: "新建白板", exact: true }).click();
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
     expect(await page.locator(".whiteboard button").count()).toBe(0);

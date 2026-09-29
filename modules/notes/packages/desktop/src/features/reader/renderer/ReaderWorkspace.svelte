@@ -10,11 +10,12 @@
   import DeadLinkDialog from "./links/DeadLinkDialog.svelte";
   import QuickSwitcher from "./navigation/QuickSwitcher.svelte";
   import CommandPalette from "./workspace/CommandPalette.svelte";
-  import GraphDialog from "./graph/GraphDialog.svelte";
+  import ConnectionsSpace from "./graph/ConnectionsSpace.svelte";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
   import { untitledNotePath, untitledWhiteboardPath } from "./library/library";
   import { emptyWhiteboard, serializeWhiteboard } from "./whiteboard/model";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
+  import { WorkspaceSpaces } from "./workspace/spaces.svelte";
   import { createBrowserMediaIo } from "./preview/media";
   import { SIDEBAR_LAYOUT, type ReaderApi, type ReaderSpace } from "../shared/api";
   import "./styles/controls.css";
@@ -32,13 +33,14 @@
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
   const workspace = new ReaderWorkspaceController(readerApi);
+  const spaces = new WorkspaceSpaces(workspace, prepareSpaceInput, persistPanes);
   const mediaIo = createBrowserMediaIo(readerApi);
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
   const doc = $derived(workspace.document);
   let filesCollapsed = $state(false);
-  let space = $state<ReaderSpace>("writing");
+  const space = $derived(spaces.space);
   let readingSpace: HTMLDivElement | undefined = $state();
-  let changingSpace = $state(false);
+  const changingSpace = $derived(spaces.changing);
   let creatingDocument = false;
   let layoutWrites = Promise.resolve();
   let narrow = $state(false);
@@ -48,7 +50,14 @@
   let toolbar: ReaderToolbar | undefined = $state();
   /** 当前打开的选择弹层；同一时间至多一个。 */
   let picker = $state<"switcher" | "palette" | null>(null);
-  let graphOpen = $state(false);
+  const connectionView = $derived(spaces.connectionView);
+  const whiteboard = $derived(doc.content?.kind === "whiteboard");
+  const documentVisible = $derived(spaces.documentVisible);
+
+  // 文内链接、阅读历史和分栏激活也可能改变文档种类，页面归属跟随真实文档。
+  $effect(() => {
+    if (spaces.followDocument()) untrack(focusDocument);
+  });
   /** 本次运行用过的命令，最新在前；只服务命令面板排序，不持久化。 */
   let recentCommands = $state<ReaderCommand[]>([]);
   const mac = navigator.userAgent.includes("Mac");
@@ -57,29 +66,30 @@
   function commandContext(): CommandContext {
     return {
       vaultOpen: workspace.vaultRoot !== null,
-      hasDocument: space === "writing" && doc.path !== null,
-      canEdit: space === "writing" && doc.canEdit,
+      hasDocument: documentVisible && doc.path !== null,
+      canEdit: documentVisible && doc.canEdit,
       reading: workspace.viewMode === "reading",
       markdown: doc.content?.kind === "markdown",
       source: workspace.viewMode === "source",
       whiteboard: doc.content?.kind === "whiteboard",
-      canBack: space === "writing" && workspace.history.canBack,
-      canForward: space === "writing" && workspace.history.canForward,
+      canBack: documentVisible && workspace.history.canBack,
+      canForward: documentVisible && workspace.history.canForward,
     };
   }
 
   /** 组词与切换期间消费但不执行命令；模态输入框保留自身历史，不修改背后的正文。 */
   export function executeHistory(action: HistoryAction): boolean {
-    if (space === "library") return false;
-    if (workspace.isComposing || workspace.switching) return true;
+    if (!documentVisible) return false;
+    if (changingSpace || workspace.isComposing || workspace.switching) return true;
     if (document.querySelector("dialog[open]")) return false;
     return workspace.navigation.applyHistory(action);
   }
 
   /** 与执行门禁一致的响应式历史投影；null 交由外壳查询当前原生输入控件。 */
   export function historyAvailability(): HistoryAvailability | null {
-    if (space === "library") return null;
-    if (workspace.isComposing || workspace.switching) return { undo: false, redo: false };
+    if (!documentVisible) return null;
+    if (changingSpace || workspace.isComposing || workspace.switching)
+      return { undo: false, redo: false };
     if (document.querySelector("dialog[open]")) return null;
     return workspace.navigation.historyAvailability;
   }
@@ -88,6 +98,7 @@
   export function executeCommand(command: ReaderCommand): void {
     if (
       workspace.isComposing ||
+      changingSpace ||
       workspace.switching ||
       workspace.copying ||
       document.querySelector("dialog[open]") ||
@@ -138,7 +149,7 @@
         workspace.navigation.openAttachments();
         break;
       case "toggle-files":
-        if (space === "library") resumeWriting();
+        if (space !== "writing") void resumeWriting();
         else toggleFilesPane();
         break;
       case "go-back":
@@ -169,7 +180,7 @@
         void showBookmarks();
         break;
       case "open-graph":
-        graphOpen = true;
+        void spaces.showConnections("graph");
         break;
     }
   }
@@ -179,8 +190,7 @@
     await tick();
     if (node.dead) await workspace.openLink("wiki", node.path);
     else {
-      await workspace.openFile(node.path);
-      if (doc.path === node.path) finishFileNavigation();
+      await openFile(node.path);
     }
   }
 
@@ -194,24 +204,33 @@
   onMount(() => {
     updateViewport();
     const dispose = workspace.start();
+    let mounted = true;
     void (async () => {
-      await restorePanes();
+      const restoredSpace = await restorePanes();
+      if (!mounted) return;
+      spaces.restore(restoredSpace);
       await workspace.restore();
+      if (mounted) spaces.restore(restoredSpace);
     })();
-    return dispose;
+    return () => {
+      mounted = false;
+      spaces.dispose();
+      dispose();
+    };
   });
 
-  async function restorePanes(): Promise<void> {
+  async function restorePanes(): Promise<ReaderSpace> {
     try {
       const panes = await readerApi.sessionGetPanes();
       filesCollapsed = panes.filesCollapsed;
       leftWidth = panes.leftWidth;
-      space = panes.space ?? "writing";
+      return panes.space ?? "writing";
     } catch (error) {
       workspace.report(
         "文件栏布局未能恢复，已使用默认布局。可重新调整布局；若问题持续，请查看详细原因。",
         error,
       );
+      return "writing";
     }
   }
 
@@ -227,28 +246,22 @@
       });
   }
 
-  async function showLibrary(): Promise<void> {
-    if (space === "library" || changingSpace) return;
-    changingSpace = true;
-    try {
-      // 键盘进入管理也先结束普通输入控件的编辑，与点击入口的失焦提交保持一致。
-      // 组词中的内容由保存门禁拒绝，不能通过 blur 擅自确认候选文字。
-      if (!workspace.isComposing && document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-        await tick();
-      }
-      if (!(await workspace.prepareLibrary())) return;
-      space = "library";
-      persistPanes();
+  /** 键盘导航也提交属性输入；输入法组词交给保存门禁拒绝，不能强制确认候选。 */
+  async function prepareSpaceInput(): Promise<void> {
+    if (!workspace.isComposing && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
       await tick();
-      fileList?.focusSearch();
-    } finally {
-      changingSpace = false;
     }
   }
 
-  function resumeWriting(): void {
-    finishFileNavigation();
+  async function showLibrary(): Promise<void> {
+    if (!(await spaces.showLibrary())) return;
+    await tick();
+    if (space === "library") fileList?.focusSearch();
+  }
+
+  async function resumeWriting(): Promise<void> {
+    if (await spaces.resumeWriting()) focusDocument();
   }
 
   async function openVault(): Promise<void> {
@@ -259,7 +272,7 @@
 
   /** 笔记与白板共用创建门禁、路径冲突规则和焦点交接，只在初始内容上分流。 */
   async function startDocument(kind: "note" | "whiteboard"): Promise<void> {
-    if (creatingDocument || workspace.isComposing) return;
+    if (creatingDocument || changingSpace || workspace.isComposing) return;
     creatingDocument = true;
     try {
       if (workspace.vaultRoot === null) await workspace.openVault("default");
@@ -302,7 +315,7 @@
   }
 
   function prepareDocumentAction(): boolean {
-    if (filesCollapsed || !narrow) return false;
+    if (space !== "writing" || filesCollapsed || !narrow) return false;
     // 原生弹层会在点击事件结束时分配焦点，需要先解除正文的 inert。
     flushSync(() => {
       filesCollapsed = true;
@@ -329,10 +342,18 @@
   }
 
   function finishFileNavigation(): void {
-    if (space !== "writing") {
-      space = "writing";
-      persistPanes();
-    }
+    spaces.showDocument();
+    focusDocument();
+  }
+
+  /** 文件打开完成才离开浏览页；活动栏变更使原请求失效，不能借用新栏的路径。 */
+  async function openFile(path: string): Promise<void> {
+    const pane = workspace.activePane;
+    await pane.openFile(path);
+    if (workspace.activePane === pane && pane.document.path === path) finishFileNavigation();
+  }
+
+  function focusDocument(): void {
     // 所有打开共用焦点交接：先解除 inert 并聚焦活动栏，文本表面再接续选区。
     // 图片、PDF 与空白页也因此有可用的键盘落点。
     prepareDocumentAction();
@@ -343,7 +364,7 @@
       // 焦点请求只属于发起时的页面、分栏和文档；卸载或新的导航会使它失效。
       if (
         !surface?.isConnected ||
-        space !== "writing" ||
+        !documentVisible ||
         workspace.activePane !== pane ||
         pane.document.epoch !== epoch
       )
@@ -406,7 +427,9 @@
     {changingSpace}
     {filesCollapsed}
     onLibrary={() => void showLibrary()}
-    onResume={resumeWriting}
+    onResume={() => void resumeWriting()}
+    onConnections={() => void spaces.showConnections()}
+    {documentVisible}
     onSearch={() => {
       picker = "switcher";
     }}
@@ -420,11 +443,32 @@
   />
   <VaultOpening {workspace} />
   <div class="panes">
+    {#if space === "connections"}
+      <ConnectionsSpace
+        {workspace}
+        view={connectionView}
+        busy={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
+        onView={(view) => void spaces.showConnections(view)}
+        onOpen={(path) => void openFile(path)}
+        onGraphNode={(node) => void openGraphNode(node)}
+        onNew={() => void startDocument("whiteboard")}
+      />
+    {/if}
+    {#if space === "writing" && whiteboard}
+      <section class="writing-empty" aria-label="开始写作">
+        <h1>留一点空间，给新的想法。</h1>
+        <button
+          class="reader-button primary"
+          type="button"
+          onclick={() => void startDocument("note")}>新建笔记</button
+        >
+      </section>
+    {/if}
     <div
       class="reading-space"
       bind:this={readingSpace}
-      inert={space !== "writing"}
-      aria-hidden={space !== "writing"}
+      inert={!documentVisible}
+      aria-hidden={!documentVisible}
     >
       {#if !filesCollapsed && space === "writing"}
         <button class="files-scrim" type="button" aria-label="收起文件栏" onclick={closeFilesPane}
@@ -432,13 +476,10 @@
       {/if}
       <QuickNavigation
         {workspace}
-        hidden={filesCollapsed}
+        hidden={filesCollapsed || space !== "writing"}
         width={leftWidth}
         onLibrary={() => void showLibrary()}
-        onOpen={(path) =>
-          void workspace.openFile(path).then(() => {
-            if (workspace.document.path === path) finishFileNavigation();
-          })}
+        onOpen={(path) => void openFile(path)}
         onWidth={(width) => {
           leftWidth = width;
           persistPanes();
@@ -449,7 +490,7 @@
           {workspace}
           {pane}
           {mediaIo}
-          narrowInert={narrow && !filesCollapsed}
+          narrowInert={space === "writing" && narrow && !filesCollapsed}
           {filesCollapsed}
           onToggleFiles={toggleFilesPane}
           onNewNote={() => void startDocument("note")}
@@ -470,7 +511,12 @@
     <DeadLinkDialog
       path={workspace.deadLinkOffer.path}
       anchor={workspace.deadLinkOffer.anchor}
-      onConfirm={() => void workspace.confirmDeadLink()}
+      onConfirm={() => {
+        const path = workspace.deadLinkOffer?.path;
+        void workspace.confirmDeadLink().then(() => {
+          if (doc.path === path) finishFileNavigation();
+        });
+      }}
       onDismiss={workspace.dismissDeadLink}
     />
   {/if}
@@ -501,20 +547,14 @@
       }}
     />
   {/if}
-  {#if graphOpen}
-    <GraphDialog
-      {workspace}
-      onClose={() => {
-        graphOpen = false;
-      }}
-      onOpen={(node) => void openGraphNode(node)}
-    />
-  {/if}
   {#if workspace.linkCandidates !== null}
     <LinkCandidatesDialog
       paths={workspace.linkCandidates.paths}
       anchor={workspace.linkCandidates.anchor}
-      onChoose={(path) => void workspace.chooseLinkCandidate(path)}
+      onChoose={(path) =>
+        void workspace.chooseLinkCandidate(path).then(() => {
+          if (doc.path === path) finishFileNavigation();
+        })}
       onDismiss={workspace.dismissLinkCandidates}
     />
   {/if}
@@ -530,6 +570,7 @@
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
+    flex-direction: column;
     position: relative;
   }
   .reading-space {
@@ -544,6 +585,17 @@
     inset: 0;
     visibility: hidden;
     pointer-events: none;
+  }
+  .writing-empty {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 1.5rem;
+    flex: 1;
+  }
+  .writing-empty h1 {
+    font-size: 1.5rem;
+    font-weight: 500;
   }
   .files-scrim {
     display: none;

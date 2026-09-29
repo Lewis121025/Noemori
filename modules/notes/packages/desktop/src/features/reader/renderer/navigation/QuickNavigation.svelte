@@ -5,6 +5,7 @@
   import { rankSwitcher, switcherEntries } from "./switcher";
   import { createCompositionGuard } from "../editor/composition";
   import { SvelteSet } from "svelte/reactivity";
+  import { isWhiteboardPath } from "../whiteboard/model";
   let {
     workspace,
     hidden,
@@ -26,7 +27,12 @@
   let searchInput: HTMLInputElement;
   const composition = createCompositionGuard();
   const busy = $derived(workspace.switching || workspace.copying || workspace.isComposing);
-  const entries = $derived(switcherEntries(workspace.files, workspace.noteKeys));
+  const entries = $derived(
+    switcherEntries(
+      workspace.files.filter((path) => !isWhiteboardPath(path)),
+      workspace.noteKeys,
+    ),
+  );
   const hits = $derived(rankSwitcher(query, entries, workspace.recentFiles).slice(0, 20));
   const focusable = $derived(
     hits.some((hit) => hit.entry.path === focused)
@@ -116,7 +122,7 @@
         </button>
       {/if}
     </div>
-    <p class="caption">{query.trim() === "" ? "继续阅读与写作" : "查找结果"}</p>
+    <p class="caption">{query.trim() === "" ? "笔记" : "查找结果"}</p>
     <ul role="tree" aria-label="快速打开笔记" bind:this={list}>
       {#each hits as { entry }, index (entry.path)}
         <li role="none">
@@ -161,7 +167,7 @@
       {/each}
     </ul>
     <button class="reader-button library-link" type="button" onclick={onLibrary}
-      >浏览全部资料</button
+      >全部资料 <span aria-hidden="true">↗</span></button
     >
   </nav>
 </Sidebar>
@@ -172,7 +178,7 @@
     flex-direction: column;
     min-height: 0;
     height: 100%;
-    padding: 1rem 0.65rem;
+    padding: 1.5rem 0.9rem;
     background: var(--sidebar);
   }
   .search {
@@ -226,8 +232,8 @@
     font: inherit;
     width: 100%;
     text-align: left;
-    padding: 0.55rem 0.6rem;
-    border-radius: 0.4rem;
+    padding: 0.7rem 0.7rem;
+    border-radius: 7px;
     cursor: pointer;
   }
   .file span {
@@ -236,9 +242,16 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .file:hover,
-  .file[aria-selected="true"] {
+  .file:hover {
     background: var(--selected);
+  }
+  .file[aria-selected="true"] {
+    background: var(--surface);
+    box-shadow: 0 1px 4px var(--shadow);
+  }
+  .search :global(.reader-input) {
+    background: color-mix(in srgb, var(--surface) 50%, transparent);
+    border-color: transparent;
   }
   .directory {
     font-size: 0.72rem;
@@ -261,5 +274,10 @@
   .library-link {
     margin-top: 1rem;
     font-size: 0.8rem;
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
   }
 </style>

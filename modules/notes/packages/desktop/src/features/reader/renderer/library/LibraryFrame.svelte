@@ -63,17 +63,22 @@
 <section class="library" {hidden} aria-label="资料管理" bind:this={container}>
   <header class="library-heading">
     <div>
-      <h1>资料管理</h1>
+      <h1>资料</h1>
       <p>
-        {workspace.vaultRoot?.split("/").at(-1) ?? "尚未打开资料夹"} · {workspace.files.length} 个文件
+        {workspace.files.length} 项资料
       </p>
     </div>
     <div class="create-actions">
       <button
         class="reader-button"
         type="button"
+        aria-label="新建文件夹"
+        title="新建文件夹"
         disabled={busy}
-        onclick={() => onAction("directory", current)}>新建文件夹</button
+        onclick={() => onAction("directory", current)}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M3 7V5h7l2 2h9v13H3V7M12 10v7m-3-3.5h6" /></svg
+        ></button
       >
       <button
         class="reader-button primary"
@@ -97,24 +102,41 @@
         }}>{previewOpen ? "返回列表" : "预览"}</button
       >
     {/if}
-    <button
-      class="reader-button"
-      type="button"
-      disabled={busy || current === null}
-      onclick={() => onAction("rename", current)}>重命名</button
-    >
-    <button
-      class="reader-button"
-      type="button"
-      disabled={busy || selected.length === 0}
-      onclick={() => onAction("move", current)}>移动到…</button
-    >
-    <button
-      class="reader-button"
-      type="button"
-      disabled={busy || selected.length === 0}
-      onclick={() => onAction("trash", current)}>移到废纸篓</button
-    >
+    {#if selected.length > 0}
+      <button
+        class="reader-button"
+        type="button"
+        aria-label="重命名"
+        title="重命名"
+        disabled={busy || current === null}
+        onclick={() => onAction("rename", current)}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="m4 16 11-11 4 4-11 11H4v-4M13 7l4 4M14 20h6" /></svg
+        ></button
+      >
+      <button
+        class="reader-button"
+        type="button"
+        aria-label="移动到…"
+        title="移动到…"
+        disabled={busy}
+        onclick={() => onAction("move", current)}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M3 7V5h7l2 2h9v13H3V7m5 7h9m-3-3 3 3-3 3" /></svg
+        ></button
+      >
+      <button
+        class="reader-button"
+        type="button"
+        aria-label="移到废纸篓"
+        title="移到废纸篓"
+        disabled={busy}
+        onclick={() => onAction("trash", current)}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5" /></svg
+        ></button
+      >
+    {/if}
   </div>
   <div class="library-body">
     <div class="library-list" inert={compact && previewOpen} aria-hidden={compact && previewOpen}>
@@ -149,10 +171,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1.6rem 2rem 1rem;
+    padding: 1.75rem 2.5rem 0.75rem;
   }
   h1 {
-    font-size: 1.45rem;
+    font-size: 1.6rem;
+    letter-spacing: -0.04em;
     font-weight: 500;
     margin: 0;
   }
@@ -166,11 +189,26 @@
     flex-wrap: wrap;
     gap: 0.5rem;
   }
+  .create-actions .reader-button,
+  .library-actions .reader-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .library-actions .reader-button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+  }
+  .library-actions .reader-button:hover:not(:disabled) {
+    background: var(--selected);
+    color: var(--fg);
+  }
   .library-actions {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    padding: 0.5rem 2rem 1rem;
+    padding: 0.5rem 2.5rem 1rem;
     border-bottom: 1px solid var(--border);
   }
   .library-actions span {
@@ -183,7 +221,9 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
+    margin: 0 2.5rem 2rem;
+    padding-top: 1rem;
   }
   .library-list {
     min-height: 0;
@@ -203,6 +243,7 @@
       flex-wrap: wrap;
     }
     .library-body {
+      margin: 0 1rem 1rem;
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr);
     }

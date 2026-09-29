@@ -15,6 +15,10 @@
   min-width: 32px;
   padding: 0.4rem 0.7rem;
   cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast);
 }
 .reader-button:hover:not(:disabled) {
   background: var(--selected);
@@ -27,6 +31,7 @@
   background: var(--accent-fill);
   color: var(--accent-text);
   border-color: transparent;
+  box-shadow: 0 1px 2px var(--shadow);
 }
 .reader-button.primary:hover:not(:disabled) {
   filter: brightness(0.92);

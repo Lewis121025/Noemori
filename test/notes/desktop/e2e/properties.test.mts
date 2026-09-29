@@ -131,9 +131,9 @@ test("属性与正文分离：隐藏配置，编辑与源码往返保持属性�
     const prefix = beforeBodyEdit.slice(0, beforeBodyEdit.indexOf("# 标题"));
 
     await page.keyboard.press("Escape");
-    await noteAction(page, "切换阅读视图");
+    await page.getByRole("button", { name: "切换阅读视图", exact: true }).click();
     expect(await editor.innerText()).not.toContain("cssclasses");
-    await noteAction(page, "退出阅读视图");
+    await page.getByRole("button", { name: "退出阅读视图", exact: true }).click();
     await editor.locator("p").last().click();
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type("替换正文。");

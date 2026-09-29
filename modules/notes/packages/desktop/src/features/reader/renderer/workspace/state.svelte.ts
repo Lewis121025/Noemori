@@ -748,12 +748,12 @@ export class ReaderWorkspaceController {
   }
 
   /**
-   * 进入资料管理前保存全部编辑与阅读位置；失败时保留可见文档供用户处理。
+   * 切换工作空间前保存全部编辑与阅读位置；失败时保留可见文档供用户处理。
    * @returns 输入法组词、并发操作或保存冲突时返回 false；错误通过工作区显示。
    */
-  async prepareLibrary(): Promise<boolean> {
+  async prepareSpaceChange(): Promise<boolean> {
     if (this.composing) {
-      this.report("请先完成输入，再打开资料管理。");
+      this.report("请先完成输入，再切换页面。");
       return false;
     }
     try {

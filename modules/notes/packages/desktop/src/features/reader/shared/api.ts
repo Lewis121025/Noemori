@@ -243,8 +243,17 @@ export const SIDEBAR_LAYOUT = {
   maxWidth: 480,
 };
 
-/** 用户所在的工作空间；文档与资料管理共享同一份笔记库。 */
-export type ReaderSpace = "writing" | "library";
+/** 用户所在的工作空间；读写、资料与关联共用笔记库及保存契约。 */
+export type ReaderSpace = "writing" | "library" | "connections";
+
+/**
+ * 会话恢复与 IPC 共用页面枚举，避免新增页面只被其中一条链路接受。
+ * @param value 未经验证的页面值。
+ * @returns 是否为受支持的页面；非法值返回 false，不抛出异常。
+ */
+export function isReaderSpace(value: unknown): value is ReaderSpace {
+  return value === "writing" || value === "library" || value === "connections";
+}
 
 /** 工作空间与轻量导航布局；旧会话缺少 space 时恢复读写空间。 */
 export type PaneLayout = {

@@ -1,5 +1,5 @@
 /** 阅读器会话只记录笔记库、当前文件、文件栏与阅读栈，不包含主题或窗口几何。 */
-import { SIDEBAR_LAYOUT, type PaneLayout } from "./api";
+import { isReaderSpace, SIDEBAR_LAYOUT, type PaneLayout } from "./api";
 import { parseFileTreeState, type FileTreeState } from "./file-browser";
 import { parseReadingBookmark, type ReadingBookmark } from "./reading-position";
 
@@ -123,7 +123,7 @@ export function parsePaneLayout(value: unknown): PaneLayout | null {
   return {
     filesCollapsed: parseCollapsed(record.filesCollapsed),
     leftWidth: clampWidth(record.leftWidth, DEFAULT_LEFT_WIDTH),
-    ...(record.space === "writing" || record.space === "library" ? { space: record.space } : {}),
+    ...(isReaderSpace(record.space) ? { space: record.space } : {}),
   };
 }
 

@@ -25,7 +25,7 @@ import type {
   VaultOpenSnapshot,
   WriteResult,
 } from "./api";
-import { SIDEBAR_LAYOUT } from "./api";
+import { isReaderSpace, SIDEBAR_LAYOUT } from "./api";
 import { parseFileTreeState } from "./file-browser";
 import {
   parseRecentFiles,
@@ -237,7 +237,7 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     !Number.isFinite(value.leftWidth) ||
     value.leftWidth < SIDEBAR_LAYOUT.minWidth ||
     value.leftWidth > SIDEBAR_LAYOUT.maxWidth ||
-    (value.space !== undefined && value.space !== "writing" && value.space !== "library")
+    (value.space !== undefined && !isReaderSpace(value.space))
   )
     throw new Error("文件栏布局参数无效");
   return {

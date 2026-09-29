@@ -161,7 +161,7 @@ test("万条目录深处的行高与隐藏恢复保持稳定", async (t) => {
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     await openLibrary(page);
     await page.evaluate(
       () =>
@@ -374,7 +374,7 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     await page.keyboard.press(`${modifier}+Shift+n`);
     expect(await dialog.getByRole("heading").innerText()).toBe("新建文件夹");
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     await page.keyboard.press(`${modifier}+Shift+f`);
     expect(await search.evaluate((node) => node === document.activeElement)).toBe(true);
     expect(await row("归档/笔记.md").isVisible()).toBe(true);
@@ -390,7 +390,7 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
       true,
     );
 
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     const resize = page.getByRole("separator", { name: "调整侧栏宽度" });
     await resize.focus();
     await resize.press("ArrowRight");
@@ -620,7 +620,7 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     await search.fill("完成");
     await files.getByRole("button", { name: "清除搜索", exact: true }).click();
     expect(await files.isVisible()).toBe(true);
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     const quickFiles = page.locator(".quick-navigation");
     if (await quickFiles.isVisible())

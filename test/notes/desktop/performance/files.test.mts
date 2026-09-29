@@ -225,7 +225,7 @@ test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, as
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     await openLibrary(page);
     expect(await tree.evaluate((node) => node.scrollTop)).toBe(beforeHide);
     await app.evaluate(({ BrowserWindow }) => {

@@ -951,8 +951,8 @@
     margin: 0.1rem 0.8rem 0.65rem;
     padding: 0.3rem 0.5rem;
     color: var(--muted);
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: var(--sidebar);
+    border: 1px solid transparent;
     border-radius: 0.55rem;
   }
   input {

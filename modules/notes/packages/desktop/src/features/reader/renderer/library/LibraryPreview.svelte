@@ -72,8 +72,7 @@
         <p>已选择 {selectionCount} 项资料</p>
         <span>可一起移动或移到废纸篓。选择单项后查看预览。</span>
       {:else}
-        <p>选一份资料，先看看内容。</p>
-        <span>双击或按回车打开，按住 ⌘ / Ctrl 多选整理。</span>
+        <p>选择资料以预览</p>
       {/if}
     </div>
   {:else}
@@ -85,7 +84,8 @@
           class="reader-button primary"
           type="button"
           disabled={busy}
-          onclick={() => onOpen(entry)}>打开阅读与写作</button
+          aria-label="打开阅读与写作"
+          onclick={() => onOpen(entry)}>打开 <span aria-hidden="true">↗</span></button
         >{/if}
     </div>
     {#if entry.kind === "directory"}
@@ -114,7 +114,7 @@
 
 <style>
   .library-preview {
-    padding: 1.5rem;
+    padding: 1.5rem 2rem;
     min-width: 0;
     min-height: 0;
     overflow: auto;
@@ -135,9 +135,10 @@
     color: var(--muted);
   }
   h2 {
-    font-size: 1.15rem;
+    font-size: 1.4rem;
+    letter-spacing: -0.025em;
     font-weight: 500;
-    margin: 0.5rem 0;
+    margin: 1rem 0 0.6rem;
     overflow-wrap: anywhere;
   }
   .path {
@@ -148,7 +149,8 @@
     padding-bottom: 1.25rem;
   }
   .excerpt {
-    line-height: 1.9;
+    line-height: 2;
+    color: var(--muted);
     overflow-wrap: anywhere;
   }
   .excerpt p {

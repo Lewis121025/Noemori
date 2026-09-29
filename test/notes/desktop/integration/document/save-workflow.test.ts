@@ -180,7 +180,7 @@ async function edit(text: string): Promise<void> {
 
 function status(): string | null {
   flushSync();
-  return target.querySelector('[role="status"]')?.textContent ?? null;
+  return target.querySelector(".save-status")?.textContent ?? null;
 }
 
 function renameTo(name: string): void {

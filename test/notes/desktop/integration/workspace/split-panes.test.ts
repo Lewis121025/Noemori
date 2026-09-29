@@ -208,7 +208,7 @@ describe("双栏编辑", () => {
     activatePane(1);
     vi.mocked(api.fileWrite).mockRejectedValue(new Error("磁盘暂不可写"));
     [...target.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "资料管理")!
+      .find((button) => button.getAttribute("aria-label") === "资料管理")!
       .click();
     await vi.waitFor(() => {
       flushSync();

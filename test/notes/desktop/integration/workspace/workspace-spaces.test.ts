@@ -6,8 +6,14 @@ import type {
   AppApi,
   AppCommand,
 } from "../../../../../modules/notes/packages/desktop/src/shared/api";
-import type { ReaderApi, VaultEntry } from "@reader/shared/api";
+import type { FileSnapshot, ReaderApi, VaultEntry } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
+
+// jsdom 验证页面数据流；真实 Worker 与画布绘制由 Electron 用例覆盖。
+vi.mock("@reader/renderer/graph/layout-client", async (original) => {
+  const actual = await original<typeof import("@reader/renderer/graph/layout-client")>();
+  return { ...actual, createWorkerLayout: actual.createInlineLayout };
+});
 
 const encode = (value: string) => new TextEncoder().encode(value);
 let component: ReturnType<typeof mount> | undefined;
@@ -17,6 +23,11 @@ let command: (value: AppCommand) => void;
 let disk: Map<string, Uint8Array>;
 
 beforeEach(() => {
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -115,16 +126,287 @@ async function manage(): Promise<void> {
   });
 }
 
+async function createBoard(): Promise<void> {
+  command("new-whiteboard");
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.querySelector(".whiteboard")).not.toBeNull();
+    expect(target.querySelector('[aria-label="关联与白板"]')?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
+}
+
 describe("资料管理与读写空间", () => {
+  it("重复点击关联入口保留正在浏览的图谱，不被后台白板改回画布", async () => {
+    await start();
+    await createBoard();
+    click("图谱");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="过滤图谱"]')).not.toBeNull();
+    });
+    target.querySelector<HTMLButtonElement>('[aria-label="关联与白板"]')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(target.querySelector('[aria-label="过滤图谱"]')).not.toBeNull();
+    expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("从白板返回写作先完成读取，失败时保持原页面与会话，不提前隐藏画布", async () => {
+    await start();
+    await createBoard();
+    const previousCanvas = target.querySelector(".whiteboard");
+    let finishRead!: (snapshot: FileSnapshot) => void;
+    const reading = new Promise<FileSnapshot>((resolve) => {
+      finishRead = resolve;
+    });
+    vi.mocked(api.fileSnapshot).mockImplementationOnce(() => reading);
+    vi.mocked(api.fileSnapshot).mockClear();
+    vi.mocked(api.sessionSetPanes).mockClear();
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => expect(api.fileSnapshot).toHaveBeenCalledWith("note.md"));
+    flushSync();
+    const whileLoading = {
+      page: target.querySelector('[aria-label="关联与白板"]')?.getAttribute("aria-current"),
+      hidden: target.querySelector(".reading-space")?.getAttribute("aria-hidden"),
+    };
+    finishRead({ disk: null, draft: null });
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".feedback-announcement")?.textContent).toContain("文件已不存在");
+      expect(target.querySelector<HTMLButtonElement>(".space-button")?.disabled).toBe(false);
+    });
+    expect(whileLoading).toEqual({ page: "page", hidden: "false" });
+    expect(target.querySelector(".whiteboard")).toBe(previousCanvas);
+    expect(api.sessionSetPanes).not.toHaveBeenCalledWith(
+      expect.objectContaining({ space: "writing" }),
+    );
+  });
+
+  it("白板旁的空分栏被激活后显示写作起点，不保留无文档的画布标题", async () => {
+    await start();
+    await createBoard();
+    command("toggle-split");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[data-pane="1"]')).not.toBeNull();
+    });
+    target
+      .querySelector('[data-pane="1"]')!
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    flushSync();
+    expect(target.querySelector('[aria-label="阅读与写作"]')?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(target.querySelector(".connections.canvas")).toBeNull();
+    expect(target.querySelector('[data-pane="1"] .welcome')).not.toBeNull();
+  });
+
+  it("返回写作的慢读取期间激活另一分栏，完成后仍按新活动栏归属显示", async () => {
+    await start();
+    await createBoard();
+    command("toggle-split");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[data-pane="1"]')).not.toBeNull();
+    });
+    let finishRead!: (snapshot: FileSnapshot) => void;
+    vi.mocked(api.fileSnapshot).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    vi.mocked(api.fileSnapshot).mockClear();
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => expect(api.fileSnapshot).toHaveBeenCalledWith("note.md"));
+    target
+      .querySelector('[data-pane="1"]')!
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    flushSync();
+    finishRead({ disk: disk.get("note.md")!, draft: null });
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector<HTMLButtonElement>(".space-button")?.disabled).toBe(false);
+    });
+    expect(target.querySelector('[data-pane="1"]')?.classList.contains("active")).toBe(true);
+    expect(target.querySelector('[aria-label="阅读与写作"]')?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(target.querySelector(".connections.canvas")).toBeNull();
+  });
+
+  it("从图谱创建缺失笔记失败时留在图谱，不能跳回无关的旧文档", async () => {
+    vi.mocked(api.indexGraph).mockImplementation(async (includeDead) => ({
+      nodes: includeDead ? [{ path: "missing.md", title: "missing", tags: [], dead: true }] : [],
+      edges: [],
+    }));
+    vi.mocked(api.entryCreate).mockRejectedValue(new Error("只读目录"));
+    HTMLDialogElement.prototype.showModal = function () {
+      this.open = true;
+    };
+    await start();
+    command("open-graph");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="过滤图谱"]')).not.toBeNull();
+    });
+    const label = [...target.querySelectorAll(".connections label")].find((item) =>
+      item.textContent?.includes("未创建的笔记"),
+    );
+    label!.querySelector<HTMLInputElement>("input")!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".connections .stats")?.textContent).toContain("1 个节点");
+    });
+    target
+      .querySelector<HTMLInputElement>('[aria-label="过滤图谱"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector<HTMLDialogElement>(".dead-link-dialog")?.open).toBe(true);
+    });
+    click("创建笔记");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".feedback-announcement")?.textContent).toContain("只读目录");
+    });
+    expect(target.querySelector('[aria-label="关联与白板"]')?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(prose().textContent).toContain("继续写作");
+  });
+
+  it("三个页面有稳定入口，关联页使用真实索引且不卸载正在写作的编辑器", async () => {
+    await start();
+    const editor = prose();
+    const connections = target.querySelector<HTMLButtonElement>('[aria-label="关联与白板"]');
+    expect(connections).not.toBeNull();
+    connections!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="关联空间"]')).not.toBeNull();
+      expect(connections!.getAttribute("aria-current")).toBe("page");
+    });
+    click("图谱");
+    await vi.waitFor(() => expect(api.indexGraph).toHaveBeenCalledWith(false));
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("过滤图谱");
+    expect(prose()).toBe(editor);
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false");
+    });
+    expect(prose()).toBe(editor);
+  });
+
+  it("关联页也遵守保存门禁，冲突时不隐藏待处理的正文", async () => {
+    await start();
+    prose().querySelector("p")!.textContent = "不能丢失的编辑";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    vi.mocked(api.fileWrite).mockResolvedValue({ status: "conflict", disk: encode("外部修改") });
+    command("open-graph");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".save-notice")?.textContent).toContain("原文件已在其他地方修改");
+    });
+    expect(target.querySelector('[aria-label="关联空间"]')).toBeNull();
+    expect(prose().textContent).toContain("不能丢失的编辑");
+  });
+
+  it("关联页面随会话恢复，白板打开后仍属于关联空间", async () => {
+    vi.mocked(api.sessionGetPanes).mockResolvedValue({
+      filesCollapsed: false,
+      leftWidth: 232,
+      space: "connections",
+    });
+    await start();
+    expect(target.querySelector('[aria-label="关联空间"]')).not.toBeNull();
+    command("new-whiteboard");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".whiteboard")).not.toBeNull();
+      expect(target.querySelector('[aria-label="关联与白板"]')?.getAttribute("aria-current")).toBe(
+        "page",
+      );
+    });
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(prose()?.textContent).toContain("继续写作");
+      expect(target.querySelector('[aria-label="阅读与写作"]')?.getAttribute("aria-current")).toBe(
+        "page",
+      );
+    });
+  });
+  it("只有白板的库仍能返回写作起点，不把白板当作普通正文显示", async () => {
+    disk.clear();
+    vi.mocked(api.vaultRestore).mockResolvedValue(null);
+    await start();
+    command("new-whiteboard");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".whiteboard")).not.toBeNull();
+    });
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="开始写作"]')).not.toBeNull();
+      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("true");
+    });
+    command("new-note");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(prose()).not.toBeNull();
+      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false");
+    });
+    target.querySelector<HTMLButtonElement>('[aria-label="关联与白板"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".board-list")).not.toBeNull();
+      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("true");
+    });
+  });
+
+  it("写作起点的组词阻止切换时，后台白板不能把页面重新带回画布", async () => {
+    disk.clear();
+    vi.mocked(api.vaultRestore).mockResolvedValue(null);
+    await start();
+    await createBoard();
+    target.querySelector<HTMLButtonElement>('[aria-label="阅读与写作"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector('[aria-label="开始写作"]')).not.toBeNull();
+    });
+    window.dispatchEvent(new CompositionEvent("compositionstart"));
+    target.querySelector<HTMLButtonElement>('[aria-label="关联与白板"]')!.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.querySelector(".feedback-announcement")?.textContent).toContain("请先完成输入");
+      expect(target.querySelector<HTMLButtonElement>(".space-button")?.disabled).toBe(false);
+    });
+    expect(target.querySelector('[aria-label="开始写作"]')).not.toBeNull();
+    expect(target.querySelector('[aria-label="阅读与写作"]')?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+    window.dispatchEvent(new CompositionEvent("compositionend"));
+  });
+
   it("返回读写后立刻卸载工作区，待执行的焦点交接应取消", async () => {
     await start();
     await manage();
-    click("返回阅读与写作");
+    vi.mocked(api.sessionSetPanes).mockClear();
+    vi.mocked(api.sessionSetDocuments).mockClear();
+    click("写作");
     const removing = unmount(component!);
     component = undefined;
     await removing;
     await Promise.resolve();
     expect(document.activeElement?.isConnected).toBe(true);
+    expect(api.sessionSetPanes).not.toHaveBeenCalled();
+    expect(api.sessionSetDocuments).not.toHaveBeenCalled();
   });
   it("通过键盘进入管理前也提交属性输入，不能把仍在输入的值留在隐藏面板", async () => {
     disk.set("note.md", encode("---\nstatus: 旧值\n---\n\n继续写作。\n"));
@@ -149,8 +431,11 @@ describe("资料管理与读写空间", () => {
     });
     expect(api.fileSnapshot).toHaveBeenCalledTimes(reads);
     expect(prose()).toBe(editor);
-    click("返回阅读与写作");
-    expect(library().hidden).toBe(true);
+    click("写作");
+    await vi.waitFor(() => {
+      flushSync();
+      expect(library().hidden).toBe(true);
+    });
     expect(prose()).toBe(editor);
     expect(prose().textContent).toContain("继续写作");
     await manage();
@@ -268,7 +553,7 @@ describe("资料管理与读写空间", () => {
         expect.objectContaining({ browse: { query: "设计", section: "files" } }),
       ),
     );
-    click("返回阅读与写作");
+    click("写作");
     await vi.waitFor(() =>
       expect(api.sessionSetPanes).toHaveBeenCalledWith(
         expect.objectContaining({ space: "writing" }),
@@ -294,15 +579,10 @@ describe("资料管理与读写空间", () => {
     expect(api.vaultCreateDefault).toHaveBeenCalledOnce();
   });
 
-  it.each(["writing", "library"])("%s 顶部直接新建白板并打开空画布", async (space) => {
+  it.each(["writing", "library"])("%s 可通过命令新建白板并进入关联画布", async (space) => {
     await start();
     if (space === "library") await manage();
-    const button = [...target.querySelectorAll<HTMLButtonElement>(".toolbar button")].find(
-      (item) => item.textContent?.trim() === "新建白板",
-    );
-    expect(button).toBeDefined();
-    expect(button!.disabled).toBe(false);
-    button!.click();
+    command("new-whiteboard");
     await vi.waitFor(() => {
       flushSync();
       expect(target.querySelector(".whiteboard")).not.toBeNull();

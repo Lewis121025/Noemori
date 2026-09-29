@@ -59,19 +59,19 @@ test("关系图谱：全局图谱过滤与点击打开，局部图谱随库变�
 
     // Cmd/Ctrl+G 打开全局图谱：四篇笔记、三条有向边。
     await page.keyboard.press("ControlOrMeta+g");
-    const dialog = page.getByRole("dialog", { name: "关系图谱" });
-    await expect.poll(() => dialog.locator(".stats").textContent()).toBe("4 个节点 · 3 条链接");
-    await dialog.getByLabel("孤立笔记").uncheck();
-    await expect.poll(() => dialog.locator(".stats").textContent()).toBe("3 个节点 · 3 条链接");
-    await page.keyboard.press("Escape");
-    await expect.poll(() => dialog.count()).toBe(0);
+    const graph = page.getByRole("region", { name: "关联空间" });
+    await expect.poll(() => graph.locator(".stats").textContent()).toBe("4 个节点 · 3 条链接");
+    await graph.getByLabel("孤立笔记").uncheck();
+    await expect.poll(() => graph.locator(".stats").textContent()).toBe("3 个节点 · 3 条链接");
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
+    await expect.poll(() => graph.count()).toBe(0);
 
     // 过滤到单个节点：适配视图把它放在画布中央，Worker 布局结束后画出来。
     await page.keyboard.press("ControlOrMeta+g");
-    await dialog.getByLabel("过滤图谱").fill("丙");
-    await expect.poll(() => dialog.locator(".stats").textContent()).toBe("1 个节点 · 0 条链接");
-    const canvas = dialog.locator("canvas");
-    await expect.poll(() => dialog.getByText("正在布局…").count()).toBe(0);
+    await graph.getByLabel("过滤图谱").fill("丙");
+    await expect.poll(() => graph.locator(".stats").textContent()).toBe("1 个节点 · 0 条链接");
+    const canvas = graph.locator("canvas");
+    await expect.poll(() => graph.getByText("正在布局…").count()).toBe(0);
     const painted = () =>
       canvas.evaluate((element: HTMLCanvasElement) => {
         const context = element.getContext("2d");
@@ -86,13 +86,13 @@ test("关系图谱：全局图谱过滤与点击打开，局部图谱随库变�
       await canvas.evaluate((element: HTMLCanvasElement) => [
         ...element.getContext("2d")!.getImageData(2, 2, 1, 1).data,
       ]),
-    ).toEqual([253, 253, 252, 255]);
+    ).toEqual([252, 251, 249, 255]);
     const box = await canvas.boundingBox();
     if (box === null) throw new Error("画布没有尺寸");
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await expect.poll(() => dialog.locator(".hovered").textContent()).toBe("丙");
+    await expect.poll(() => graph.locator(".hovered").textContent()).toBe("丙");
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await expect.poll(() => dialog.count()).toBe(0);
+    await expect.poll(() => graph.count()).toBe(0);
     await expect.poll(documentName).toBe("丙.md");
 
     // 局部图谱：丙只有甲一条入链；外部新增一篇链接丙的笔记后增量刷新。

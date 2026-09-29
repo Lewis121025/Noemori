@@ -160,7 +160,7 @@
   }
   .main {
     /* 查找栏复用滚动区内边距，吸顶时对齐真实视口边缘。 */
-    --reader-inset: 1.5rem;
+    --reader-inset: clamp(1.5rem, 4vw, 3.5rem);
     position: relative;
     flex: 1 1 0;
     overflow: auto;
@@ -194,7 +194,7 @@
   .document-body {
     max-width: var(--reading-width);
     margin: 0 auto;
-    padding: 0.5rem 0 1.5rem;
+    padding: 0.5rem 0 4rem;
   }
   .welcome {
     display: flex;
@@ -206,8 +206,9 @@
     text-align: center;
   }
   .welcome h1 {
-    font-size: 1.5rem;
+    font-size: clamp(1.5rem, 2.6vw, 2rem);
     font-weight: 500;
+    letter-spacing: -0.04em;
   }
   .welcome p {
     color: var(--muted);

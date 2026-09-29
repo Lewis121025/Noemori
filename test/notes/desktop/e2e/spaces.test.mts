@@ -97,7 +97,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
       });
       await writeFile(join(artifacts, "nous-library.png"), Buffer.from(bytes));
     }
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
     expect(await editor.innerText()).toContain("继续思考");
     await page.getByRole("button", { name: "笔记操作", exact: true }).click();
@@ -188,7 +188,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     page.setDefaultTimeout(5000);
     await page.getByRole("region", { name: "资料管理", exact: true }).waitFor();
     await expect.poll(() => page.getByRole("searchbox").inputValue()).toBe("合适");
-    await page.getByRole("button", { name: "返回阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     await expect.poll(() => page.locator(".ProseMirror").innerText()).toContain("在合适的时候");
   } finally {
     await app.close();

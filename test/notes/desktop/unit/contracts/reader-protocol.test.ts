@@ -20,6 +20,16 @@ import {
 
 const bytes = new TextEncoder().encode("中文 👩‍💻\r\n");
 
+it("三页布局可穿过 IPC，未知空间不能污染会话", () => {
+  for (const space of ["writing", "library", "connections"]) {
+    const layout = { filesCollapsed: false, leftWidth: 232, space };
+    expect(parsePaneLayoutMessage(layout)).toEqual(layout);
+  }
+  expect(() =>
+    parsePaneLayoutMessage({ filesCollapsed: false, leftWidth: 232, space: "unknown" }),
+  ).toThrow("文件栏布局参数无效");
+});
+
 it("空文件与不存在的磁盘基准有效，但缺失基准和伪字节不能进入写盘", () => {
   const empty = new Uint8Array();
   expect(parseWriteRequest("空文件.md", empty, null)).toEqual({

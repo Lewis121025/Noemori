@@ -11,6 +11,8 @@
     changingSpace,
     onLibrary,
     onResume,
+    onConnections,
+    documentVisible,
     onSearch,
     onNewNote,
     onNewWhiteboard,
@@ -26,6 +28,8 @@
     changingSpace: boolean;
     onLibrary: () => void;
     onResume: () => void;
+    onConnections: () => void;
+    documentVisible: boolean;
     onSearch: () => void;
     onNewNote: () => void;
     onNewWhiteboard: () => void;
@@ -37,6 +41,7 @@
     applicationMenu: Snippet;
   } = $props();
   const doc = $derived(workspace.document);
+  const busy = $derived(changingSpace || workspace.switching || workspace.copying);
   const navigation = $derived(workspace.navigation);
   let outlinePopover: HTMLElement | undefined = $state();
   let filesToggle: HTMLButtonElement;
@@ -71,6 +76,9 @@
     noteMenu.hidePopover();
     noteMenuButton?.focus();
     panel.showPopover();
+    // Tab 从面板内的第一个控件开始，不依赖工具条与文档栏的 DOM 顺序。
+    panel.tabIndex = -1;
+    panel.focus({ preventScroll: true });
   }
   /** 窄窗口关闭文件栏后，焦点回到稳定可见的入口，避免落在隐藏控件上。 */
   export function focusFilesToggle(): void {
@@ -79,79 +87,119 @@
 </script>
 
 <header class="toolbar">
-  <button
-    bind:this={filesToggle}
-    type="button"
-    class="reader-button icon-button"
-    aria-label="显示或隐藏文件栏"
-    aria-pressed={!filesCollapsed}
-    onclick={onToggleFiles}
-    title="显示或隐藏文件栏"
-    hidden={space !== "writing"}
-  >
-    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-      ><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M9 5v14" /></svg
+  <div class="brand">
+    <button
+      bind:this={filesToggle}
+      type="button"
+      class="reader-button icon-button"
+      aria-label="显示或隐藏文件栏"
+      aria-pressed={!filesCollapsed}
+      onclick={onToggleFiles}
+      title="显示或隐藏文件栏"
+      hidden={space !== "writing"}
     >
-  </button>
-  <button
-    class="reader-button space-button"
-    type="button"
-    disabled={changingSpace || workspace.switching || workspace.copying}
-    onclick={space === "writing" ? onLibrary : onResume}
-  >
-    {space === "writing" ? "资料管理" : "返回阅读与写作"}
-  </button>
-  <button
-    type="button"
-    class="reader-button library-button"
-    popovertarget="library-menu"
-    disabled={workspace.switching || workspace.copying}
-    aria-label="切换笔记库"
-  >
-    {workspace.vaultRoot === null ? "Nous" : basename(workspace.vaultRoot)}
-    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg>
-  </button>
-  <div class="document-heading">
-    <span class="document-name" title={doc.path ?? undefined}
-      >{space === "library" || doc.path === null ? "" : basename(doc.path)}</span
-    >
-    {#if space === "writing" && doc.path !== null}
-      <span
-        class="save-status"
-        class:quiet={!doc.dirty &&
-          !doc.saving &&
-          !workspace.copying &&
-          doc.saveError === null &&
-          doc.conflict === null}
-        role="status">{doc.canEdit ? saveStatus : "只读预览"}</span
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M9 5v14" /></svg
       >
-    {/if}
+    </button>
+    <button
+      type="button"
+      class="reader-button library-button"
+      popovertarget="library-menu"
+      disabled={busy}
+      aria-label="切换笔记库"
+      title={workspace.vaultRoot ?? "Nous"}
+    >
+      <span>{workspace.vaultRoot === null ? "Nous" : basename(workspace.vaultRoot)}</span>
+      <svg class="reader-icon chevron" viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="m8 10 4 4 4-4" /></svg
+      >
+    </button>
   </div>
-  <WorkspaceFeedback {workspace} />
-  {#if space === "writing"}
+  <nav class="spaces" aria-label="工作空间">
     <button
-      class="reader-button"
+      class="space-button"
       type="button"
+      aria-label="阅读与写作"
+      aria-current={space === "writing" ? "page" : undefined}
+      disabled={busy}
+      onclick={onResume}
+    >
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="M4 19.5h16M6 15l1-4L16 2l4 4-9 9-5 1M14 4l4 4" /></svg
+      >写作
+    </button>
+    <button
+      class="space-button"
+      type="button"
+      aria-label="资料管理"
+      aria-current={space === "library" ? "page" : undefined}
+      disabled={busy}
+      onclick={onLibrary}
+    >
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M4 9h16M9 9v11" /></svg
+      >资料
+    </button>
+    <button
+      class="space-button"
+      type="button"
+      aria-label="关联与白板"
+      aria-current={space === "connections" ? "page" : undefined}
+      disabled={busy}
+      onclick={onConnections}
+    >
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><circle cx="6" cy="6" r="3" /><circle cx="18" cy="7" r="3" /><circle
+          cx="12"
+          cy="19"
+          r="3"
+        /><path d="m8.7 6.3 6.3.4M7.3 8.7l3.4 7.6m6-6.6-3.4 6.6" /></svg
+      >关联
+    </button>
+  </nav>
+  <div class="actions">
+    <WorkspaceFeedback {workspace} />
+    <button
+      class="reader-button icon-button"
+      type="button"
+      aria-label="查找"
+      title="查找笔记"
       onclick={onSearch}
-      disabled={workspace.vaultRoot === null || workspace.switching}>查找</button
+      disabled={workspace.vaultRoot === null || busy}
     >
-    <button
-      class="reader-button"
-      type="button"
-      aria-label="新建笔记"
-      onclick={onNewNote}
-      disabled={workspace.switching}>新建</button
-    >
-  {/if}
-  <button
-    class="reader-button"
-    type="button"
-    onclick={onNewWhiteboard}
-    disabled={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
-    >新建白板</button
-  >
-  {#if space === "writing"}
-    {#if navigation.hasOutline}
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg
+      >
+    </button>
+    {#if space === "writing"}
+      <button
+        class="reader-button icon-button"
+        type="button"
+        aria-label="新建笔记"
+        title="新建笔记"
+        onclick={onNewNote}
+        disabled={busy || workspace.isComposing}
+      >
+        <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M12 5H5v14h14v-7M14 4l6 6M10 14l1-5 7-7 4 4-7 7-5 1" /></svg
+        >
+      </button>
+    {:else if space === "connections"}
+      <button
+        class="reader-button icon-button"
+        type="button"
+        aria-label="新建白板"
+        title="新建白板"
+        onclick={onNewWhiteboard}
+        disabled={busy || workspace.isComposing}
+      >
+        <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M12 8v8m-4-4h8" /></svg
+        >
+      </button>
+    {/if}
+    {#if documentVisible && navigation.hasOutline}
       <button
         class="reader-button icon-button"
         type="button"
@@ -159,22 +207,22 @@
         aria-label="目录"
         title="目录"
         onclick={onDocumentAction}
-        disabled={workspace.switching || workspace.copying}
+        disabled={busy}
       >
         <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
           ><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
         >
       </button>
     {/if}
-    {#if doc.path !== null}
+    {#if documentVisible && doc.path !== null}
       <button
         type="button"
         class="reader-button icon-button"
         popovertarget="note-menu"
         aria-label="笔记操作"
         bind:this={noteMenuButton}
-        disabled={workspace.switching || workspace.copying}
-        title="笔记操作"
+        disabled={busy}
+        title="更多操作"
         onclick={onDocumentAction}
       >
         <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -186,8 +234,33 @@
         >
       </button>
     {/if}
-  {/if}
+  </div>
 </header>
+{#if documentVisible && doc.path !== null && space === "writing"}
+  <div class="document-bar">
+    <span class="document-name" title={doc.path}>{basename(doc.path)}</span>
+    <span
+      class="save-status"
+      class:quiet={!doc.dirty &&
+        !doc.saving &&
+        !workspace.copying &&
+        doc.saveError === null &&
+        doc.conflict === null}
+      role="status">{doc.canEdit ? saveStatus : "只读预览"}</span
+    >
+    {#if doc.content?.kind === "markdown" && doc.canEdit}
+      <button
+        class="reading-toggle"
+        type="button"
+        aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
+        aria-pressed={workspace.viewMode === "reading"}
+        onclick={() => void workspace.toggleReadingMode()}
+        disabled={busy || workspace.isComposing}
+        >{workspace.viewMode === "reading" ? "阅读" : "编辑"}</button
+      >
+    {/if}
+  </div>
+{/if}
 
 <div id="library-menu" popover="auto" class="reader-popover action-popover library-menu">
   <button
@@ -196,7 +269,7 @@
     popovertarget="library-menu"
     popovertargetaction="hide"
     onclick={onOpenVault}
-    disabled={workspace.switching || workspace.copying}>打开笔记库…</button
+    disabled={busy}>打开笔记库…</button
   >
   {@render applicationMenu()}
 </div>
@@ -240,15 +313,6 @@
       onclick={() => void workspace.toggleViewMode()}
       >{workspace.viewMode === "source" ? "返回排版" : "查看 Markdown 源码"}</button
     >
-    <button
-      class="reader-button"
-      type="button"
-      popovertarget="note-menu"
-      popovertargetaction="hide"
-      aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
-      onclick={() => void workspace.toggleReadingMode()}
-      >{workspace.viewMode === "reading" ? "允许编辑" : "只读阅读"}</button
-    >
   {/if}
   <button
     class="reader-button"
@@ -257,7 +321,7 @@
     popovertargetaction="hide"
     aria-label={workspace.split ? "合并分栏" : "拆分为两栏"}
     onclick={() => void workspace.toggleSplit()}
-    disabled={workspace.switching || workspace.copying || workspace.isComposing}
+    disabled={busy || workspace.isComposing}
     >{workspace.split ? "关闭另一栏" : "并排查看另一篇"}</button
   >
   {#if doc.content?.kind === "markdown" || doc.content?.kind === "text"}<button
@@ -275,7 +339,7 @@
     popovertarget="note-menu"
     popovertargetaction="hide"
     onclick={onRename}
-    disabled={doc.path === null || workspace.switching || workspace.copying}>重命名…</button
+    disabled={doc.path === null || busy}>重命名…</button
   >
   <button
     class="reader-button"
@@ -283,7 +347,7 @@
     popovertarget="note-menu"
     popovertargetaction="hide"
     onclick={workspace.requestSave}
-    disabled={!doc.canEdit || workspace.switching || workspace.copying || doc.saving}>保存</button
+    disabled={!doc.canEdit || busy || doc.saving}>保存</button
   >
 </div>
 <div
@@ -305,55 +369,133 @@
 
 <style>
   .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 1rem;
+    min-height: 68px;
+    flex-shrink: 0;
+    padding: 0.8rem 1.4rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--chrome);
+  }
+  .brand,
+  .actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    height: 3.5rem;
-    flex-shrink: 0;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--sidebar);
+    gap: 0.45rem;
+    min-width: 0;
   }
-  .toolbar button {
+  .actions {
+    justify-content: flex-end;
+  }
+  .toolbar .reader-button {
     border-color: transparent;
     background: transparent;
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
   }
-  .toolbar button[aria-pressed="true"] {
+  .toolbar .reader-button:hover:not(:disabled) {
     background: var(--selected);
   }
   .toolbar button[hidden] {
     display: none;
   }
-
   .toolbar .icon-button {
     padding: 0.4rem;
+    color: var(--muted);
+  }
+  .toolbar .icon-button:hover {
+    color: var(--fg);
   }
   .library-button {
     max-width: 12rem;
+    min-width: 0;
+    font-weight: 550;
+  }
+  .library-button span {
     overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .document-heading {
-    flex: 1;
-    min-width: 0;
+  .chevron {
+    width: 0.8rem;
+    color: var(--muted);
+  }
+  .spaces {
+    display: flex;
+    padding: 4px;
+    gap: 2px;
+    border-radius: 11px;
+    background: var(--sidebar);
+  }
+  .space-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.7rem;
+    gap: 0.5rem;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    min-height: 32px;
+    padding: 0.3rem 1.2rem;
+    cursor: pointer;
+    transition:
+      background var(--motion-fast),
+      color var(--motion-fast),
+      box-shadow var(--motion-fast);
+  }
+  .space-button .reader-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .space-button:hover:not(:disabled) {
+    color: var(--fg);
+  }
+  .space-button[aria-current="page"] {
+    color: var(--fg);
+    background: var(--surface);
+    box-shadow: 0 1px 4px var(--shadow);
+  }
+  .space-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .document-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 44px;
+    padding: 0.5rem 2rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    color: var(--muted);
   }
   .document-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: 500;
+    font-size: 0.75rem;
   }
   .save-status {
     white-space: nowrap;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
+    color: var(--warning);
+  }
+  .reading-toggle {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
     color: var(--muted);
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .reading-toggle[aria-pressed="true"] {
+    background: var(--selected);
+    color: var(--fg);
   }
   .quiet {
     position: absolute;
@@ -391,20 +533,40 @@
     color: var(--muted);
     margin: 0.25rem 0.35rem 0.6rem;
   }
-  @media (max-width: 640px) {
+  @media (max-width: 800px) {
     .toolbar {
-      padding: 0.5rem;
-      gap: 0.2rem;
+      gap: 0.5rem;
+      padding: 0.7rem;
+    }
+    .space-button {
+      padding: 0.3rem 0.75rem;
+    }
+    .brand {
+      gap: 0.1rem;
     }
     .library-button {
       max-width: 7rem;
     }
-    .document-name {
-      font-size: 0.8rem;
+  }
+  @media (max-width: 640px) {
+    .toolbar {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: 0.65rem;
     }
-    .document-heading {
-      flex-direction: column;
-      gap: 0;
+    .spaces {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      justify-self: stretch;
+    }
+    .space-button {
+      flex: 1;
+    }
+    .actions {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .document-bar {
+      padding: 0.4rem 1rem;
     }
   }
 </style>

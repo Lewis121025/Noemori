@@ -14,6 +14,8 @@ describe("阅读器会话边界", () => {
   it("恢复独立的资料管理空间，旧会话和损坏值保留默认读写入口", () => {
     expect(parsePaneLayout({ space: "library" })?.space).toBe("library");
     expect(parsePaneLayout({ space: "writing" })?.space).toBe("writing");
+    expect(parsePaneLayout({ space: "connections" })?.space).toBe("connections");
+    expect(parseReaderSession({ space: "connections" }).space).toBe("connections");
     expect(parsePaneLayout({ space: "unknown" })?.space).toBeUndefined();
     expect(parseReaderSession({ space: "library" }).space).toBe("library");
   });
