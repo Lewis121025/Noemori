@@ -25,6 +25,7 @@ import type { ReaderHistory } from "../navigation/history.svelte";
 import { ReaderSearch } from "../search/state.svelte";
 import { ReaderBookmarks } from "../bookmarks/state.svelte";
 import { ReaderFileTree } from "../library/state.svelte";
+import { createSessionWrite, type SessionWrite } from "../session-write";
 import {
   mapEntryPath,
   type EntryBatchRequest,
@@ -35,6 +36,9 @@ import {
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+const READING_SESSION_ERROR =
+  "阅读现场未能保存，下次打开可能无法恢复当前位置。请检查文件权限后重试。";
 
 /** 成功反馈只属于产生它的分栏与文档版本；需要处理的错误不随输入自动消失。 */
 type WorkspaceNotice =
@@ -98,9 +102,16 @@ export class ReaderWorkspaceController {
   private idleWaiters: Array<() => void> = [];
   private compositionWaiters: Array<() => void> = [];
   private readonly host: PaneHost;
+  private readonly documentSession: SessionWrite;
 
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
   constructor(private readonly api: ReaderApi) {
+    this.documentSession = createSessionWrite({
+      delayMs: 300,
+      write: (isCurrent) => this.writeDocuments(isCurrent),
+      ready: () => !this.composing && this.paneList.every((pane) => pane.idle),
+      report: (error) => this.reportSessionFailure(READING_SESSION_ERROR, error),
+    });
     this.search = new ReaderSearch(api, (message) => this.report(message));
     this.bookmarks = new ReaderBookmarks(api);
     this.fileTree = new ReaderFileTree(
@@ -156,9 +167,11 @@ export class ReaderWorkspaceController {
       },
       persistDocuments: () => this.persistDocuments(),
       rememberDocuments: () => this.persistDocumentsSafe(),
+      scheduleReadingPosition: () => this.documentSession.request(),
       refreshList: () => this.refreshList(),
       resumeVaultRefresh: () => this.resumeVaultRefresh(),
       onPaneIdle: () => {
+        this.documentSession.resume();
         if (this.paneList.every((pane) => pane.idle)) this.notifyIdle();
       },
     };
@@ -358,6 +371,7 @@ export class ReaderWorkspaceController {
       this.compositionWaiters = [];
       for (const resolve of waiters) resolve();
       for (const pane of this.paneList) pane.resumeAutosave();
+      this.documentSession.resume();
       this.resumeVaultRefresh();
     }
   }
@@ -442,6 +456,7 @@ export class ReaderWorkspaceController {
       }
     });
     return () => {
+      this.documentSession.dispose();
       this.search.reset();
       this.fileTree.reset();
       for (const pane of this.paneList) pane.dispose();
@@ -451,6 +466,7 @@ export class ReaderWorkspaceController {
 
   /** 恢复上次笔记库、分栏与文档；失败显示原因，最终释放启动门禁。 */
   async restore(): Promise<void> {
+    this.documentSession.reset();
     const opening = this.beginOpening();
     try {
       const restored = await this.api.vaultRestore(opening.report);
@@ -503,6 +519,7 @@ export class ReaderWorkspaceController {
   openVault = async (kind: "choose" | "default" = "choose"): Promise<void> => {
     try {
       await this.withAllPanesSaved(async () => {
+        await this.flushPendingDocuments();
         const opening = this.beginOpening();
         try {
           const opened =
@@ -510,6 +527,7 @@ export class ReaderWorkspaceController {
               ? await this.api.vaultCreateDefault(opening.report)
               : await this.api.vaultOpen(opening.report);
           if (opened === null) return;
+          this.documentSession.reset();
           this.fileTree.reset();
           this.root = opened.root;
           this.backgroundError = "";
@@ -840,6 +858,7 @@ export class ReaderWorkspaceController {
     try {
       const allowed = await this.withAllPanesSaved(async () => {
         if (request.root !== this.root) throw new Error("笔记库已切换，请重新选择条目");
+        await this.flushPendingDocuments();
         await this.fileTree.flush();
         this.listRequest += 1;
         awaitingReply = true;
@@ -956,6 +975,7 @@ export class ReaderWorkspaceController {
     let after: Array<string | null> = before;
     try {
       const completed = await this.withAllPanesSaved(async () => {
+        await this.flushPendingDocuments();
         this.listRequest += 1;
         await this.fileTree.flush();
         after = panes.map((pane, index) => nextPath(pane, before[index] ?? null));
@@ -1037,10 +1057,21 @@ export class ReaderWorkspaceController {
     for (const resolve of waiters) resolve();
   }
 
+  /** 文件操作或切库前排空已有阅读请求，避免路径迁移后重放旧现场；失败仍保留可见原因。 */
+  private flushPendingDocuments(): Promise<void> {
+    return this.persistSession(() => this.documentSession.flush(), READING_SESSION_ERROR);
+  }
+
   /** 组合当前分栏状态并持久化；失败抛给调用方决定可见性。 */
-  async persistDocuments(): Promise<void> {
+  persistDocuments(): Promise<void> {
+    this.documentSession.request();
+    return this.documentSession.flush();
+  }
+
+  private async writeDocuments(isCurrent: () => boolean): Promise<void> {
     // 文档身份先于编辑器 DOM 更新；等换面完成后再捕获，不能把旧文档位置写给新路径。
     await tick();
+    if (!isCurrent()) return;
     return this.api.sessionSetDocuments({
       panes: this.paneList.map((pane) => {
         const position =
@@ -1063,10 +1094,7 @@ export class ReaderWorkspaceController {
 
   /** 已完成的导航或布局不因会话失败回滚；关窗门禁仍直接等待 persistDocuments。 */
   private persistDocumentsSafe(): Promise<void> {
-    return this.persistSession(
-      () => this.persistDocuments(),
-      "阅读现场未能保存，下次打开可能无法恢复当前位置。请检查文件权限后重试。",
-    );
+    return this.persistSession(() => this.persistDocuments(), READING_SESSION_ERROR);
   }
 
   /**
@@ -1079,13 +1107,17 @@ export class ReaderWorkspaceController {
       await write();
     } catch (error) {
       if (generation !== this.listGeneration) return;
-      this.sessionNotice = {
-        kind: "attention",
-        source: "operation",
-        message,
-        detail: errorText(error),
-      };
+      this.reportSessionFailure(message, error);
     }
+  }
+
+  private reportSessionFailure(message: string, error: unknown): void {
+    this.sessionNotice = {
+      kind: "attention",
+      source: "operation",
+      message,
+      detail: errorText(error),
+    };
   }
 
   /** 视图记忆独立写入；失败不打断切换，并说明跨重启恢复的影响。 */

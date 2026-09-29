@@ -27,6 +27,7 @@
     type ReaderCommand,
   } from "../shared/commands";
   import { isCompositionKey } from "./editor/composition";
+  import { createSessionWrite } from "./session-write";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
   let { api, applicationMenu }: { api: ReaderApi; applicationMenu: Snippet } = $props();
@@ -42,9 +43,15 @@
   let readingSpace: HTMLDivElement | undefined = $state();
   const changingSpace = $derived(spaces.changing);
   let creatingDocument = false;
-  let layoutWrites = Promise.resolve();
   let narrow = $state(false);
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
+  const layoutWrites = createSessionWrite({
+    delayMs: 300,
+    write: async (isCurrent) => {
+      if (isCurrent()) await readerApi.sessionSetPanes({ filesCollapsed, leftWidth, space });
+    },
+    report: reportLayoutFailure,
+  });
   let entryDialog: FileEntryDialog | undefined = $state();
   let fileList: LibraryBrowser | undefined = $state();
   let toolbar: ReaderToolbar | undefined = $state();
@@ -214,6 +221,7 @@
     })();
     return () => {
       mounted = false;
+      layoutWrites.dispose();
       spaces.dispose();
       dispose();
     };
@@ -235,15 +243,15 @@
   }
 
   function persistPanes(): void {
-    const snapshot = { filesCollapsed, leftWidth, space };
-    layoutWrites = layoutWrites
-      .then(() => readerApi.sessionSetPanes(snapshot))
-      .catch((error: unknown) => {
-        workspace.report(
-          "文件栏布局未能保存，下次打开可能恢复为原布局。请检查磁盘空间及应用数据目录是否可写，再重新调整布局。",
-          error,
-        );
-      });
+    layoutWrites.request();
+    void layoutWrites.flush().catch(reportLayoutFailure);
+  }
+
+  function reportLayoutFailure(error: unknown): void {
+    workspace.report(
+      "文件栏布局未能保存，下次打开可能恢复为原布局。请检查磁盘空间及应用数据目录是否可写，再重新调整布局。",
+      error,
+    );
   }
 
   /** 键盘导航也提交属性输入；输入法组词交给保存门禁拒绝，不能强制确认候选。 */
@@ -408,7 +416,12 @@
 
   /** @returns 当前编辑已安全保存时允许关闭；冲突或写入失败时由应用外壳保留窗口。 */
   export async function flushBeforeClose(): Promise<boolean> {
-    await layoutWrites;
+    try {
+      await layoutWrites.flush();
+    } catch (error) {
+      reportLayoutFailure(error);
+      return false;
+    }
     return workspace.flushBeforeClose();
   }
 </script>
@@ -482,7 +495,7 @@
         onOpen={(path) => void openFile(path)}
         onWidth={(width) => {
           leftWidth = width;
-          persistPanes();
+          layoutWrites.request();
         }}
       />
       {#each workspace.panes as pane (pane.id)}

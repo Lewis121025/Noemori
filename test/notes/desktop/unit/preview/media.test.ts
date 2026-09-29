@@ -1,15 +1,37 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { VaultEvent } from "@reader/shared/api";
 import {
   previewKindFromReference,
   isRemoteMediaSrc,
   mimeFromPath,
   resolveMediaUrl,
   rewriteMediaSrcs,
+  createBrowserMediaIo,
   type MediaIo,
 } from "@reader/renderer/preview/media";
 
 describe("media helpers", () => {
+  it("完整刷新通知覆盖所有嵌入，取消订阅后不再刷新", () => {
+    const listeners = new Set<(event: VaultEvent) => void>();
+    const io = createBrowserMediaIo({
+      linksResolve: async () => ({ status: "dead" }),
+      fileRead: async () => new Uint8Array(),
+      subscribeVaultChanged: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    });
+    const changed = vi.fn();
+    const stop = io.watchFile!("picture.png", changed);
+    for (const listener of listeners) listener({ status: "changed", paths: [], healthy: true });
+    expect(changed).toHaveBeenCalledTimes(1);
+    stop();
+    expect(listeners.size).toBe(0);
+  });
+
   it("recognizes wiki image filenames and remote urls", () => {
     expect(previewKindFromReference("shot.jpg")).toBe("image");
     expect(previewKindFromReference("shot.jpg#crop")).toBe("image");

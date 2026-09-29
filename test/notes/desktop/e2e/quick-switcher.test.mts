@@ -54,13 +54,18 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     const input = picker.getByRole("combobox");
     const options = picker.getByRole("option");
     const documentName = () => page.locator(".document-name").first().textContent();
+    const ready = (name: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.querySelector(".document-name")?.textContent === expected &&
+          [...document.querySelectorAll("section[data-pane]")].every(
+            (pane) => !pane.hasAttribute("inert"),
+          ),
+        name,
+      );
 
     // 分栏切换门禁期间快捷键按设计被忽略；门禁落在分栏自身的 inert 上。
-    await page.waitForFunction(
-      () =>
-        document.querySelector(".document-name")?.textContent === "首页.md" &&
-        !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
-    );
+    await ready("首页.md");
 
     // 别名命中：输入英文别名找到中文笔记，Enter 在当前栏打开。
     await page.keyboard.press("ControlOrMeta+o");
@@ -68,7 +73,7 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     await input.fill("roadmap");
     await expect.poll(async () => options.first().textContent()).toContain("别名：Roadmap");
     await input.press("Enter");
-    await expect.poll(documentName).toBe("路线图.md");
+    await ready("路线图.md");
     expect(await picker.count()).toBe(0);
 
     // 空查询列出最近打开，Esc 关闭且不改变当前文档。
@@ -90,7 +95,7 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     await expect
       .poll(async () => page.locator("section[data-pane] .ProseMirror h1").allTextContents())
       .toEqual(["路线图", "首页"]);
-    await expect.poll(documentName).toBe("首页.md");
+    await ready("首页.md");
 
     // 无命中时 Enter 按输入新建笔记。
     await page.keyboard.press("ControlOrMeta+o");
@@ -98,6 +103,7 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     await expect.poll(async () => options.count()).toBe(0);
     await input.press("Enter");
     await expect.poll(async () => page.getByRole("treeitem", { name: /会议记录/ }).count()).toBe(1);
+    await ready("会议记录.md");
 
     // 命令面板：执行「切换分栏」合回单栏。
     await page.keyboard.press("ControlOrMeta+p");

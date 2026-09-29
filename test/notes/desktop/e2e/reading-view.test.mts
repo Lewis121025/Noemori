@@ -249,6 +249,8 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
     const top = () => scroller.evaluate((element) => element.scrollTop);
     const near = async (expected: number) => {
       await expect.poll(async () => Math.abs((await top()) - expected)).toBeLessThan(2);
+      // 滚动先恢复，会话提交后门禁才释放；下一次快捷键须等待本次导航完成。
+      await expect.poll(() => scroller.getAttribute("inert")).toBeNull();
     };
     await ready("长文.md");
     const link = page.locator('.surface .wiki-link[data-wiki-target="#第二节"]');

@@ -291,16 +291,13 @@ pub(crate) fn load_alias_keys(conn: &Connection) -> Result<HashMap<String, Vec<S
     Ok(out)
 }
 
-/// 用当前文件集合替换 `files`/`links`，并增量同步派生表。
-///
-/// `files`/`links` 行小且刷新时已全量在手，维持整表重写；标题/标签/属性/全文
-/// 按篇重建：`removals` 删除已消失路径的行，`derived` 只覆盖本次重扫过的文件，
-/// 未改文件的派生行保持不动。
+/// 同步完整扫描快照，只提交实际变化的文件和出链；派生数据按重扫路径更新。
+/// `removals` 为已消失路径，`derived` 为需要重建的内容；未改记录不产生写入。
 ///
 /// # Errors
 ///
 /// `SQLite` 失败时返回错误。
-pub(crate) fn replace_all(
+pub(crate) fn sync_snapshot(
     conn: &Connection,
     files: &[FileRow],
     links: &[LinkRecord],
@@ -308,22 +305,11 @@ pub(crate) fn replace_all(
     derived: &[(String, DerivedRows)],
 ) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute_batch("DELETE FROM links; DELETE FROM files;")?;
-    {
-        let mut insert_file = tx.prepare(
-            "INSERT INTO files(path, title, kind, mtime, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
-        )?;
-        for file in files {
-            insert_file.execute(params![
-                file.path,
-                file.title,
-                file.kind,
-                file.mtime,
-                file.content_hash
-            ])?;
-        }
+    for path in removals {
+        tx.execute("DELETE FROM files WHERE path = ?1", [path])?;
     }
-    insert_link_rows(&tx, links)?;
+    upsert_file_rows(&tx, files)?;
+    sync_link_rows(&tx, links)?;
     let changed: Vec<&str> = removals
         .iter()
         .chain(derived.iter().map(|(path, _)| path))
@@ -333,8 +319,55 @@ pub(crate) fn replace_all(
     for (path, rows) in derived {
         insert_derived(&tx, path, rows)?;
     }
+    if scan_version(&tx)? != SCAN_VERSION {
+        tx.pragma_update(None, "user_version", SCAN_VERSION)?;
+    }
     tx.commit()?;
-    conn.pragma_update(None, "user_version", SCAN_VERSION)?;
+    Ok(())
+}
+
+/// 文件行以完整值比较；内容未变但时间戳改变时只产生一次元数据更新。
+fn upsert_file_rows(tx: &rusqlite::Transaction<'_>, files: &[FileRow]) -> Result<(), Error> {
+    let mut insert = tx.prepare(
+        "INSERT INTO files(path, title, kind, mtime, content_hash) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(path) DO UPDATE SET title = excluded.title, kind = excluded.kind,
+             mtime = excluded.mtime, content_hash = excluded.content_hash
+         WHERE files.title != excluded.title OR files.kind != excluded.kind
+             OR files.mtime != excluded.mtime OR files.content_hash != excluded.content_hash",
+    )?;
+    for file in files {
+        insert.execute(params![
+            file.path,
+            file.title,
+            file.kind,
+            file.mtime,
+            file.content_hash
+        ])?;
+    }
+    Ok(())
+}
+
+/// 按出链所属文档比较完整事实，身份重绑也不能重写结果未变的其他来源。
+fn sync_link_rows(tx: &rusqlite::Transaction<'_>, links: &[LinkRecord]) -> Result<(), Error> {
+    let previous = load_links(tx)?;
+    let mut old: HashMap<&str, Vec<&LinkRecord>> = HashMap::new();
+    for link in &previous {
+        old.entry(&link.from_path).or_default().push(link);
+    }
+    let mut next: HashMap<&str, Vec<&LinkRecord>> = HashMap::new();
+    for link in links {
+        next.entry(&link.from_path).or_default().push(link);
+    }
+    for (path, outgoing) in &next {
+        if old.remove(path).as_ref() == Some(outgoing) {
+            continue;
+        }
+        tx.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
+        insert_link_rows(tx, outgoing.iter().copied())?;
+    }
+    for path in old.keys() {
+        tx.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
+    }
     Ok(())
 }
 
@@ -478,22 +511,7 @@ pub(crate) fn upsert_file(
 ) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM links WHERE from_path = ?1", params![file.path])?;
-    tx.execute(
-        "INSERT INTO files(path, title, kind, mtime, content_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(path) DO UPDATE SET
-            title = excluded.title,
-            kind = excluded.kind,
-            mtime = excluded.mtime,
-            content_hash = excluded.content_hash",
-        params![
-            file.path,
-            file.title,
-            file.kind,
-            file.mtime,
-            file.content_hash
-        ],
-    )?;
+    upsert_file_rows(&tx, std::slice::from_ref(file))?;
     insert_link_rows(&tx, outgoing)?;
     delete_derived(&tx, &[&file.path])?;
     insert_derived(&tx, &file.path, derived)?;
@@ -515,22 +533,24 @@ pub(crate) fn delete_file(conn: &Connection, path: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// 用当前链接集合替换 `links` 表，不动 `files`。
+/// 将完整链接集合的差异同步到 `links` 表，不动 `files`。
 ///
 /// 文件集合变了、需要重绑 `to_path` 时用这个，避免把未改动的文件行删掉重建。
 ///
 /// # Errors
 ///
 /// `SQLite` 失败时返回错误。
-pub(crate) fn replace_links(conn: &Connection, links: &[LinkRecord]) -> Result<(), Error> {
+pub(crate) fn sync_links(conn: &Connection, links: &[LinkRecord]) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute_batch("DELETE FROM links;")?;
-    insert_link_rows(&tx, links)?;
+    sync_link_rows(&tx, links)?;
     tx.commit()?;
     Ok(())
 }
 
-fn insert_link_rows(tx: &rusqlite::Transaction<'_>, links: &[LinkRecord]) -> Result<(), Error> {
+fn insert_link_rows<'a>(
+    tx: &rusqlite::Transaction<'_>,
+    links: impl IntoIterator<Item = &'a LinkRecord>,
+) -> Result<(), Error> {
     let mut insert_link = tx.prepare(
         "INSERT INTO links(from_path, to_raw, to_path, kind, start_byte, end_byte, resolution)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",

@@ -6,6 +6,7 @@ import {
   emptySession,
   saveSession,
   loadSession,
+  patchSession,
 } from "../../../../../modules/notes/packages/desktop/src/main/session";
 
 vi.mock("node:fs", async (original) => {
@@ -19,6 +20,48 @@ vi.mock("node:fs", async (original) => {
   };
 });
 afterEach(() => vi.restoreAllMocks());
+
+it.each(["missing", "corrupt"])("%s 会话提交默认值仍须创建有效文件", (state) => {
+  const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-default-"));
+  const file = join(directory, "session.json");
+  try {
+    if (state === "corrupt") fs.writeFileSync(file, "{invalid");
+    patchSession(file, {});
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual(emptySession);
+    expect(fs.readdirSync(directory)).toEqual(["session.json"]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("重复提交相同会话不写盘；外部改变后仍核对磁盘，失败提交可以重试", () => {
+  const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-resource-"));
+  const file = join(directory, "session.json");
+  try {
+    patchSession(file, { appearance: "dark" });
+    vi.mocked(fs.writeFileSync).mockClear();
+    vi.mocked(fs.fsyncSync).mockClear();
+    vi.mocked(fs.renameSync).mockClear();
+    for (let index = 0; index < 50; index++) patchSession(file, { appearance: "dark" });
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+    expect(fs.fsyncSync).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
+
+    saveSession(file, { ...emptySession, appearance: "light" });
+    patchSession(file, { appearance: "dark" });
+    expect(loadSession(file).appearance).toBe("dark");
+    vi.mocked(fs.renameSync).mockImplementationOnce(() => {
+      throw new Error("提交失败");
+    });
+    expect(() => patchSession(file, { appearance: "light" })).toThrow("提交失败");
+    expect(loadSession(file).appearance).toBe("dark");
+    patchSession(file, { appearance: "light" });
+    expect(loadSession(file).appearance).toBe("light");
+    expect(fs.readdirSync(directory)).toEqual(["session.json"]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 it.each(["write", "sync", "close", "rename"])(
   "会话 %s 失败保留完整旧文件并清理临时文件",

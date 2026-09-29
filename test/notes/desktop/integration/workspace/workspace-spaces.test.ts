@@ -138,6 +138,30 @@ async function createBoard(): Promise<void> {
 }
 
 describe("资料管理与读写空间", () => {
+  it("连续用键盘调整侧栏宽度只提交最终布局", async () => {
+    await start();
+    vi.useFakeTimers();
+    vi.mocked(api.sessionSetPanes).mockClear();
+    try {
+      const handle = target.querySelector<HTMLElement>(
+        '[role="separator"][aria-label="调整侧栏宽度"]',
+      )!;
+      for (let index = 0; index < 12; index++) {
+        handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        flushSync();
+      }
+      await vi.advanceTimersByTimeAsync(299);
+      expect(api.sessionSetPanes).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(api.sessionSetPanes).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.sessionSetPanes).mock.calls[0]?.[0].leftWidth).toBe(
+        Number(handle.getAttribute("aria-valuenow")),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("重复点击关联入口保留正在浏览的图谱，不被后台白板改回画布", async () => {
     await start();
     await createBoard();

@@ -1,4 +1,5 @@
 import type { VaultEntry } from "../../shared/api";
+import { createSessionWrite, type SessionWrite } from "../session-write";
 import {
   emptyFileTreeState,
   mapFileTreeState,
@@ -15,9 +16,7 @@ export class ReaderFileTree {
   private value = $state.raw<FileTreeState>(emptyFileTreeState());
   private initialized = $state(false);
   private remembered = false;
-  private dirty = false;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private writing: Promise<boolean> = Promise.resolve(true);
+  private readonly writing: SessionWrite;
   private epoch = 0;
 
   /** 保存函数必须核对 root，不能把旧库的延迟写入应用到新库。 */
@@ -25,7 +24,21 @@ export class ReaderFileTree {
     private root: () => string | null,
     private save: (root: string, state: FileTreeState) => Promise<void>,
     private report: (message: string) => void,
-  ) {}
+  ) {
+    this.writing = createSessionWrite({
+      delayMs: 180,
+      write: async (isCurrent) => {
+        const root = this.root();
+        if (!this.initialized || root === null || !isCurrent()) return;
+        await this.save(root, structuredClone(this.value));
+      },
+      report: (error) => this.reportFailure(error),
+    });
+  }
+
+  private reportFailure(error: unknown): void {
+    this.report(`目录状态未能保存：${error instanceof Error ? error.message : String(error)}`);
+  }
 
   /** 当前内存现场，调用方只能通过 update 更新。 */
   get state(): FileTreeState {
@@ -52,13 +65,10 @@ export class ReaderFileTree {
   /** 切库及卸载时取消尚未派发的写入；已派发请求由主进程核对库归属。 */
   reset(): void {
     this.epoch += 1;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    this.dirty = false;
+    this.writing.reset();
     this.initialized = false;
     this.remembered = false;
     this.value = emptyFileTreeState();
-    this.writing = Promise.resolve(true);
   }
 
   /** 更新选择、展开或滚动锚点；不变的状态不会重复排队写盘。 */
@@ -79,11 +89,7 @@ export class ReaderFileTree {
       return;
     this.value = next;
     if (!this.initialized || this.root() === null) return;
-    this.dirty = true;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      void this.flush();
-    }, 180);
+    this.writing.request();
   }
 
   /** 文件变化按同一映射迁移全部现场，提交后、清单刷新前调用。 */
@@ -97,29 +103,15 @@ export class ReaderFileTree {
   }
 
   /** 立即发送最新现场；返回是否成功，失败原因已交给工作区显示。 */
-  flush(): Promise<boolean> {
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    const root = this.root();
-    if (!this.dirty || root === null) return this.writing;
-    this.dirty = false;
-    const snapshot = structuredClone(this.value);
+  async flush(): Promise<boolean> {
     const epoch = this.epoch;
-    this.writing = this.writing.then(async () => {
-      if (epoch !== this.epoch || this.root() !== root) return true;
-      try {
-        await this.save(root, snapshot);
-        return true;
-      } catch (error) {
-        if (epoch === this.epoch && this.root() === root) {
-          this.dirty = true;
-          this.report(
-            `目录状态未能保存：${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        return false;
-      }
-    });
-    return this.writing;
+    try {
+      await this.writing.flush();
+      return true;
+    } catch (error) {
+      if (epoch !== this.epoch) return true;
+      this.reportFailure(error);
+      return false;
+    }
   }
 }

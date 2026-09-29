@@ -77,6 +77,8 @@ export type PaneHost = {
   persistDocuments(): Promise<void>;
   /** 完成导航后记住现场；写入失败由宿主显示，不抛错或回滚已完成的导航。 */
   rememberDocuments(): Promise<void>;
+  /** 滚动仅标记最新现场，由工作区合并后提交。 */
+  scheduleReadingPosition(): void;
   /** 目录快照刷新。 */
   refreshList(): Promise<void>;
   /** 写盘或切换结束后重放被推迟的外部变更。 */
@@ -370,10 +372,10 @@ export class ReaderPane {
     }
   }
 
-  /** 滚动结束时写入本栏阅读现场；保存失败可见提示，关窗时仍会重新冲刷。 */
+  /** 滚动结束时合并本栏阅读现场；导航和关窗会等待最新状态提交。 */
   rememberReadingPosition = (): void => {
     if (!this.idle || this.host.composing || !this.document.canEdit) return;
-    void this.host.rememberDocuments();
+    this.host.scheduleReadingPosition();
   };
 
   /**

@@ -5,7 +5,10 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   root: fileURLToPath(new URL("../modules/notes/packages/desktop/", import.meta.url)),
   test: {
-    setupFiles: ["../../../../test/notes/desktop/support/window-mode.ts"],
+    setupFiles: [
+      "../../../../test/notes/desktop/support/window-mode.ts",
+      "../../../../test/notes/desktop/support/electron-lifecycle.ts",
+    ],
     environment: "node",
     env: {
       NOUS_PERFORMANCE_REPORT:

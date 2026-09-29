@@ -13,6 +13,29 @@ const entries: VaultEntry[] = [
 afterEach(() => vi.useRealTimers());
 
 describe("持久化目录现场", () => {
+  it("磁盘繁忙时不会逐个写出过时的滚动快照", async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const save = vi.fn(async () => {}).mockReturnValueOnce(pending);
+    const tree = new ReaderFileTree(() => "/notes", save, vi.fn());
+    tree.restore(null, entries);
+    tree.update({ scroll: { path: "folder/a.md", offset: 0 } });
+    const first = tree.flush();
+    await Promise.resolve();
+    for (let offset = 1; offset <= 50; offset++) {
+      tree.update({ scroll: { path: "folder/a.md", offset } });
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    const last = tree.flush();
+    finish();
+    await Promise.all([first, last]);
+    expect(save.mock.calls.map(([, state]) => state.scroll?.offset)).toEqual([0, 50]);
+    tree.reset();
+  });
+
   it("合并滚动写入，关闭前立即保存最新选择，保存失败允许重试", async () => {
     vi.useFakeTimers();
     const save = vi.fn(async () => {});

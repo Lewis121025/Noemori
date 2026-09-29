@@ -26,6 +26,10 @@ name = "vault_integration_watch"
 path = "../../../../test/notes/vault/integration/storage/watch.rs"
 
 [[test]]
+name = "vault_integration_resources"
+path = "../../../../test/notes/vault/integration/storage/resources.rs"
+
+[[test]]
 name = "vault_integration_save_recovery"
 path = "../../../../test/notes/vault/integration/storage/save_recovery.rs"
 

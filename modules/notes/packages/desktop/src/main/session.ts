@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { parseAppearance, type Appearance } from "../shared/api";
 import {
   emptyReaderSession,
@@ -128,10 +129,15 @@ export function serializeSession(session: Session): string {
  * @returns 可用会话；文件缺失、不可读或损坏时返回空会话。
  */
 export function loadSession(file: string): Session {
+  return readSession(file) ?? emptySession;
+}
+
+/** 缺失或损坏必须保留为空的事实，不能把默认值当成已经持久化的会话。 */
+function readSession(file: string): Session | null {
   try {
-    return parseSession(readFileSync(file, "utf8")) ?? emptySession;
+    return parseSession(readFileSync(file, "utf8"));
   } catch {
-    return emptySession;
+    return null;
   }
 }
 
@@ -144,6 +150,8 @@ export function loadSession(file: string): Session {
  * 所有同步和关闭操作均在替换前完成，成功替换后不会因收尾步骤误报保存失败。
  */
 export function saveSession(file: string, session: Session): void {
+  // 比较当前磁盘状态，避免缓存一次失败或外部修改后误判已经提交。
+  if (isDeepStrictEqual(readSession(file), session)) return;
   const contents = serializeSession(session);
   mkdirSync(dirname(file), { recursive: true });
   const temporary = join(dirname(file), `.${basename(file)}.${randomUUID()}.tmp`);

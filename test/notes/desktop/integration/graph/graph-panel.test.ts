@@ -2,7 +2,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GraphPanel from "@reader/renderer/graph/GraphPanel.svelte";
-import { createInlineLayout } from "@reader/renderer/graph/layout-client";
+import { createInlineLayout, type LayoutEngine } from "@reader/renderer/graph/layout-client";
 import { ReaderWorkspaceController } from "@reader/renderer/workspace/state.svelte";
 import type { GraphNode, VaultGraph } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
@@ -51,7 +51,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function start(center: string | null, graph: VaultGraph = base) {
+async function start(
+  center: string | null,
+  graph: VaultGraph = base,
+  engine = createInlineLayout(),
+) {
   const indexGraph = vi.fn(async (includeDead: boolean) =>
     includeDead
       ? {
@@ -68,7 +72,7 @@ async function start(center: string | null, graph: VaultGraph = base) {
   const onOpen = vi.fn();
   component = mount(GraphPanel, {
     target,
-    props: { workspace, center, engine: createInlineLayout(), onOpen },
+    props: { workspace, center, engine, onOpen },
   });
   await settle();
   flushSync();
@@ -83,6 +87,45 @@ const checkbox = (label: string) =>
     ?.querySelector<HTMLInputElement>("input")!;
 
 describe("全局图谱面板", () => {
+  it("画布实际使用完整清单回收旧坐标，过滤保留有效身份，切库清除同名记忆", async () => {
+    const seeds: number[][] = [];
+    const engine: LayoutEngine = {
+      run(request, onFrame) {
+        seeds.push([...request.seeds]);
+        onFrame(new Float32Array(request.count * 2).fill(7), true);
+        return () => {};
+      },
+      dispose() {},
+    };
+    const graph = { nodes: [node("a.md"), node("b.md")], edges: [] };
+    const { api, workspace, indexGraph } = await start(null, graph, engine);
+    input().value = "b";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    input().value = "";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    expect(seeds.at(-1)).toEqual([7, 7, 7, 7]);
+
+    vi.useFakeTimers();
+    indexGraph.mockResolvedValue({ nodes: [node("b.md")], edges: [] });
+    await workspace.refreshList();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    indexGraph.mockResolvedValue(graph);
+    await workspace.refreshList();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(seeds.at(-1)).toEqual([NaN, NaN, 7, 7]);
+
+    vi.mocked(api.vaultOpen).mockResolvedValue({ root: "/other", entries: [] });
+    await workspace.openVault();
+    flushSync();
+    expect(seeds.at(-1)).toEqual([NaN, NaN, NaN, NaN]);
+  });
+
   it("读入全库图谱，过滤、孤立开关与死链开关分别作用于显示的节点", async () => {
     const { indexGraph } = await start(null);
     expect(indexGraph).toHaveBeenLastCalledWith(false);

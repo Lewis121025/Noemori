@@ -39,6 +39,7 @@
   let request = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let loadedDead: boolean | null = null;
+  const inventory = $derived(raw?.nodes.map((node) => node.path) ?? []);
 
   const shown = $derived.by(() => {
     if (raw === null) return null;
@@ -126,6 +127,8 @@
     <div class="stage">
       <GraphCanvas
         graph={shown}
+        {inventory}
+        vaultRoot={workspace.vaultRoot}
         current={center ?? workspace.document.path}
         {engine}
         label={center === null ? "全库关系图谱" : "本文局部关系图谱"}

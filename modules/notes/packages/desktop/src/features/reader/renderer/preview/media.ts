@@ -152,7 +152,7 @@ export function createBrowserMediaIo(
     readFile: (rel) => api.fileRead(rel),
     watchFile: (path, changed) =>
       api.subscribeVaultChanged?.((event) => {
-        if (event.paths.includes(path)) changed();
+        if (event.paths.length === 0 || event.paths.includes(path)) changed();
       }) ?? (() => {}),
     createUrl: (bytes, mime) => {
       const copy = new Uint8Array(bytes.byteLength);

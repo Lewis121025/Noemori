@@ -850,6 +850,7 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "nous-vault",
+ "tempfile",
  "trash",
 ]
 

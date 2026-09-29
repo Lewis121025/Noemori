@@ -121,10 +121,19 @@ export class LayoutRun {
 /**
  * 按路径记住节点坐标，跨过滤、深度切换与增量刷新复用。
  *
- * 只增不删：被过滤掉的节点重新出现时回到原处，而不是重新找位置。
+ * 完整清单决定条目生命周期；显示过滤不删除坐标，切库不继承同名身份。
  */
 export class PositionMemory {
   private readonly known = new Map<string, readonly [number, number]>();
+  private scope: string | null = null;
+
+  /** 按库身份和完整清单清理坐标；paths 必须包含被显示过滤隐藏的有效节点。 */
+  reconcile(scope: string | null, paths: readonly string[]): void {
+    if (scope !== this.scope) this.known.clear();
+    this.scope = scope;
+    const retained = new Set(paths);
+    for (const path of this.known.keys()) if (!retained.has(path)) this.known.delete(path);
+  }
 
   /** 按节点顺序生成播种坐标；没记过的节点为 `NaN`。 */
   seeds(paths: readonly string[]): Float32Array {

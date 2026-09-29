@@ -15,6 +15,8 @@
 
   let {
     graph,
+    inventory,
+    vaultRoot,
     current,
     engine,
     label,
@@ -22,6 +24,9 @@
   }: {
     /** 要显示的图（已过滤）。 */
     graph: VaultGraph;
+    /** 当前库的完整节点身份；显示过滤不能决定缓存条目的生命周期。 */
+    inventory: readonly string[];
+    vaultRoot: string | null;
     /** 当前笔记路径；以强调色标出。 */
     current: string | null;
     engine: LayoutEngine;
@@ -141,7 +146,12 @@
 
   $effect(() => {
     const next = graph;
-    untrack(() => layout(next));
+    const paths = inventory;
+    const scope = vaultRoot;
+    untrack(() => {
+      memory.reconcile(scope, paths);
+      layout(next);
+    });
   });
 
   $effect(() => {

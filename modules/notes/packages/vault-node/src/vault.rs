@@ -1,6 +1,9 @@
 //! 库生命周期与监视事件的 Node-API 适配。
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
@@ -14,6 +17,10 @@ use std::sync::atomic::{AtomicU8, Ordering};
 const WATCH_PENDING: u8 = 0;
 const WATCH_ACTIVE: u8 = 1;
 const WATCH_CANCELLED: u8 = 2;
+
+#[cfg(test)]
+#[path = "../../../../../test/notes/vault-node/unit/watch_notification.rs"]
+mod resource_tests;
 
 /// 候选监视器先等待归属确定；取消先唤醒等待者，再回收监视线程。
 struct PendingWatch(Arc<AtomicU8>);
@@ -151,8 +158,17 @@ fn watch_candidate(
     on_changed: JsFunction,
     watching: Arc<AtomicU8>,
 ) -> Result<nous_vault::WatchHandle> {
-    let tsfn: ThreadsafeFunction<JsVaultEvent, ErrorStrategy::Fatal> =
-        on_changed.create_threadsafe_function(0, |ctx| Ok(vec![ctx.value]))?;
+    let pending = Arc::new(Mutex::new(crate::watch_events::PendingNotification::default()));
+    let delivery = Arc::clone(&pending);
+    let tsfn: ThreadsafeFunction<(), ErrorStrategy::Fatal> =
+        on_changed.create_threadsafe_function(1, move |_| {
+            let event = delivery
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+                .ok_or_else(|| Error::from_reason("缺少待交付的监视通知"))?;
+            Ok(vec![event])
+        })?;
     // macOS 监视事件会使用 /private/var 等物理路径，比较前只规范化库根，删除事件不能再解析文件。
     let watch_root = std::fs::canonicalize(watched.root())
         .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -167,7 +183,14 @@ fn watch_candidate(
                 return;
             }
             let notification = watch_notification(&watched, &watch_root, event);
-            tsfn.call(notification, ThreadsafeFunctionCallMode::NonBlocking);
+            let schedule = pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(notification);
+            if schedule {
+                // 一个待交付状态只入队一次；关闭时不能阻塞等待 JS，否则 join 会死锁。
+                tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
+            }
         },
     )
     .map_err(to_napi)?;
@@ -181,11 +204,17 @@ fn watch_notification(
     event: std::result::Result<Vec<std::path::PathBuf>, String>,
 ) -> JsVaultEvent {
     match event {
-        Err(message) => JsVaultEvent {
-            status: "watch-error".into(),
-            paths: Vec::new(),
-            healthy: false,
-            message: Some(message),
+        Err(mut message) => {
+            // 监视错误可能与磁盘变化同批到达；核对最终状态，同时保留监视故障身份。
+            if let Err(error) = watched.refresh_index() {
+                message.push_str(&format!("；索引复核失败：{error}"));
+            }
+            JsVaultEvent {
+                status: "watch-error".into(),
+                paths: Vec::new(),
+                healthy: false,
+                message: Some(message),
+            }
         },
         Ok(paths) => {
             let paths = paths

@@ -18,6 +18,8 @@
     "../../../../test/vitest.core.config.ts",
     "../../../../test/vitest.preview.config.ts",
     "../../../../test/vitest.performance.config.ts",
+    "../../../../test/vitest.resources.config.ts",
+    "../../../../test/vitest.resource-contracts.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",

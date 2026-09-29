@@ -29,7 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            modules/notes -> .artifacts/target
+            modules/notes -> target
             modules/agent -> target
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -43,6 +43,12 @@ jobs:
         run: pnpm --filter @nous/desktop test:preview
       - if: runner.os == 'Linux'
         run: xvfb-run -a pnpm --filter @nous/desktop test:preview
+      - name: Resource lifecycle (macOS)
+        if: runner.os == 'macOS'
+        run: pnpm --filter @nous/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
+      - name: Resource lifecycle (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @nous/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

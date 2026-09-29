@@ -6,6 +6,26 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 #[test]
+fn resource_watch_drop_releases_its_vault_across_repeated_lifecycles() {
+    let root = TempDir::new().unwrap();
+    let index = TempDir::new().unwrap();
+    fs::write(root.path().join("note.md"), "# Note\n").unwrap();
+    for _ in 0..20 {
+        let vault = Arc::new(Vault::open(root.path(), index.path()).unwrap());
+        let lifetime = Arc::downgrade(&vault);
+        let watched = Arc::clone(&vault);
+        let handle = nous_vault::start_watch(root.path(), Duration::from_millis(20), move |_| {
+            watched.refresh_index().unwrap();
+        })
+        .unwrap();
+        drop(vault);
+        assert!(lifetime.upgrade().is_some());
+        drop(handle);
+        assert!(lifetime.upgrade().is_none(), "监视器释放后不能继续持有旧库");
+    }
+}
+
+#[test]
 fn external_edit_refreshes_backlinks_after_debounce() {
     let root = TempDir::new().expect("库");
     let index = TempDir::new().expect("索引");

@@ -52,6 +52,32 @@ describe("增量布局", () => {
 });
 
 describe("PositionMemory", () => {
+  it("完整清单清理已删除身份，过滤隐藏的节点仍保留；切库不复用同名节点", () => {
+    const memory = new PositionMemory();
+    memory.reconcile("first", ["a", "b"]);
+    memory.remember(["a", "b"], [1, 2, 3, 4]);
+    memory.reconcile("first", ["a", "b"]);
+    memory.remember(["b"], [5, 6]);
+    expect([...memory.seeds(["a"])]).toEqual([1, 2]);
+    memory.reconcile("first", ["b"]);
+    expect([...memory.seeds(["a", "b"])]).toEqual([NaN, NaN, 5, 6]);
+    memory.reconcile("second", ["b"]);
+    expect([...memory.seeds(["b"])]).toEqual([NaN, NaN]);
+  });
+
+  it("反复更换完整清单后，历史路径不能继续提供坐标", () => {
+    const memory = new PositionMemory();
+    const historical: string[] = [];
+    for (let batch = 0; batch < 200; batch++) {
+      const paths = Array.from({ length: 10 }, (_, index) => `${batch}/${index}.md`);
+      memory.reconcile("vault", paths);
+      memory.remember(paths, new Float32Array(20).fill(batch));
+      historical.push(...paths);
+    }
+    expect([...memory.seeds(historical.slice(0, -10))].every(Number.isNaN)).toBe(true);
+    expect([...memory.seeds(historical.slice(-10))].every((value) => value === 199)).toBe(true);
+  });
+
   it("按路径播种，未记过的为 NaN；被过滤掉的节点重新出现时回到原处", () => {
     const memory = new PositionMemory();
     memory.remember(["a", "b"], [1, 2, 3, 4]);

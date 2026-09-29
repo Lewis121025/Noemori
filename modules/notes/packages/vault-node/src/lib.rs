@@ -11,3 +11,4 @@ pub mod metadata;
 pub mod search;
 pub mod vault;
 mod runtime;
+mod watch_events;

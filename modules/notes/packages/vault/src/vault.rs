@@ -287,7 +287,7 @@ impl Vault {
 
         report(observer, OpenPhase::Indexing, 0, None)?;
         let conn = self.lock_conn()?;
-        index::replace_all(&conn, &file_rows, &links, &removals, &derived)?;
+        index::sync_snapshot(&conn, &file_rows, &links, &removals, &derived)?;
         drop(conn);
         self.store_built_inventory(inventory)?;
         self.store_directories(directories)?;
@@ -827,7 +827,7 @@ impl Vault {
             for link in &mut links {
                 assign_target(link, &inventory);
             }
-            index::replace_links(&conn, &links)?;
+            index::sync_links(&conn, &links)?;
         }
         drop(conn);
         self.store_built_inventory(inventory)?;

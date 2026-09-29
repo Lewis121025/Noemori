@@ -16,8 +16,8 @@
     }
   },
   "scripts": {
-    "build": "PATH=\"$HOME/.cargo/bin:$(brew --prefix rustup 2>/dev/null)/bin:$PATH\" CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-../../.artifacts/target}\" napi build --platform --release",
-    "build:debug": "PATH=\"$HOME/.cargo/bin:$(brew --prefix rustup 2>/dev/null)/bin:$PATH\" CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-../../.artifacts/target}\" napi build --platform"
+    "build": "PATH=\"$HOME/.cargo/bin:$(brew --prefix rustup 2>/dev/null)/bin:$PATH\" CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-../../target}\" napi build --platform --release",
+    "build:debug": "PATH=\"$HOME/.cargo/bin:$(brew --prefix rustup 2>/dev/null)/bin:$PATH\" CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-../../target}\" napi build --platform"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"
