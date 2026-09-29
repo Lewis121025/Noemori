@@ -14,10 +14,11 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      NOUS_QUALITY_ARTIFACTS: ${{ runner.temp }}/nous-quality
     steps:
       - uses: actions/checkout@v4
+      - name: Set test artifact directory
+        shell: bash
+        run: echo "NOUS_QUALITY_ARTIFACTS=$RUNNER_TEMP/nous-quality" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
