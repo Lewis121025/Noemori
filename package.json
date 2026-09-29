@@ -5,17 +5,21 @@
   "packageManager": "pnpm@12.5.1",
   "scripts": {
     "dev": "pnpm build:vault-node && pnpm --filter @nous/desktop dev",
-    "build": "pnpm --filter @nous/vault-node build:debug && pnpm --filter @nous/desktop build",
+    "build": "pnpm build:agent && pnpm --filter @nous/vault-node build:debug && pnpm --filter @nous/desktop build",
+    "build:agent": "cargo build --manifest-path modules/agent/Cargo.toml --locked",
     "build:vault-node": "pnpm --filter @nous/vault-node build",
-    "check": "pnpm --filter @nous/desktop check",
+    "check": "pnpm check:agent && pnpm --filter @nous/desktop check",
+    "check:agent": "cargo check --manifest-path modules/agent/Cargo.toml --all-targets --locked",
     "lint": "pnpm --filter @nous/desktop lint",
     "test": "pnpm --filter @nous/desktop test",
     "test:core": "pnpm build && pnpm --filter @nous/desktop test:core",
     "test:preview": "pnpm build && pnpm --filter @nous/desktop test:preview",
     "test:performance": "pnpm build && pnpm --filter @nous/desktop test:performance",
     "test:watch": "pnpm --filter @nous/desktop exec vitest --config ../../../../test/vitest.config.ts",
-    "test:rust": "cd modules/notes && cargo test --workspace --locked",
-    "lint:rust": "cd modules/notes && cargo clippy --workspace --all-targets --locked -- -D warnings"
+    "test:agent": "cargo test --manifest-path modules/agent/Cargo.toml --locked",
+    "lint:agent": "cargo fmt --manifest-path modules/agent/Cargo.toml --check && cargo clippy --manifest-path modules/agent/Cargo.toml --all-targets --locked -- -D warnings",
+    "test:rust": "pnpm test:agent && cd modules/notes && cargo test --workspace --locked",
+    "lint:rust": "pnpm lint:agent && cd modules/notes && cargo clippy --workspace --all-targets --locked -- -D warnings"
   },
   "devDependencies": {
     "@codemirror/state": "^6.7.5",

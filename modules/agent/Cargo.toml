@@ -1,0 +1,58 @@
+[package]
+name = "nous-agent"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Nous 自定义模型接入、Agent 循环与工具契约"
+
+[workspace]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+
+[dependencies]
+async-stream = "0.3.6"
+async-trait = "0.1.92"
+aws-credential-types = "1"
+aws-sigv4 = "1.6.0"
+aws-smithy-eventstream = "0.61.4"
+aws-smithy-types = "1"
+bytes = "1"
+eventsource-stream = "0.2.3"
+futures = "0.3.34"
+jsonschema = { version = "0.58.2", default-features = false }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "stream", "rustls", "http2", "system-proxy"] }
+schemars = "1.2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt"] }
+tokio-util = "0.7.19"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["full", "test-util"] }
+
+[[test]]
+name = "contracts"
+path = "../../test/agent/tool/unit/contracts.rs"
+
+[[test]]
+name = "runtime"
+path = "../../test/agent/runtime/integration/loop.rs"
+
+[[test]]
+name = "providers"
+path = "../../test/agent/llm/integration/providers.rs"
+
+[[test]]
+name = "model_contracts"
+path = "../../test/agent/llm/unit/contract.rs"
+
+[[test]]
+name = "messages"
+path = "../../test/agent/message/unit/history.rs"

@@ -28,7 +28,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: modules/notes -> .artifacts/target
+          workspaces: |
+            modules/notes -> .artifacts/target
+            modules/agent -> target
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm lint

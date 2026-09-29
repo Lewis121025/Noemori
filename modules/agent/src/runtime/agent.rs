@@ -1,0 +1,125 @@
+use super::{AgentEvent, RunReport, runner};
+use crate::{
+    CancellationToken, Error, ExecutionContext, Message,
+    llm::{GenerationOptions, Model, ModelRequest},
+    tool::ToolRegistry,
+};
+use futures::{Stream, StreamExt};
+use std::{pin::Pin, sync::Arc, time::Duration};
+
+/// 按消费推进的运行事件流；释放后不再调度模型和工具。
+pub type AgentStream = Pin<Box<dyn Stream<Item = AgentEvent> + Send>>;
+
+/// 运行策略；每次模型请求都计入预算，包括重试。
+#[derive(Clone, Debug)]
+pub struct RunOptions {
+    /// 整个运行允许调度的请求数，包含初次请求和重试；零表示不调度。
+    pub max_model_calls: usize,
+    /// 同一轮尚未产生事件时允许的重试次数，成功响应后重新计算。
+    pub max_retries: usize,
+    /// 从创建运行流开始计算的总时间预算，必须为可表示的正时长。
+    pub timeout: Duration,
+    /// 服务商未提供等待提示时的重试间隔，实际等待不超过剩余运行预算。
+    pub retry_delay: Duration,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            max_model_calls: 8,
+            max_retries: 2,
+            timeout: Duration::from_secs(300),
+            retry_delay: Duration::from_millis(250),
+        }
+    }
+}
+
+/// 每次运行独占的输入；父取消信号不会因单次运行结束而被取消。
+#[derive(Clone, Debug)]
+pub struct RunInput {
+    /// 交给本次运行独占的完整历史，启动前校验工具调用是否闭合。
+    pub messages: Vec<Message>,
+    /// 每一轮共用的生成参数，工具声明由 Agent 的注册快照提供。
+    pub generation: GenerationOptions,
+    /// 调用方持有的父取消信号；运行结束不反向取消它。
+    pub cancellation: CancellationToken,
+}
+
+impl RunInput {
+    /// 从完整历史创建输入，默认使用独立取消信号和默认生成参数。
+    pub fn new(messages: Vec<Message>) -> Self {
+        Self {
+            messages,
+            generation: GenerationOptions::default(),
+            cancellation: CancellationToken::new(),
+        }
+    }
+}
+
+/// 可复用的 Agent 配置；历史仅存在于单次运行中。
+#[derive(Clone)]
+pub struct Agent {
+    pub(super) model: Arc<dyn Model>,
+    pub(super) tools: ToolRegistry,
+    pub(super) options: RunOptions,
+}
+
+impl Agent {
+    /// 绑定模型、工具快照与预算；不会发送模型请求。
+    ///
+    /// `model` 与工具实现可被多个运行共享，`options` 约束每次运行。
+    /// 返回不持有对话历史的 Agent，具体输入由后续的 run 或 stream 提供。
+    ///
+    /// # 错误
+    /// 非法超时或模型不支持已注册工具时返回错误。
+    pub fn new(
+        model: Arc<dyn Model>,
+        tools: ToolRegistry,
+        options: RunOptions,
+    ) -> Result<Self, Error> {
+        ExecutionContext::new(CancellationToken::new(), options.timeout)?;
+        if !tools.definitions().is_empty() && !model.capabilities().tools {
+            return Err(Error::Unsupported(
+                "Agent 注册了工具，但模型未声明工具能力".into(),
+            ));
+        }
+        Ok(Self {
+            model,
+            tools,
+            options,
+        })
+    }
+
+    /// 创建运行流；开始消费后才执行模型和工具，完成时发出唯一 RunReport。
+    ///
+    /// `input` 包含本次历史、生成参数和父取消信号；返回按消费推进的事件流。
+    /// 丢弃流会释放本次工作，此时无法再通过该流取得结束报告。
+    ///
+    /// # 错误
+    /// 输入不合法在启动前返回；启动后的失败保留在最终运行报告中。
+    pub fn stream(&self, input: RunInput) -> Result<AgentStream, Error> {
+        ModelRequest {
+            messages: input.messages.clone(),
+            tools: self.tools.definitions(),
+            options: input.generation.clone(),
+        }
+        .validate(self.model.capabilities())?;
+        let context =
+            ExecutionContext::new(input.cancellation.child_token(), self.options.timeout)?;
+        Ok(runner::drive(self.clone(), input, context))
+    }
+
+    /// 消费与 stream 相同的执行路径，返回完整运行报告。
+    ///
+    /// # 错误
+    /// 输入校验失败返回错误；运行中的取消、超时和故障由报告状态表达。
+    pub async fn run(&self, input: RunInput) -> Result<RunReport, Error> {
+        let mut stream = self.stream(input)?;
+        while let Some(event) = stream.next().await {
+            if let AgentEvent::Finished(report) = event {
+                return Ok(*report);
+            }
+        }
+        Err(Error::Protocol("Agent 运行缺少终态报告".into()))
+    }
+}
