@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "purpose": "整理白板几何修正的数据来源，区分真实评测配对、规范几何素材和本项目合成数据。",
+  "verified_on": "2026-09-29",
+  "training_policy": "geometry-v1 保留自有程序合成；tabler-synthetic-v1 使用固定版本开源 SVG 作为目标并施加合成偏差。真实草图单独作评测，不进入训练。",
+  "sources": [
+    {
+      "id": "rough-sketch-cleanup-benchmark",
+      "title": "A Benchmark for Rough Sketch Cleanup",
+      "project_url": "https://cragl.cs.gmu.edu/sketchbench/",
+      "repository_url": "https://github.com/Nauhcnay/A-Benchmark-for-Rough-Sketch-Cleanup",
+      "paper_url": "https://doi.org/10.1145/3414685.3417784",
+      "dataset_url": "https://cragl.cs.gmu.edu/sketchbench/Benchmark_Dataset.zip",
+      "kind": "human_cleanup_reference",
+      "contents": {
+        "collected_sketches": 281,
+        "curated_sketches": 101,
+        "additional_prior_work_sketches": 40,
+        "references": "专业人士对 101 + 40 幅草图制作人工矢量化结果和多个清理目标。"
+      },
+      "suggested_use": "独立整图清理评测：34幅/103参考通过视框一致性检查；10幅/30参考单独待复核，不进入评测文件。",
+      "license": "按样本来源区分；论文说明多数为 Creative Commons，其余仅允许学术使用。",
+      "verification": "已核对上游标签表与输入/参考稿链接，下载44幅草图的形状层、全部层和133份人工参考稿（221个SVG），逐文件校验；完整900MB归档未下载。",
+      "limitations": [
+        "不能假定所有样本允许相同用途。",
+        "整幅草图清理配对不直接提供每次抬笔的修改范围。",
+        "已补齐服务器中间证书并通过HTTPS验证；原始矢量可能来自人工描摹，不提供真实抬笔顺序和局部修改标签。"
+      ],
+      "acquisition_status": "subset_downloaded_and_verified",
+      "local_manifest": ".artifacts/whiteboard/real-eval-v1/manifest.json",
+      "local_counts": {
+        "sketches": 44,
+        "references": 133,
+        "evaluation_sketches": 34,
+        "evaluation_references": 103,
+        "review_sketches": 10,
+        "svg_files": 221,
+        "genres": {
+          "Artistic: Freeform": 12,
+          "Artistic: Logo": 7,
+          "Industrial: Architecture": 4,
+          "Industrial: Fashion": 1,
+          "Industrial: Product": 20
+        },
+        "source_licenses": {
+          "CC-BY-4.0": 12,
+          "CC-BY-3.0": 5,
+          "CC-BY-2.0": 27
+        }
+      }
+    },
+    {
+      "id": "tabler-outline",
+      "title": "Tabler Icons outline",
+      "repository_url": "https://github.com/tabler/tabler-icons",
+      "revision": "74929e50416e2b7c0abb8368cdc74bdcb2560ab6",
+      "license_url": "https://github.com/tabler/tabler-icons/blob/74929e50416e2b7c0abb8368cdc74bdcb2560ab6/LICENSE",
+      "kind": "clean_vector_reference",
+      "license": "MIT；保留上游版权和许可文本。",
+      "suggested_use": "已下载固定版本 40 个候选 SVG 及 MIT 许可证，导入为扩展合成数据的规范几何目标。",
+      "verification": "40/40 SVG 和 LICENSE 已成功下载；逐文件 URL、SHA-256、字节数记录在本地来源清单。",
+      "acquisition_status": "downloaded_and_verified",
+      "upstream_directory": "icons/outline/",
+      "selected_files": [
+        "line.svg",
+        "circle.svg",
+        "oval.svg",
+        "rectangle.svg",
+        "rectangle-vertical.svg",
+        "square.svg",
+        "triangle.svg",
+        "triangle-inverted.svg",
+        "diamond.svg",
+        "hexagon.svg",
+        "pentagon.svg",
+        "octagon.svg",
+        "star.svg",
+        "arrow-right.svg",
+        "arrow-left.svg",
+        "arrow-up.svg",
+        "arrow-down.svg",
+        "arrows-left-right.svg",
+        "arrow-loop-right.svg",
+        "arrow-zig-zag.svg",
+        "arrow-curve-right.svg",
+        "arrows-split.svg",
+        "arrows-join.svg",
+        "chart-line.svg",
+        "chart-arcs.svg",
+        "chart-circles.svg",
+        "chart-dots.svg",
+        "chart-grid-dots.svg",
+        "route.svg",
+        "git-branch.svg",
+        "git-merge.svg",
+        "git-fork.svg",
+        "triangle-square-circle.svg",
+        "square-rounded.svg",
+        "spiral.svg",
+        "activity.svg",
+        "vector-bezier.svg",
+        "vector-triangle.svg",
+        "circle-dashed.svg",
+        "polygon.svg"
+      ],
+      "limitations": [
+        "图标素材不等于真实手绘修正配对。",
+        "24×24 网格及图标风格不足以覆盖任意白板内容。",
+        "SVG 元素中的辅助空路径不可误作监督几何。",
+        "以开源规范路径制造的粗稿仍属合成数据，不能替代真实用户手绘评测。"
+      ],
+      "local_manifest": ".artifacts/whiteboard/sources/tabler-outline/manifest.json"
+    },
+    {
+      "id": "sketchgraphs",
+      "title": "SketchGraphs",
+      "repository_url": "https://github.com/PrincetonLIPS/SketchGraphs",
+      "revision": "1f27f5f9459926d38318007c71b72697083b2f3c",
+      "paper_url": "https://arxiv.org/abs/2007.08506",
+      "kind": "cad_geometry_reference",
+      "contents": "约 1500 万个 CAD 草图，包含几何元素与设计者施加的约束关系。",
+      "suggested_use": "后续扩展规范结构分布时的候选来源。",
+      "license": "原作者保留草图版权；按上游说明和 Onshape 条款核对，不能以代码许可代替数据许可。",
+      "verification": "已核对固定版本的官方说明；未下载数据。",
+      "limitations": [
+        "没有对应的自然手绘输入与人工修正目标。",
+        "工程 CAD 分布与自由白板内容有差异。"
+      ]
+    },
+    {
+      "id": "virtual-sketching-quickdraw-rough",
+      "title": "General Virtual Sketching / QuickDraw-rough",
+      "repository_url": "https://github.com/MarkMoHR/virtual_sketching",
+      "paper_url": "https://doi.org/10.1145/3450626.3459833",
+      "kind": "synthetic_raster_reference",
+      "contents": "QuickDraw 草图经铅笔画生成模型合成为粗糙图像，作者仓库提供数据入口。",
+      "suggested_use": "研究合成退化与真实评测的方法，不直接作为几何输入数据。",
+      "license": "需分别核对原始数据、派生数据和生成模型的使用条件。",
+      "verification": "已核对作者仓库中的数据说明；未下载数据。",
+      "limitations": [
+        "粗糙输入为图像，不是本项目需要的原始矢量路径。",
+        "合成铅笔风格不直接等于几何位置偏差。"
+      ]
+    }
+  ]
+}
