@@ -5,10 +5,10 @@ const encode = (source: string) => new TextEncoder().encode(source);
 
 describe("文件预览与编辑边界", () => {
   it("白板按独立格式打开，损坏文件不能退回可写文本或空白板", () => {
-    expect(readFileContent("草稿.NOUSBOARD", encode('{"version":1,"strokes":[]}')))
+    expect(readFileContent("草稿.NOEMORIBOARD", encode('{"version":1,"strokes":[]}')))
       .toEqual({ kind: "whiteboard", board: { version: 1, strokes: [] } });
-    expect(() => readFileContent("草稿.nousboard", encode("broken"))).toThrow("JSON");
-    expect(() => readFileContent("草稿.nousboard", new Uint8Array([255]))).toThrow();
+    expect(() => readFileContent("草稿.noemoriboard", encode("broken"))).toThrow("JSON");
+    expect(() => readFileContent("草稿.noemoriboard", new Uint8Array([255]))).toThrow();
   });
   it.each([
     "photo.PNG",

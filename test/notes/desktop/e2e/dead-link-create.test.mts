@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("死链创建：#标题锚点随创建写入新笔记并直接定位", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-dead-link-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-dead-link-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

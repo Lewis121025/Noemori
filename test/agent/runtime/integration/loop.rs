@@ -3,10 +3,12 @@ mod support;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nous_agent::llm::{Capabilities, FinishReason, Model, ModelEvent, ModelRequest, ModelStream};
-use nous_agent::runtime::{Agent, AgentEvent, RunInput, RunOptions, RunStatus};
-use nous_agent::tool::{Tool, ToolContext, ToolError, ToolRegistry};
-use nous_agent::{CancellationToken, Error, ExecutionContext, Message, Role, validate_history};
+use noemori_agent::llm::{
+    Capabilities, FinishReason, Model, ModelEvent, ModelRequest, ModelStream,
+};
+use noemori_agent::runtime::{Agent, AgentEvent, RunInput, RunOptions, RunStatus};
+use noemori_agent::tool::{Tool, ToolContext, ToolError, ToolRegistry};
+use noemori_agent::{CancellationToken, Error, ExecutionContext, Message, Role, validate_history};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -98,10 +100,10 @@ async fn tools_round_trip_in_order_and_commit_before_next_model_call() {
     let requests = model.requests.lock().unwrap();
     let results = &requests[1].messages.last().unwrap().content;
     assert!(
-        matches!(&results[0],nous_agent::ContentPart::ToolResult(r)if r.call_id=="a"&&r.output==json!(4))
+        matches!(&results[0],noemori_agent::ContentPart::ToolResult(r)if r.call_id=="a"&&r.output==json!(4))
     );
     assert!(
-        matches!(&results[1],nous_agent::ContentPart::ToolResult(r)if r.call_id=="b"&&r.output==json!(6))
+        matches!(&results[1],noemori_agent::ContentPart::ToolResult(r)if r.call_id=="b"&&r.output==json!(6))
     );
 }
 
@@ -124,7 +126,7 @@ async fn invalid_arguments_and_unknown_tools_become_observations() {
         report.history[2]
             .content
             .iter()
-            .all(|p| matches!(p,nous_agent::ContentPart::ToolResult(r)if r.is_error))
+            .all(|p| matches!(p,noemori_agent::ContentPart::ToolResult(r)if r.is_error))
     );
 }
 

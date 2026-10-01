@@ -1,16 +1,16 @@
 //! 真实磁盘的开库、重开和批量移动基准；夹具由临时目录自动清理。
 
-use nous_vault::{EntryMutation, Vault};
+use noemori_vault::{EntryMutation, Vault};
 use std::{fs, time::Instant};
 use tempfile::TempDir;
 
 #[test]
 #[ignore = "使用 --release --ignored --nocapture 显式测量，避免影响日常回归"]
 fn open_and_move_notes() {
-    let count = std::env::var("NOUS_FILES_BENCH_NOTES")
+    let count = std::env::var("NOEMORI_FILES_BENCH_NOTES")
         .map_or(1000, |value| value.parse::<usize>().expect("笔记数量"));
-    let batches = std::env::var("NOUS_FILES_BENCH_BATCHES").unwrap_or_else(|_| "10,100".into());
-    let modes = std::env::var("NOUS_FILES_BENCH_MODES").unwrap_or_else(|_| "batch".into());
+    let batches = std::env::var("NOEMORI_FILES_BENCH_BATCHES").unwrap_or_else(|_| "10,100".into());
+    let modes = std::env::var("NOEMORI_FILES_BENCH_MODES").unwrap_or_else(|_| "batch".into());
     let root = TempDir::new().unwrap();
     let index = TempDir::new().unwrap();
     fs::create_dir(root.path().join("archive")).unwrap();

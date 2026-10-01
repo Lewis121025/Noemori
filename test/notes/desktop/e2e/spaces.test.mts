@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("两个空间：预览、连续写作、自动搜索和跨重启现场", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-spaces-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-spaces-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "我的资料");
   const state = join(root, "state");
@@ -86,7 +86,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     await library.getByRole("treeitem", { name: "渐进呈现.md", exact: true }).click();
     await expect.poll(() => library.locator(".excerpt").innerText()).toContain("在合适的时候");
     expect(await page.locator(".reading-space").getAttribute("aria-hidden")).toBe("true");
-    const artifacts = process.env.NOUS_SPACES_SCREENSHOTS;
+    const artifacts = process.env.NOEMORI_SPACES_SCREENSHOTS;
     if (artifacts) {
       await mkdir(artifacts, { recursive: true });
       const bytes = await app.evaluate(async ({ BrowserWindow }) => {
@@ -95,7 +95,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
         if (width === undefined || height === undefined) throw new Error("窗口尺寸不可用");
         return (await win.capturePage()).resize({ width, height }).toPNG();
       });
-      await writeFile(join(artifacts, "nous-library.png"), Buffer.from(bytes));
+      await writeFile(join(artifacts, "noemori-library.png"), Buffer.from(bytes));
     }
     await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
     expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
@@ -113,7 +113,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
         if (width === undefined || height === undefined) throw new Error("窗口尺寸不可用");
         return (await win.capturePage()).resize({ width, height }).toPNG();
       });
-      await writeFile(join(artifacts, "nous-writing.png"), Buffer.from(bytes));
+      await writeFile(join(artifacts, "noemori-writing.png"), Buffer.from(bytes));
     }
     await page.getByRole("button", { name: "资料管理", exact: true }).click();
     expect(
@@ -196,7 +196,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
 });
 
 test("首次记录不要求命名或选目录，实际文件创建在系统文稿目录", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-first-note-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-first-note-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const executablePath: unknown = require("electron");
   if (typeof executablePath !== "string") throw new Error("缺少 Electron");
@@ -224,11 +224,11 @@ test("首次记录不要求命名或选目录，实际文件创建在系统文�
     await page.locator(".ProseMirror").click();
     await page.keyboard.type("从一个想法开始。");
     await expect
-      .poll(async () => readFile(join(root, "Nous", "未命名.md"), "utf8"), { timeout: 5000 })
+      .poll(async () => readFile(join(root, "Noemori", "未命名.md"), "utf8"), { timeout: 5000 })
       .toContain("从一个想法开始");
     expect(await page.getByRole("dialog").count()).toBe(0);
     await page.getByRole("button", { name: "新建笔记", exact: true }).click();
-    await expect.poll(async () => readFile(join(root, "Nous", "未命名 2.md"), "utf8")).toBe("");
+    await expect.poll(async () => readFile(join(root, "Noemori", "未命名 2.md"), "utf8")).toBe("");
   } finally {
     await app.close();
   }

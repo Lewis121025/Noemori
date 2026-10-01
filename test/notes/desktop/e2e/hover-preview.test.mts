@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("悬停预览：链接停留后弹出目标小节，移入弹层保持，离开关闭；点击标题打开原文", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-hover-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-hover-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

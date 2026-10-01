@@ -5,20 +5,20 @@ describe("buildTagTree", () => {
   it("按 / 组树，计数向祖先汇总，自身计数单列", () => {
     const tree = buildTagTree([
       { tag: "project", count: 2 },
-      { tag: "project/nous", count: 3 },
-      { tag: "project/nous/search", count: 1 },
+      { tag: "project/noemori", count: 3 },
+      { tag: "project/noemori/search", count: 1 },
       { tag: "阅读", count: 5 },
     ]);
     expect(tree).toHaveLength(2);
     expect(tree[0]).toMatchObject({ name: "project", path: "project", own: 2, count: 6 });
     expect(tree[0]?.children[0]).toMatchObject({
-      name: "nous",
-      path: "project/nous",
+      name: "noemori",
+      path: "project/noemori",
       own: 3,
       count: 4,
     });
     expect(tree[0]?.children[0]?.children[0]).toMatchObject({
-      path: "project/nous/search",
+      path: "project/noemori/search",
       own: 1,
       count: 1,
       children: [],

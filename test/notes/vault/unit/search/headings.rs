@@ -1,6 +1,6 @@
 //! 标题提取：等级、纯文本与源字节区间，锚点解析与补全的数据地基。
 
-use nous_vault::Vault;
+use noemori_vault::Vault;
 use std::fs;
 use tempfile::TempDir;
 

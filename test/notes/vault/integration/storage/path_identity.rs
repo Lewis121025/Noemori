@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use nous_vault::{LinkKind, LinkTarget, Vault, WriteOutcome};
+use noemori_vault::{LinkKind, LinkTarget, Vault, WriteOutcome};
 use std::fs;
 use tempfile::TempDir;
 
@@ -175,7 +175,7 @@ fn previous_index_paths_are_rebuilt_without_removing_recovery_drafts() {
 fn path_text_rejects_non_utf8_instead_of_replacing_filename_bytes() {
     use std::os::unix::ffi::OsStrExt;
     let invalid = std::path::Path::new(std::ffi::OsStr::from_bytes(b"note\xff.md"));
-    let error = nous_vault::path_to_slashes(invalid).unwrap_err();
+    let error = noemori_vault::path_to_slashes(invalid).unwrap_err();
     assert!(error.to_string().contains("UTF-8"), "{error}");
 }
 

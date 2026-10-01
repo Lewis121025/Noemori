@@ -108,9 +108,9 @@
       popovertarget="library-menu"
       disabled={busy}
       aria-label="切换笔记库"
-      title={workspace.vaultRoot ?? "Nous"}
+      title={workspace.vaultRoot ?? "Noemori"}
     >
-      <span>{workspace.vaultRoot === null ? "Nous" : basename(workspace.vaultRoot)}</span>
+      <span>{workspace.vaultRoot === null ? "Noemori" : basename(workspace.vaultRoot)}</span>
       <svg class="reader-icon chevron" viewBox="0 0 24 24" aria-hidden="true"
         ><path d="m8 10 4 4 4-4" /></svg
       >

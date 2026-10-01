@@ -1,10 +1,10 @@
 [package]
-name = "nous-agent"
+name = "noemori-agent"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
-description = "Nous 自定义模型接入、Agent 循环与工具契约"
+description = "Noemori 自定义模型接入、Agent 循环与工具契约"
 
 [workspace]
 

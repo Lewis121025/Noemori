@@ -66,7 +66,7 @@ pub fn entry_rename_batch(
 ) -> Result<JsRenameBatchOutcome> {
     let changes: Vec<_> = changes
         .into_iter()
-        .map(|change| nous_vault::EntryMutation {
+        .map(|change| noemori_vault::EntryMutation {
             from: change.from,
             to: change.to,
         })
@@ -77,7 +77,7 @@ pub fn entry_rename_batch(
             // 输入来自 Node-API 的 u32 长度数组，完成数不会超过该范围。
             progress
                 .call(completed as u32)
-                .map_err(|error| nous_vault::Error::Io(std::io::Error::other(error.to_string())))
+                .map_err(|error| noemori_vault::Error::Io(std::io::Error::other(error.to_string())))
         })
     })?;
     Ok(JsRenameBatchOutcome {

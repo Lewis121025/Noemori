@@ -1,4 +1,4 @@
-use nous_vault::{Vault, MAX_ATTACHMENT_BYTES};
+use noemori_vault::{Vault, MAX_ATTACHMENT_BYTES};
 use std::fs;
 use tempfile::TempDir;
 

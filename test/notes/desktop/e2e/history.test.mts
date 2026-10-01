@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("原生菜单、快捷键和就地源码共用历史，普通输入框保持独立撤销并保真保存", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-history-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-history-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

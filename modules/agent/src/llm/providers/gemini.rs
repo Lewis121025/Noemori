@@ -79,7 +79,7 @@ pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelRespons
                 id: call["id"]
                     .as_str()
                     .map(str::to_owned)
-                    .unwrap_or_else(|| format!("nous-gemini-{identity}-{index}")),
+                    .unwrap_or_else(|| format!("noemori-gemini-{identity}-{index}")),
                 name: string(call, "name")?.into(),
                 arguments: call.get("args").cloned().unwrap_or_else(|| json!({})),
             }));

@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("关系图谱：全局图谱过滤与点击打开，局部图谱随库变更增量刷新", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-graph-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-graph-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

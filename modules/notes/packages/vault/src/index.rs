@@ -92,7 +92,7 @@ pub(crate) fn open_search_reader(path: &std::path::Path) -> Result<Connection, E
 
 fn register_search_functions(conn: &Connection) -> Result<(), Error> {
     conn.create_scalar_function(
-        "nous_fold",
+        "noemori_fold",
         1,
         rusqlite::functions::FunctionFlags::SQLITE_UTF8
             | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,

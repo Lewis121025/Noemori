@@ -1,6 +1,6 @@
 //! 分页、取消与写入隔离的公开契约；游标不可混用查询或正文版本。
 
-use nous_vault::{Error, SearchCancellation, SearchExpr, SearchQuery, Vault};
+use noemori_vault::{Error, SearchCancellation, SearchExpr, SearchQuery, Vault};
 use std::{
     collections::HashSet,
     fs,

@@ -1,4 +1,4 @@
-use nous_vault::{LinkKind, Vault};
+use noemori_vault::{LinkKind, Vault};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

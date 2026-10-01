@@ -1,12 +1,12 @@
 //! 首次建索引、热重开和外部批量变更的阶段基线；临时夹具随测试释放。
-use nous_vault::{OpenPhase, Vault};
+use noemori_vault::{OpenPhase, Vault};
 use std::{collections::BTreeMap, fs, time::Instant};
 use tempfile::TempDir;
 
 #[test]
 #[ignore = "使用 --release --ignored --nocapture 显式测量开库"]
 fn opening_phases() {
-    let count = std::env::var("NOUS_OPEN_BENCH_NOTES")
+    let count = std::env::var("NOEMORI_OPEN_BENCH_NOTES")
         .map_or(1000, |value| value.parse::<usize>().unwrap());
     for sample in 0..3 {
         let root = TempDir::new().unwrap();

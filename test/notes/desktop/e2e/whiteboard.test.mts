@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("无工具栏白板：正文插入、手势编辑、保存重启、改名和嵌入关系", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-whiteboard-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-whiteboard-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -57,13 +57,13 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
     await page.locator(".ProseMirror").first().getByText("记录位置", { exact: true }).click();
     await command(app, "insert-whiteboard");
     await page
-      .getByRole("button", { name: "打开白板 attachments/白板.nousboard", exact: true })
+      .getByRole("button", { name: "打开白板 attachments/白板.noemoriboard", exact: true })
       .waitFor();
     await expect
       .poll(() => readFile(join(vault, "Home.md"), "utf8"), { timeout: 8000 })
-      .toContain("![[attachments/白板.nousboard]]");
+      .toContain("![[attachments/白板.noemoriboard]]");
     await page
-      .getByRole("button", { name: "打开白板 attachments/白板.nousboard", exact: true })
+      .getByRole("button", { name: "打开白板 attachments/白板.noemoriboard", exact: true })
       .click();
     const board = page.getByRole("application", { name: "白板", exact: true });
     await board.waitFor();
@@ -142,7 +142,7 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
     await expect
       .poll(() => page.locator(".whiteboard .board-canvas > g").getAttribute("transform"))
       .not.toBe(transform);
-    const boardPath = join(vault, "attachments", "白板.nousboard");
+    const boardPath = join(vault, "attachments", "白板.noemoriboard");
     await command(app, "save");
     await expect
       .poll(async () => JSON.parse(await readFile(boardPath, "utf8")).strokes.length, {
@@ -159,14 +159,14 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
     expect(await readFile(boardPath, "utf8")).toBe(saved);
     await page.getByRole("button", { name: "笔记操作", exact: true }).click();
     await page.getByRole("button", { name: "重命名…", exact: true }).click();
-    await page.locator("#entry-name").fill("整理.nousboard");
+    await page.locator("#entry-name").fill("整理.noemoriboard");
     await page.getByRole("button", { name: "重命名", exact: true }).click();
     await expect
       .poll(() => readFile(join(vault, "Home.md"), "utf8"), { timeout: 8000 })
-      .toContain("整理.nousboard");
+      .toContain("整理.noemoriboard");
     await command(app, "go-back");
     await page
-      .getByRole("button", { name: "打开白板 attachments/整理.nousboard", exact: true })
+      .getByRole("button", { name: "打开白板 attachments/整理.noemoriboard", exact: true })
       .waitFor();
     expect(await page.locator(".whiteboard-preview path").count()).toBe(3);
     expect(await readFile(join(vault, "Home.md"), "utf8")).toContain("保留后文");
@@ -230,7 +230,7 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
       pointerType: "pen",
     });
     await cdp.detach();
-    const penBoard = JSON.parse(await readFile(join(vault, "白板.nousboard"), "utf8"));
+    const penBoard = JSON.parse(await readFile(join(vault, "白板.noemoriboard"), "utf8"));
     expect(penBoard.strokes).toHaveLength(1);
     expect(penBoard.strokes[0].points[0].pressure).toBeCloseTo(0.2);
     expect(penBoard.strokes[0].points.at(-1).pressure).toBeCloseTo(0.8);

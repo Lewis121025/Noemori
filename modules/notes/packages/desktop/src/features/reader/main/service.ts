@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import type * as NativeModule from "@nous/vault-node";
+import type * as NativeModule from "@noemori/vault-node";
 import type {
   Bookmark,
   FileSnapshot,
@@ -209,7 +209,7 @@ export function createReaderService(
   onChanged: (event: VaultEvent) => void,
   sessions: ReaderSessionStore,
 ) {
-  const native = require("@nous/vault-node") as typeof NativeModule;
+  const native = require("@noemori/vault-node") as typeof NativeModule;
   let activeVault: object | null = null;
 
   function listEntries(): VaultEntry[] {

@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use nous_vault::{GraphEdge, Vault};
+use noemori_vault::{GraphEdge, Vault};
 use tempfile::TempDir;
 
 fn vault_with(files: &[(&str, &str)]) -> (TempDir, TempDir, Vault) {

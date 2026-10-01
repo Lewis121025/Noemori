@@ -1,6 +1,6 @@
 //! 批次复用实时快照，但每项独立提交；任何退出路径都保留真实完成数并收尾索引。
 
-use nous_vault::{EntryMutation, Error, Vault};
+use noemori_vault::{EntryMutation, Error, Vault};
 use rusqlite::Connection;
 use std::fs;
 use tempfile::TempDir;

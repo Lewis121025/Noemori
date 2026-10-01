@@ -88,7 +88,7 @@ beforeEach(() => {
     closeAfterFlush: vi.fn(async () => {}),
     closeBlocked: vi.fn(async () => {}),
   };
-  window.nous = { app, reader: api };
+  window.noemori = { app, reader: api };
 });
 afterEach(async () => {
   if (component !== undefined) await unmount(component);
@@ -612,7 +612,7 @@ describe("资料管理与读写空间", () => {
       expect(target.querySelector(".whiteboard")).not.toBeNull();
       expect(library().hidden).toBe(true);
     });
-    const created = disk.get("白板.nousboard");
+    const created = disk.get("白板.noemoriboard");
     expect(created).toBeDefined();
     expect(JSON.parse(new TextDecoder().decode(created))).toEqual({ version: 1, strokes: [] });
   });

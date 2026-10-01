@@ -16,7 +16,7 @@ export class MarkdownSnapshotError extends Error {
     this.recovery = {
       source: new TextEncoder().encode(source),
       editor: JSON.stringify({
-        format: "nous.prosemirror",
+        format: "noemori.prosemirror",
         version: 1,
         revision,
         doc: document.toJSON(),

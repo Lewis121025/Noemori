@@ -1,6 +1,6 @@
 //! 检索表达式：OR、取反、正则、文件名、属性存在、line: 与 section: 的组合语义。
 
-use nous_vault::{Error, SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
+use noemori_vault::{Error, SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
 use std::fs;
 use tempfile::TempDir;
 

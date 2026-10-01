@@ -27,7 +27,7 @@ const source = [
 ].join("\n");
 
 test("Obsidian 方言：高亮、注释、标注、脚注与 Mermaid 渲染，编辑后未改片段逐字节保留", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-dialect-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-dialect-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { createReaderApi } from "../features/reader/preload/api";
-import type { Appearance, AppApi, NousApi } from "../shared/api";
+import type { Appearance, AppApi, NoemoriApi } from "../shared/api";
 import { parseAppCommand } from "../shared/api";
 
 const app: AppApi = {
@@ -27,5 +27,5 @@ const app: AppApi = {
   closeAfterFlush: () => ipcRenderer.invoke("app.closeAfterFlush") as Promise<void>,
   closeBlocked: () => ipcRenderer.invoke("app.closeBlocked") as Promise<void>,
 };
-const api: NousApi = { app, reader: createReaderApi() };
-contextBridge.exposeInMainWorld("nous", api);
+const api: NoemoriApi = { app, reader: createReaderApi() };
+contextBridge.exposeInMainWorld("noemori", api);

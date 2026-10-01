@@ -35,7 +35,7 @@ export function registerVaultOpenIpc(
       if (mode === "restore") return await core.call("vaultRestore", control.buffer);
       let root: string | undefined;
       if (mode === "default") {
-        root = join(app.getPath("documents"), "Nous");
+        root = join(app.getPath("documents"), "Noemori");
         await mkdir(root, { recursive: true });
       } else {
         const window = getWindow();

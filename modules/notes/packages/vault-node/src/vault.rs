@@ -7,7 +7,7 @@ use std::{
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
-use nous_vault::{OpenPhase, Vault};
+use noemori_vault::{OpenPhase, Vault};
 use crate::runtime::{lock_state, to_napi, AppState};
 use crate::entry_batch::ProgressCallback;
 use crate::entries::JsVaultEntry;
@@ -81,7 +81,7 @@ pub fn vault_open(
     let mut observer = |item| report_open_progress(progress.as_ref(), item, verifying.get());
     let vault = match Vault::open_with_progress(&root, &index_dir, &mut observer) {
         Ok(vault) => Arc::new(vault),
-        Err(nous_vault::Error::OpenCancelled) => return Ok(false),
+        Err(noemori_vault::Error::OpenCancelled) => return Ok(false),
         Err(error) => return Err(to_napi(error)),
     };
     let activation = Arc::new(AtomicU8::new(WATCH_PENDING));
@@ -92,7 +92,7 @@ pub fn vault_open(
     verifying.set(true);
     match vault.verify_opening(&mut observer) {
         Ok(()) => {}
-        Err(nous_vault::Error::OpenCancelled) => return Ok(false),
+        Err(noemori_vault::Error::OpenCancelled) => return Ok(false),
         Err(error) => return Err(to_napi(error)),
     }
     // 在提交前验证目录与恢复入口，不能提交后才发现恢复记录不可读。
@@ -121,9 +121,9 @@ pub fn vault_open(
 /// 在调用线程校验计数并报告阶段，禁止 JavaScript 回调重入内核。
 fn report_open_progress(
     callback: Option<&Function<'_, JsOpenProgress, bool>>,
-    item: nous_vault::OpenProgress,
+    item: noemori_vault::OpenProgress,
     verifying: bool,
-) -> std::result::Result<bool, nous_vault::Error> {
+) -> std::result::Result<bool, noemori_vault::Error> {
     let Some(callback) = callback else {
         return Ok(true);
     };
@@ -140,7 +140,7 @@ fn report_open_progress(
         }
     };
     let convert = |count| {
-        u32::try_from(count).map_err(|error| nous_vault::Error::Io(std::io::Error::other(error)))
+        u32::try_from(count).map_err(|error| noemori_vault::Error::Io(std::io::Error::other(error)))
     };
     let _guard = ProgressCallback::enter();
     callback
@@ -149,7 +149,7 @@ fn report_open_progress(
             completed: convert(item.completed)?,
             total: item.total.map(convert).transpose()?,
         })
-        .map_err(|error| nous_vault::Error::Io(std::io::Error::other(error.to_string())))
+        .map_err(|error| noemori_vault::Error::Io(std::io::Error::other(error.to_string())))
 }
 
 /// 候选库监视器暂缓实际刷新，取消释放等待状态后即可退出。
@@ -157,7 +157,7 @@ fn watch_candidate(
     watched: Arc<Vault>,
     on_changed: JsFunction,
     watching: Arc<AtomicU8>,
-) -> Result<nous_vault::WatchHandle> {
+) -> Result<noemori_vault::WatchHandle> {
     let pending = Arc::new(Mutex::new(crate::watch_events::PendingNotification::default()));
     let delivery = Arc::clone(&pending);
     let tsfn: ThreadsafeFunction<(), ErrorStrategy::Fatal> =
@@ -172,7 +172,7 @@ fn watch_candidate(
     // macOS 监视事件会使用 /private/var 等物理路径，比较前只规范化库根，删除事件不能再解析文件。
     let watch_root = std::fs::canonicalize(watched.root())
         .map_err(|error| Error::from_reason(error.to_string()))?;
-    let watch = nous_vault::start_watch(
+    let watch = noemori_vault::start_watch(
         watch_root.clone(),
         Duration::from_millis(300),
         move |event| {
@@ -222,7 +222,7 @@ fn watch_notification(
                 .filter_map(|path| {
                     path.strip_prefix(watch_root)
                         .ok()
-                        .map(nous_vault::path_to_slashes)
+                        .map(noemori_vault::path_to_slashes)
                 })
                 .collect::<std::result::Result<Vec<_>, _>>();
             let (paths, refreshed) = match paths {

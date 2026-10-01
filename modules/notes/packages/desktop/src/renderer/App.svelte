@@ -6,7 +6,7 @@
   import type { HistoryAction, HistoryAvailability } from "../features/reader/shared/api";
   import { InputHistory } from "./input-history";
 
-  const { app, reader: readerApi } = window.nous;
+  const { app, reader: readerApi } = window.noemori;
   let reader: ReaderWorkspace | undefined = $state();
   let historyContext = $state(0);
   let publishedHistory: HistoryAvailability | null = null;

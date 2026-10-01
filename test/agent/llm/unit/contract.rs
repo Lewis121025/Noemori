@@ -1,9 +1,9 @@
 #[path = "../../support/model.rs"]
 mod support;
 
-use nous_agent::llm::{Capabilities, ModelEvent, ModelRequest, generate};
-use nous_agent::tool::ToolDefinition;
-use nous_agent::{CancellationToken, Error, ExecutionContext, Message, Role};
+use noemori_agent::llm::{Capabilities, ModelEvent, ModelRequest, generate};
+use noemori_agent::tool::ToolDefinition;
+use noemori_agent::{CancellationToken, Error, ExecutionContext, Message, Role};
 use serde_json::json;
 use std::time::Duration;
 use support::{ScriptedModel, answer, calls};
@@ -98,7 +98,7 @@ async fn direct_generation_rejects_call_ids_already_present_in_history() {
     request.messages.push(previous.message);
     request
         .messages
-        .push(Message::tool_results(vec![nous_agent::ToolResult {
+        .push(Message::tool_results(vec![noemori_agent::ToolResult {
             call_id: "call-1".into(),
             name: "test".into(),
             output: json!("done"),

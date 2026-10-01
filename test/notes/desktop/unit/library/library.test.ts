@@ -11,13 +11,13 @@ describe("资料管理与直接记录", () => {
     expect(
       untitledWhiteboardPath(
         [
-          { path: "资料/白板.nousboard", kind: "file" },
-          { path: "资料/白板 2.NOUSBOARD", kind: "directory" },
+          { path: "资料/白板.noemoriboard", kind: "file" },
+          { path: "资料/白板 2.NOEMORIBOARD", kind: "directory" },
         ],
         "资料",
       ),
-    ).toBe("资料/白板 3.nousboard");
-    expect(untitledWhiteboardPath([], "")).toBe("白板.nousboard");
+    ).toBe("资料/白板 3.noemoriboard");
+    expect(untitledWhiteboardPath([], "")).toBe("白板.noemoriboard");
   });
   it("新笔记避开文件与文件夹占用，沿用当前目录而不覆盖已有内容", () => {
     expect(

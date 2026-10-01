@@ -32,7 +32,7 @@ function silentWav(seconds: number): Buffer {
 }
 
 test("音频嵌入经流式协议加载并可拖动进度，编辑前后原文逐字节保留", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-media-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-media-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -77,7 +77,7 @@ test("音频嵌入经流式协议加载并可拖动进度，编辑前后原文�
     );
     const audio = page.locator(".media-audio audio");
     await audio.waitFor({ state: "attached" });
-    expect(await audio.getAttribute("src")).toMatch(/^nous-vault:\/\/vault\//);
+    expect(await audio.getAttribute("src")).toMatch(/^noemori-vault:\/\/vault\//);
     // 元数据经协议读到：时长约 2 秒。
     await expect
       .poll(() => audio.evaluate((element: HTMLAudioElement) => element.duration))

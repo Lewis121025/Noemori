@@ -23,7 +23,7 @@ const edge = (from: string, to: string) => ({ from, to, count: 1 });
 const graph: VaultGraph = {
   nodes: [
     node("a.md", ["项目"]),
-    node("b.md", ["项目/nous"]),
+    node("b.md", ["项目/noemori"]),
     node("c.md"),
     node("d.md", [], "终点"),
     node("e.md"),
@@ -82,7 +82,7 @@ describe("filterGraph", () => {
       "a.md",
       "b.md",
     ]);
-    expect(paths(filterGraph(graph, { query: "tag:项目/nous", showOrphans: true }))).toEqual([
+    expect(paths(filterGraph(graph, { query: "tag:项目/noemori", showOrphans: true }))).toEqual([
       "b.md",
     ]);
   });

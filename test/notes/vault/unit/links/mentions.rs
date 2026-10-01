@@ -1,4 +1,4 @@
-use nous_vault::{MentionKind, Vault};
+use noemori_vault::{MentionKind, Vault};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

@@ -2,7 +2,7 @@
 
 use napi::{bindgen_prelude::*, Task};
 use napi_derive::napi;
-use nous_vault::{SearchCancellation, SearchMatchesPage, SearchPage, SearchQuery, Vault};
+use noemori_vault::{SearchCancellation, SearchMatchesPage, SearchPage, SearchQuery, Vault};
 use std::sync::Arc;
 
 use crate::runtime::{lock_state, to_napi};
@@ -45,7 +45,7 @@ impl Task for MatchesTask {
 
     fn resolve(&mut self, _env: Env, page: SearchMatchesPage) -> Result<Self::JsValue> {
         if self.cancellation.is_cancelled() {
-            return Err(to_napi(nous_vault::Error::SearchCancelled));
+            return Err(to_napi(noemori_vault::Error::SearchCancelled));
         }
         Ok(JsSearchMatchesPage {
             matches: page.matches.into_iter().map(map_match).collect(),
@@ -75,7 +75,7 @@ impl Task for SearchTask {
     fn resolve(&mut self, _env: Env, page: SearchPage) -> Result<Self::JsValue> {
         // compute 完成和 JS 投递之间仍可能被取消，不能发布已经失效的结果。
         if self.cancellation.is_cancelled() {
-            return Err(to_napi(nous_vault::Error::SearchCancelled));
+            return Err(to_napi(noemori_vault::Error::SearchCancelled));
         }
         Ok(JsSearchPage {
             hits: page.hits.into_iter().map(map_hit).collect(),
@@ -143,7 +143,7 @@ fn session(id: String, continuation: bool) -> Result<(Arc<Vault>, SearchCancella
         }
     }
     if continuation {
-        return Err(to_napi(nous_vault::Error::SearchCancelled));
+        return Err(to_napi(noemori_vault::Error::SearchCancelled));
     }
     let cancellation = SearchCancellation::default();
     if let Some((_, previous)) = state.search.replace((id, cancellation.clone())) {
@@ -170,7 +170,7 @@ pub fn search_cancel(id: String) -> Result<()> {
     Ok(())
 }
 
-fn map_hit(hit: nous_vault::SearchHit) -> JsSearchHit {
+fn map_hit(hit: noemori_vault::SearchHit) -> JsSearchHit {
     JsSearchHit {
         path: hit.path,
         title: hit.title,
@@ -182,7 +182,7 @@ fn map_hit(hit: nous_vault::SearchHit) -> JsSearchHit {
     }
 }
 
-fn map_match(item: nous_vault::SearchMatch) -> JsSearchMatch {
+fn map_match(item: noemori_vault::SearchMatch) -> JsSearchMatch {
     JsSearchMatch {
         snippet: item.snippet,
         location: item.location.map_or(Either::B(Null), |location| {
@@ -223,8 +223,8 @@ pub struct JsSearchQuery {
 /// 表达式嵌套深度上限；主进程已校验，这里是跨语言边界的最后一道防线。
 const SEARCH_DEPTH_LIMIT: usize = 32;
 
-fn search_expr(node: JsSearchExpr, depth: usize) -> Result<nous_vault::SearchExpr> {
-    use nous_vault::SearchExpr;
+fn search_expr(node: JsSearchExpr, depth: usize) -> Result<noemori_vault::SearchExpr> {
+    use noemori_vault::SearchExpr;
     if depth > SEARCH_DEPTH_LIMIT {
         return Err(Error::from_reason("检索条件嵌套过深"));
     }

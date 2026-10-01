@@ -1,4 +1,4 @@
-use nous_agent::{ContentPart, Message, Role, ToolCall, ToolResult, validate_history};
+use noemori_agent::{ContentPart, Message, Role, ToolCall, ToolResult, validate_history};
 use serde_json::json;
 
 #[test]

@@ -1,6 +1,6 @@
 //! 链接解析：路径形式消歧、锚点分离与歧义候选。
 
-use nous_vault::{LinkKind, LinkResolution, LinkTarget, Vault};
+use noemori_vault::{LinkKind, LinkResolution, LinkTarget, Vault};
 use std::fs;
 use tempfile::TempDir;
 

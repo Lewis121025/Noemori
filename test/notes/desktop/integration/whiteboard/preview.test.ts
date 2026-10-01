@@ -26,14 +26,14 @@ it("初次读取期间发生更新时显示新版本，晚到的旧读取不能�
   document.body.append(body);
   const preview = mountNotePreview(body, {
     from: "note.md",
-    target: "board.nousboard",
+    target: "board.noemoriboard",
     kind: "wiki",
     anchor: null,
     depth: 0,
     chain: ["note.md"],
     openLink: () => {},
     io: {
-      resolveLink: async () => "board.nousboard",
+      resolveLink: async () => "board.noemoriboard",
       readFile,
       createUrl: () => "",
       watchFile: (_path, callback) => {
@@ -63,13 +63,13 @@ it("卸载后迟到的文件结果不重建预览", async () => {
   const readFile = vi.fn(() => pending.promise);
   const preview = mountNotePreview(body, {
     from: "note.md",
-    target: "board.nousboard",
+    target: "board.noemoriboard",
     kind: "wiki",
     anchor: null,
     depth: 0,
     chain: ["note.md"],
     openLink: () => {},
-    io: { resolveLink: async () => "board.nousboard", readFile, createUrl: () => "" },
+    io: { resolveLink: async () => "board.noemoriboard", readFile, createUrl: () => "" },
   });
   await vi.waitFor(() => expect(readFile).toHaveBeenCalledOnce());
   preview.destroy();
@@ -89,14 +89,14 @@ it("嵌入预览复用原始笔迹，文件更新后刷新，点击打开来源�
   document.body.append(body);
   const preview = mountNotePreview(body, {
     from: "note.md",
-    target: "草稿.nousboard",
+    target: "草稿.noemoriboard",
     kind: "wiki",
     anchor: null,
     depth: 0,
     chain: ["note.md"],
     openLink,
     io: {
-      resolveLink: async () => "草稿.nousboard",
+      resolveLink: async () => "草稿.noemoriboard",
       readFile: async () => new TextEncoder().encode(serializeWhiteboard(board)),
       createUrl: () => "",
       watchFile: (_path, callback) => {
@@ -129,7 +129,7 @@ it("嵌入预览复用原始笔迹，文件更新后刷新，点击打开来源�
     await vi.waitFor(() => expect(body.querySelectorAll("path")).toHaveLength(1));
     expect(document.activeElement).toBe(button);
     body.querySelector<HTMLButtonElement>(".whiteboard-embed-open")?.click();
-    expect(openLink).toHaveBeenCalledWith("wiki", "草稿.nousboard", "note.md");
+    expect(openLink).toHaveBeenCalledWith("wiki", "草稿.noemoriboard", "note.md");
   } finally {
     preview.destroy();
     body.remove();

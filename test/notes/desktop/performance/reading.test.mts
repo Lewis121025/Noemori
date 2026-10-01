@@ -47,7 +47,7 @@ test("文本打开时的解码与类型检查", async () => {
 });
 
 test("实际内核线程读取附件", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "nous-reading-bench-"));
+  const directory = await mkdtemp(join(tmpdir(), "noemori-reading-bench-"));
   let core: CoreClient | undefined;
   t.onTestFinished(async () => {
     try {

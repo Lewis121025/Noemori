@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use crate::runtime::with_vault;
-use nous_vault::WriteOutcome;
+use noemori_vault::WriteOutcome;
 
 /// 读取文件原始字节。
 ///

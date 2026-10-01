@@ -1,11 +1,11 @@
 #[path = "../../support/http.rs"]
 mod support;
 
-use nous_agent::llm::{
+use noemori_agent::llm::{
     Authentication, Capabilities, FinishReason, HttpModel, ModelConfig, ModelRequest, Protocol,
     generate,
 };
-use nous_agent::{CancellationToken, Error, ExecutionContext, Message, Role, ToolResult};
+use noemori_agent::{CancellationToken, Error, ExecutionContext, Message, Role, ToolResult};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use support::{Fixture, Server};

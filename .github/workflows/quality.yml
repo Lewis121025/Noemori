@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set test artifact directory
         shell: bash
-        run: echo "NOUS_QUALITY_ARTIFACTS=$RUNNER_TEMP/nous-quality" >> "$GITHUB_ENV"
+        run: echo "NOEMORI_QUALITY_ARTIFACTS=$RUNNER_TEMP/noemori-quality" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -39,20 +39,20 @@ jobs:
       - run: pnpm test:rust
       - run: pnpm lint:rust
       - run: pnpm build
-      - run: pnpm --filter @nous/desktop test:core
+      - run: pnpm --filter @noemori/desktop test:core
       - if: runner.os == 'macOS'
-        run: pnpm --filter @nous/desktop test:preview
+        run: pnpm --filter @noemori/desktop test:preview
       - if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm --filter @nous/desktop test:preview
+        run: xvfb-run -a pnpm --filter @noemori/desktop test:preview
       - name: Resource lifecycle (macOS)
         if: runner.os == 'macOS'
-        run: pnpm --filter @nous/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
+        run: pnpm --filter @noemori/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
       - name: Resource lifecycle (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm --filter @nous/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
+        run: xvfb-run -a pnpm --filter @noemori/desktop exec vitest run --config ../../../../test/vitest.resources.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: visual-scenes-${{ matrix.os }}
-          path: ${{ runner.temp }}/nous-quality
+          path: ${{ runner.temp }}/noemori-quality
           if-no-files-found: ignore

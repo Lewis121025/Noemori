@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本地原始文件", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-attachment-import-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-attachment-import-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

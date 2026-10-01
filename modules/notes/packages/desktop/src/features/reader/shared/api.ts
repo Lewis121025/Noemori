@@ -323,7 +323,7 @@ export type ReaderApi = {
   vaultOpen: (
     onProgress?: (progress: VaultOpenProgress) => void,
   ) => Promise<VaultOpenSnapshot | null>;
-  /** 用户首次开始记录时打开 Documents/Nous；取消返回 null，创建失败时拒绝。 */
+  /** 用户首次开始记录时打开 Documents/Noemori；取消返回 null，创建失败时拒绝。 */
   vaultCreateDefault: (
     onProgress?: (progress: VaultOpenProgress) => void,
   ) => Promise<VaultOpenSnapshot | null>;

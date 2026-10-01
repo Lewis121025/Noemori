@@ -97,7 +97,7 @@ async function start() {
 
 describe("main process worker lifetime", () => {
   it("后台测试从创建起隐藏窗口并保持渲染调度，普通启动仍显示窗口", async () => {
-    vi.stubEnv("NOUS_TEST_WINDOW", "hidden");
+    vi.stubEnv("NOEMORI_TEST_WINDOW", "hidden");
     const { app } = await start();
     expect(windowOptions).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -110,7 +110,7 @@ describe("main process worker lifetime", () => {
   });
 
   it("普通启动保持前台窗口与后台节流", async () => {
-    vi.stubEnv("NOUS_TEST_WINDOW", "");
+    vi.stubEnv("NOEMORI_TEST_WINDOW", "");
     await start();
     expect(windowOptions).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -120,7 +120,7 @@ describe("main process worker lifetime", () => {
     );
   });
   it("隐藏测试恢复最大化会话时不调用会显示窗口的 maximize", async () => {
-    vi.stubEnv("NOUS_TEST_WINDOW", "hidden");
+    vi.stubEnv("NOEMORI_TEST_WINDOW", "hidden");
     call.mockResolvedValue({
       window: { x: 0, y: 0, width: 900, height: 700, maximized: true },
       appearance: "system",
@@ -158,9 +158,9 @@ describe("main process worker lifetime", () => {
   it("就绪前声明库内媒体协议，内核就绪后才接管请求", async () => {
     const { protocol } = await start();
     expect(protocol.registerSchemesAsPrivileged).toHaveBeenCalledWith([
-      expect.objectContaining({ scheme: "nous-vault" }),
+      expect.objectContaining({ scheme: "noemori-vault" }),
     ]);
-    expect(protocol.handle).toHaveBeenCalledWith("nous-vault", expect.any(Function));
+    expect(protocol.handle).toHaveBeenCalledWith("noemori-vault", expect.any(Function));
   });
   it("flushes the editor before stopping and holds quit until the worker has exited", async () => {
     const stopped = deferred<void>();

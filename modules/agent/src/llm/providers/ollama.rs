@@ -69,7 +69,7 @@ pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelRespons
         let identity = uuid::Uuid::new_v4();
         for (index, call) in calls.iter().enumerate() {
             content.push(ContentPart::ToolCall(ToolCall {
-                id: format!("nous-ollama-{identity}-{index}"),
+                id: format!("noemori-ollama-{identity}-{index}"),
                 name: string(&call["function"], "name")?.into(),
                 arguments: call["function"]
                     .get("arguments")

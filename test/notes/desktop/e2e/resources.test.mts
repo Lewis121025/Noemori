@@ -8,7 +8,7 @@ import { _electron as electron } from "playwright-core";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
-const cycles = Number(process.env["NOUS_RESOURCE_CYCLES"] ?? "15");
+const cycles = Number(process.env["NOEMORI_RESOURCE_CYCLES"] ?? "15");
 if (!Number.isInteger(cycles) || cycles < 15 || cycles > 10000)
   throw new Error("资源循环次数必须为 15–10000 的整数");
 
@@ -22,7 +22,7 @@ declare global {
 test(
   "资源契约：反复挂载图片、PDF、图谱后释放资源，空闲不改写业务文件",
   async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "nous-resource-contract-"));
+    const root = await mkdtemp(join(tmpdir(), "noemori-resource-contract-"));
     t.onTestFinished(() => rm(root, { recursive: true, force: true }));
     const vault = join(root, "vault");
     const userData = join(root, "state");

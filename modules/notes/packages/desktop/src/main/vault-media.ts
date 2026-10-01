@@ -1,5 +1,5 @@
 /**
- * 库内音视频的流式协议 `nous-vault://vault/<库内路径>`。
+ * 库内音视频的流式协议 `noemori-vault://vault/<库内路径>`。
  *
  * 音视频文件往往很大，经 IPC 读成整块字节再转 blob 会占满内存且无法拖动进度；
  * 这里按 HTTP Range 语义从磁盘流式读取。路径一律交给内核校验库根边界，
@@ -10,7 +10,7 @@ import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 
 /** 协议名；渲染进程 CSP 的 `media-src` 必须同时放行。 */
-export const VAULT_MEDIA_SCHEME = "nous-vault";
+export const VAULT_MEDIA_SCHEME = "noemori-vault";
 
 const MEDIA_TYPES: Readonly<Record<string, string>> = {
   mp3: "audio/mpeg",

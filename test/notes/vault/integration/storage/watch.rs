@@ -1,4 +1,4 @@
-use nous_vault::Vault;
+use noemori_vault::Vault;
 use std::fs;
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ fn resource_watch_drop_releases_its_vault_across_repeated_lifecycles() {
         let vault = Arc::new(Vault::open(root.path(), index.path()).unwrap());
         let lifetime = Arc::downgrade(&vault);
         let watched = Arc::clone(&vault);
-        let handle = nous_vault::start_watch(root.path(), Duration::from_millis(20), move |_| {
+        let handle = noemori_vault::start_watch(root.path(), Duration::from_millis(20), move |_| {
             watched.refresh_index().unwrap();
         })
         .unwrap();
@@ -36,7 +36,7 @@ fn external_edit_refreshes_backlinks_after_debounce() {
 
     let (tx, rx) = mpsc::channel();
     let watched = Arc::clone(&vault);
-    let _handle = nous_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
+    let _handle = noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
         assert!(event.is_ok());
         let _ = watched.refresh_index();
         let _ = tx.send(());
@@ -59,7 +59,7 @@ fn removing_an_empty_directory_refreshes_the_inventory() {
     let vault = Arc::new(Vault::open(root.path(), index.path()).expect("打开"));
     let (tx, rx) = mpsc::channel();
     let watched = Arc::clone(&vault);
-    let _handle = nous_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
+    let _handle = noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
         assert!(event.is_ok());
         watched.refresh_index().expect("更新目录");
         let _ = tx.send(watched.list_entries().expect("目录快照"));

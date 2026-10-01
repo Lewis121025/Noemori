@@ -203,7 +203,7 @@ async fn core_fields_cannot_be_overridden_by_provider_options() {
 
 #[tokio::test]
 async fn model_adapters_work_inside_the_agent_loop() {
-    use nous_agent::{
+    use noemori_agent::{
         runtime::{Agent, RunInput, RunOptions, RunStatus},
         tool::ToolRegistry,
     };
@@ -263,7 +263,7 @@ async fn editing_a_message_cannot_silently_replay_stale_native_content() {
     let model = HttpModel::new(config(Protocol::OpenAiChat, &server.url, false)).unwrap();
     let mut response = generate(&model, request(), context()).await.unwrap();
     server.finish().await;
-    response.message.content = vec![nous_agent::ContentPart::Text("edited".into())];
+    response.message.content = vec![noemori_agent::ContentPart::Text("edited".into())];
     let mut next = request();
     next.messages.push(response.message);
     assert!(matches!(
@@ -308,7 +308,7 @@ async fn provider_specific_options_extend_nested_generation_settings() {
 async fn legacy_chat_and_vertex_anthropic_use_their_actual_wire_fields() {
     let mut server = Server::start(vec![Fixture::json(chat("ok"))]).await;
     let mut settings = config(Protocol::OpenAiChat, &server.url, false);
-    settings.chat_token_limit = nous_agent::llm::ChatTokenLimit::MaxTokens;
+    settings.chat_token_limit = noemori_agent::llm::ChatTokenLimit::MaxTokens;
     let model = HttpModel::new(settings).unwrap();
     let mut input = request();
     input.options.max_output_tokens = Some(99);
@@ -357,7 +357,7 @@ async fn cross_provider_history_and_oversized_responses_are_rejected() {
 
 #[tokio::test]
 async fn native_streams_keep_truncated_arguments_as_pending_deltas() {
-    use nous_agent::{
+    use noemori_agent::{
         runtime::{Agent, RunInput, RunOptions, RunStatus},
         tool::ToolRegistry,
     };
@@ -396,7 +396,7 @@ async fn native_streams_keep_truncated_arguments_as_pending_deltas() {
         assert!(matches!(report.status, RunStatus::Truncated));
         let pending = report.pending_turn.unwrap();
         assert_eq!(pending.response.unwrap().message.tool_calls().count(), 0);
-        assert!(pending.deltas.iter().any(|event|matches!(event,nous_agent::llm::ModelEvent::ToolCallDelta{arguments,..}if arguments=="{")));
+        assert!(pending.deltas.iter().any(|event|matches!(event,noemori_agent::llm::ModelEvent::ToolCallDelta{arguments,..}if arguments=="{")));
         server.finish().await;
     }
 }

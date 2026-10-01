@@ -60,7 +60,7 @@ it.each([
   },
 ])("恢复文档拒绝未知节点、错误结构或非法属性：%j", (node) => {
   const editor = JSON.stringify({
-    format: "nous.prosemirror",
+    format: "noemori.prosemirror",
     version: 1,
     revision: 1,
     doc: { type: "doc", content: [node] },

@@ -11,15 +11,15 @@ import {
 
 describe("媒体地址与类型", () => {
   it("只接受 vault 主机下的规范相对路径，逐段解码", () => {
-    expect(vaultMediaPath("nous-vault://vault/%E9%9F%B3%E9%A2%91/a%20b.mp3")).toBe("音频/a b.mp3");
+    expect(vaultMediaPath("noemori-vault://vault/%E9%9F%B3%E9%A2%91/a%20b.mp3")).toBe("音频/a b.mp3");
     for (const invalid of [
-      "nous-vault://other/a.mp3",
+      "noemori-vault://other/a.mp3",
       "https://vault/a.mp3",
-      "nous-vault://vault/",
-      "nous-vault://vault/a//b.mp3",
-      "nous-vault://vault/%2E%2E/secret.mp3",
-      "nous-vault://vault/a%00.mp3",
-      "nous-vault://vault/%E0%A4%A.mp3",
+      "noemori-vault://vault/",
+      "noemori-vault://vault/a//b.mp3",
+      "noemori-vault://vault/%2E%2E/secret.mp3",
+      "noemori-vault://vault/a%00.mp3",
+      "noemori-vault://vault/%E0%A4%A.mp3",
     ])
       expect(vaultMediaPath(invalid)).toBeNull();
   });
@@ -51,7 +51,7 @@ describe("协议处理", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "nous-media-"));
+    root = await mkdtemp(join(tmpdir(), "noemori-media-"));
     await writeFile(join(root, "clip.mp4"), "0123456789");
     await writeFile(join(root, "note.md"), "# 不给");
   });
@@ -64,29 +64,29 @@ describe("协议处理", () => {
 
   it("整篇返回 200，区间请求返回 206 与 Content-Range", async () => {
     const handle = createVaultMediaHandler(resolved);
-    const full = await handle(new Request("nous-vault://vault/clip.mp4"));
+    const full = await handle(new Request("noemori-vault://vault/clip.mp4"));
     expect(full.status).toBe(200);
     expect(full.headers.get("content-type")).toBe("video/mp4");
     expect(full.headers.get("accept-ranges")).toBe("bytes");
     expect(await full.text()).toBe("0123456789");
     const part = await handle(
-      new Request("nous-vault://vault/clip.mp4", { headers: { Range: "bytes=2-5" } }),
+      new Request("noemori-vault://vault/clip.mp4", { headers: { Range: "bytes=2-5" } }),
     );
     expect(part.status).toBe(206);
     expect(part.headers.get("content-range")).toBe("bytes 2-5/10");
     expect(part.headers.get("content-length")).toBe("4");
     expect(await part.text()).toBe("2345");
     const beyond = await handle(
-      new Request("nous-vault://vault/clip.mp4", { headers: { Range: "bytes=10-" } }),
+      new Request("noemori-vault://vault/clip.mp4", { headers: { Range: "bytes=10-" } }),
     );
     expect(beyond.status).toBe(416);
   });
 
   it("非媒体、越界与非法地址都拒绝，不泄露文件内容", async () => {
     const handle = createVaultMediaHandler(resolved);
-    expect((await handle(new Request("nous-vault://vault/note.md"))).status).toBe(415);
-    expect((await handle(new Request("nous-vault://vault/missing.mp4"))).status).toBe(404);
+    expect((await handle(new Request("noemori-vault://vault/note.md"))).status).toBe(415);
+    expect((await handle(new Request("noemori-vault://vault/missing.mp4"))).status).toBe(404);
     // Request 会先规范化点段；上级目录在原文层由 vaultMediaPath 拒绝，库根边界由内核兜底。
-    expect((await handle(new Request("nous-vault://other/clip.mp4"))).status).toBe(400);
+    expect((await handle(new Request("noemori-vault://other/clip.mp4"))).status).toBe(400);
   });
 });

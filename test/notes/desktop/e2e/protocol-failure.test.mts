@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("错误保存确认经过真实 IPC 后保留编辑、阻止关闭，并给出可恢复提示", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-protocol-failure-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-protocol-failure-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

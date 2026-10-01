@@ -14,7 +14,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("一万文件目录的搜索与键盘响应基准", { timeout: 180000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-files-bench-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-files-bench-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

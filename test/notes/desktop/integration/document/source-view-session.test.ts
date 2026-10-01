@@ -8,7 +8,7 @@ const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 // 与内核恢复流程同构的最小合法编辑器恢复记录。
 const editorRecovery = JSON.stringify({
-  format: "nous.prosemirror",
+  format: "noemori.prosemirror",
   version: 1,
   revision: 1,
   doc: {

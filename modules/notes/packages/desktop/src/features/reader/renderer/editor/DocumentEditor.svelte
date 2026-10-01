@@ -509,7 +509,7 @@
         openAttachments,
         insertWhiteboard: () => {
           if (!attachmentEditing.prepare(created)) return;
-          const file = new File([serializeWhiteboard(emptyWhiteboard())], "白板.nousboard", {
+          const file = new File([serializeWhiteboard(emptyWhiteboard())], "白板.noemoriboard", {
             type: "application/json",
           });
           void attachmentEditing.insertFiles(created, [file]);

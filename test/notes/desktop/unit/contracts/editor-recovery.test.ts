@@ -8,7 +8,7 @@ import {
 
 const bytes = new TextEncoder().encode("original");
 const editor = JSON.stringify({
-  format: "nous.prosemirror",
+  format: "noemori.prosemirror",
   version: 1,
   revision: 2,
   doc: { type: "doc", content: [{ type: "paragraph" }] },

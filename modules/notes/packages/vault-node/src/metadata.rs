@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use crate::runtime::with_vault;
-use nous_vault::Vault;
+use noemori_vault::Vault;
 
 /// 索引里的一条标题记录。
 #[napi(object)]

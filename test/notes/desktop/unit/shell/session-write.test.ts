@@ -22,7 +22,7 @@ vi.mock("node:fs", async (original) => {
 afterEach(() => vi.restoreAllMocks());
 
 it.each(["missing", "corrupt"])("%s 会话提交默认值仍须创建有效文件", (state) => {
-  const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-default-"));
+  const directory = fs.mkdtempSync(join(tmpdir(), "noemori-session-default-"));
   const file = join(directory, "session.json");
   try {
     if (state === "corrupt") fs.writeFileSync(file, "{invalid");
@@ -35,7 +35,7 @@ it.each(["missing", "corrupt"])("%s 会话提交默认值仍须创建有效文�
 });
 
 it("重复提交相同会话不写盘；外部改变后仍核对磁盘，失败提交可以重试", () => {
-  const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-resource-"));
+  const directory = fs.mkdtempSync(join(tmpdir(), "noemori-session-resource-"));
   const file = join(directory, "session.json");
   try {
     patchSession(file, { appearance: "dark" });
@@ -67,7 +67,7 @@ it.each(["write", "sync", "close", "rename"])(
   "会话 %s 失败保留完整旧文件并清理临时文件",
   async (phase) => {
     const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-commit-"));
+    const directory = fs.mkdtempSync(join(tmpdir(), "noemori-session-commit-"));
     const file = join(directory, "session.json");
     const original = JSON.stringify({ ...emptySession, appearance: "dark" });
     actual.writeFileSync(file, original);
@@ -99,7 +99,7 @@ it.each(["write", "sync", "close", "rename"])(
 );
 
 it("只有原子替换完成才发布新会话，替换后没有会被误报为失败的文件操作", () => {
-  const directory = fs.mkdtempSync(join(tmpdir(), "nous-session-success-"));
+  const directory = fs.mkdtempSync(join(tmpdir(), "noemori-session-success-"));
   const file = join(directory, "session.json");
   try {
     saveSession(file, { ...emptySession, appearance: "dark" });

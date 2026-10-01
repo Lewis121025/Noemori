@@ -221,7 +221,7 @@ def acquire_dataset(destination: Path) -> dict[str, object]:
         _preview(records, staging)
         files = {path.relative_to(staging).as_posix(): {"bytes": path.stat().st_size,
                  "sha256": _hash(path.read_bytes())} for path in sorted(staging.rglob("*")) if path.is_file()}
-        manifest = {"schema_version": 1, "dataset": "nous-whiteboard-real-eval-v1",
+        manifest = {"schema_version": 1, "dataset": "noemori-whiteboard-real-eval-v1",
                     "generator_version": VERSION, "role": "evaluation_only", "source": BASE,
                     "source_metadata": {"tags": TAGS_URL, "references": REFERENCES_URL, "rough_inputs": ROUGH_URL,
                                         "intermediate_certificate": CA_URL, "tls_verified": True},

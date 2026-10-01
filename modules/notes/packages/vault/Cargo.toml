@@ -1,16 +1,16 @@
 [package]
-name = "nous-vault"
+name = "noemori-vault"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Nous 库内核：磁盘、链接索引与改名事务"
+description = "Noemori 库内核：磁盘、链接索引与改名事务"
 
 [lints]
 workspace = true
 
 [lib]
-name = "nous_vault"
+name = "noemori_vault"
 path = "src/lib.rs"
 
 [[test]]

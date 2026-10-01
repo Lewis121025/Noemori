@@ -1,6 +1,6 @@
 //! 派生表（标题/标签/属性/全文）与磁盘同步：单篇增量、删除清理与版本重扫。
 
-use nous_vault::{SearchExpr, SearchQuery, Vault};
+use noemori_vault::{SearchExpr, SearchQuery, Vault};
 use std::fs;
 use tempfile::TempDir;
 

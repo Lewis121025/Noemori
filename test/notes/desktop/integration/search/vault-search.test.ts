@@ -626,7 +626,7 @@ describe("侧栏全文搜索", () => {
     }));
     const indexTags = vi.fn(async () => [
       { tag: "project", count: 2 },
-      { tag: "project/nous", count: 1 },
+      { tag: "project/noemori", count: 1 },
     ]);
     await startList(createApi({ searchQuery, indexTags }));
 
@@ -636,26 +636,26 @@ describe("侧栏全文搜索", () => {
     flushSync();
 
     const names = [...target.querySelectorAll(".tag .name")].map((node) => node.textContent);
-    expect(names).toEqual(["#project", "#nous"]);
+    expect(names).toEqual(["#project", "#noemori"]);
     // 文件树的行让位给标签面板（文件树行带 data-path，标签行没有）。
     expect(target.querySelector('[role="treeitem"][data-path]')).toBeNull();
 
     // 点击子标签：转成 tag: 谓词检索并展示结果。
     const child = [...target.querySelectorAll<HTMLButtonElement>(".tag")].find((button) =>
-      button.textContent?.includes("nous"),
+      button.textContent?.includes("noemori"),
     );
     child!.click();
     await settle();
     flushSync();
     expect(searchQuery).toHaveBeenCalledWith(
       {
-        expr: { kind: "tag", value: "project/nous" },
+        expr: { kind: "tag", value: "project/noemori" },
         limit: 100,
       },
       expect.any(String),
       null,
     );
-    expect(searchBox().value).toBe("tag:project/nous");
+    expect(searchBox().value).toBe("tag:project/noemori");
     expect(target.querySelector(".hit")).not.toBeNull();
   });
 

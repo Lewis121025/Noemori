@@ -13,7 +13,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("1200 段长文输入到可见更新的桌面响应预算", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-formatting-bench-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-formatting-bench-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

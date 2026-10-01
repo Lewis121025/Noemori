@@ -1,16 +1,16 @@
 [package]
-name = "nous-vault-node"
+name = "noemori-vault-node"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Nous 内核的 Node-API 薄绑定"
+description = "Noemori 内核的 Node-API 薄绑定"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-nous-vault = { path = "../vault" }
+noemori-vault = { path = "../vault" }
 napi = { version = "2.16.17", default-features = false, features = ["napi8"] }
 napi-derive = "2.16.13"
 trash = "5.2.9"

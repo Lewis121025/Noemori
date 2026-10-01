@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use crate::runtime::with_vault;
-use nous_vault::Vault;
+use noemori_vault::Vault;
 
 /// 列出库内相对路径。
 ///
@@ -26,13 +26,13 @@ pub struct JsVaultEntry {
     pub recovery_only: Option<bool>,
 }
 
-impl From<nous_vault::VaultEntry> for JsVaultEntry {
-    fn from(entry: nous_vault::VaultEntry) -> Self {
+impl From<noemori_vault::VaultEntry> for JsVaultEntry {
+    fn from(entry: noemori_vault::VaultEntry) -> Self {
         Self {
             path: entry.path,
             kind: match entry.kind {
-                nous_vault::EntryKind::File => "file",
-                nous_vault::EntryKind::Directory => "directory",
+                noemori_vault::EntryKind::File => "file",
+                noemori_vault::EntryKind::Directory => "directory",
             }
             .into(),
             recovery_only: entry.recovery_only.then_some(true),
@@ -58,8 +58,8 @@ pub fn entry_create(
     content: Option<Buffer>,
 ) -> Result<JsRenameOutcome> {
     let kind = match kind.as_str() {
-        "file" => nous_vault::EntryKind::File,
-        "directory" => nous_vault::EntryKind::Directory,
+        "file" => noemori_vault::EntryKind::File,
+        "directory" => noemori_vault::EntryKind::Directory,
         _ => return Err(Error::from_reason("未知条目类型")),
     };
     let content = content.map(|buffer| buffer.to_vec());
@@ -77,7 +77,7 @@ pub fn entry_trash(path: String) -> Result<JsRenameOutcome> {
     let result = with_vault(|vault| {
         vault.trash_entry(&path, |absolute| {
             trash::delete(absolute)
-                .map_err(|error| nous_vault::Error::Io(std::io::Error::other(error.to_string())))
+                .map_err(|error| noemori_vault::Error::Io(std::io::Error::other(error.to_string())))
         })
     })?;
     Ok(JsRenameOutcome {
@@ -99,7 +99,7 @@ pub struct JsEntryMutation {
 pub fn entry_check_batch(changes: Vec<JsEntryMutation>) -> Result<()> {
     let changes: Vec<_> = changes
         .into_iter()
-        .map(|change| nous_vault::EntryMutation {
+        .map(|change| noemori_vault::EntryMutation {
             from: change.from,
             to: change.to,
         })

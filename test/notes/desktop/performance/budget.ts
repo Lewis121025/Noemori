@@ -28,7 +28,7 @@ export async function checkBudget(
     },
   };
   console.info(JSON.stringify(report));
-  const directory = process.env["NOUS_PERFORMANCE_REPORT"];
+  const directory = process.env["NOEMORI_PERFORMANCE_REPORT"];
   if (directory) {
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, `${name}.json`), JSON.stringify(report, null, 2) + "\n");

@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("链接补全：别名插入带显示名的链接；块引用自动为其他笔记与本笔记写入 ID", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-completion-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-completion-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

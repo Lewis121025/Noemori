@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能用键盘返回正文", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-continuous-editing-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-continuous-editing-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -55,7 +55,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await editor.waitFor();
     expect(await quickFormat.isVisible()).toBe(false);
     await page.locator(".math-inline mjx-container").waitFor();
-    const screenshots = process.env.NOUS_INTERACTION_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_INTERACTION_SCREENSHOTS;
     if (screenshots)
       await page.screenshot({ path: join(screenshots, "continuous-reading.png"), scale: "css" });
     const link = editor.locator('a[href="参考.md"]');

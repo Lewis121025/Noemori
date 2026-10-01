@@ -313,7 +313,7 @@ class MermaidView implements NodeView {
     }
     const dark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
     mermaidSequence += 1;
-    void this.render(`nous-mermaid-${String(mermaidSequence)}`, source, dark).then(
+    void this.render(`noemori-mermaid-${String(mermaidSequence)}`, source, dark).then(
       (svg) => {
         if (generation !== this.generation) return;
         this.preview.classList.remove("mermaid-error");

@@ -2,7 +2,7 @@ import type { FileSnapshot } from "./api";
 
 /** 恢复内容只用于重建编辑会话；doc 在编辑器边界继续按 ProseMirror schema 验证。 */
 export type EditorRecovery = {
-  format: "nous.prosemirror";
+  format: "noemori.prosemirror";
   version: 1;
   revision: number;
   doc: unknown;
@@ -21,11 +21,11 @@ export function parseEditorRecovery(value: unknown): EditorRecovery {
     typeof parsed !== "object" ||
     parsed === null ||
     !("format" in parsed) ||
-    parsed.format !== "nous.prosemirror" ||
+    parsed.format !== "noemori.prosemirror" ||
     !("version" in parsed) ||
     parsed.version !== 1
   )
-    throw new Error("此编辑恢复格式暂不支持，请使用兼容的 Nous 版本；恢复记录已保留");
+    throw new Error("此编辑恢复格式暂不支持，请使用兼容的 Noemori 版本；恢复记录已保留");
   if (
     !("revision" in parsed) ||
     typeof parsed.revision !== "number" ||
@@ -38,7 +38,7 @@ export function parseEditorRecovery(value: unknown): EditorRecovery {
     parsed.doc.type !== "doc"
   )
     throw new Error("编辑恢复内容无效；恢复记录已保留");
-  return { format: "nous.prosemirror", version: 1, revision: parsed.revision, doc: parsed.doc };
+  return { format: "noemori.prosemirror", version: 1, revision: parsed.revision, doc: parsed.doc };
 }
 
 /** 校验跨进程恢复写入请求；文件路径和磁盘访问仍由内核约束。 */

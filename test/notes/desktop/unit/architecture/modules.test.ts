@@ -116,12 +116,12 @@ describe("功能模块依赖边界", () => {
           ((layer === "renderer" || layer === "shared") &&
             (specifier.startsWith("node:") ||
               specifier === "electron" ||
-              specifier === "@nous/vault-node"))
+              specifier === "@noemori/vault-node"))
         ) {
           violations.push(`${from} → ${specifier}`);
         }
       }
-      if (/window\.nous\b/.test(readFileSync(file, "utf8")))
+      if (/window\.noemori\b/.test(readFileSync(file, "utf8")))
         violations.push(`${from} 直接依赖全局应用桥接`);
     }
     expect(violations).toEqual([]);

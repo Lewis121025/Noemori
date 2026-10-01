@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("固定内容在浅深色、长表格和三种窗口中保持可读并输出视觉基线", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-visual-scenes-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-visual-scenes-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const state = join(root, "state");
@@ -50,7 +50,7 @@ test("固定内容在浅深色、长表格和三种窗口中保持可读并输�
     const page = await app.firstWindow();
     page.setDefaultTimeout(5000);
     await page.locator(".ProseMirror").waitFor();
-    const artifacts = process.env.NOUS_QUALITY_ARTIFACTS;
+    const artifacts = process.env.NOEMORI_QUALITY_ARTIFACTS;
     if (artifacts) await mkdir(artifacts, { recursive: true });
     for (const appearance of ["浅色", "深色"]) {
       await page.getByRole("button", { name: "切换笔记库", exact: true }).click();

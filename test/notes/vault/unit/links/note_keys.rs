@@ -1,6 +1,6 @@
 //! 笔记身份键清单：快速切换器与别名补全按标题与别名匹配笔记。
 
-use nous_vault::{NoteKeys, Vault};
+use noemori_vault::{NoteKeys, Vault};
 use std::fs;
 use tempfile::TempDir;
 

@@ -12,7 +12,7 @@ import {
 import { emptyReaderSession } from "@reader/shared/session";
 
 function temporaryFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), "nous-session-"));
+  const dir = mkdtempSync(join(tmpdir(), "noemori-session-"));
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   return join(dir, "session.json");
 }

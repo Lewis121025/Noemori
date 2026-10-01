@@ -47,9 +47,9 @@ it("在段落中间插入白板会建立块级引用，撤销不删除独立文�
   const { view, editing, importer, save } = start();
   const original = view.state.doc;
   expect(editing.prepare(view)).toBe(true);
-  await editing.insertFiles(view, [file("白板.nousboard")]);
+  await editing.insertFiles(view, [file("白板.noemoriboard")]);
   expect(importer).toHaveBeenCalledOnce();
-  expect(save()).toContain("![[资料/attachments/白板.nousboard]]");
+  expect(save()).toContain("![[资料/attachments/白板.noemoriboard]]");
   expect(parseMarkdown(save().slice(1)).eq(view.state.doc)).toBe(true);
   expect(undo(view.state, view.dispatch)).toBe(true);
   expect(view.state.doc.eq(original)).toBe(true);

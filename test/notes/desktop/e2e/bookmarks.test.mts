@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排，失效目标置灰", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-bookmarks-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-bookmarks-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -51,7 +51,7 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
     const palette = page.locator("dialog.picker[open]").getByRole("combobox");
     const documentName = () => page.locator(".document-name").first().textContent();
     const stored = async () =>
-      JSON.parse(await readFile(join(vault, ".nous/bookmarks.json"), "utf8").catch(() => "{}"));
+      JSON.parse(await readFile(join(vault, ".noemori/bookmarks.json"), "utf8").catch(() => "{}"));
     const runCommand = async (label: string) => {
       await page.keyboard.press("ControlOrMeta+p");
       await palette.fill(label);
@@ -84,7 +84,7 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
       ]);
 
     // 书签是库内点目录里的用户数据，不进文件树。
-    expect(await page.getByRole("treeitem", { name: ".nous" }).count()).toBe(0);
+    expect(await page.getByRole("treeitem", { name: ".noemori" }).count()).toBe(0);
 
     await openLibrary(page);
     await page.getByRole("button", { name: "书签", exact: true }).click();

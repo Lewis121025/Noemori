@@ -1,4 +1,4 @@
-use nous_vault::{Vault, WriteOutcome};
+use noemori_vault::{Vault, WriteOutcome};
 use std::fs;
 use std::sync::{Arc, Barrier};
 use tempfile::TempDir;
@@ -160,7 +160,7 @@ fn draft_remains_readable_when_its_file_is_replaced_by_a_directory() {
         .iter()
         .any(|entry| entry.path == "note.md" && entry.recovery_only));
     assert!(entries.iter().any(|entry| entry.path == "note.md"
-        && entry.kind == nous_vault::EntryKind::Directory
+        && entry.kind == noemori_vault::EntryKind::Directory
         && !entry.recovery_only));
     let copy = reopened
         .write_copy("note.md", b"latest draft", Some(b"base"))
@@ -435,10 +435,10 @@ fn concurrent_saves_from_the_same_base_cannot_both_commit() {
 #[test]
 fn existing_temporary_named_file_is_never_truncated() {
     let (root, _index, vault) = setup();
-    fs::write(root.path().join("note.nous-tmp"), b"valuable").unwrap();
+    fs::write(root.path().join("note.noemori-tmp"), b"valuable").unwrap();
     vault.write("note.md", b"edited", Some(b"base")).unwrap();
     assert_eq!(
-        fs::read(root.path().join("note.nous-tmp")).unwrap(),
+        fs::read(root.path().join("note.noemori-tmp")).unwrap(),
         b"valuable"
     );
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
@@ -483,7 +483,7 @@ fn editor_checkpoint_keeps_source_and_latest_state_without_touching_disk() {
     let index = tempfile::tempdir().unwrap();
     let source = "\u{feff}原文 _保留_\r\n".as_bytes();
     std::fs::write(root.path().join("note.md"), source).unwrap();
-    let vault = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let vault = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     vault
         .preserve_editor_draft("note.md", source, Some(source), "editor-v1-first")
         .unwrap();
@@ -511,7 +511,7 @@ fn editor_checkpoint_keeps_source_and_latest_state_without_touching_disk() {
     );
     drop(vault);
     std::fs::remove_file(root.path().join("note.md")).unwrap();
-    let reopened = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let reopened = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     let snapshot = reopened.snapshot("note.md").unwrap();
     assert!(snapshot.disk.is_none());
     assert_eq!(
@@ -535,7 +535,7 @@ fn editor_checkpoint_migration_keeps_existing_drafts_and_recovery_tables() {
         INSERT INTO rename_created_directories VALUES ('owned');",
         )
         .unwrap();
-    let vault = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let vault = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     let draft = vault.snapshot("old.md").unwrap().draft.unwrap();
     assert_eq!(draft.bytes, b"edit");
     assert_eq!(draft.base.as_deref(), Some(b"base".as_slice()));
@@ -566,7 +566,7 @@ fn failed_editor_checkpoint_preserves_previous_record_and_reports_failure() {
     let root = tempfile::tempdir().unwrap();
     let index = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("note.md"), b"disk").unwrap();
-    let vault = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let vault = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     vault
         .preserve_editor_draft("note.md", b"source", Some(b"disk"), "previous")
         .unwrap();
@@ -592,7 +592,7 @@ fn failed_editor_checkpoint_preserves_previous_record_and_reports_failure() {
 fn editor_checkpoint_rejects_invalid_paths_and_payload_without_new_records() {
     let root = tempfile::tempdir().unwrap();
     let index = tempfile::tempdir().unwrap();
-    let vault = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let vault = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     for path in ["../outside.md", "/outside.md", "image.png"] {
         assert!(vault
             .preserve_editor_draft(path, b"source", None, "editor")

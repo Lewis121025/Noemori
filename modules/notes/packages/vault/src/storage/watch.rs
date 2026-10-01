@@ -192,7 +192,7 @@ where
         .map_err(|error| Error::Io(std::io::Error::other(error)))?;
     let processing = Arc::clone(&queue);
     let thread = thread::Builder::new()
-        .name("nous-vault-watch".into())
+        .name("noemori-vault-watch".into())
         .spawn(move || {
             while let Some(event) = processing.next() {
                 on_change(event);

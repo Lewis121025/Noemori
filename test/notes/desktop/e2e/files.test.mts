@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("批量进度跨越真实内核线程，停止与继续保留文件和链接", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-batch-progress-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-batch-progress-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -30,9 +30,9 @@ test("批量进度跨越真实内核线程，停止与继续保留文件和链�
   await writeFile(join(userData, "session.json"), JSON.stringify({ vaultRoot: vault }));
   const executable: unknown = require("electron");
   if (typeof executable !== "string") throw new Error("缺少 Electron 可执行文件");
-  const environment: Record<string, string> = { NOUS_TEST_WINDOW: "hidden" };
+  const environment: Record<string, string> = { NOEMORI_TEST_WINDOW: "hidden" };
   for (const [name, value] of Object.entries(process.env))
-    if (value !== undefined && name !== "ELECTRON_RENDERER_URL" && name !== "NOUS_TEST_WINDOW")
+    if (value !== undefined && name !== "ELECTRON_RENDERER_URL" && name !== "NOEMORI_TEST_WINDOW")
       environment[name] = value;
   const app = await electron.launch({
     executablePath: executable,
@@ -69,7 +69,7 @@ test("批量进度跨越真实内核线程，停止与继续保留文件和链�
       const progress = document.querySelector<HTMLProgressElement>(".batch-dialog progress");
       return progress !== null && progress.value > 0 && progress.max === 80;
     });
-    const screenshots = process.env.NOUS_FILE_MANAGER_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_FILE_MANAGER_SCREENSHOTS;
     if (screenshots) await page.screenshot({ path: join(screenshots, "files-batch-progress.png") });
     await dialog.getByRole("button", { name: "停止", exact: true }).click();
     const retry = dialog.getByRole("button", { name: "继续剩余项", exact: true });
@@ -95,7 +95,7 @@ test("批量进度跨越真实内核线程，停止与继续保留文件和链�
       );
     expect(
       await page.evaluate(
-        async () => (await window.nous.reader.indexLinksFrom("archive/batch000.md"))[0]?.toPath,
+        async () => (await window.noemori.reader.indexLinksFrom("archive/batch000.md"))[0]?.toPath,
       ),
     ).toBe("archive/batch001.md");
     expect(errors).toEqual([]);
@@ -110,7 +110,7 @@ test("批量进度跨越真实内核线程，停止与继续保留文件和链�
 });
 
 test("万条目录深处的行高与隐藏恢复保持稳定", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-files-scroll-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-files-scroll-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -234,7 +234,7 @@ test("万条目录深处的行高与隐藏恢复保持稳定", async (t) => {
 });
 
 test("文件树支持搜索定位、新建、重名保护、键盘重命名、目录移动与拖拽", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-files-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-files-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -329,7 +329,7 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
       await dialog.locator("input").fill(name);
       await dialog.getByRole("button", { name: label, exact: true }).click();
     };
-    const screenshots = process.env.NOUS_FILE_MANAGER_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_FILE_MANAGER_SCREENSHOTS;
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     await active("项目/研究/笔记.md");
@@ -684,7 +684,7 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
 });
 
 test("批量移动整批预检，外部变更与重启保留目录现场", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-batch-files-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-batch-files-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -716,9 +716,9 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
   ]);
   const executable: unknown = require("electron");
   if (typeof executable !== "string") throw new Error("缺少 Electron 可执行文件");
-  const environment: Record<string, string> = { NOUS_TEST_WINDOW: "hidden" };
+  const environment: Record<string, string> = { NOEMORI_TEST_WINDOW: "hidden" };
   for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined && name !== "ELECTRON_RENDERER_URL" && name !== "NOUS_TEST_WINDOW")
+    if (value !== undefined && name !== "ELECTRON_RENDERER_URL" && name !== "NOEMORI_TEST_WINDOW")
       environment[name] = value;
   }
   const launch = () =>
@@ -761,7 +761,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
     expect(await readFile(join(vault, "source/a.md"), "utf8")).toContain("# A");
     expect(await readFile(join(vault, "source/b.md"), "utf8")).toContain("# B");
     expect(await readFile(join(vault, "target/b.md"), "utf8")).toContain("不得覆盖");
-    const screenshots = process.env["NOUS_FILE_MANAGER_SCREENSHOTS"];
+    const screenshots = process.env["NOEMORI_FILE_MANAGER_SCREENSHOTS"];
     if (screenshots) await page.screenshot({ path: join(screenshots, "files-batch-conflict.png") });
     await rm(join(vault, "target/b.md"));
     // 冲突解除由真实文件监视传回，目标恢复可用后才能重试整批。

@@ -60,7 +60,7 @@ export type AppApi = {
 };
 
 /** preload 只负责组合各模块的公开能力，不提供任意 IPC 入口。 */
-export type NousApi = {
+export type NoemoriApi = {
   app: AppApi;
   reader: ReaderApi;
 };

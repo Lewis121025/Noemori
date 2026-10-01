@@ -81,7 +81,7 @@ def _write_samples(destination: Path, seed: int, groups: int) -> dict[str, objec
 def _manifest(destination: Path, seed: int, groups: int, counts: dict[str, object]) -> dict[str, object]:
     names = [f"{split}.jsonl" for split in SPLITS] + ["preview.html"]
     return {
-        "schema_version": 1, "dataset": "nous-whiteboard-geometry-v1", "generator_version": GENERATOR_VERSION,
+        "schema_version": 1, "dataset": "noemori-whiteboard-geometry-v1", "generator_version": GENERATOR_VERSION,
         "config": {"seed": seed, "groups": groups, "variants_per_group": len(VARIANTS)},
         "coordinate_system": "world_xy_y_down",
         "feature_contract": {"input_only": True, "fields": ["focus_stroke_id", "strokes.id", "strokes.points"],

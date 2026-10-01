@@ -122,7 +122,7 @@
               disabled={workspace.switching}>打开已有资料…</button
             >
           </div>
-          <p class="local-storage">笔记保存在本机的“文稿 / Nous”文件夹。</p>
+          <p class="local-storage">笔记保存在本机的“文稿 / Noemori”文件夹。</p>
         {:else}
           <div class="welcome-actions">
             <button

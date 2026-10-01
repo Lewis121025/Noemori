@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use crate::runtime::with_vault;
-use nous_vault::Vault;
+use noemori_vault::Vault;
 
 /// 一条书签；`kind` 为 `file`/`folder`（`path`）、`heading`（`path` 与 `heading`）或 `search`（`query`）。
 #[napi(object)]
@@ -20,8 +20,8 @@ pub struct JsBookmark {
     pub title: Option<String>,
 }
 
-fn js_bookmark(bookmark: nous_vault::Bookmark) -> JsBookmark {
-    use nous_vault::Bookmark;
+fn js_bookmark(bookmark: noemori_vault::Bookmark) -> JsBookmark {
+    use noemori_vault::Bookmark;
     let (kind, path, heading, query, title) = match bookmark {
         Bookmark::File { path, title } => ("file", Some(path), None, None, title),
         Bookmark::Folder { path, title } => ("folder", Some(path), None, None, title),
@@ -41,8 +41,8 @@ fn js_bookmark(bookmark: nous_vault::Bookmark) -> JsBookmark {
     }
 }
 
-fn core_bookmark(bookmark: JsBookmark) -> Result<nous_vault::Bookmark> {
-    use nous_vault::Bookmark;
+fn core_bookmark(bookmark: JsBookmark) -> Result<noemori_vault::Bookmark> {
+    use noemori_vault::Bookmark;
     let missing = |field: &str| Error::from_reason(format!("书签缺少字段 {field}"));
     Ok(match bookmark.kind.as_str() {
         "file" => Bookmark::File {

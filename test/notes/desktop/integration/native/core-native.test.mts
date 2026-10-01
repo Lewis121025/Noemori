@@ -250,7 +250,7 @@ test("原生分页无重复，版本变化拒绝旧游标", async (t) => {
 });
 
 async function fixture(t: TestContext) {
-  const dir = await mkdtemp(join(tmpdir(), "nous-core-worker-"));
+  const dir = await mkdtemp(join(tmpdir(), "noemori-core-worker-"));
   const clients: CoreClient[] = [];
   t.onTestFinished(async () => {
     try {
@@ -369,7 +369,7 @@ test("映射失败的编辑恢复数据穿过原生线程，重开仍可读取�
   await core.call("entryCreate", "note.md", "file");
   const source = bytes("原文\r\n");
   await core.call("fileWrite", "note.md", source, bytes(""));
-  const editor = JSON.stringify({ format: "nous.prosemirror", version: 1, revision: 3, doc: { type: "doc", content: [{ type: "paragraph", content: [{ type: "math_inline", attrs: { tex: "" } }] }] } });
+  const editor = JSON.stringify({ format: "noemori.prosemirror", version: 1, revision: 3, doc: { type: "doc", content: [{ type: "paragraph", content: [{ type: "math_inline", attrs: { tex: "" } }] }] } });
   await core.call("filePreserveDraft", "note.md", source, source, editor);
   await core.call("vaultClose");
   await core.call("vaultOpen", root);

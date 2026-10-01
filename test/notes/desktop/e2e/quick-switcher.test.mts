@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("快速切换器与命令面板：模糊打开、别名命中、另一栏打开、新建与执行命令", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-switcher-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-switcher-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

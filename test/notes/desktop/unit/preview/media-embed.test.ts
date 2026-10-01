@@ -40,7 +40,7 @@ describe("音视频嵌入", () => {
       vaultMediaUrl("音频/会议 1.mp3"),
     );
     expect(vaultMediaUrl("音频/会议 1.mp3")).toBe(
-      `nous-vault://vault/${encodeURIComponent("音频")}/${encodeURIComponent("会议 1.mp3")}`,
+      `noemori-vault://vault/${encodeURIComponent("音频")}/${encodeURIComponent("会议 1.mp3")}`,
     );
     expect(await playerSource("a.md", "missing.mp3", "wiki", io)).toBeNull();
     expect(await playerSource("a.md", "  ", "wiki", io)).toBeNull();

@@ -1,4 +1,4 @@
-use nous_vault::{EntryKind, EntryMutation, Error, Vault};
+use noemori_vault::{EntryKind, EntryMutation, Error, Vault};
 use std::fs;
 use tempfile::TempDir;
 

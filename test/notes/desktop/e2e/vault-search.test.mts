@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-search-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-search-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

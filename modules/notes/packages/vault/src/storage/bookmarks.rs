@@ -1,4 +1,4 @@
-//! 书签：用户整理的入口清单，存放在库内 `.nous/bookmarks.json`。
+//! 书签：用户整理的入口清单，存放在库内 `.noemori/bookmarks.json`。
 //!
 //! 书签是用户数据而不是派生索引，必须随库一起同步或备份，所以放在库内的点目录里
 //! （扫描与文件树都跳过点目录）。写入走暂存文件加原子替换；改名事务提交后
@@ -15,7 +15,7 @@ use crate::storage::save::{read_optional, stage_bytes, sync_parent};
 use crate::{Error, Vault};
 
 /// 书签所在的库内点目录。
-const DIRECTORY: &str = ".nous";
+const DIRECTORY: &str = ".noemori";
 /// 书签文件名。
 const FILE: &str = "bookmarks.json";
 /// 损坏文件在首次覆盖前的备份名。

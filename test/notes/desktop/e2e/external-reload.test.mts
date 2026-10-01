@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("外部更新长文后保留反向选区、阅读位置和焦点，继续输入使用新的磁盘基准", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-external-reload-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-external-reload-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

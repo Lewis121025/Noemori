@@ -12,7 +12,7 @@ const require = createRequire(new URL("package.json", desktop));
 
 // CDP 驱动 Chromium 的真实 composition 生命周期；macOS 输入法候选窗仍需独立系统验收。
 test("组词确认和取消不提交弹窗、不跳转查找、不退出源码；结束后正常保存重开", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-composition-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-composition-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("属性与正文分离：隐藏配置，编辑与源码往返保持属性字节", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-properties-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-properties-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

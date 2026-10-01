@@ -1,4 +1,4 @@
-use nous_vault::{Error, OpenPhase, Vault};
+use noemori_vault::{Error, OpenPhase, Vault};
 use std::fs;
 use tempfile::TempDir;
 
@@ -105,8 +105,8 @@ fn corrupt_ranking_metadata_rebuilds_from_notes() {
     .unwrap();
     let vault = Vault::open(root.path(), index.path()).unwrap();
     let hits = vault
-        .search(&nous_vault::SearchQuery {
-            expr: nous_vault::SearchExpr::Term("needle".into()),
+        .search(&noemori_vault::SearchQuery {
+            expr: noemori_vault::SearchExpr::Term("needle".into()),
             limit: 10,
         })
         .unwrap();
@@ -131,8 +131,8 @@ fn missing_ranking_segment_rebuilds_from_notes() {
     let vault = Vault::open(root.path(), index.path()).unwrap();
     assert_eq!(
         vault
-            .search(&nous_vault::SearchQuery {
-                expr: nous_vault::SearchExpr::Term("needle".into()),
+            .search(&noemori_vault::SearchQuery {
+                expr: noemori_vault::SearchExpr::Term("needle".into()),
                 limit: 10
             })
             .unwrap()
@@ -158,8 +158,8 @@ fn verification_includes_files_changed_during_preparation() {
     .unwrap();
     vault.verify_opening(&mut |_| Ok(true)).unwrap();
     let hits = vault
-        .search(&nous_vault::SearchQuery {
-            expr: nous_vault::SearchExpr::Term("after".into()),
+        .search(&noemori_vault::SearchQuery {
+            expr: noemori_vault::SearchExpr::Term("after".into()),
             limit: 10,
         })
         .unwrap();

@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("真实窗口开库进度、取消、文件错误和修正重试", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-open-e2e-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-open-e2e-"));
   const first = join(root, "原资料");
   const large = join(root, "大资料");
   const broken = join(root, "待修正");

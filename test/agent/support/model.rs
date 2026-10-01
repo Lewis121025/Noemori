@@ -1,7 +1,7 @@
-use nous_agent::llm::{
+use noemori_agent::llm::{
     Capabilities, FinishReason, Model, ModelEvent, ModelRequest, ModelResponse, ModelStream, Usage,
 };
-use nous_agent::{ContentPart, Error, ExecutionContext, Message, Role, ToolCall};
+use noemori_agent::{ContentPart, Error, ExecutionContext, Message, Role, ToolCall};
 use serde_json::Value;
 use std::{collections::VecDeque, sync::Mutex};
 

@@ -34,7 +34,7 @@ async fn bedrock_stream_checks_frames_and_finishes_after_metadata() {
 
 #[tokio::test]
 async fn aws_sigv4_signs_the_final_body_and_session_credentials() {
-    use nous_agent::llm::{AwsCredentials, AwsSigV4};
+    use noemori_agent::llm::{AwsCredentials, AwsSigV4};
     let body = json!({"output":{"message":{"content":[{"text":"ok"}]}},"stopReason":"end_turn"});
     let mut server = Server::start(vec![Fixture::json(body)]).await;
     let mut settings = config(Protocol::Bedrock, &server.url, false);

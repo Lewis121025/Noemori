@@ -1,6 +1,6 @@
 //! 排名索引与 `SQLite` 正文快照的一致性；中断后只允许重放或重建，不能返回旧命中。
 
-use nous_vault::{SearchExpr, SearchQuery, Vault};
+use noemori_vault::{SearchExpr, SearchQuery, Vault};
 use std::fs;
 use tempfile::TempDir;
 

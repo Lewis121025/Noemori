@@ -81,7 +81,7 @@ def _make_manifest(staging: Path, sources: Path, geometries: list[SourceGeometry
                    augmentations: int, counts: dict[str, object]) -> dict[str, object]:
     source_manifest = json.loads((sources / "manifest.json").read_text(encoding="utf-8"))
     return {
-        "schema_version": 1, "dataset": "nous-tabler-synthetic-v1", "generator_version": GENERATOR_VERSION,
+        "schema_version": 1, "dataset": "noemori-tabler-synthetic-v1", "generator_version": GENERATOR_VERSION,
         "config": {"seed": seed, "augmentations_per_source": augmentations, "variants_per_augmentation": len(VARIANTS)},
         "dependency": DEPENDENCY, "coordinate_system": "world_xy_y_down",
         "feature_contract": {"input_only": True, "fields": ["focus_stroke_id", "strokes.id", "strokes.points"],

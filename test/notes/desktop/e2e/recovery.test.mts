@@ -13,7 +13,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("非活动分栏的保存冲突可以定位并另存，操作始终属于冲突笔记", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-split-recovery-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-split-recovery-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -92,7 +92,7 @@ test("非活动分栏的保存冲突可以定位并另存，操作始终属于�
 });
 
 test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安全另存", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-recovery-e2e-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-recovery-e2e-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -167,18 +167,18 @@ test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安�
     await notice.getByText("查看详细原因", { exact: true }).click();
     expect(await notice.locator(".save-error").isVisible()).toBe(true);
     await notice.getByText("查看详细原因", { exact: true }).click();
-    const screenshots = process.env.NOUS_RECOVERY_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_RECOVERY_SCREENSHOTS;
     await page.getByRole("button", { name: "切换笔记库" }).click();
     await page.getByRole("button", { name: "浅色", exact: true }).click();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "处理保存问题", exact: true }).click();
-    if (screenshots) await page.screenshot({ path: join(screenshots, "nous-recovery-light.png") });
+    if (screenshots) await page.screenshot({ path: join(screenshots, "noemori-recovery-light.png") });
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "切换笔记库" }).click();
     await page.getByRole("button", { name: "深色", exact: true }).click();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "处理保存问题", exact: true }).click();
-    if (screenshots) await page.screenshot({ path: join(screenshots, "nous-recovery-dark.png") });
+    if (screenshots) await page.screenshot({ path: join(screenshots, "noemori-recovery-dark.png") });
     await page.keyboard.press("Escape");
     await page.locator(".ProseMirror p").click();
     await page.keyboard.press("End");

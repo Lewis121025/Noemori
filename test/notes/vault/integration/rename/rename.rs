@@ -1,4 +1,4 @@
-use nous_vault::{Error, Vault};
+use noemori_vault::{Error, Vault};
 use std::fs;
 use tempfile::TempDir;
 

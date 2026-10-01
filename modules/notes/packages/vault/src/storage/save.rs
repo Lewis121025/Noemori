@@ -287,7 +287,7 @@ pub(crate) fn write_staged_bytes(
     bytes: &[u8],
     permissions: Option<fs::Permissions>,
 ) -> Result<NamedTempFile, Error> {
-    let mut file = Builder::new().prefix(".nous-").tempfile_in(parent)?;
+    let mut file = Builder::new().prefix(".noemori-").tempfile_in(parent)?;
     file.write_all(bytes)?;
     // 暂存文件先以私有权限写完，再恢复最终权限，避免写入清掉源文件的特殊权限位。
     if let Some(permissions) = permissions {

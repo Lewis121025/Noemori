@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("跨视图与重启：长文选区和双栏阅读锚点在前文变化、窗口改宽后仍连续", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-reading-resume-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-reading-resume-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -188,7 +188,7 @@ test("跨视图与重启：长文选区和双栏阅读锚点在前文变化、�
 });
 
 test("长文阅读连续性：文内跳转、后退前进与跨文档返回保留实际阅读位置", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-reading-position-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-reading-position-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -373,7 +373,7 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
 });
 
 test("阅读视图：查找与导航可用，正文和任务只读，返回编辑保留历史，模式随会话记住", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-reading-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-reading-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -427,7 +427,7 @@ test("阅读视图：查找与导航可用，正文和任务只读，返回编�
       );
     await ready("阅读.md");
     const editor = page.locator(".ProseMirror");
-    if (environment.NOUS_TEST_WINDOW === "hidden") {
+    if (environment.NOEMORI_TEST_WINDOW === "hidden") {
       expect(
         await app.evaluate(({ BrowserWindow }) =>
           BrowserWindow.getAllWindows().map((window) => ({

@@ -40,7 +40,7 @@ export function previewKindFromMime(mime: string): "image" | "pdf" | "audio" | "
  * @param rel 已解析的库内相对路径。
  */
 export function vaultMediaUrl(rel: string): string {
-  return `nous-vault://vault/${rel.split("/").map(encodeURIComponent).join("/")}`;
+  return `noemori-vault://vault/${rel.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /**

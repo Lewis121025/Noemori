@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("无法保真保存的编辑在进程退出后恢复，修正后只修改必要源码", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-source-recovery-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-source-recovery-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -84,7 +84,7 @@ test("无法保真保存的编辑在进程退出后恢复，修正后只修改�
     await page.keyboard.press("ControlOrMeta+s");
     await expect
       .poll(() =>
-        page.evaluate(async () => (await window.nous.reader.fileSnapshot("恢复.md")).draft?.editor),
+        page.evaluate(async () => (await window.noemori.reader.fileSnapshot("恢复.md")).draft?.editor),
       )
       .toContain("后来输入");
     expect(await readFile(join(vault, "恢复.md"), "utf8")).toBe(original);
@@ -125,7 +125,7 @@ test("无法保真保存的编辑在进程退出后恢复，修正后只修改�
     expect(await readFile(join(vault, "恢复.md"), "utf8")).toBe(saved);
     expect(
       await recovered.evaluate(
-        async () => (await window.nous.reader.fileSnapshot("恢复.md")).draft,
+        async () => (await window.noemori.reader.fileSnapshot("恢复.md")).draft,
       ),
     ).toBeNull();
     expect(await recovered.getByRole("region", { name: "保存需要处理" }).count()).toBe(0);

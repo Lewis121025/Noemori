@@ -32,7 +32,7 @@
   function boardTitle(path: string | null): string {
     return path === null
       ? "白板"
-      : path.slice(path.lastIndexOf("/") + 1).replace(/\.nousboard$/iu, "");
+      : path.slice(path.lastIndexOf("/") + 1).replace(/\.noemoriboard$/iu, "");
   }
 
   $effect(() => {

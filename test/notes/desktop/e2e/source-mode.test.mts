@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("源码视图：排版表达不了的语法逐字节保真，[[ 补全与排版视图往返", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-source-mode-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-source-mode-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

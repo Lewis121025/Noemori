@@ -1,6 +1,6 @@
 //! 全文搜索端到端：长词位置索引、短词倒排、谓词组合与摘要。
 
-use nous_vault::{SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
+use noemori_vault::{SearchExpr, SearchQuery, Vault, SNIPPET_END, SNIPPET_START};
 use std::fs;
 use tempfile::TempDir;
 

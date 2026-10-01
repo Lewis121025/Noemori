@@ -3,7 +3,7 @@
 use std::fs;
 use std::time::{Duration, SystemTime};
 
-use nous_vault::Vault;
+use noemori_vault::Vault;
 use rusqlite::Connection;
 use tempfile::TempDir;
 

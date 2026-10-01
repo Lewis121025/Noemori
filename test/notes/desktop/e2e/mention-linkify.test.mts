@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("未链接提及就地转为链接：来源文件按字节改写，引用面板即时归组", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-linkify-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-linkify-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

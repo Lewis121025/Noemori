@@ -23,7 +23,7 @@ let storedWindow: WindowSession | null = null;
 let quitState: "running" | "stopping" | "stopped" = "running";
 
 // 桌面测试显式启用后台窗口；创建前决定可见性，避免先弹出再隐藏而抢走用户焦点。
-const hiddenTestWindow = process.env["NOUS_TEST_WINDOW"] === "hidden";
+const hiddenTestWindow = process.env["NOEMORI_TEST_WINDOW"] === "hidden";
 if (hiddenTestWindow && process.platform === "darwin") app.setActivationPolicy("accessory");
 
 /**

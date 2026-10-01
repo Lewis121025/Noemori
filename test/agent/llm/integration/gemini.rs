@@ -40,7 +40,7 @@ async fn gemini_stream_retains_thought_signature_and_function_id() {
 
 #[tokio::test]
 async fn gemini_native_call_ids_are_not_classified_by_a_magic_prefix() {
-    let response = json!({"candidates":[{"content":{"parts":[{"functionCall":{"id":"nous-gemini-real","name":"double","args":{"value":2}}}]},"finishReason":"STOP"}]});
+    let response = json!({"candidates":[{"content":{"parts":[{"functionCall":{"id":"noemori-gemini-real","name":"double","args":{"value":2}}}]},"finishReason":"STOP"}]});
     let final_response =
         json!({"candidates":[{"content":{"parts":[{"text":"4"}]},"finishReason":"STOP"}]});
     let mut server =
@@ -50,7 +50,7 @@ async fn gemini_native_call_ids_are_not_classified_by_a_magic_prefix() {
     let mut second = request();
     second.messages.push(first.message);
     second.messages.push(Message::tool_results(vec![ToolResult {
-        call_id: "nous-gemini-real".into(),
+        call_id: "noemori-gemini-real".into(),
         name: "double".into(),
         output: json!(4),
         is_error: false,
@@ -59,7 +59,7 @@ async fn gemini_native_call_ids_are_not_classified_by_a_magic_prefix() {
     server.finish().await;
     assert_eq!(
         server.requests.lock().unwrap()[1].body["contents"][2]["parts"][0]["functionResponse"]["id"],
-        "nous-gemini-real"
+        "noemori-gemini-real"
     );
 }
 

@@ -99,17 +99,17 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
   ];
   if (process.platform === "darwin")
     template.unshift({
-      label: "Nous",
+      label: "Noemori",
       submenu: [
-        { role: "about", label: "关于 Nous" },
+        { role: "about", label: "关于 Noemori" },
         { type: "separator" },
         { role: "services", label: "服务" },
         { type: "separator" },
-        { role: "hide", label: "隐藏 Nous" },
+        { role: "hide", label: "隐藏 Noemori" },
         { role: "hideOthers", label: "隐藏其他" },
         { role: "unhide", label: "显示全部" },
         { type: "separator" },
-        { role: "quit", label: "退出 Nous" },
+        { role: "quit", label: "退出 Noemori" },
       ],
     });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

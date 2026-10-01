@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附件", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-attachment-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-attachment-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -89,10 +89,10 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       );
 
     await ready(1);
-    const mentions = await page.evaluate(() => window.nous.reader.indexMentionsTo("preview.pdf"));
+    const mentions = await page.evaluate(() => window.noemori.reader.indexMentionsTo("preview.pdf"));
     expect(mentions.linked.some((mention) => mention.fromPath === "note.md")).toBe(true);
     const session = await page.evaluate(async () => {
-      const panes = await window.nous.reader.sessionGetPanes();
+      const panes = await window.noemori.reader.sessionGetPanes();
       // 经 IPC 提交布局时，额外字段不能改写当前库或文件。
       const submitted = {
         ...panes,
@@ -100,8 +100,8 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
         vaultRoot: "/unexpected",
         currentPath: "unexpected.md",
       };
-      await window.nous.reader.sessionSetPanes(submitted);
-      return window.nous.reader.sessionGetPanes();
+      await window.noemori.reader.sessionSetPanes(submitted);
+      return window.noemori.reader.sessionGetPanes();
     });
     expect(session.leftWidth).toBe(240);
     expect(session).not.toHaveProperty("vaultRoot");

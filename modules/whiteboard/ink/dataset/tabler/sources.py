@@ -48,7 +48,7 @@ def _download(relative: str, staging: Path) -> dict[str, object]:
     error = ""
     for _ in range(3):
         try:
-            request = urllib.request.Request(url, headers={"User-Agent": "Nous-geometry-dataset/1.0"})
+            request = urllib.request.Request(url, headers={"User-Agent": "Noemori-geometry-dataset/1.0"})
             with urllib.request.urlopen(request, timeout=35) as response:
                 content = response.read(2_000_001)
             if not content or len(content) > 2_000_000:

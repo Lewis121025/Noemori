@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("工作区操作、外观持久化与复杂公式和 HTML 离线渲染", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-workspace-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-workspace-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "我的笔记");
   const userData = join(root, "state");
@@ -202,9 +202,9 @@ $$
     const light = await page
       .locator("body")
       .evaluate((body) => getComputedStyle(body).backgroundColor);
-    const screenshots = process.env.NOUS_WORKSPACE_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_WORKSPACE_SCREENSHOTS;
     if (screenshots)
-      await page.screenshot({ path: join(screenshots, "nous-appearance-light.png") });
+      await page.screenshot({ path: join(screenshots, "noemori-appearance-light.png") });
     await chooseAppearance("深色");
     await page.waitForFunction(() => matchMedia("(prefers-color-scheme: dark)").matches);
     const dark = await page
@@ -218,7 +218,7 @@ $$
     // IPC 只接受外观枚举，不能借主题输入改写其他会话字段。
     const invalid = await page.evaluate(async () => {
       try {
-        await Reflect.apply(window.nous.app.appearanceSet, null, [
+        await Reflect.apply(window.noemori.app.appearanceSet, null, [
           { appearance: "light", vaultRoot: "/unexpected" },
         ]);
         return "accepted";
@@ -227,7 +227,7 @@ $$
       }
     });
     expect(invalid).toBe("rejected");
-    expect(await page.evaluate(() => window.nous.app.appearanceGet())).toBe("dark");
+    expect(await page.evaluate(() => window.noemori.app.appearanceGet())).toBe("dark");
     await chooseAppearance("跟随系统");
     expect(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe("system");
     await page.emulateMedia({ colorScheme: "light" });
@@ -240,7 +240,7 @@ $$
     ).toBe(dark);
     await page.emulateMedia({ colorScheme: null });
     await chooseAppearance("深色");
-    if (screenshots) await page.screenshot({ path: join(screenshots, "nous-appearance-dark.png") });
+    if (screenshots) await page.screenshot({ path: join(screenshots, "noemori-appearance-dark.png") });
     await page.keyboard.press("Escape");
 
     const remoteRequests: string[] = [];
@@ -274,7 +274,7 @@ $$
     expect(await page.evaluate(() => Reflect.get(window, "unwantedHtmlScript"))).toBeUndefined();
     await page.evaluate(() => document.fonts.ready);
     if (screenshots)
-      await page.screenshot({ path: join(screenshots, "nous-rich-content-dark.png") });
+      await page.screenshot({ path: join(screenshots, "noemori-rich-content-dark.png") });
     expect(remoteRequests).toEqual([]);
     expect(await readFile(join(vault, "渲染验证.md"), "utf8")).toBe(richNote);
     // 返回同一篇笔记会命中公式缓存，样式仍须保留，不能依赖重新排版补回。
@@ -303,7 +303,7 @@ $$
     app = await launch();
     const reopened = await app.firstWindow();
     await reopened.locator(".ProseMirror").waitFor();
-    expect(await reopened.evaluate(() => window.nous.app.appearanceGet())).toBe("dark");
+    expect(await reopened.evaluate(() => window.noemori.app.appearanceGet())).toBe("dark");
     expect(await reopened.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(
       true,
     );

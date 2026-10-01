@@ -137,9 +137,9 @@ describe("活动文档保存契约", () => {
     document.markDirty();
     for (const editor of [
       "broken",
-      JSON.stringify({ format: "nous.prosemirror", version: 2 }),
+      JSON.stringify({ format: "noemori.prosemirror", version: 2 }),
       JSON.stringify({
-        format: "nous.prosemirror",
+        format: "noemori.prosemirror",
         version: 1,
         revision: 1,
         doc: { type: "doc", content: [{ type: "unknown" }] },

@@ -277,7 +277,7 @@ it("区分大小写、替换、撤销与清空查询后，命中提示和按钮�
   document.body.append(controls, host);
   view = new EditorView(host, {
     state: EditorState.create({
-      doc: parseMarkdown("Nous nous NOUS\n"),
+      doc: parseMarkdown("Noemori noemori NOEMORI\n"),
       plugins: [history(), search()],
     }),
     handleScrollToSelection: () => true,
@@ -287,7 +287,7 @@ it("区分大小写、替换、撤销与清空查询后，命中提示和按钮�
   const status = controls.querySelector('[role="status"]')!;
   const next = controls.querySelector<HTMLButtonElement>('[aria-label="下一处"]')!;
   const previous = controls.querySelector<HTMLButtonElement>('[aria-label="上一处"]')!;
-  input.value = "nous";
+  input.value = "noemori";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   expect(status.textContent).toBe("共 3 处");
@@ -304,7 +304,7 @@ it("区分大小写、替换、撤销与清空查询后，命中提示和按钮�
   flushSync();
   [...controls.querySelectorAll("button")].find((button) => button.textContent === "替换")!.click();
   flushSync();
-  expect(view.state.doc.textContent).toBe("Nous 笔记 NOUS");
+  expect(view.state.doc.textContent).toBe("Noemori 笔记 NOEMORI");
   expect(status.textContent).toBe("没有匹配项");
   expect(next.disabled).toBe(true);
   expect(previous.disabled).toBe(true);

@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与失效锚点提示", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-links-test-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-links-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

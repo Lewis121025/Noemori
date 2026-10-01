@@ -21,7 +21,7 @@ export function untitledNotePath(entries: readonly VaultEntry[], parent: string)
  * @returns 待独占创建的白板路径；本函数不读写磁盘。
  */
 export function untitledWhiteboardPath(entries: readonly VaultEntry[], parent: string): string {
-  return availableDocumentPath(entries, parent, "白板", ".nousboard");
+  return availableDocumentPath(entries, parent, "白板", ".noemoriboard");
 }
 
 function availableDocumentPath(

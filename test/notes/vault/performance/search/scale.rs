@@ -1,7 +1,7 @@
 //! 显式运行的大库基准；使用真实文件扫描、排名索引与 `SQLite` 正文查询，退出时清理临时库。
-//! `NOUS_SEARCH_BENCH_NOTES` 可缩小诊断规模；默认 100000 篇、约 1 GB。
+//! `NOEMORI_SEARCH_BENCH_NOTES` 可缩小诊断规模；默认 100000 篇、约 1 GB。
 
-use nous_vault::{Error, SearchCancellation, SearchExpr, SearchQuery, Vault};
+use noemori_vault::{Error, SearchCancellation, SearchExpr, SearchQuery, Vault};
 use std::{
     fmt::Write as _,
     fs, thread,
@@ -12,7 +12,7 @@ use tempfile::TempDir;
 #[test]
 #[ignore = "生成 10 万篇真实文件；使用 --release --ignored --nocapture 显式运行"]
 fn hundred_thousand_notes() {
-    let count = std::env::var("NOUS_SEARCH_BENCH_NOTES")
+    let count = std::env::var("NOEMORI_SEARCH_BENCH_NOTES")
         .map_or(100_000, |value| value.parse::<usize>().expect("笔记数量"));
     assert!(count > 0, "基准笔记数必须大于零");
     let root = TempDir::new().unwrap();

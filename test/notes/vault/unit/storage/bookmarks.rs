@@ -1,6 +1,6 @@
-//! 书签：库内 `.nous/bookmarks.json` 的读写、损坏回退与改名同步。
+//! 书签：库内 `.noemori/bookmarks.json` 的读写、损坏回退与改名同步。
 
-use nous_vault::{Bookmark, Error, Vault};
+use noemori_vault::{Bookmark, Error, Vault};
 use std::fs;
 use tempfile::TempDir;
 
@@ -47,23 +47,23 @@ fn missing_file_reads_as_empty_and_round_trips() {
     vault.set_bookmarks(&sample()).expect("写入");
     assert_eq!(vault.bookmarks().expect("读取"), sample());
     // 书签目录是点目录：不出现在文件树与文件列表里。
-    assert!(root.path().join(".nous/bookmarks.json").is_file());
+    assert!(root.path().join(".noemori/bookmarks.json").is_file());
     let entries = vault.list_entries().expect("目录");
-    assert!(entries.iter().all(|entry| !entry.path.starts_with(".nous")));
+    assert!(entries.iter().all(|entry| !entry.path.starts_with(".noemori")));
 }
 
 #[test]
 fn corrupt_file_is_an_error_and_is_backed_up_before_overwrite() {
     let (root, _index, vault) = vault_with(&[]);
-    fs::create_dir_all(root.path().join(".nous")).expect("目录");
-    fs::write(root.path().join(".nous/bookmarks.json"), "{不是 JSON").expect("写入");
+    fs::create_dir_all(root.path().join(".noemori")).expect("目录");
+    fs::write(root.path().join(".noemori/bookmarks.json"), "{不是 JSON").expect("写入");
     assert!(matches!(
         vault.bookmarks(),
         Err(Error::InvalidBookmarks { .. })
     ));
     vault.set_bookmarks(&sample()).expect("覆盖");
     assert_eq!(
-        fs::read_to_string(root.path().join(".nous/bookmarks.corrupt.json")).expect("备份"),
+        fs::read_to_string(root.path().join(".noemori/bookmarks.corrupt.json")).expect("备份"),
         "{不是 JSON"
     );
     assert_eq!(vault.bookmarks().expect("读取"), sample());
@@ -102,5 +102,5 @@ fn rename_remaps_bookmarked_paths_without_warning() {
     // 没有书签文件时改名不创建它。
     let (root, _index, plain) = vault_with(&[("x.md", "x\n")]);
     plain.rename("x.md", "y.md").expect("改名");
-    assert!(!root.path().join(".nous").exists());
+    assert!(!root.path().join(".noemori").exists());
 }

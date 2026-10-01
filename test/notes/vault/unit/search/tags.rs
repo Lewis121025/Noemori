@@ -3,7 +3,7 @@
 //! 夹具 `test/notes/vault/fixtures/search/inline-tags.md` 是规则表的权威用例集；
 //! TS 侧编辑器分词器落地时必须与本断言集逐条对齐。
 
-use nous_vault::{SearchExpr, SearchQuery, Vault};
+use noemori_vault::{SearchExpr, SearchQuery, Vault};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

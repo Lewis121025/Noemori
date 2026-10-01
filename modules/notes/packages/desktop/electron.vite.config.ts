@@ -67,7 +67,7 @@ export default defineConfig({
       },
     },
     resolve: {
-      external: ["@nous/vault-node"],
+      external: ["@noemori/vault-node"],
     },
   },
   preload: {

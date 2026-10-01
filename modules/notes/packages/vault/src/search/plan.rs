@@ -158,11 +158,11 @@ impl Plan {
                 params.push(Box::new(key.clone()));
                 let value_filter = if let Some(value) = value {
                     params.push(Box::new(value.clone()));
-                    " AND nous_fold(attributes.value) = ?"
+                    " AND noemori_fold(attributes.value) = ?"
                 } else {
                     ""
                 };
-                format!("EXISTS (SELECT 1 FROM attributes WHERE attributes.path = files.path AND nous_fold(attributes.key) = ?{value_filter})")
+                format!("EXISTS (SELECT 1 FROM attributes WHERE attributes.path = files.path AND noemori_fold(attributes.key) = ?{value_filter})")
             }
             Self::Path(path) => {
                 params.push(Box::new(path.clone()));

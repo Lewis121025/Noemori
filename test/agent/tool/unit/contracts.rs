@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use nous_agent::tool::{Tool, ToolContext, ToolError, ToolRegistry};
-use nous_agent::{CancellationToken, ExecutionContext, ToolCall};
+use noemori_agent::tool::{Tool, ToolContext, ToolError, ToolRegistry};
+use noemori_agent::{CancellationToken, ExecutionContext, ToolCall};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -111,7 +111,7 @@ async fn cancelled_tool_never_executes() {
     context.cancellation.cancel();
     assert!(matches!(
         tools.execute(&call(json!({"count":1})), context).await,
-        Err(nous_agent::Error::Cancelled)
+        Err(noemori_agent::Error::Cancelled)
     ));
     assert_eq!(executions.load(Ordering::SeqCst), 0);
 }

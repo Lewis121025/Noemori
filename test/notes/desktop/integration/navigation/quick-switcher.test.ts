@@ -72,7 +72,7 @@ beforeEach(() => {
     closeAfterFlush: vi.fn(async () => {}),
     closeBlocked: vi.fn(async () => {}),
   };
-  window.nous = { app: appApi, reader: api };
+  window.noemori = { app: appApi, reader: api };
 });
 
 afterEach(async () => {

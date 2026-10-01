@@ -18,7 +18,7 @@ const MAX_STROKES = 100_000;
 
 /** 判断真实库内文件名；不会把其他扩展名或链接片段误认成白板。 */
 export function isWhiteboardPath(path: string): boolean {
-  return path.toLowerCase().endsWith(".nousboard");
+  return path.toLowerCase().endsWith(".noemoriboard");
 }
 
 /** 返回没有共享可变数组的空白板；不访问磁盘。 */

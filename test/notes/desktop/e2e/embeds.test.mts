@@ -10,7 +10,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("嵌入：列表内展开、循环检测与深度上限", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-embeds-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-embeds-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");

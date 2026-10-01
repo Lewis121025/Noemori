@@ -11,7 +11,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("从空白笔记写作、任务交互、链接插入、查找替换和重启恢复", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-writing-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-writing-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -200,15 +200,15 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       () => document.querySelector(".save-status")?.textContent === "已保存",
     );
     await editor.locator(":scope > p").first().click();
-    const screenshots = process.env.NOUS_WRITING_SCREENSHOTS;
+    const screenshots = process.env.NOEMORI_WRITING_SCREENSHOTS;
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-wide.png") });
     await page.setViewportSize({ width: 480, height: 800 });
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     expect(
       await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    if (process.env.NOUS_WRITING_SCREENSHOT)
-      await page.screenshot({ path: process.env.NOUS_WRITING_SCREENSHOT });
+    if (process.env.NOEMORI_WRITING_SCREENSHOT)
+      await page.screenshot({ path: process.env.NOEMORI_WRITING_SCREENSHOT });
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-narrow.png") });
     // 原生弹层支持键盘进入与 Escape 返回入口，不能让隐藏控件挤占正文。
     await page.getByRole("button", { name: "笔记操作", exact: true }).click();

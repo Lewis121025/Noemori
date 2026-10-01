@@ -1,6 +1,6 @@
 //! 单篇高密度命中的按需交付基准；包括精确计数、源码映射和真实后续页。
 
-use nous_vault::{SearchCancellation, SearchExpr, SearchQuery, Vault};
+use noemori_vault::{SearchCancellation, SearchExpr, SearchQuery, Vault};
 use std::{fs, time::Instant};
 use tempfile::TempDir;
 

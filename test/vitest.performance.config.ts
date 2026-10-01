@@ -11,8 +11,8 @@ export default defineConfig({
     ],
     environment: "node",
     env: {
-      NOUS_PERFORMANCE_REPORT:
-        process.env["NOUS_PERFORMANCE_REPORT"] ??
+      NOEMORI_PERFORMANCE_REPORT:
+        process.env["NOEMORI_PERFORMANCE_REPORT"] ??
         fileURLToPath(
           new URL("../modules/notes/.artifacts/reports/performance/latest/", import.meta.url),
         ),

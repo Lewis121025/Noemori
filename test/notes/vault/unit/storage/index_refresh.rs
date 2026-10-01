@@ -1,6 +1,6 @@
 //! 写入与刷新只处理变化文件：未改的兄弟文件即使不可读也不应挡住索引更新。
 
-use nous_vault::Vault;
+use noemori_vault::Vault;
 use std::fs;
 use tempfile::TempDir;
 
@@ -10,7 +10,7 @@ fn missing_derived_table_rebuilds_without_removing_recovery_state() {
     let index = tempfile::tempdir().unwrap();
     fs::write(root.path().join("target.md"), "target").unwrap();
     fs::write(root.path().join("ref.md"), "[[target]]").unwrap();
-    let vault = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let vault = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     assert_eq!(vault.links_to("target.md").unwrap().len(), 1);
     vault
         .write("target.md", b"recoverable draft", Some(b"stale"))
@@ -19,7 +19,7 @@ fn missing_derived_table_rebuilds_without_removing_recovery_state() {
     let database = rusqlite::Connection::open(index.path().join("index.sqlite")).unwrap();
     database.execute("DROP TABLE links", []).unwrap();
     drop(database);
-    let reopened = nous_vault::Vault::open(root.path(), index.path()).unwrap();
+    let reopened = noemori_vault::Vault::open(root.path(), index.path()).unwrap();
     assert_eq!(reopened.links_to("target.md").unwrap().len(), 1);
     assert_eq!(
         reopened.snapshot("target.md").unwrap().draft.unwrap().bytes,
@@ -207,7 +207,7 @@ fn large_refresh_resolves_links_across_chunks_and_reopens_without_writes() {
             Some(format!("{:03}.md", (note + 129) % 256))
         );
     }
-    vault.search(&nous_vault::SearchQuery::default()).unwrap();
+    vault.search(&noemori_vault::SearchQuery::default()).unwrap();
     drop(vault);
     let probe = open_index(&index);
     let before = sqlite_data_version(&probe);

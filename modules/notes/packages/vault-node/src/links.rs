@@ -3,7 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use crate::runtime::with_vault;
-use nous_vault::LinkKind;
+use noemori_vault::LinkKind;
 use crate::entries::JsRenameOutcome;
 
 /// 链接解析结果：路径、锚点与歧义候选分开返回。
@@ -33,19 +33,19 @@ pub fn links_resolve(from: String, raw: String, kind: String) -> Result<JsLinkTa
         .map_err(|()| Error::from_reason("未知链接种类"))?;
     with_vault(|vault| {
         Ok(match vault.resolve_link(&from, &raw, kind) {
-            nous_vault::LinkTarget::Resolved { path, anchor } => JsLinkTarget {
+            noemori_vault::LinkTarget::Resolved { path, anchor } => JsLinkTarget {
                 status: "resolved".into(),
                 path: Some(path),
                 candidates: None,
                 anchor,
             },
-            nous_vault::LinkTarget::Ambiguous { candidates, anchor } => JsLinkTarget {
+            noemori_vault::LinkTarget::Ambiguous { candidates, anchor } => JsLinkTarget {
                 status: "ambiguous".into(),
                 path: None,
                 candidates: Some(candidates),
                 anchor,
             },
-            nous_vault::LinkTarget::Dead => JsLinkTarget {
+            noemori_vault::LinkTarget::Dead => JsLinkTarget {
                 status: "dead".into(),
                 path: None,
                 candidates: None,
@@ -74,7 +74,7 @@ pub struct JsLinkRecord {
     pub resolution: String,
 }
 
-fn to_js(link: nous_vault::LinkRecord) -> JsLinkRecord {
+fn to_js(link: noemori_vault::LinkRecord) -> JsLinkRecord {
     JsLinkRecord {
         from_path: link.from_path,
         to_raw: link.to_raw,
@@ -118,7 +118,7 @@ pub struct JsMentions {
     pub unlinked: Vec<JsMentionRecord>,
 }
 
-fn to_js_mention(mention: nous_vault::MentionRecord) -> JsMentionRecord {
+fn to_js_mention(mention: noemori_vault::MentionRecord) -> JsMentionRecord {
     JsMentionRecord {
         from_path: mention.from_path,
         from_title: mention.from_title,

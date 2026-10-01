@@ -12,7 +12,7 @@ const desktop = new URL("../../../../modules/notes/packages/desktop/", import.me
 const require = createRequire(new URL("package.json", desktop));
 
 test("表格插入、连续写作、结构编辑、撤销和重启保留内容与焦点", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nous-table-"));
+  const root = await mkdtemp(join(tmpdir(), "noemori-table-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
   const userData = join(root, "state");
@@ -96,7 +96,7 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
     expect(await save()).toBe(aligned);
 
     // 表格的工具同样遵守最小窗口和浅深色；截图留在显式指定的仓库外目录。
-    const artifacts = process.env.NOUS_TABLE_ARTIFACTS;
+    const artifacts = process.env.NOEMORI_TABLE_ARTIFACTS;
     if (artifacts) await mkdir(artifacts, { recursive: true });
     for (const appearance of ["浅色", "深色"]) {
       await page.getByRole("button", { name: "切换笔记库", exact: true }).click();

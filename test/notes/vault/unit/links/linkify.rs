@@ -1,6 +1,6 @@
 //! 未链接提及就地转链接：字节区间替换、别名保留、歧义回退与过期拒绝。
 
-use nous_vault::{Error, Vault};
+use noemori_vault::{Error, Vault};
 use std::fs;
 use tempfile::TempDir;
 

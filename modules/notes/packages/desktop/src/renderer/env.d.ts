@@ -1,7 +1,7 @@
 /// <reference types="svelte" />
 /// <reference types="vite/client" />
 
-import type { NousApi } from "../shared/api";
+import type { NoemoriApi } from "../shared/api";
 
 declare global {
   interface Window {
@@ -10,7 +10,7 @@ declare global {
      *
      * 渲染进程只能通过该对象访问主进程。
      */
-    nous: NousApi;
+    noemori: NoemoriApi;
   }
 }
 
