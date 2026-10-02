@@ -1,24 +1,24 @@
 import { app, dialog, ipcMain, type BrowserWindow, type WebContents } from "electron";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ReaderClient } from "./ipc";
-import { VaultOpenControl } from "./vault-open-control";
+import type { NativeControl } from "@noemori/vault-node";
+import { parseVaultOpenProgress } from "../shared/vault-opening";
 import { parseVaultOpenId } from "../shared/vault-opening";
 
-/** 开库进度与取消独立于阻塞中的工作线程队列；同窗口只允许一个请求。 */
+/** 开库进度与取消直接读取 Rust 内存状态；同窗口只允许一个请求。 */
 export function registerVaultOpenIpc(
   getWindow: () => BrowserWindow | null,
   core: ReaderClient,
 ): void {
-  const active = new Map<number, { id: string; control: VaultOpenControl }>();
+  const active = new Map<number, { id: string; control: NativeControl }>();
   async function open(sender: WebContents, value: unknown, mode: "choose" | "default" | "restore") {
     const id = parseVaultOpenId(value);
     if (active.has(sender.id)) throw new Error("已有资料库正在打开");
-    const control = new VaultOpenControl();
+    const control = core.createControl();
     active.set(sender.id, { id, control });
     let previous = "";
     const report = () => {
-      const progress = control.progress;
+      const progress = parseVaultOpenProgress(control.progress);
       const key = JSON.stringify(progress);
       if (previous === key || sender.isDestroyed()) return;
       previous = key;
@@ -32,11 +32,10 @@ export function registerVaultOpenIpc(
     timer.unref();
     try {
       report();
-      if (mode === "restore") return await core.call("vaultRestore", control.buffer);
+      if (mode === "restore") return await core.call("vaultRestore", control);
       let root: string | undefined;
       if (mode === "default") {
         root = join(app.getPath("documents"), "Noemori");
-        await mkdir(root, { recursive: true });
       } else {
         const window = getWindow();
         const result = window
@@ -46,7 +45,7 @@ export function registerVaultOpenIpc(
         root = result.filePaths[0];
       }
       if (root === undefined || control.cancelled) return null;
-      return await core.call("vaultOpen", root, control.buffer);
+      return await core.call(mode === "default" ? "vaultCreate" : "vaultOpen", root, control);
     } finally {
       clearInterval(timer);
       sender.removeListener("destroyed", cancel);

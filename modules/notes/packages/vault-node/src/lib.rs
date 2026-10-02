@@ -1,4 +1,4 @@
-//! Node-API 绑定：只转发 `noemori-vault`，不在此层写业务。
+//! Node-API 绑定：只适配 `noemori-runtime`，不在此层编排业务。
 
 pub mod attachments;
 pub mod bookmarks;

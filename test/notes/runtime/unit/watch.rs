@@ -8,7 +8,7 @@ fn resource_watch_error_refreshes_disk_without_claiming_healthy() {
     let index = tempfile::tempdir().unwrap();
     let vault = Vault::open(root.path(), index.path()).unwrap();
     std::fs::write(root.path().join("new.md"), "# New\n\n[[target]]\n").unwrap();
-    let event = watch_notification(&vault, root.path(), Err("系统监视故障".into()));
+    let event = notification(&vault, root.path(), 1, Err("系统监视故障".into()));
     assert_eq!(event.status, "watch-error");
     assert!(!event.healthy);
     assert!(event.paths.is_empty());

@@ -1,10 +1,10 @@
 //! 链接解析、入链、出链与提及的 Node-API 适配。
 
+use crate::entries::JsRenameOutcome;
+use crate::runtime::{to_napi, with_vault, NativeRuntime};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use crate::runtime::with_vault;
 use noemori_vault::LinkKind;
-use crate::entries::JsRenameOutcome;
 
 /// 链接解析结果：路径、锚点与歧义候选分开返回。
 #[napi(object)]
@@ -19,40 +19,51 @@ pub struct JsLinkTarget {
     pub anchor: Option<String>,
 }
 
-/// 解析链接目标。
-///
-/// `kind` 为 `wiki` 或 `md`。歧义时返回全部候选，由界面让用户选择。
-///
-/// # Errors
-///
-/// 未打开库或 kind 非法。
 #[napi]
-pub fn links_resolve(from: String, raw: String, kind: String) -> Result<JsLinkTarget> {
-    let kind: LinkKind = kind
-        .parse()
-        .map_err(|()| Error::from_reason("未知链接种类"))?;
-    with_vault(|vault| {
-        Ok(match vault.resolve_link(&from, &raw, kind) {
-            noemori_vault::LinkTarget::Resolved { path, anchor } => JsLinkTarget {
-                status: "resolved".into(),
-                path: Some(path),
-                candidates: None,
-                anchor,
-            },
-            noemori_vault::LinkTarget::Ambiguous { candidates, anchor } => JsLinkTarget {
-                status: "ambiguous".into(),
-                path: None,
-                candidates: Some(candidates),
-                anchor,
-            },
-            noemori_vault::LinkTarget::Dead => JsLinkTarget {
-                status: "dead".into(),
-                path: None,
-                candidates: None,
-                anchor: None,
-            },
+impl NativeRuntime {
+    /// 解析链接目标。
+    ///
+    /// `kind` 为 `wiki` 或 `md`。歧义时返回全部候选，由界面让用户选择。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库或 kind 非法。
+    #[napi(ts_return_type = "Promise<JsLinkTarget>")]
+    pub fn links_resolve(
+        &self,
+        env: Env,
+        from: String,
+        raw: String,
+        kind: String,
+    ) -> Result<Object> {
+        self.read(env, move |vault| {
+            let kind: LinkKind = kind
+                .parse()
+                .map_err(|()| Error::from_reason("未知链接种类"))?;
+            with_vault(vault, |vault| {
+                Ok(match vault.resolve_link(&from, &raw, kind) {
+                    noemori_vault::LinkTarget::Resolved { path, anchor } => JsLinkTarget {
+                        status: "resolved".into(),
+                        path: Some(path),
+                        candidates: None,
+                        anchor,
+                    },
+                    noemori_vault::LinkTarget::Ambiguous { candidates, anchor } => JsLinkTarget {
+                        status: "ambiguous".into(),
+                        path: None,
+                        candidates: Some(candidates),
+                        anchor,
+                    },
+                    noemori_vault::LinkTarget::Dead => JsLinkTarget {
+                        status: "dead".into(),
+                        path: None,
+                        candidates: None,
+                        anchor: None,
+                    },
+                })
+            })
         })
-    })
+    }
 }
 
 /// 一条索引中的链接。
@@ -132,63 +143,94 @@ fn to_js_mention(mention: noemori_vault::MentionRecord) -> JsMentionRecord {
     }
 }
 
-/// 指向 `path` 的入链。
-///
-/// # Errors
-///
-/// 未打开库。
 #[napi]
-pub fn index_links_to(path: String) -> Result<Vec<JsLinkRecord>> {
-    Ok(with_vault(|vault| vault.links_to(&path))?
-        .into_iter()
-        .map(to_js)
-        .collect())
+impl NativeRuntime {
+    /// 指向 `path` 的入链。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库。
+    #[napi(ts_return_type = "Promise<Array<JsLinkRecord>>")]
+    pub fn index_links_to(&self, env: Env, path: String) -> Result<Object> {
+        self.read(env, move |vault| {
+            Ok(with_vault(vault, |vault| vault.links_to(&path))?
+                .into_iter()
+                .map(to_js)
+                .collect::<Vec<_>>())
+        })
+    }
 }
 
-/// `path` 的出链。
-///
-/// # Errors
-///
-/// 未打开库。
 #[napi]
-pub fn index_links_from(path: String) -> Result<Vec<JsLinkRecord>> {
-    Ok(with_vault(|vault| vault.links_from(&path))?
-        .into_iter()
-        .map(to_js)
-        .collect())
+impl NativeRuntime {
+    /// `path` 的出链。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库。
+    #[napi(ts_return_type = "Promise<Array<JsLinkRecord>>")]
+    pub fn index_links_from(&self, env: Env, path: String) -> Result<Object> {
+        self.read(env, move |vault| {
+            Ok(with_vault(vault, |vault| vault.links_from(&path))?
+                .into_iter()
+                .map(to_js)
+                .collect::<Vec<_>>())
+        })
+    }
 }
 
-/// 指向 `path` 的已链接提及与未链接提及。
-///
-/// # Errors
-///
-/// 未打开库。
 #[napi]
-pub fn index_mentions_to(path: String) -> Result<JsMentions> {
-    let mentions = with_vault(|vault| vault.mentions_to(&path))?;
-    Ok(JsMentions {
-        linked: mentions.linked.into_iter().map(to_js_mention).collect(),
-        unlinked: mentions.unlinked.into_iter().map(to_js_mention).collect(),
-    })
+impl NativeRuntime {
+    /// 指向 `path` 的已链接提及与未链接提及。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库。
+    #[napi(ts_return_type = "Promise<JsMentions>")]
+    pub fn index_mentions_to(&self, env: Env, path: String) -> Result<Object> {
+        self.read(env, move |vault| {
+            let mentions = with_vault(vault, |vault| vault.mentions_to(&path))?;
+            Ok(JsMentions {
+                linked: mentions
+                    .linked
+                    .into_iter()
+                    .map(to_js_mention)
+                    .collect::<Vec<_>>(),
+                unlinked: mentions
+                    .unlinked
+                    .into_iter()
+                    .map(to_js_mention)
+                    .collect::<Vec<_>>(),
+            })
+        })
+    }
 }
 
-/// 把 `from` 文件里 `[start_byte, end_byte)` 的未链接提及就地转为指向
-/// `target` 的 wiki 链接；`expected` 是查询时的提及文本，文件已变化时拒绝。
-///
-/// # Errors
-///
-/// 未打开库、目标不在库内、区间过期或写盘失败。
 #[napi]
-pub fn mentions_linkify(
-    from: String,
-    start_byte: i64,
-    end_byte: i64,
-    expected: String,
-    target: String,
-) -> Result<JsRenameOutcome> {
-    let result =
-        with_vault(|vault| vault.linkify_mention(&from, start_byte, end_byte, &expected, &target))?;
-    Ok(JsRenameOutcome {
-        warning: result.warning,
-    })
+impl NativeRuntime {
+    /// 把 `from` 文件里 `[start_byte, end_byte)` 的未链接提及就地转为指向
+    /// `target` 的 wiki 链接；`expected` 是查询时的提及文本，文件已变化时拒绝。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库、目标不在库内、区间过期或写盘失败。
+    #[napi(ts_return_type = "Promise<JsRenameOutcome>")]
+    pub fn mentions_linkify(
+        &self,
+        env: Env,
+        from: String,
+        start_byte: i64,
+        end_byte: i64,
+        expected: String,
+        target: String,
+    ) -> Result<Object> {
+        self.write(env, true, move |state| {
+            let result = state
+                .linkify_mention(&from, start_byte, end_byte, &expected, &target)
+                .map_err(to_napi)?;
+            Ok(JsRenameOutcome {
+                warning: result.warning,
+            })
+        })
+    }
 }

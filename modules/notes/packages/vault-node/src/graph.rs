@@ -1,8 +1,8 @@
 //! 关系图谱的 Node-API 适配。
 
+use crate::runtime::{with_vault, NativeRuntime};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use crate::runtime::with_vault;
 
 /// 图谱节点：笔记或死链目标。
 #[napi(object)]
@@ -37,33 +37,38 @@ pub struct JsGraph {
     pub edges: Vec<JsGraphEdge>,
 }
 
-/// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
-///
-/// # Errors
-///
-/// 未打开库或索引查询失败。
 #[napi]
-pub fn index_graph(include_dead: bool) -> Result<JsGraph> {
-    let graph = with_vault(|vault| vault.graph(include_dead))?;
-    Ok(JsGraph {
-        nodes: graph
-            .nodes
-            .into_iter()
-            .map(|node| JsGraphNode {
-                path: node.path,
-                title: node.title,
-                tags: node.tags,
-                dead: node.dead,
+impl NativeRuntime {
+    /// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库或索引查询失败。
+    #[napi(ts_return_type = "Promise<JsGraph>")]
+    pub fn index_graph(&self, env: Env, include_dead: bool) -> Result<Object> {
+        self.read(env, move |vault| {
+            let graph = with_vault(vault, |vault| vault.graph(include_dead))?;
+            Ok(JsGraph {
+                nodes: graph
+                    .nodes
+                    .into_iter()
+                    .map(|node| JsGraphNode {
+                        path: node.path,
+                        title: node.title,
+                        tags: node.tags,
+                        dead: node.dead,
+                    })
+                    .collect::<Vec<_>>(),
+                edges: graph
+                    .edges
+                    .into_iter()
+                    .map(|edge| JsGraphEdge {
+                        from: edge.from,
+                        to: edge.to,
+                        count: edge.count,
+                    })
+                    .collect::<Vec<_>>(),
             })
-            .collect(),
-        edges: graph
-            .edges
-            .into_iter()
-            .map(|edge| JsGraphEdge {
-                from: edge.from,
-                to: edge.to,
-                count: edge.count,
-            })
-            .collect(),
-    })
+        })
+    }
 }

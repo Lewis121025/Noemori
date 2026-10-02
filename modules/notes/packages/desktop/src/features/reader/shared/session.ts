@@ -334,9 +334,3 @@ export function parseReaderSession(value: unknown): ReaderSession {
     ...(parsePaneLayout(record) ?? emptyReaderSession),
   };
 }
-
-/** 工作线程注入的会话存储；提交前失败必须保留旧会话并抛错，成功返回后不能再误报未提交。 */
-export type ReaderSessionStore = {
-  load: () => ReaderSession;
-  save: (session: ReaderSession) => void;
-};

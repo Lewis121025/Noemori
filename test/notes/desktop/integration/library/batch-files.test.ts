@@ -345,7 +345,7 @@ describe("文件树多选与批量整理", () => {
     click("b.md", { metaKey: true });
     key("b.md", "Delete");
     await settle();
-    vi.mocked(api.entryBatch).mockRejectedValueOnce(new Error("工作线程中断"));
+    vi.mocked(api.entryBatch).mockRejectedValueOnce(new Error("内核任务中断"));
     submit();
     await settle();
     expect(target.querySelector('.batch-dialog [role="alert"]')?.textContent).toContain("未能确认");

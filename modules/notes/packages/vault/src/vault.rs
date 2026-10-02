@@ -737,6 +737,21 @@ impl Vault {
         result
     }
 
+    /// 提前发布已提交的全文变更；只持有一次同步事务，不跨查询保存 writer 或读快照。
+    ///
+    /// # Errors
+    /// 取消、数据库或排名索引失败时保留 pending，后续查询仍会重新同步。
+    pub fn publish_search_index(&self, cancellation: &crate::SearchCancellation) -> Result<(), Error> {
+        let conn = self.lock_conn()?;
+        cancellation.check()?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
+        self.search_index.lock()
+            .map_err(|_| Error::Io(io::Error::other("排名索引锁已失效")))?
+            .synchronize(&tx, cancellation, &mut |_, _| Ok(()))?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn search_snapshot(
         &self,
         cancellation: &crate::SearchCancellation,
@@ -804,7 +819,8 @@ impl Vault {
         } else {
             rows.push(row.clone());
         }
-        rows.retain(|item| files.iter().any(|path| path == &item.path));
+        let disk_set: HashSet<&str> = files.iter().map(String::as_str).collect();
+        rows.retain(|item| disk_set.contains(item.path.as_str()));
         let extras = crate::links::identity::extras_from_files(&rows, &aliases);
         let inventory = Inventory::with_extra(files, &extras);
         for link in &mut new_links {
@@ -1042,7 +1058,11 @@ fn file_title_fallback(rel: &str) -> String {
 
 /// 对原始字节计算稳定版本，用于索引复用与改名前的内容校验。
 pub(super) fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
+    hex_digest(&Sha256::digest(bytes))
+}
+
+/// 已计算的摘要只做编码，改名快照避免再次遍历全文计算哈希。
+pub(super) fn hex_digest(digest: &[u8]) -> String {
     digest.iter().fold(String::new(), |mut acc, b| {
         use std::fmt::Write as _;
         let _ = write!(acc, "{b:02x}");

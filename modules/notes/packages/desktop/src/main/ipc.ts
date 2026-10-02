@@ -9,7 +9,7 @@ import { updateHistoryMenu } from "./menu";
  * 装配应用级与功能级 IPC；外壳不处理文件或索引业务。
  * @param getWindow 当前窗口，用于关闭及功能对话框。
  * @param closeGate 退出闸门。
- * @param core 由工作线程持有的服务客户端。
+ * @param core 连接 Rust 运行时的服务客户端。
  * @throws 重复注册及命令错误由 Electron 传播。
  */
 export function registerIpc(

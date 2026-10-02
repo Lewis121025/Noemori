@@ -3,12 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
 import { test } from "vitest";
 import { CoreClient } from "../../../../modules/notes/packages/desktop/src/main/core-client";
 import { readFileContent } from "../../../../modules/notes/packages/desktop/src/features/reader/renderer/document/file-content";
 
-const workerUrl = new URL("../../../../modules/notes/packages/desktop/out/main/core-worker.js", import.meta.url);
 
 async function measure(name: string, run: () => unknown) {
   for (let index = 0; index < 5; index += 1) await run();
@@ -46,7 +44,7 @@ test("文本打开时的解码与类型检查", async () => {
   }
 });
 
-test("实际内核线程读取附件", async (t) => {
+test("实际 Rust 运行时读取附件", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-reading-bench-"));
   let core: CoreClient | undefined;
   t.onTestFinished(async () => {
@@ -60,9 +58,7 @@ test("实际内核线程读取附件", async (t) => {
   await mkdir(vault);
   await writeFile(join(vault, "attachment.bin"), new Uint8Array(16 * 1024 * 1024).fill(173));
   const client = new CoreClient(
-    new Worker(workerUrl, {
-      workerData: join(directory, "state"),
-    }),
+    join(directory, "state"),
     () => {},
   );
   core = client;

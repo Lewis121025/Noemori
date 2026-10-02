@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
 import { BrowserWindow, app, dialog, nativeTheme, protocol, screen } from "electron";
 import { createCloseGate, onCloseAttempt, resetCloseGate, type CloseGate } from "./close-gate";
 import { CoreClient } from "./core-client";
@@ -132,9 +131,7 @@ function createWindow(client: CoreClient): void {
 
 app.whenReady().then(async () => {
   const client = new CoreClient(
-    new Worker(new URL("./core-worker.js", import.meta.url), {
-      workerData: app.getPath("userData"),
-    }),
+    app.getPath("userData"),
     (event) => {
       if (mainWindow !== null && !mainWindow.webContents.isDestroyed()) {
         mainWindow.webContents.send("reader.vault.changed", event);

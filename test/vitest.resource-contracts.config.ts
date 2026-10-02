@@ -8,9 +8,8 @@ export default defineConfig({
     ...unit.test,
     include: [
       "../../../../test/notes/desktop/unit/architecture/build-output.test.ts",
-      "../../../../test/notes/desktop/unit/shell/session-write.test.ts",
       "../../../../test/notes/desktop/unit/shell/session-queue.test.ts",
-      "../../../../test/notes/desktop/unit/shell/core-worker.test.ts",
+      "../../../../test/notes/desktop/integration/shell/core-client.test.ts",
       "../../../../test/notes/desktop/unit/graph/layout.test.ts",
       "../../../../test/notes/desktop/unit/preview/media.test.ts",
       "../../../../test/notes/desktop/unit/preview/pdf-render.test.ts",

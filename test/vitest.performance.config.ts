@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// 使用生产前端与实际内核线程，独立执行预算验收，避免多个桌面实例争用渲染资源。
+// 使用生产前端与实际 Rust 运行时，独立执行预算验收，避免多个桌面实例争用渲染资源。
 export default defineConfig({
   root: fileURLToPath(new URL("../modules/notes/packages/desktop/", import.meta.url)),
   test: {

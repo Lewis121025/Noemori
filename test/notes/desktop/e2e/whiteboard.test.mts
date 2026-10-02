@@ -164,6 +164,8 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
     await expect
       .poll(() => readFile(join(vault, "Home.md"), "utf8"), { timeout: 8000 })
       .toContain("整理.noemoriboard");
+    // 正文链接已落盘还不代表异步重命名的会话迁移和界面重载已完成。
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
     await command(app, "go-back");
     await page
       .getByRole("button", { name: "打开白板 attachments/整理.noemoriboard", exact: true })

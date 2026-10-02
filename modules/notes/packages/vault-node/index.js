@@ -310,35 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { attachmentImport, bookmarksList, bookmarksSet, vaultList, vaultEntries, entryCreate, entryTrash, entryCheckBatch, entryPath, entryRename, entryRenameBatch, fileRead, fileSnapshot, filePreserveDraft, fileWrite, fileWriteCopy, indexGraph, linksResolve, indexLinksTo, indexLinksFrom, indexMentionsTo, mentionsLinkify, indexTags, indexNoteKeys, indexHeadings, searchQuery, searchMatches, searchCancel, vaultOpen, vaultClose } = nativeBinding
+const { NativeControl, NativeRuntime } = nativeBinding
 
-module.exports.attachmentImport = attachmentImport
-module.exports.bookmarksList = bookmarksList
-module.exports.bookmarksSet = bookmarksSet
-module.exports.vaultList = vaultList
-module.exports.vaultEntries = vaultEntries
-module.exports.entryCreate = entryCreate
-module.exports.entryTrash = entryTrash
-module.exports.entryCheckBatch = entryCheckBatch
-module.exports.entryPath = entryPath
-module.exports.entryRename = entryRename
-module.exports.entryRenameBatch = entryRenameBatch
-module.exports.fileRead = fileRead
-module.exports.fileSnapshot = fileSnapshot
-module.exports.filePreserveDraft = filePreserveDraft
-module.exports.fileWrite = fileWrite
-module.exports.fileWriteCopy = fileWriteCopy
-module.exports.indexGraph = indexGraph
-module.exports.linksResolve = linksResolve
-module.exports.indexLinksTo = indexLinksTo
-module.exports.indexLinksFrom = indexLinksFrom
-module.exports.indexMentionsTo = indexMentionsTo
-module.exports.mentionsLinkify = mentionsLinkify
-module.exports.indexTags = indexTags
-module.exports.indexNoteKeys = indexNoteKeys
-module.exports.indexHeadings = indexHeadings
-module.exports.searchQuery = searchQuery
-module.exports.searchMatches = searchMatches
-module.exports.searchCancel = searchCancel
-module.exports.vaultOpen = vaultOpen
-module.exports.vaultClose = vaultClose
+module.exports.NativeControl = NativeControl
+module.exports.NativeRuntime = NativeRuntime

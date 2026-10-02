@@ -1,21 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   emptySession,
-  loadSession,
   parseSession,
-  patchSession,
-  serializeSession,
 } from "../../../../../modules/notes/packages/desktop/src/main/session";
 import { emptyReaderSession } from "@reader/shared/session";
-
-function temporaryFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), "noemori-session-"));
-  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-  return join(dir, "session.json");
-}
 
 describe("应用与阅读器会话", () => {
   it("迁移旧版平铺字段，保留主题、窗口、笔记库与文件栏，忽略旧分栏配置", () => {
@@ -77,39 +65,5 @@ describe("应用与阅读器会话", () => {
   });
   it("拒绝无效 JSON 和非对象根值", () => {
     for (const value of ["{", "[]", "null"]) expect(parseSession(value)).toBeNull();
-  });
-  it("应用设置与阅读器状态可以独立持久化，互不覆盖", () => {
-    const file = temporaryFile();
-    const reader = {
-      ...emptyReaderSession,
-      vaultRoot: "/notes",
-      documents: {
-        panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }],
-        active: 0,
-        split: false,
-      },
-    };
-    patchSession(file, { reader });
-    for (const appearance of ["system", "light", "dark"] as const) {
-      patchSession(file, { appearance });
-      expect(loadSession(file).reader).toEqual(reader);
-      patchSession(file, { reader: { ...reader, leftWidth: 240 } });
-      expect(loadSession(file).appearance).toBe(appearance);
-      patchSession(file, { reader });
-    }
-  });
-  it("会话写回只保留新结构，重启仍能恢复迁移后的状态", () => {
-    const file = temporaryFile();
-    writeFileSync(
-      file,
-      JSON.stringify({ vaultRoot: "/notes", currentPath: "a.md", leftWidth: 250 }),
-    );
-    const migrated = patchSession(file, { appearance: "dark" });
-    expect(loadSession(file)).toEqual(migrated);
-    expect(JSON.parse(serializeSession(migrated))).not.toHaveProperty("vaultRoot");
-    expect(migrated.reader.vaultRoot).toBe("/notes");
-  });
-  it("文件缺失时使用默认会话", () => {
-    expect(loadSession(temporaryFile())).toEqual(emptySession);
   });
 });

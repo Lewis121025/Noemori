@@ -10,6 +10,7 @@ pub use batch::{RenameBatchIssue, RenameBatchOutcome};
 mod source;
 
 use std::collections::{BTreeSet, HashMap};
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -221,7 +222,7 @@ impl Vault {
                 creates.push(FileChange {
                     path: moved_path(path, from, to),
                     before: None,
-                    after: Some(rewritten),
+                    after: Some(rewritten.into_owned()),
                     permissions,
                     started: false,
                 });
@@ -232,12 +233,12 @@ impl Vault {
                     permissions,
                     started: false,
                 });
-            } else if rewritten != *bytes {
+            } else if rewritten.as_ref() != bytes.as_slice() {
                 let permissions = file_permissions(&resolve_in_root(self.root(), path)?)?;
                 updates.push(FileChange {
                     path: path.clone(),
                     before: Some(bytes.clone()),
-                    after: Some(rewritten),
+                    after: Some(rewritten.into_owned()),
                     permissions,
                     started: false,
                 });
@@ -276,17 +277,17 @@ fn contains_source_ancestor(
     Ok(false)
 }
 
-fn rewrite_file(
+fn rewrite_file<'a>(
     path: &str,
-    bytes: &[u8],
+    bytes: &'a [u8],
     links: &[LinkRecord],
     from: &str,
     to: &str,
     before: &Inventory,
     after: &Inventory,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Cow<'a, [u8]>, Error> {
     let Ok(source) = std::str::from_utf8(bytes) else {
-        return Ok(bytes.to_vec());
+        return Ok(Cow::Borrowed(bytes));
     };
     let mut edits = Vec::new();
     for link in links.iter().rev() {
@@ -347,11 +348,14 @@ fn rewrite_file(
     if edits.windows(2).any(|pair| pair[0].1 > pair[1].0) {
         return Err(Error::Io(io::Error::other("链接修改区间重叠，已停止改名")));
     }
+    if edits.is_empty() {
+        return Ok(Cow::Borrowed(bytes));
+    }
     let mut rewritten = bytes.to_vec();
     for (start, end, replacement) in edits.into_iter().rev() {
         rewritten.splice(start..end, replacement);
     }
-    Ok(rewritten)
+    Ok(Cow::Owned(rewritten))
 }
 
 pub(super) fn recover_pending(root: &Path, store: &RecoveryStore) -> Result<(), Error> {

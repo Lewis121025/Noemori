@@ -1,19 +1,21 @@
-import { Worker } from "node:worker_threads";
 import { EventEmitter } from "node:events";
 import { beforeEach, expect, it, vi } from "vitest";
 import { CoreClient } from "../../../../../modules/notes/packages/desktop/src/main/core-client";
 import { registerReaderIpc } from "@reader/main/ipc";
-import { EntryBatchControl } from "@reader/main/entry-batch-control";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
-const { handlers, call } = vi.hoisted(() => ({
+const { handlers, call, controls } = vi.hoisted(() => ({
+  controls: [] as { cancelled: boolean; cancel(): boolean; progress: { phase: string; completed: number; total: number } }[],
   handlers: new Map<string, Handler>(),
   call: vi.fn(),
 }));
-vi.mock("node:worker_threads", () => ({ Worker: class {} }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/main/core-client", () => ({
   CoreClient: class {
     call = call;
+    createControl() {
+      const control = { cancelled: false, progress: { phase: "checking", completed: 0, total: 0 }, cancel() { this.cancelled = true; return true; } };
+      controls.push(control); return control;
+    }
   },
 }));
 vi.mock("electron", () => ({
@@ -24,9 +26,10 @@ vi.mock("electron", () => ({
 
 beforeEach(() => {
   handlers.clear();
+  controls.length = 0;
   call.mockReset();
   call.mockResolvedValue(undefined);
-  registerReaderIpc(() => null, new CoreClient(new Worker("unused"), vi.fn()));
+  registerReaderIpc(() => null, new CoreClient("/state", vi.fn()));
 });
 
 const sender = Object.assign(new EventEmitter(), {
@@ -56,7 +59,7 @@ it("批量请求与目录现场整体校验，并携带笔记库归属进入工�
   expect(call).toHaveBeenLastCalledWith(
     "entryBatch",
     { ...request, paths: ["folder"] },
-    expect.any(SharedArrayBuffer),
+    controls.at(-1),
   );
   const state = {
     expanded: ["folder"],
@@ -79,17 +82,14 @@ it("停止信号无需等待内核队列，且旧编号、其他窗口或其他�
       }),
   );
   const pending = invoke("reader.entry.batch", request, "batch-active");
-  const shared: unknown = call.mock.calls.at(-1)?.[2];
-  if (!(shared instanceof SharedArrayBuffer)) throw new Error("缺少共享停止信号");
-  const worker = new EntryBatchControl(shared);
+  const control = controls.at(-1)!;
   try {
     await expect(invoke("reader.entry.batch", request, "batch-duplicate")).rejects.toThrow("等待");
     await invoke("reader.entry.batch.stop", "/notes", "batch-old");
     await invoke("reader.entry.batch.stop", "/other", "batch-active");
     await handlers.get("reader.entry.batch.stop")!({ sender: { id: 2 } }, "/notes", "batch-active");
-    expect(worker.stopped).toBe(false);
-    worker.running();
-    worker.completed(1);
+    expect(control.cancelled).toBe(false);
+    control.progress = { phase: "running", completed: 1, total: 2 };
     await vi.advanceTimersByTimeAsync(80);
     expect(sender.send).toHaveBeenLastCalledWith("reader.entry.batch.progress", "batch-active", {
       phase: "running",
@@ -97,16 +97,14 @@ it("停止信号无需等待内核队列，且旧编号、其他窗口或其他�
       total: 2,
     });
     await invoke("reader.entry.batch.stop", "/notes", "batch-active");
-    expect(worker.stopped).toBe(true);
+    expect(control.cancelled).toBe(true);
     expect(call).toHaveBeenCalledTimes(1);
     finish();
     await pending;
     expect(vi.getTimerCount()).toBe(0);
     expect(sender.listenerCount("destroyed")).toBe(0);
     await invoke("reader.entry.batch", request, "batch-retry");
-    const retried: unknown = call.mock.calls.at(-1)?.[2];
-    if (!(retried instanceof SharedArrayBuffer)) throw new Error("缺少重试信号");
-    expect(new EntryBatchControl(retried).stopped).toBe(false);
+    expect(controls.at(-1)?.cancelled).toBe(false);
   } finally {
     finish();
     await pending;
@@ -125,10 +123,8 @@ it("窗口销毁请求安全停止，内核拒绝后清理批次与监听器", a
   );
   const pending = invoke("reader.entry.batch", request, "destroyed");
   const rejected = expect(pending).rejects.toThrow("线程错误");
-  const shared: unknown = call.mock.calls.at(-1)?.[2];
-  if (!(shared instanceof SharedArrayBuffer)) throw new Error("缺少共享停止信号");
   sender.emit("destroyed");
-  expect(new EntryBatchControl(shared).stopped).toBe(true);
+  expect(controls.at(-1)?.cancelled).toBe(true);
   fail(new Error("线程错误"));
   await rejected;
   expect(sender.listenerCount("destroyed")).toBe(0);

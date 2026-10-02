@@ -1,115 +1,74 @@
-import { Worker } from "node:worker_threads";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreClient } from "../../../../../modules/notes/packages/desktop/src/main/core-client";
-
-const workers: Worker[] = [];
-
-function start(mode = "normal") {
-  const gate = new Int32Array(new SharedArrayBuffer(8));
-  const worker = new Worker(
-    `
-      const { parentPort, workerData } = require("node:worker_threads");
-      let count = 0;
-      parentPort.on("message", (request) => {
-        if (request.type === "shutdown") {
-          if (workerData.mode === "exit-on-stop") process.exit(0);
-          parentPort.postMessage({ type: "stopped" });
-          parentPort.close();
-          return;
-        }
-        if (workerData.mode === "crash") throw new Error("测试线程故障");
-        if (workerData.mode === "exit") process.exit(0);
-        if (request.command === "fileRead") {
-          Atomics.store(workerData.gate, 0, 1);
-          Atomics.wait(workerData.gate, 1, 0, 3000);
-          parentPort.postMessage({ type: "result", id: request.id, value: new Uint8Array([42]) });
-        } else if (request.command === "entryRename") {
-          parentPort.postMessage({ type: "error", id: request.id, message: "目标已存在：b.md" });
-        } else {
-          parentPort.postMessage({ type: "result", id: request.id, value: [String(++count)] });
-        }
-      });
-    `,
-    { eval: true, workerData: { mode, gate } },
-  );
-  workers.push(worker);
-  const changed = vi.fn();
-  return { client: new CoreClient(worker, changed), worker, gate, changed };
-}
-
-afterEach(async () => {
-  await Promise.all(workers.splice(0).map((worker) => worker.terminate()));
+const { service } = vi.hoisted(() => ({
+  service: {
+    fileRead: vi.fn(),
+    fileWrite: vi.fn(),
+    vaultList: vi.fn(),
+    entryRename: vi.fn(),
+    shutdown: vi.fn(),
+    createControl: vi.fn(),
+  },
+}));
+vi.mock("../../../../../modules/notes/packages/desktop/src/main/core-service", () => ({
+  createCoreService: () => service,
+}));
+beforeEach(() => {
+  vi.resetAllMocks();
+  service.shutdown.mockResolvedValue(undefined);
 });
 
-describe("core client with a real worker thread", () => {
-  it("waits for the exit event even when the worker has already reported an error", async () => {
-    const { client, worker, changed } = start("crash");
-    let exited = false;
-    worker.once("exit", () => {
-      exited = true;
-    });
-    const failedCall = expect(client.call("vaultList")).rejects.toThrow("测试线程故障");
-    await expect(client.shutdown()).rejects.toThrow("测试线程故障");
-    expect(exited).toBe(true);
-    expect(changed).toHaveBeenCalledExactlyOnceWith({ status: "worker-error", paths: [], message: "测试线程故障" });
-    await failedCall;
-  });
-
-  it("requires confirmation that the native service was closed before treating exit as success", async () => {
-    const { client } = start("exit-on-stop");
-    await client.call("vaultList");
-    await expect(client.shutdown()).rejects.toThrow("内核线程意外退出");
-  });
-
-  it("keeps the parent responsive while work is blocked and drains requests before shutdown", async () => {
-    const { client, gate } = start();
-    let completed = false;
-    const read = client.call("fileRead", "a.md").then((bytes) => {
-      completed = true;
-      return bytes;
-    });
-    const list = client.call("vaultList");
-    await vi.waitFor(() => expect(Atomics.load(gate, 0)).toBe(1));
-
-    const stopping = client.shutdown();
-    expect(client.shutdown()).toBe(stopping);
-    await expect(client.call("vaultList")).rejects.toThrow("内核正在关闭");
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(completed).toBe(false);
-        Atomics.store(gate, 1, 1);
-        Atomics.notify(gate, 1);
-        resolve();
-      }, 20);
-    });
-    expect(await read).toEqual(new Uint8Array([42]));
-    expect(await list).toEqual(["1"]);
-    await stopping;
-  });
-
-  it("preserves per-command errors without poisoning the following request", async () => {
-    const { client } = start();
-    const rename = expect(client.call("entryRename", "a.md", "b.md")).rejects.toThrow(
-      "目标已存在：b.md",
+describe("直接原生客户端的结果与停机边界", () => {
+  it("在调用栈内顺序提交，不等待在途读取；停机同时等待原生资源和 JS 结果", async () => {
+    let finish!: (value: Uint8Array) => void;
+    let closed!: () => void;
+    service.fileRead.mockReturnValue(
+      new Promise<Uint8Array>((resolve) => {
+        finish = resolve;
+      }),
     );
-    const first = client.call("vaultList");
-    const second = client.call("vaultList");
-    await rename;
-    expect(await first).toEqual(["1"]);
-    expect(await second).toEqual(["2"]);
-    await client.shutdown();
+    service.fileWrite.mockResolvedValue({ status: "saved", warning: null });
+    service.shutdown.mockReturnValue(
+      new Promise<void>((resolve) => {
+        closed = resolve;
+      }),
+    );
+    const core = new CoreClient("/state", vi.fn());
+    const read = core.call("fileRead", "a.md");
+    const input = new Uint8Array([7]);
+    const save = core.call("fileWrite", "a.md", input, null);
+    expect(service.fileRead).toHaveBeenCalledExactlyOnceWith("a.md");
+    expect(service.fileWrite).toHaveBeenCalledExactlyOnceWith("a.md", input, null);
+    await expect(save).resolves.toEqual({ status: "saved", warning: null });
+    let stopped = false;
+    const shutdown = core.shutdown();
+    void shutdown.then(() => {
+      stopped = true;
+    });
+    expect(core.shutdown()).toBe(shutdown);
+    await expect(core.call("vaultList")).rejects.toThrow("内核正在关闭");
+    closed();
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    finish(new Uint8Array([42]));
+    await expect(read).resolves.toEqual(new Uint8Array([42]));
+    await shutdown;
+    expect(stopped).toBe(true);
+    expect(input).toEqual(new Uint8Array([7]));
   });
-
-  it.each(["crash", "exit"])(
-    "rejects every pending and future call after unexpected %s",
-    async (mode) => {
-      const { client } = start(mode);
-      await Promise.all([
-        expect(client.call("vaultList")).rejects.toThrow(),
-        expect(client.call("fileRead", "a.md")).rejects.toThrow(),
-        expect(client.shutdown()).rejects.toThrow(),
-      ]);
-      await expect(client.call("vaultList")).rejects.toThrow();
-    },
-  );
+  it("操作失败保持原因，不重试写入，后续合法请求仍可执行", async () => {
+    const core = new CoreClient("/state", vi.fn());
+    service.entryRename.mockRejectedValue(new Error("目标已存在：b.md"));
+    service.vaultList.mockResolvedValue(["a.md"]);
+    await expect(core.call("entryRename", "a.md", "b.md")).rejects.toThrow("目标已存在");
+    expect(service.entryRename).toHaveBeenCalledTimes(1);
+    await expect(core.call("vaultList")).resolves.toEqual(["a.md"]);
+    await core.shutdown();
+  });
+  it("原生关闭失败不能伪装成安全退出", async () => {
+    service.shutdown.mockRejectedValue(new Error("停机失败"));
+    const core = new CoreClient("/state", vi.fn());
+    await expect(core.shutdown()).rejects.toThrow("停机失败");
+    expect(service.shutdown).toHaveBeenCalledTimes(1);
+  });
 });

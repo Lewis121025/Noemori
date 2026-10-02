@@ -12,7 +12,6 @@ const { call, shutdown, register, historyItems, windowOptions } = vi.hoisted(() 
   ]),
 }));
 
-vi.mock("node:worker_threads", () => ({ Worker: class {} }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/main/core-client", () => ({
   CoreClient: class {
     call = call;
@@ -95,7 +94,7 @@ async function start() {
   return { ...electron, window: electron.BrowserWindow.getAllWindows()[0]! };
 }
 
-describe("main process worker lifetime", () => {
+describe("主进程与 Rust 内核生命周期", () => {
   it("后台测试从创建起隐藏窗口并保持渲染调度，普通启动仍显示窗口", async () => {
     vi.stubEnv("NOEMORI_TEST_WINDOW", "hidden");
     const { app } = await start();
@@ -162,7 +161,7 @@ describe("main process worker lifetime", () => {
     ]);
     expect(protocol.handle).toHaveBeenCalledWith("noemori-vault", expect.any(Function));
   });
-  it("flushes the editor before stopping and holds quit until the worker has exited", async () => {
+  it("先提交编辑器，再等待 Rust 内核完成停机后退出", async () => {
     const stopped = deferred<void>();
     shutdown.mockReturnValue(stopped.promise);
     const { app, window } = await start();
@@ -209,7 +208,7 @@ describe("main process worker lifetime", () => {
     expect(BrowserWindow.getAllWindows()).toHaveLength(0);
   });
 
-  it("reports a failed worker shutdown and permits quitting the unusable process", async () => {
+  it("报告内核停机失败，并允许退出已不可用的进程", async () => {
     const stopped = deferred<void>();
     shutdown.mockReturnValue(stopped.promise);
     const { app, window, dialog } = await start();

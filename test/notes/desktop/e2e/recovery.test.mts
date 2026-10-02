@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { Worker } from "node:worker_threads";
 import { expect, test } from "vitest";
 import { _electron as electron } from "playwright-core";
 import { CoreClient } from "../../../../modules/notes/packages/desktop/src/main/core-client";
@@ -103,7 +102,7 @@ test("目录被外部替换后，恢复草稿仍可打开、继续编辑并安�
     writeFile(join(vault, "旧笔记.md"), "外部版本"),
   ]);
   const core = new CoreClient(
-    new Worker(new URL("out/main/core-worker.js", desktop), { workerData: userData }),
+    userData,
     () => {},
   );
   try {

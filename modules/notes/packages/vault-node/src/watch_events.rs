@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::vault::JsVaultEvent;
+use noemori_runtime::VaultEvent;
 
 const MAX_PATHS: usize = 1024;
 const MAX_PATH_BYTES: usize = 256 * 1024;
@@ -10,13 +10,25 @@ const MAX_MESSAGE_BYTES: usize = 2048;
 
 /// None 表示没有已调度通知；取走内容后下一次 push 才能重新调度。
 #[derive(Default)]
-pub(crate) struct PendingNotification(Option<JsVaultEvent>);
+pub(crate) struct PendingNotification(Option<VaultEvent>);
 
 impl PendingNotification {
     /// 合并路径及健康状态；返回是否需要调度一个 JS 回调。
-    pub(crate) fn push(&mut self, mut event: JsVaultEvent) -> bool {
+    pub(crate) fn push(&mut self, mut event: VaultEvent) -> bool {
+        // 旧发布任务可能晚于新库变更抵达；必须在替换待交付内容之前排除旧代次。
+        if self
+            .0
+            .as_ref()
+            .is_some_and(|old| old.generation > event.generation)
+        {
+            return false;
+        }
         let schedule = self.0.is_none();
-        if let Some(previous) = self.0.take() {
+        if let Some(previous) = self
+            .0
+            .take()
+            .filter(|old| old.generation == event.generation)
+        {
             event.paths = merge_paths(previous.paths, event.paths);
             event.healthy &= previous.healthy;
             if previous.status != "changed" {
@@ -38,7 +50,7 @@ impl PendingNotification {
     }
 
     /// 在转换为 JS 参数时释放调度归属，允许新变化进入下一批。
-    pub(crate) fn take(&mut self) -> Option<JsVaultEvent> {
+    pub(crate) fn take(&mut self) -> Option<VaultEvent> {
         self.0.take()
     }
 }

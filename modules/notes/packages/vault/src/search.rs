@@ -18,6 +18,10 @@ mod evidence;
 mod occurrences;
 mod plan;
 
+#[cfg(test)]
+#[path = "../../../../../test/notes/vault/performance/search/phases.rs"]
+mod performance;
+
 pub(crate) use occurrences::execute as execute_matches_page;
 
 use std::collections::HashMap;

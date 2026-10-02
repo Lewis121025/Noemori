@@ -1,110 +1,64 @@
-import type { Worker } from "node:worker_threads";
-import type { CoreCommand, CoreInput, CoreOutput, CoreRequest } from "./core-protocol";
-import type { CoreService } from "./core-service";
+import type { NativeControl } from "@noemori/vault-node";
+import { createCoreService, type CoreService } from "./core-service";
 import type { VaultEvent } from "../features/reader/shared/api";
 
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-
-/**
- * 主进程的内核客户端：关联异步结果，并在退出前排空已提交的工作。
- * 线程异常后拒绝后续调用，不自动重放结果未知的写操作。
- */
+/** 主进程的薄客户端；原生同步入队确定顺序，Promise 仅交付最终结果。 */
 export class CoreClient {
-  private sequence = 0;
-  private readonly pending = new Map<number, Pending>();
-  private failure: Error | null = null;
+  private readonly service: ReturnType<typeof createCoreService>;
+  private readonly pending = new Set<Promise<unknown>>();
   private stopping: Promise<void> | null = null;
-  private readonly exited: Promise<Error | null>;
-  private serviceClosed = false;
 
-  /**
-   * @param worker 唯一持有原生内核的线程。
-   * @param onChanged 当前库变更通知。
-   */
-  constructor(
-    private readonly worker: Worker,
-    private readonly onChanged: (event: VaultEvent) => void,
-  ) {
-    worker.on("message", (message: CoreOutput) => {
-      if (message.type === "stopped") {
-        this.serviceClosed = true;
-        return;
-      }
-      if (message.type === "changed") {
-        if (this.failure === null && this.stopping === null) onChanged(message.event);
-        return;
-      }
-      const pending = this.pending.get(message.id);
-      if (pending === undefined) return;
-      this.pending.delete(message.id);
-      if (message.type === "error") pending.reject(new Error(message.message));
-      else pending.resolve(message.value);
-    });
-    worker.on("error", (error) => this.fail(error));
-    // error 只表明发生故障，exit 才表示线程资源确已释放；此 Promise 不主动拒绝。
-    this.exited = new Promise((resolve) => {
-      worker.once("exit", (code) => {
-        if (code !== 0 || !this.serviceClosed || this.pending.size !== 0) {
-          this.fail(new Error(`内核线程意外退出（${code}），请重新启动应用`));
-        }
-        resolve(this.failure);
-      });
+  /** 创建当前应用的运行时；加载错误直接传播，不启动部分可用的内核。 */
+  constructor(userData: string, onChanged: (event: VaultEvent) => void) {
+    this.service = createCoreService(userData, (event) => {
+      if (this.stopping === null) onChanged(event);
     });
   }
 
+  /** 创建独立控制句柄；进度读取与取消均不访问磁盘或命令队列。 */
+  createControl(): NativeControl {
+    return this.service.createControl();
+  }
+
   /**
-   * 按调用顺序提交命令；字节通过结构化克隆传递，不转移编辑器缓冲区所有权。
-   * @param command 服务命令名。
-   * @param args 与命令签名一致的参数。
-   * @returns 命令结果；内核错误、线程故障或停机后调用会拒绝。
+   * 按调用顺序进入 Rust；不转移或分离编辑器输入缓冲区。
+   * @returns 对应命令的结果；失败传播，禁止自动重放写入。
    */
-  call<C extends CoreCommand>(
+  call<C extends keyof CoreService>(
     command: C,
     ...args: Parameters<CoreService[C]>
   ): Promise<Awaited<ReturnType<CoreService[C]>>> {
-    if (this.failure !== null) return Promise.reject(this.failure);
     if (this.stopping !== null) return Promise.reject(new Error("内核正在关闭"));
-    const id = ++this.sequence;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, {
-        // 编号只对应这一条命令，结果类型与调用签名一致。
-        resolve: (value) => resolve(value as Awaited<ReturnType<CoreService[C]>>),
-        reject,
-      });
-      const request: CoreRequest<C> = { type: "call", id, command, args };
-      try {
-        this.worker.postMessage(request);
-      } catch (error) {
-        this.pending.delete(id);
-        reject(error);
-      }
-    });
+    // 索引与参数共享同一 C；仅恢复 TypeScript 对异构方法索引丢失的对应关系。
+    const invoke = this.service[command] as (
+      ...input: Parameters<CoreService[C]>
+    ) => ReturnType<CoreService[C]>;
+    let result: Promise<Awaited<ReturnType<CoreService[C]>>>;
+    try {
+      result = Promise.resolve(invoke(...args));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    this.pending.add(result);
+    void result.then(
+      () => this.pending.delete(result),
+      () => this.pending.delete(result),
+    );
+    return result;
   }
 
-  /**
-   * 排空命令、停止原生监视后等待线程自然退出；重复调用共用同一结果。
-   * @returns 线程已结束；异常终止时拒绝，不伪装成安全停机。
-   */
+  /** 关闭原生入口，等待真实停机与所有 JS 结果交付；重复调用共用结果。 */
   shutdown(): Promise<void> {
     if (this.stopping !== null) return this.stopping;
-    this.stopping = this.exited.then((error) => {
-      if (error !== null) throw error;
-    });
-    if (this.failure === null) {
-      try {
-        this.worker.postMessage({ type: "shutdown" } satisfies CoreInput);
-      } catch (error) {
-        this.fail(error instanceof Error ? error : new Error(String(error)));
-      }
+    let native: Promise<void>;
+    try {
+      native = this.service.shutdown();
+    } catch (error) {
+      native = Promise.reject(error);
     }
+    this.stopping = Promise.all([native, Promise.allSettled([...this.pending])]).then(
+      () => undefined,
+    );
     return this.stopping;
-  }
-
-  private fail(error: Error): void {
-    const first = this.failure === null;
-    this.failure ??= error;
-    for (const pending of this.pending.values()) pending.reject(this.failure);
-    this.pending.clear();
-    if (first) this.onChanged({ status: "worker-error", paths: [], message: this.failure.message });
   }
 }

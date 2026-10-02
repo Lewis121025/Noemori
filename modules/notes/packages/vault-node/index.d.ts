@@ -10,8 +10,6 @@ export interface JsImportedAttachment {
   /** 文件已落盘后发生的索引或同步错误。 */
   warning?: string
 }
-/** 导入用户选择的附件字节，返回实际位置；路径、大小与写盘错误由内核传播。 */
-export declare function attachmentImport(from: string, name: string, bytes: Buffer): JsImportedAttachment
 /** 一条书签；`kind` 为 `file`/`folder`（`path`）、`heading`（`path` 与 `heading`）或 `search`（`query`）。 */
 export interface JsBookmark {
   /** 书签种类。 */
@@ -25,30 +23,6 @@ export interface JsBookmark {
   /** 自定义显示名。 */
   title?: string
 }
-/**
- * 读出库内书签；文件不存在时为空。
- *
- * # Errors
- *
- * 未打开库、读盘失败或书签文件损坏。
- */
-export declare function bookmarksList(): Array<JsBookmark>
-/**
- * 整体替换书签清单；损坏的旧文件先备份再覆盖。
- *
- * # Errors
- *
- * 未打开库、书签字段无效或写盘失败。
- */
-export declare function bookmarksSet(items: Array<JsBookmark>): void
-/**
- * 列出库内相对路径。
- *
- * # Errors
- *
- * 未打开库或读目录失败。
- */
-export declare function vaultList(): Array<string>
 /** 文件树条目，包含空文件夹。 */
 export interface JsVaultEntry {
   /** 库内相对路径。 */
@@ -58,70 +32,11 @@ export interface JsVaultEntry {
   /** 仅在草稿无法对应真实文件条目时设置。 */
   recoveryOnly?: boolean
 }
-/** 列出完整目录；未打开库或目录读取失败时返回错误。 */
-export declare function vaultEntries(): Array<JsVaultEntry>
-/**
- * 创建笔记或文件夹；`content` 是文件初始字节（缺省为空），创建与写入
- * 是同一次独占提交。非法类型、同名目标、目录携带内容或磁盘失败时拒绝。
- */
-export declare function entryCreate(path: string, kind: string, content?: Buffer | undefined | null): JsRenameOutcome
-/** 移入系统废纸篓；失败不退化为永久删除，未保存草稿阻止操作。 */
-export declare function entryTrash(path: string): JsRenameOutcome
-/** 批量预检的独立条目，不包含未经确认的覆盖或永久删除选项。 */
-export interface JsEntryMutation {
-  /** 规范的库内源路径。 */
-  from: string
-  /** 缺席表示废纸篓操作，否则为规范移动目标。 */
-  to?: string
-}
-/** 预检整批操作；不修改用户文件，路径、草稿或目标冲突通过异常返回。 */
-export declare function entryCheckBatch(changes: Array<JsEntryMutation>): void
-/** 获取经过库根校验的现有路径，只供主进程调用系统文件管理器。 */
-export declare function entryPath(path: string): string
 /** 文件已经完成改名，索引或日志清理可能仍需重试。 */
 export interface JsRenameOutcome {
   /** 提交后的警告；无警告时缺失。 */
   warning?: string
 }
-/**
- * 将 `from` 改名为 `to` 并更新全库链接，返回提交后的警告。
- *
- * # Errors
- *
- * 未打开库、目标已存在或写盘失败。
- */
-export declare function entryRename(from: string, to: string): JsRenameOutcome
-/** 首个失败的源路径与原因；空路径表示进度回调失败。 */
-export interface JsRenameBatchIssue {
-  /** 规范的库内源路径，或表示批次错误的空字符串。 */
-  path: string
-  /** 可直接展示的失败原因。 */
-  message: string
-}
-/** 已提交前缀是重试的唯一边界，索引警告不会让已完成文件再次执行。 */
-export interface JsRenameBatchOutcome {
-  /** 已独立持久化的条目数。 */
-  completed: number
-  /** 首个执行或回调失败，主动停止时缺省。 */
-  issue?: JsRenameBatchIssue
-  /** 提交后的清理、书签或索引警告。 */
-  warning?: string
-}
-/**
- * 整批预检后复用快照逐项移动；同步回调收到完成数，返回 false 在事务之间停止。
- * 回调只能保存外部会话或读取停止信号，不能重入内核；异常进入结果并收尾索引。
- * # Errors
- * 未打开库、预检或快照失败时抛错且本批尚未提交；执行后的错误保留真实完成数。
- */
-export declare function entryRenameBatch(changes: Array<JsEntryMutation>, progress: (completed: number) => boolean): JsRenameBatchOutcome
-/**
- * 读取文件原始字节。
- *
- * # Errors
- *
- * 未打开库、越界或不存在。
- */
-export declare function fileRead(rel: string): Buffer
 /** 已持久化的恢复草稿。 */
 export interface JsDraft {
   /** 普通草稿为最新内容；存在 editor 时为重建源码映射的原始字节。 */
@@ -140,21 +55,6 @@ export interface JsFileSnapshot {
   /** 尚未提交的编辑。 */
   draft?: JsDraft
 }
-/**
- * 获取 `rel` 的磁盘内容与恢复草稿。
- *
- * # Errors
- *
- * 未打开库、越界或读取失败。
- */
-export declare function fileSnapshot(rel: string): JsFileSnapshot
-/**
- * 持久化带版本的编辑恢复数据，保持原笔记字节不变。
- *
- * # Errors
- * 未打开库、路径或数据非法、恢复记录冲突或数据库不可写。
- */
-export declare function filePreserveDraft(rel: string, source: Buffer, expected: Buffer | undefined | null, editor: string): void
 /** 文件提交结果，冲突时附带磁盘版本。 */
 export interface JsWriteResult {
   /** `saved` 或 `conflict`。 */
@@ -164,14 +64,6 @@ export interface JsWriteResult {
   /** 已提交后的同步、索引或清理警告。 */
   warning?: string
 }
-/**
- * 按 `expected` 基准保存 `bytes`，返回提交状态或冲突。
- *
- * # Errors
- *
- * 未打开库、越界、草稿持久化或内容提交失败。
- */
-export declare function fileWrite(rel: string, bytes: Buffer, expected?: Buffer | undefined | null): JsWriteResult
 /** 新副本的路径与提交后警告。 */
 export interface JsSavedCopy {
   /** 实际创建的相对路径。 */
@@ -179,14 +71,6 @@ export interface JsSavedCopy {
   /** 内容已保存后的警告。 */
   warning?: string
 }
-/**
- * 将当前 `bytes` 写入唯一命名的新副本，`expected` 用于恢复基准。
- *
- * # Errors
- *
- * 未打开库、路径非法或副本提交失败。
- */
-export declare function fileWriteCopy(rel: string, bytes: Buffer, expected?: Buffer | undefined | null): JsSavedCopy
 /** 图谱节点：笔记或死链目标。 */
 export interface JsGraphNode {
   /** 笔记的库内相对路径；死链为去掉锚点后的目标原文。 */
@@ -214,14 +98,6 @@ export interface JsGraph {
   /** 边，按起止升序。 */
   edges: Array<JsGraphEdge>
 }
-/**
- * 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
- *
- * # Errors
- *
- * 未打开库或索引查询失败。
- */
-export declare function indexGraph(includeDead: boolean): JsGraph
 /** 链接解析结果：路径、锚点与歧义候选分开返回。 */
 export interface JsLinkTarget {
   /** `resolved`、`ambiguous` 或 `dead`。 */
@@ -233,16 +109,6 @@ export interface JsLinkTarget {
   /** 已解码的标题锚点；无锚点为缺失。 */
   anchor?: string
 }
-/**
- * 解析链接目标。
- *
- * `kind` 为 `wiki` 或 `md`。歧义时返回全部候选，由界面让用户选择。
- *
- * # Errors
- *
- * 未打开库或 kind 非法。
- */
-export declare function linksResolve(from: string, raw: string, kind: string): JsLinkTarget
 /** 一条索引中的链接。 */
 export interface JsLinkRecord {
   /** 源文件相对路径。 */
@@ -288,39 +154,6 @@ export interface JsMentions {
   /** 正文里尚未做成链接的出现。 */
   unlinked: Array<JsMentionRecord>
 }
-/**
- * 指向 `path` 的入链。
- *
- * # Errors
- *
- * 未打开库。
- */
-export declare function indexLinksTo(path: string): Array<JsLinkRecord>
-/**
- * `path` 的出链。
- *
- * # Errors
- *
- * 未打开库。
- */
-export declare function indexLinksFrom(path: string): Array<JsLinkRecord>
-/**
- * 指向 `path` 的已链接提及与未链接提及。
- *
- * # Errors
- *
- * 未打开库。
- */
-export declare function indexMentionsTo(path: string): JsMentions
-/**
- * 把 `from` 文件里 `[start_byte, end_byte)` 的未链接提及就地转为指向
- * `target` 的 wiki 链接；`expected` 是查询时的提及文本，文件已变化时拒绝。
- *
- * # Errors
- *
- * 未打开库、目标不在库内、区间过期或写盘失败。
- */
-export declare function mentionsLinkify(from: string, startByte: number, endByte: number, expected: string, target: string): JsRenameOutcome
 /** 索引里的一条标题记录。 */
 export interface JsHeadingRecord {
   /** 源文件相对路径。 */
@@ -341,14 +174,6 @@ export interface JsTagCount {
   /** 携带该标签的文件数。 */
   count: number
 }
-/**
- * 全库标签及计数，标签升序；供标签浏览面板。
- *
- * # Errors
- *
- * 未打开库。
- */
-export declare function indexTags(): Array<JsTagCount>
 /** 一篇笔记可被点名的标题与别名。 */
 export interface JsNoteKeys {
   /** 库内相对路径。 */
@@ -358,22 +183,6 @@ export interface JsNoteKeys {
   /** frontmatter 别名，按书写顺序。 */
   aliases: Array<string>
 }
-/**
- * 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
- *
- * # Errors
- *
- * 未打开库或索引查询失败。
- */
-export declare function indexNoteKeys(): Array<JsNoteKeys>
-/**
- * `path` 的全部标题，按文档顺序；供锚点解析与标题补全。
- *
- * # Errors
- *
- * 未打开库。
- */
-export declare function indexHeadings(path: string): Array<JsHeadingRecord>
 /** 一页已验证命中；续页游标只能用于相同表达式、页长与库版本。 */
 export interface JsSearchPage {
   /** 当前页文件。 */
@@ -388,15 +197,6 @@ export interface JsSearchMatchesPage {
   /** 没有更多命中时明确为 null。 */
   nextCursor: string | null
 }
-/**
- * 提交异步搜索；新 ID 替代旧会话，同 ID 的文件和命中续页共享取消令牌。
- * 未打开库、参数、游标或索引错误会拒绝；取消不返回部分结果。
- */
-export declare function searchQuery(query: JsSearchQuery, id: string, cursor?: string | undefined | null): Promise<JsSearchPage>
-/** 加载当前搜索会话中的下一批命中；过期会话、游标或库版本会拒绝，不复活旧搜索。 */
-export declare function searchMatches(query: JsSearchQuery, id: string, cursor: string): Promise<JsSearchMatchesPage>
-/** 只取消匹配 ID 的任务；迟到的旧请求不能取消新查询，已完成或已关闭时可安全重试。 */
-export declare function searchCancel(id: string): void
 /**
  * 检索表达式节点；查询文本解析在渲染层完成。
  *
@@ -453,45 +253,219 @@ export interface JsSearchLocation {
   /** 一基行号。 */
   line: number
 }
-/** 开库阶段计数；准备期间可取消，提交会话后的状态替换不可中断。 */
-export interface JsOpenProgress {
-  /** recovering、scanning、checking、reading、indexing、ranking 或 verifying。 */
-  phase: string
-  /** 当前阶段已完成条目数。 */
-  completed: number
-  /** 未知总量时缺省，不生成虚构的总体百分比。 */
-  total?: number
-}
-/** 监视通知携带受影响路径及健康状态；失败不能伪装成一次成功刷新。 */
+/** 监视事件携带代次，主线程交付时过滤已关闭的库。 */
 export interface JsVaultEvent {
+  /** 原生运行时代次；不暴露给渲染进程。 */
+  generation: string
   /** changed、watch-error 或 index-error。 */
   status: string
-  /** 已约束到当前库的相对路径，空列表表示需要完整刷新。 */
+  /** 受影响的库内路径；空表示完整刷新。 */
   paths: Array<string>
-  /** 本次确实完成了监视后的索引校验。 */
+  /** 是否完成索引复核。 */
   healthy: boolean
-  /** 异常原因；成功事件不提供。 */
+  /** 失败时保留原因。 */
   message?: string
 }
-/**
- * 打开库并开始监视。
- *
- * `root` 是库目录，`index_dir` 是库外的派生索引与恢复目录。
- * 监视线程在防抖与索引刷新后，将 `on_changed` 投递给持有内核的 JS 线程。
- * 成功后替换当前库及其监视器；失败时保留原库。
- * `progress` 返回 false 时取消准备；`before_commit` 接收已准备目录并提交外部会话，
- * 返回 false 同样取消。两个回调都不可重入内核。返回 true 表示已切库，false 表示取消。
- *
- * # Errors
- *
- * 打不开目录、索引或监视器时失败。
- */
-export declare function vaultOpen(root: string, indexDir: string, onChanged: (...args: any[]) => any, progress?: ((progress: JsOpenProgress) => boolean) | undefined | null, beforeCommit?: ((entries: JsVaultEntry[]) => boolean) | undefined | null): boolean
-/**
- * 关闭当前库并停止监视。
- *
- * # Errors
- *
- * 锁毒化时失败。
- */
-export declare function vaultClose(): void
+/** 内存控制句柄，取消和进度不排在正在执行的操作之后。 */
+export declare class NativeControl {
+  /** 创建可取消操作；磁盘工作由持有句柄的命令负责。 */
+  constructor()
+  /** 原子请求取消；已经提交的操作返回 false。 */
+  cancel(): boolean
+  /** 读取取消标记，目录对话框结束后仍能识别此前的取消。 */
+  get cancelled(): boolean
+  /** 当前阶段完整快照，不等待任何磁盘任务。 */
+  get progress(): unknown
+}
+/** 一个宿主的 Rust 运行时；显式 shutdown 负责等待磁盘任务与监听退出。 */
+export declare class NativeRuntime {
+  /** 导入用户选择的附件字节，返回实际位置；路径、大小与写盘错误由内核传播。 */
+  attachmentImport(root: string, from: string, name: string, bytes: Buffer): Promise<JsImportedAttachment>
+  /**
+   * 读出库内书签；文件不存在时为空。
+   *
+   * # Errors
+   *
+   * 未打开库、读盘失败或书签文件损坏。
+   */
+  bookmarksList(): Promise<Array<JsBookmark>>
+  /**
+   * 整体替换书签清单；损坏的旧文件先备份再覆盖。
+   *
+   * # Errors
+   *
+   * 未打开库、书签字段无效或写盘失败。
+   */
+  bookmarksSet(items: Array<JsBookmark>): Promise<void>
+  /**
+   * 列出库内相对路径。
+   *
+   * # Errors
+   *
+   * 未打开库或读目录失败。
+   */
+  vaultList(): Promise<Array<string>>
+  /** 列出完整目录；未打开库或目录读取失败时返回错误。 */
+  vaultEntries(): Promise<Array<JsVaultEntry>>
+  /**
+   * 创建笔记或文件夹；`content` 是文件初始字节（缺省为空），创建与写入
+   * 是同一次独占提交。非法类型、同名目标、目录携带内容或磁盘失败时拒绝。
+   */
+  entryCreate(path: string, kind: string, content?: Buffer | undefined | null): Promise<JsRenameOutcome>
+  /** 移入系统废纸篓；失败不退化为永久删除，未保存草稿阻止操作。 */
+  entryTrash(path: string): Promise<JsRenameOutcome>
+  /** 获取经过库根校验的现有路径，只供主进程调用系统文件管理器。 */
+  entryPath(path: string): Promise<string>
+  /**
+   * 将 `from` 改名为 `to` 并更新全库链接，返回提交后的警告。
+   *
+   * # Errors
+   *
+   * 未打开库、目标已存在或写盘失败。
+   */
+  entryRename(from: string, to: string): Promise<JsRenameOutcome>
+  /** 执行整批请求；返回真实完成前缀，取消只能发生在事务边界。 */
+  entryBatch(request: unknown, control: NativeControl): Promise<unknown>
+  /**
+   * 读取文件原始字节。
+   *
+   * # Errors
+   *
+   * 未打开库、越界或不存在。
+   */
+  fileRead(rel: string): Promise<Buffer>
+  /**
+   * 获取 `rel` 的磁盘内容与恢复草稿。
+   *
+   * # Errors
+   *
+   * 未打开库、越界或读取失败。
+   */
+  fileSnapshot(rel: string): Promise<JsFileSnapshot>
+  /**
+   * 持久化带版本的编辑恢复数据，保持原笔记字节不变。
+   *
+   * # Errors
+   * 未打开库、路径或数据非法、恢复记录冲突或数据库不可写。
+   */
+  filePreserveDraft(rel: string, source: Buffer, expected: Buffer | undefined | null, editor: string): Promise<void>
+  /**
+   * 按 `expected` 基准保存 `bytes`，返回提交状态或冲突。
+   *
+   * # Errors
+   *
+   * 未打开库、越界、草稿持久化或内容提交失败。
+   */
+  fileWrite(rel: string, bytes: Buffer, expected?: Buffer | undefined | null): Promise<JsWriteResult>
+  /**
+   * 将当前 `bytes` 写入唯一命名的新副本，`expected` 用于恢复基准。
+   *
+   * # Errors
+   *
+   * 未打开库、路径非法或副本提交失败。
+   */
+  fileWriteCopy(rel: string, bytes: Buffer, expected?: Buffer | undefined | null): Promise<JsSavedCopy>
+  /**
+   * 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
+   *
+   * # Errors
+   *
+   * 未打开库或索引查询失败。
+   */
+  indexGraph(includeDead: boolean): Promise<JsGraph>
+  /**
+   * 解析链接目标。
+   *
+   * `kind` 为 `wiki` 或 `md`。歧义时返回全部候选，由界面让用户选择。
+   *
+   * # Errors
+   *
+   * 未打开库或 kind 非法。
+   */
+  linksResolve(from: string, raw: string, kind: string): Promise<JsLinkTarget>
+  /**
+   * 指向 `path` 的入链。
+   *
+   * # Errors
+   *
+   * 未打开库。
+   */
+  indexLinksTo(path: string): Promise<Array<JsLinkRecord>>
+  /**
+   * `path` 的出链。
+   *
+   * # Errors
+   *
+   * 未打开库。
+   */
+  indexLinksFrom(path: string): Promise<Array<JsLinkRecord>>
+  /**
+   * 指向 `path` 的已链接提及与未链接提及。
+   *
+   * # Errors
+   *
+   * 未打开库。
+   */
+  indexMentionsTo(path: string): Promise<JsMentions>
+  /**
+   * 把 `from` 文件里 `[start_byte, end_byte)` 的未链接提及就地转为指向
+   * `target` 的 wiki 链接；`expected` 是查询时的提及文本，文件已变化时拒绝。
+   *
+   * # Errors
+   *
+   * 未打开库、目标不在库内、区间过期或写盘失败。
+   */
+  mentionsLinkify(from: string, startByte: number, endByte: number, expected: string, target: string): Promise<JsRenameOutcome>
+  /**
+   * 全库标签及计数，标签升序；供标签浏览面板。
+   *
+   * # Errors
+   *
+   * 未打开库。
+   */
+  indexTags(): Promise<Array<JsTagCount>>
+  /**
+   * 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
+   *
+   * # Errors
+   *
+   * 未打开库或索引查询失败。
+   */
+  indexNoteKeys(): Promise<Array<JsNoteKeys>>
+  /**
+   * `path` 的全部标题，按文档顺序；供锚点解析与标题补全。
+   *
+   * # Errors
+   *
+   * 未打开库。
+   */
+  indexHeadings(path: string): Promise<Array<JsHeadingRecord>>
+  /** 提交搜索；在调用线程登记会话，旧续页不能替换新搜索。 */
+  searchQuery(query: JsSearchQuery, id: string, cursor?: string | undefined | null): Promise<JsSearchPage>
+  /** 同会话的命中续页共享取消令牌，交付前再次验证归属。 */
+  searchMatches(query: JsSearchQuery, id: string, cursor: string): Promise<JsSearchMatchesPage>
+  /** 取消仅匹配 ID 的会话，不经过磁盘队列。 */
+  searchCancel(id: string): void
+  /** 准备候选库并原子切换；取消返回 null，失败保留旧库。 */
+  vaultOpen(root: string, control: NativeControl): Promise<unknown>
+  /** 在后台创建默认目录并打开，主线程只负责提供系统路径。 */
+  vaultCreate(root: string, control: NativeControl): Promise<unknown>
+  /** 从磁盘会话恢复原库与阅读现场；失败不覆盖原会话。 */
+  vaultRestore(control: NativeControl): Promise<unknown>
+  /** 顺序关闭当前库，等待监视线程退出。 */
+  vaultClose(): Promise<void>
+  /** 读取兼容旧格式的应用会话；磁盘错误按现有恢复规则回退。 */
+  sessionLoad(): Promise<unknown>
+  /** 仅替换应用字段；输入由主进程校验，Rust 仍归一化磁盘格式。 */
+  sessionPatch(patch: unknown): Promise<void>
+  /** 合并阅读器会话，不允许覆盖窗口和外观字段。 */
+  readerSessionPatch(patch: unknown): Promise<void>
+  /** 目录状态绑定库根，迟到的旧状态不能覆盖新库。 */
+  readerFileTreeSave(root: string, tree: unknown): Promise<void>
+  /** 创建轻量句柄；初始化不读取磁盘，首个应用命令在后台执行。 */
+  constructor(userData: string, onChanged: (event: JsVaultEvent) => void)
+  /** 当前代次只访问原子内存，供宿主丢弃迟到事件。 */
+  get generation(): string
+  /** 关闭入口并排空所有已接受任务；Promise 完成才表示监听已停止。 */
+  shutdown(): Promise<void>
+}

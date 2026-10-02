@@ -86,7 +86,7 @@ export function parseEntryBatchRequest(value: unknown): EntryBatchRequest {
 
 /**
  * 用同一清单预检整批的名称占用、自身子目录、失效与恢复条目；不触碰磁盘。
- * 工作线程在执行前重新调用，并交内核核验真实磁盘与草稿约束。
+ * 此结果用于界面预览；Rust 运行时执行前重新预检，由 Vault 核验真实磁盘与草稿约束。
  */
 export function planEntryBatch(
   entries: readonly VaultEntry[],

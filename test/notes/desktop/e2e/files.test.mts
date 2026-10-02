@@ -10,7 +10,7 @@ import { _electron as electron } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("批量进度跨越真实内核线程，停止与继续保留文件和链接", async (t) => {
+test("批量进度经真实 Rust 运行时交付，停止与继续保留文件和链接", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-batch-progress-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -668,9 +668,9 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     await empty.getByRole("button", { name: "新建笔记", exact: true }).click();
     await expect.poll(() => empty.locator(".document-name").textContent()).toBe("未命名 2.md");
     expect(await empty.getByRole("complementary", { name: "文件栏" }).isVisible()).toBe(false);
-    expect(
-      await empty.locator(".ProseMirror").evaluate((node) => node.contains(document.activeElement)),
-    ).toBe(true);
+    await expect
+      .poll(() => empty.locator(".ProseMirror").evaluate((node) => node.contains(document.activeElement)))
+      .toBe(true);
     await empty.keyboard.insertText("小窗口也能直接写下想法。");
     await empty.keyboard.press(`${modifier}+s`);
     await expect

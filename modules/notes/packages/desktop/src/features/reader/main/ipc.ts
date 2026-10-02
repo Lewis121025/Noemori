@@ -1,3 +1,4 @@
+import type { NativeControl } from "@noemori/vault-node";
 import { ipcMain, shell, type BrowserWindow } from "electron";
 import { externalUrl } from "../shared/link-target";
 import type { PaneLayout } from "../shared/api";
@@ -27,14 +28,15 @@ import {
 
 /** 主进程仅能调用阅读器命令，不暴露外壳会话或任意线程消息。 */
 export type ReaderClient = {
+  createControl(): NativeControl;
   call<C extends keyof ReaderService>(
     command: C,
     ...args: Parameters<ReaderService[C]>
-  ): Promise<ReturnType<ReaderService[C]>>;
+  ): Promise<Awaited<ReturnType<ReaderService[C]>>>;
 };
 
 /**
- * 注册阅读器 IPC，文件操作与持久化均经工作线程执行。
+ * 注册阅读器 IPC，文件操作与持久化均在 Rust 后台任务中执行。
  * @param getWindow 目录选择框的父窗口。
  * @param core 注入的阅读器命令客户端。
  * @throws IPC 重复注册或单次命令失败时由 Electron 传播错误。

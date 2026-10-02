@@ -14,7 +14,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "我的资料");
   const state = join(root, "state");
-  await Promise.all([mkdir(vault), mkdir(state), mkdir(join(vault, "阅读"), { recursive: true })]);
+  await Promise.all([mkdir(state), mkdir(join(vault, "阅读"), { recursive: true })]);
   await writeFile(
     join(vault, "注意力与工具.md"),
     "# 注意力与工具\n\n打开笔记，是为了接着自己的想法写下去。\n\n工具应当记住位置，在需要时提供帮助。\n\n## 留一点空间\n\n先记录，再慢慢整理。\n",

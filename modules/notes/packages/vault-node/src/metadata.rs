@@ -1,8 +1,8 @@
 //! 标题、标签及笔记身份的 Node-API 适配。
 
+use crate::runtime::{with_vault, NativeRuntime};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use crate::runtime::with_vault;
 use noemori_vault::Vault;
 
 /// 索引里的一条标题记录。
@@ -29,21 +29,26 @@ pub struct JsTagCount {
     pub count: i64,
 }
 
-/// 全库标签及计数，标签升序；供标签浏览面板。
-///
-/// # Errors
-///
-/// 未打开库。
 #[napi]
-pub fn index_tags() -> Result<Vec<JsTagCount>> {
-    let counts = with_vault(Vault::tag_counts)?;
-    Ok(counts
-        .into_iter()
-        .map(|count| JsTagCount {
-            tag: count.tag,
-            count: count.count,
+impl NativeRuntime {
+    /// 全库标签及计数，标签升序；供标签浏览面板。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库。
+    #[napi(ts_return_type = "Promise<Array<JsTagCount>>")]
+    pub fn index_tags(&self, env: Env) -> Result<Object> {
+        self.read(env, move |vault| {
+            let counts = with_vault(vault, Vault::tag_counts)?;
+            Ok(counts
+                .into_iter()
+                .map(|count| JsTagCount {
+                    tag: count.tag,
+                    count: count.count,
+                })
+                .collect::<Vec<_>>())
         })
-        .collect())
+    }
 }
 
 /// 一篇笔记可被点名的标题与别名。
@@ -57,40 +62,50 @@ pub struct JsNoteKeys {
     pub aliases: Vec<String>,
 }
 
-/// 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
-///
-/// # Errors
-///
-/// 未打开库或索引查询失败。
 #[napi]
-pub fn index_note_keys() -> Result<Vec<JsNoteKeys>> {
-    let keys = with_vault(Vault::note_keys)?;
-    Ok(keys
-        .into_iter()
-        .map(|note| JsNoteKeys {
-            path: note.path,
-            title: note.title,
-            aliases: note.aliases,
+impl NativeRuntime {
+    /// 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库或索引查询失败。
+    #[napi(ts_return_type = "Promise<Array<JsNoteKeys>>")]
+    pub fn index_note_keys(&self, env: Env) -> Result<Object> {
+        self.read(env, move |vault| {
+            let keys = with_vault(vault, Vault::note_keys)?;
+            Ok(keys
+                .into_iter()
+                .map(|note| JsNoteKeys {
+                    path: note.path,
+                    title: note.title,
+                    aliases: note.aliases,
+                })
+                .collect::<Vec<_>>())
         })
-        .collect())
+    }
 }
 
-/// `path` 的全部标题，按文档顺序；供锚点解析与标题补全。
-///
-/// # Errors
-///
-/// 未打开库。
 #[napi]
-pub fn index_headings(path: String) -> Result<Vec<JsHeadingRecord>> {
-    let headings = with_vault(|vault| vault.headings(&path))?;
-    Ok(headings
-        .into_iter()
-        .map(|heading| JsHeadingRecord {
-            path: heading.path,
-            level: heading.level,
-            text: heading.text,
-            start_byte: heading.start_byte,
-            end_byte: heading.end_byte,
+impl NativeRuntime {
+    /// `path` 的全部标题，按文档顺序；供锚点解析与标题补全。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库。
+    #[napi(ts_return_type = "Promise<Array<JsHeadingRecord>>")]
+    pub fn index_headings(&self, env: Env, path: String) -> Result<Object> {
+        self.read(env, move |vault| {
+            let headings = with_vault(vault, |vault| vault.headings(&path))?;
+            Ok(headings
+                .into_iter()
+                .map(|heading| JsHeadingRecord {
+                    path: heading.path,
+                    level: heading.level,
+                    text: heading.text,
+                    start_byte: heading.start_byte,
+                    end_byte: heading.end_byte,
+                })
+                .collect::<Vec<_>>())
         })
-        .collect())
+    }
 }

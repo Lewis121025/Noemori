@@ -1,31 +1,41 @@
-/** 工作线程装配：组合应用会话与功能服务，功能内部不反向依赖外壳。 */
+/** 宿主装配：原生句柄唯一拥有应用运行时，功能层只适配协议。 */
+import { createRequire } from "node:module";
+import type * as NativeModule from "@noemori/vault-node";
 import { createReaderService } from "../features/reader/main/service";
-import type { VaultEvent } from "../features/reader/shared/api";
-import { loadSession, patchSession, sessionFile, type Session } from "./session";
+import { parseVaultEvent, type VaultEvent } from "../features/reader/shared/api";
+import { parseSession, type Session } from "./session";
+
+const require = createRequire(import.meta.url);
 
 /**
- * 创建按线程消息顺序执行的服务；原生模块只在工作线程内加载。
+ * 创建直接连接 Rust 的应用服务；所有磁盘操作均返回原生 Promise。
  * @param userData 应用数据目录。
- * @param onChanged 阅读器库变更通知。
- * @returns 应用命令与阅读器命令；磁盘及原生模块错误向调用方传播。
+ * @param onChanged 当前库通知；迟到代次在这里丢弃。
+ * @returns 应用服务与控制句柄工厂；原生加载和请求错误保留原因。
  */
 export function createCoreService(userData: string, onChanged: (event: VaultEvent) => void) {
-  const file = sessionFile(userData);
-  const reader = createReaderService(userData, onChanged, {
-    load: () => loadSession(file).reader,
-    save: (state) => {
-      patchSession(file, { reader: state });
-    },
+  const module = require("@noemori/vault-node") as typeof NativeModule;
+  const native = new module.NativeRuntime(userData, (event) => {
+    if (event.generation !== native.generation) return;
+    try {
+      onChanged(parseVaultEvent(event));
+    } catch (error) {
+      onChanged({ status: "index-error", paths: [], message: String(error) });
+    }
   });
   return {
-    ...reader,
-    sessionLoad: (): Session => loadSession(file),
-    sessionPatch: (patch: Partial<Pick<Session, "appearance" | "window">>): void => {
-      patchSession(file, patch);
+    ...createReaderService(native, () => new module.NativeControl()),
+    createControl: (): NativeModule.NativeControl => new module.NativeControl(),
+    async sessionLoad(): Promise<Session> {
+      const session = parseSession(JSON.stringify(await native.sessionLoad()));
+      if (session === null) throw new Error("内核会话响应无效");
+      return session;
     },
-    shutdown: (): void => reader.vaultClose(),
+    sessionPatch: (patch: Partial<Pick<Session, "appearance" | "window">>): Promise<void> =>
+      native.sessionPatch(patch),
+    shutdown: (): Promise<void> => native.shutdown(),
   };
 }
 
-/** 工作线程命令由实现签名推导，停机只能经专用 shutdown 消息触发。 */
-export type CoreService = Omit<ReturnType<typeof createCoreService>, "shutdown">;
+/** 命令签名由服务推导，控制与停机不经普通命令入口。 */
+export type CoreService = Omit<ReturnType<typeof createCoreService>, "shutdown" | "createControl">;

@@ -1,52 +1,47 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "vitest";
-import { Worker } from "node:worker_threads";
 import { CoreClient } from "../../../../../modules/notes/packages/desktop/src/main/core-client";
-import { VaultOpenControl } from "../../../../../modules/notes/packages/desktop/src/features/reader/main/vault-open-control";
+import { parseVaultOpenProgress } from "../../../../../modules/notes/packages/desktop/src/features/reader/shared/vault-opening";
 import type { SearchQuery, VaultEvent } from "../../../../../modules/notes/packages/desktop/src/features/reader/shared/api";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-const workerUrl = new URL("../../../../../modules/notes/packages/desktop/out/main/core-worker.js", import.meta.url);
-
-test("候选监视器已有事件时取消复核仍能退出，并保留原库", async (t) => {
-  const { roots: [first, second], userData } = await fixture(t);
-  await writeFile(join(first, "old.md"), "原库");
-  await writeFile(join(second, "new.md"), "新库");
-  const script = `
-    const assert = require("node:assert/strict");
-    const fs = require("node:fs");
-    const path = require("node:path");
-    const native = require(process.argv[1]);
-    native.vaultOpen(process.argv[2], path.join(process.argv[4], "first"), () => {});
-    let reached = false;
-    try {
-      const opened = native.vaultOpen(process.argv[3], path.join(process.argv[4], "second"), () => {}, progress => {
-        if (progress.phase !== "verifying") return true;
-        reached = true;
-        fs.writeFileSync(path.join(process.argv[3], "change.md"), "打开期间新增");
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 650);
-        return false;
-      });
-      assert.equal(reached, true);
-      assert.equal(opened, false);
-      assert.equal(native.fileRead("old.md").toString(), "原库");
-    } finally { native.vaultClose(); }
-  `;
-  await promisify(execFile)(process.execPath, ["-e", script,
-    fileURLToPath(new URL("../../../../../modules/notes/packages/vault-node/index.js", import.meta.url)),
-    first, second, userData,
-  ], { timeout: 10000, killSignal: "SIGKILL" });
-});
 const bytes = (text: string) => new TextEncoder().encode(text);
 
-test("同步开库期间共享取消立即生效，原库与会话仍可继续使用", async (t) => {
+test("会话中的有限大数仍作为 JavaScript number 恢复，不能让整个会话变成 BigInt 错误", async (t) => {
+  const { roots: [root], userData, start } = await fixture(t);
+  await mkdir(userData);
+  await writeFile(join(userData, "session.json"), JSON.stringify({ reader: { vaultRoot: root }, window: { x: 0, y: 0, width: 9007199254740992, height: 600, maximized: false } }));
+  const { core } = start();
+  const session = await core.call("sessionLoad");
+  assert.equal(session.reader.vaultRoot, root);
+  assert.equal(session.window?.width, 9007199254740992);
+});
+
+test("窗口数字溢出只丢弃窗口字段，保存设置后仍可恢复原库与阅读现场", async (t) => {
+  const { roots: [root], userData, start } = await fixture(t);
+  await mkdir(userData);
+  const reader = { vaultRoot: root, currentPath: "a.md", recentFiles: ["a.md"] };
+  await writeFile(
+    join(userData, "session.json"),
+    `{"reader":${JSON.stringify(reader)},"window":{"x":0,"y":0,"width":1e400,"height":600}}`,
+  );
+  const { core } = start();
+  const session = await core.call("sessionLoad");
+  assert.equal(session.window, null);
+  assert.equal(session.reader.vaultRoot, root);
+  assert.equal(session.reader.documents.panes[0]?.currentPath, "a.md");
+  await core.call("sessionPatch", { appearance: "dark" });
+  const restored = await core.call("sessionLoad");
+  assert.equal(restored.appearance, "dark");
+  assert.deepEqual(restored.reader, session.reader);
+  assert.equal(JSON.parse(await readFile(join(userData, "session.json"), "utf8")).reader.vaultRoot, root);
+});
+
+test("异步开库期间原生取消立即生效，原库与会话仍可继续使用", async (t) => {
   const {
     roots: [first, second],
     start,
@@ -59,16 +54,16 @@ test("同步开库期间共享取消立即生效，原库与会话仍可继续�
   );
   const { core } = start();
   await core.call("vaultOpen", first);
-  const control = new VaultOpenControl();
+  const control = core.createControl();
   let observed = false;
   const timer = setInterval(() => {
-    if (control.progress.phase === "reading") {
+    if (parseVaultOpenProgress(control.progress).phase === "reading") {
       observed = true;
       control.cancel();
     }
   }, 1);
   try {
-    assert.equal(await core.call("vaultOpen", second, control.buffer), null);
+    assert.equal(await core.call("vaultOpen", second, control), null);
     assert.equal(observed, true);
     assert.equal(new TextDecoder().decode(await core.call("fileRead", "原笔记.md")), "原工作区");
     assert.equal((await core.call("readerSessionLoad")).vaultRoot, first);
@@ -134,62 +129,6 @@ test("单篇命中按需读取，与文件续页并行，取消后迟到展开�
   await assert.rejects(core.call("searchMatches", query, "new-session", cursors[0]!), /搜索已取消/);
 });
 
-for (const mode of ["stop", "throw", "reenter"]) {
-  test(`原生移动批次 ${mode} 保留提交数、刷新索引并释放回调状态`, async (t) => {
-    const {
-      roots: [root],
-      userData,
-    } = await fixture(t);
-    await mkdir(join(root, "archive"));
-    await Promise.all([
-      writeFile(join(root, "a.md"), "[b](./b.md)\n"),
-      writeFile(join(root, "b.md"), "[a](./a.md)\n"),
-    ]);
-    // 独立进程的硬超时可以捕获原生锁重入死锁，不让整套测试跟随阻塞。
-    const script = `
-      const assert = require("node:assert/strict");
-      const native = require(process.argv[1]);
-      const mode = process.argv[4];
-      native.vaultOpen(process.argv[2], process.argv[3], () => {});
-      try {
-        const changes = ["a.md", "b.md"].map(from => ({ from, to: "archive/" + from }));
-        const seen = [];
-        const outcome = native.entryRenameBatch(changes, completed => {
-          seen.push(completed);
-          if (completed === 0) return true;
-          if (mode === "throw") throw new Error("observer failed");
-          if (mode === "reenter") native.vaultClose();
-          return false;
-        });
-        assert.deepEqual(seen, [0, 1]);
-        assert.equal(outcome.completed, 1);
-        assert.equal(outcome.warning, undefined);
-        if (mode === "stop") assert.equal(outcome.issue, undefined);
-        else assert.match(outcome.issue.message, mode === "throw" ? /observer failed/ : /不能重新调用内核/);
-        assert.equal(native.indexLinksTo("archive/a.md").length, 1);
-        assert.deepEqual(native.vaultList(), ["archive/a.md", "b.md"]);
-        const retried = native.entryRenameBatch(changes.slice(outcome.completed), () => true);
-        assert.equal(retried.completed, 1);
-        assert.equal(retried.issue, undefined);
-        assert.equal(native.indexLinksTo("archive/b.md").length, 1);
-        assert.equal(Buffer.from(native.fileRead("archive/a.md")).toString(), "[b](./b.md)\\n");
-      } finally { native.vaultClose(); }
-    `;
-    await promisify(execFile)(
-      process.execPath,
-      [
-        "-e",
-        script,
-        fileURLToPath(new URL("../../../../../modules/notes/packages/vault-node/index.js", import.meta.url)),
-        root,
-        userData,
-        mode,
-      ],
-      { timeout: 10000 },
-    );
-  });
-}
-
 test("真实异步搜索允许保存并响应取消、替换、切库与停机", async (t) => {
   const { roots: [root, other], start } = await fixture(t);
   await Promise.all(Array.from({ length: 32 }, (_, index) => writeFile(join(root, `${index}.md`), "a".repeat(128_000))));
@@ -250,7 +189,7 @@ test("原生分页无重复，版本变化拒绝旧游标", async (t) => {
 });
 
 async function fixture(t: TestContext) {
-  const dir = await mkdtemp(join(tmpdir(), "noemori-core-worker-"));
+  const dir = await mkdtemp(join(tmpdir(), "noemori-runtime-"));
   const clients: CoreClient[] = [];
   t.onTestFinished(async () => {
     try {
@@ -267,7 +206,7 @@ async function fixture(t: TestContext) {
     userData,
     start() {
       const events: VaultEvent[] = [];
-      const core = new CoreClient(new Worker(workerUrl, { workerData: userData }), (event) => {
+      const core = new CoreClient(userData, (event) => {
         events.push(event);
       });
       clients.push(core);
@@ -327,7 +266,7 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test("built worker preserves directory entries, current paths and safe file operation boundaries", async (t) => {
+test("native runtime preserves directory entries, current paths and safe file operation boundaries", async (t) => {
   const {
     roots: [root],
     start,
@@ -436,7 +375,7 @@ test("索引故障穿过原生监视通道，正文提交仍返回真实成功�
   if (result.status === "saved") assert.ok(result.warning?.includes("索引"));
 });
 
-test("built worker preserves native save, conflict, copy, rename and link contracts", async (t) => {
+test("native runtime preserves native save, conflict, copy, rename and link contracts", async (t) => {
   const {
     roots: [root],
     start,
@@ -502,8 +441,9 @@ test("queued writes stay in their original vault and shutdown drains the final s
   const { core } = start();
   await core.call("vaultOpen", first);
   const saveFirst = core.call("fileWrite", "a.md", bytes("first saved"), bytes("original"));
-  const openSecond = core.call("vaultOpen", second);
-  const readSecond = core.call("fileRead", "a.md");
+  await saveFirst;
+  await core.call("vaultOpen", second);
+  const secondBytes = await core.call("fileRead", "a.md");
   const saveSecond = core.call("fileWrite", "a.md", bytes("second saved"), bytes("original"));
   const remember = core.call("readerSessionPatch", {
     documents: { panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }], active: 0, split: false },
@@ -511,10 +451,8 @@ test("queued writes stay in their original vault and shutdown drains the final s
     leftWidth: 240,
   });
   const stopped = core.shutdown();
-  const [firstResult, , secondBytes, secondResult] = await Promise.all([
+  const [firstResult, secondResult] = await Promise.all([
     saveFirst,
-    openSecond,
-    readSecond,
     saveSecond,
     remember,
     stopped,
@@ -763,7 +701,7 @@ test("检索与标题索引穿过原生线程，中文短词、标签与属性�
   );
 });
 
-test("native bookmarks round-trip through the worker and follow renames", async (t) => {
+test("原生书签通过 Rust 运行时读写并跟随改名", async (t) => {
   const {
     roots: [root],
     start,
@@ -789,7 +727,7 @@ test("native bookmarks round-trip through the worker and follow renames", async 
   await core.shutdown();
 });
 
-test("native graph crosses the worker with aggregated edges and optional dead nodes", async (t) => {
+test("原生图谱通过 Rust 运行时返回聚合边与可选失效节点", async (t) => {
   const {
     roots: [root],
     start,
@@ -825,7 +763,7 @@ test("native watcher refreshes the active vault and releases it on close", async
   for (let attempt = 0; attempt < 60 && changes() === 0; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.ok(changes() > 0, "原生监视回调应穿过工作线程");
+  assert.ok(changes() > 0, "原生监视通知应经 Rust 运行时交付主进程");
   assert.deepEqual(await core.call("vaultList"), ["new.md"]);
   const links = await core.call("indexLinksFrom", "new.md");
   assert.ok(links[0]);
@@ -836,4 +774,67 @@ test("native watcher refreshes the active vault and releases it on close", async
   await writeFile(join(root, "late.md"), "late");
   await core.shutdown();
   assert.equal(changes(), changesAtClose);
+});
+
+
+test("原生写入被 SQLite 锁阻塞时，主线程定时器与取消仍在释放锁前执行", async (t) => {
+  const { roots: [root], userData, start } = await fixture(t);
+  await writeFile(join(root, "a.md"), "old");
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  const connection = new DatabaseSync(join(userData, "vaults", hash, "index.sqlite"));
+  connection.exec("BEGIN IMMEDIATE");
+  let settled = false;
+  const write = core.call("fileWrite", "a.md", bytes("new"), bytes("old"));
+  void write.then(() => { settled = true; }, () => { settled = true; });
+  const control = core.createControl();
+  try {
+    // 读到新正文证明原生任务已进入提交；索引锁仍由本测试持有。
+    for (let i = 0; i < 100 && await readFile(join(root, "a.md"), "utf8") !== "new"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(await readFile(join(root, "a.md"), "utf8"), "new");
+    await new Promise<void>((resolve) => setTimeout(() => {
+      assert.equal(settled, false);
+      assert.equal(control.cancel(), true);
+      assert.equal(control.cancelled, true);
+      resolve();
+    }, 0));
+  } finally { connection.exec("ROLLBACK"); connection.close(); }
+  assert.equal((await write).status, "saved");
+});
+
+test("批量移动在事务之间停止，真实前缀迁移会话并可按 remaining 重试", async (t) => {
+  const { roots: [root], start } = await fixture(t);
+  await mkdir(join(root, "target"));
+  const paths = Array.from({ length: 100 }, (_, i) => `${i}.md`);
+  await Promise.all(paths.map((path) => writeFile(join(root, path), "原文")));
+  const { core } = start(); await core.call("vaultOpen", root);
+  await core.call("readerSessionPatch", { recentFiles: ["0.md"] });
+  const control = core.createControl();
+  const stop = setInterval(() => {
+    const progress = control.progress;
+    if (typeof progress === "object" && progress !== null && "completed" in progress && typeof progress.completed === "number" && progress.completed > 0) control.cancel();
+  }, 1);
+  let result;
+  try { result = await core.call("entryBatch", { root, paths, action: "move", destination: "target" }, control); }
+  finally { clearInterval(stop); }
+  assert.ok(result.completed.length > 0 && result.completed.length < paths.length);
+  assert.equal(result.completed.length + result.remaining.length, paths.length);
+  assert.deepEqual(result.issues, []); assert.equal(result.warning, null);
+  assert.deepEqual((await core.call("readerSessionLoad")).recentFiles, ["target/0.md"]);
+  const retry = await core.call("entryBatch", { root, paths: result.remaining, action: "move", destination: "target" });
+  assert.equal(retry.remaining.length, 0); assert.equal(retry.completed.length, result.remaining.length);
+});
+
+test("切库前接受的旧库请求不得写入候选新库", async (t) => {
+  const { roots: [root, other], start } = await fixture(t);
+  await writeFile(join(root, "a.md"), "old"); await writeFile(join(other, "a.md"), "other");
+  const { core } = start(); await core.call("vaultOpen", root);
+  const opened = core.call("vaultOpen", other);
+  const stale = assert.rejects(core.call("fileWrite", "a.md", bytes("wrong"), bytes("other")), /笔记库已切换/);
+  await opened; await stale;
+  assert.equal(await readFile(join(root, "a.md"), "utf8"), "old");
+  assert.equal(await readFile(join(other, "a.md"), "utf8"), "other");
 });

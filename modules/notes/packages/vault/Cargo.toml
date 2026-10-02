@@ -14,6 +14,10 @@ name = "noemori_vault"
 path = "src/lib.rs"
 
 [[test]]
+name = "vault_performance_runtime"
+path = "../../../../test/notes/vault/performance/storage/runtime.rs"
+
+[[test]]
 name = "vault_unit_identity_write"
 path = "../../../../test/notes/vault/unit/storage/identity_write.rs"
 

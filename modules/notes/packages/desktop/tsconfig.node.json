@@ -23,7 +23,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
-    "../../../../test/notes/desktop/unit/shell/core-protocol.types.ts",
+    "../../../../test/notes/desktop/unit/shell/core-client.types.ts",
     "../../../../test/notes/desktop/integration/native/core-native.test.mts",
     "../../../../test/notes/desktop/e2e/*.test.mts",
     "../../../../test/notes/desktop/performance/*.test.mts",

@@ -1,21 +1,8 @@
 /**
  * 应用会话：窗口、外观及各功能独立的恢复状态。
  *
- * 只在内核工作线程读写；渲染进程不能提交任意库路径。损坏或缺失的文件视为空会话。
+ * 这里只定义宿主协议；会话磁盘读写与迁移由 Rust 运行时负责。
  */
-import {
-  closeSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { parseAppearance, type Appearance } from "../shared/api";
 import {
   emptyReaderSession,
@@ -48,16 +35,6 @@ export const emptySession: Session = {
   reader: emptyReaderSession,
   window: null,
 };
-
-/**
- * 会话文件路径。放在 userData 根下，不进笔记库。
- *
- * @param userData Electron `app.getPath("userData")`。
- * @returns 会话文件的绝对路径；本函数不访问磁盘。
- */
-export function sessionFile(userData: string): string {
-  return join(userData, "session.json");
-}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -110,88 +87,4 @@ export function parseSession(raw: string): Session | null {
     appearance: parseAppearance(record.appearance) ?? "system",
     window: "window" in record ? parseWindow(record.window) : null,
   };
-}
-
-/**
- * 把会话写成确定性 JSON。
- *
- * @param session 当前会话。
- * @returns 带末尾换行的 JSON 文本。
- */
-export function serializeSession(session: Session): string {
-  return `${JSON.stringify(session, null, 2)}\n`;
-}
-
-/**
- * 从磁盘读取会话；文件不存在或损坏时返回空会话。
- *
- * @param file 会话文件绝对路径。
- * @returns 可用会话；文件缺失、不可读或损坏时返回空会话。
- */
-export function loadSession(file: string): Session {
-  return readSession(file) ?? emptySession;
-}
-
-/** 缺失或损坏必须保留为空的事实，不能把默认值当成已经持久化的会话。 */
-function readSession(file: string): Session | null {
-  try {
-    return parseSession(readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 在同目录暂存并同步完整会话，以原子替换作为唯一提交点。
- *
- * @param file 会话文件绝对路径。
- * @param session 要保存的完整会话。
- * @throws 提交前失败时保留旧文件；清理也失败时合并报告原因。
- * 所有同步和关闭操作均在替换前完成，成功替换后不会因收尾步骤误报保存失败。
- */
-export function saveSession(file: string, session: Session): void {
-  // 比较当前磁盘状态，避免缓存一次失败或外部修改后误判已经提交。
-  if (isDeepStrictEqual(readSession(file), session)) return;
-  const contents = serializeSession(session);
-  mkdirSync(dirname(file), { recursive: true });
-  const temporary = join(dirname(file), `.${basename(file)}.${randomUUID()}.tmp`);
-  let owned = false;
-  try {
-    const fd = openSync(temporary, "wx", 0o600);
-    owned = true;
-    try {
-      writeFileSync(fd, contents);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(temporary, file);
-  } catch (error) {
-    if (owned) {
-      try {
-        unlinkSync(temporary);
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          `会话提交失败，暂存文件清理也失败：${temporary}`,
-          { cause: error },
-        );
-      }
-    }
-    throw error;
-  }
-}
-
-/**
- * 合并补丁后写回。
- *
- * @param file 会话文件绝对路径。
- * @param patch 要覆盖的字段。
- * @returns 写盘后的完整会话。
- * @throws 合并后的会话无法写入时，保留底层文件系统错误。
- */
-export function patchSession(file: string, patch: Partial<Session>): Session {
-  const next = { ...loadSession(file), ...patch };
-  saveSession(file, next);
-  return next;
 }

@@ -62,7 +62,6 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
-          "core-worker": resolve("src/main/core-worker.ts"),
         },
       },
     },

@@ -1,4 +1,3 @@
-import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BrowserWindow, ipcMain } from "electron";
 import { registerIpc } from "../../../../../modules/notes/packages/desktop/src/main/ipc";
@@ -10,7 +9,6 @@ const { updateMenu, transport } = vi.hoisted(() => ({
   transport: { destroyed: false, loading: false },
 }));
 
-vi.mock("node:worker_threads", () => ({ Worker: class {} }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/main/core-client", () => ({ CoreClient: class {} }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/main/menu", () => ({ updateHistoryMenu: updateMenu }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/features/reader/main/ipc", () => ({
@@ -38,7 +36,7 @@ beforeEach(() => {
   transport.destroyed = false;
   transport.loading = false;
   window = new BrowserWindow();
-  registerIpc(() => window, createCloseGate(), new CoreClient(new Worker("unused"), vi.fn()));
+  registerIpc(() => window, createCloseGate(), new CoreClient("/state", vi.fn()));
 });
 afterEach(() => ipcMain.removeAllListeners());
 

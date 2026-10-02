@@ -1,8 +1,8 @@
 //! 书签类型转换与持久化操作的 Node-API 适配。
 
+use crate::runtime::{to_napi, with_vault, NativeRuntime};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use crate::runtime::with_vault;
 use noemori_vault::Vault;
 
 /// 一条书签；`kind` 为 `file`/`folder`（`path`）、`heading`（`path` 与 `heading`）或 `search`（`query`）。
@@ -66,27 +66,38 @@ fn core_bookmark(bookmark: JsBookmark) -> Result<noemori_vault::Bookmark> {
     })
 }
 
-/// 读出库内书签；文件不存在时为空。
-///
-/// # Errors
-///
-/// 未打开库、读盘失败或书签文件损坏。
 #[napi]
-pub fn bookmarks_list() -> Result<Vec<JsBookmark>> {
-    let items = with_vault(Vault::bookmarks)?;
-    Ok(items.into_iter().map(js_bookmark).collect())
+impl NativeRuntime {
+    /// 读出库内书签；文件不存在时为空。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库、读盘失败或书签文件损坏。
+    #[napi(ts_return_type = "Promise<Array<JsBookmark>>")]
+    pub fn bookmarks_list(&self, env: Env) -> Result<Object> {
+        self.read(env, move |vault| {
+            let items = with_vault(vault, Vault::bookmarks)?;
+            Ok(items.into_iter().map(js_bookmark).collect::<Vec<_>>())
+        })
+    }
 }
 
-/// 整体替换书签清单；损坏的旧文件先备份再覆盖。
-///
-/// # Errors
-///
-/// 未打开库、书签字段无效或写盘失败。
 #[napi]
-pub fn bookmarks_set(items: Vec<JsBookmark>) -> Result<()> {
-    let items = items
-        .into_iter()
-        .map(core_bookmark)
-        .collect::<Result<Vec<_>>>()?;
-    with_vault(|vault| vault.set_bookmarks(&items))
+impl NativeRuntime {
+    /// 整体替换书签清单；损坏的旧文件先备份再覆盖。
+    ///
+    /// # Errors
+    ///
+    /// 未打开库、书签字段无效或写盘失败。
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn bookmarks_set(&self, env: Env, items: Vec<JsBookmark>) -> Result<Object> {
+        self.write(env, true, move |state| {
+            let vault = state.vault().map_err(to_napi)?;
+            let items = items
+                .into_iter()
+                .map(core_bookmark)
+                .collect::<Result<Vec<_>>>()?;
+            with_vault(vault, |vault| vault.set_bookmarks(&items))
+        })
+    }
 }

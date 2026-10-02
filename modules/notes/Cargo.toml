@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["packages/vault", "packages/vault-node"]
+members = ["packages/vault", "packages/runtime", "packages/vault-node"]
 
 [workspace.package]
 edition = "2021"

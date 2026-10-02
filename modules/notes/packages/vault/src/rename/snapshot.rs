@@ -137,9 +137,10 @@ impl Vault {
                 continue;
             }
             let read = self.read(path)?;
+            let hash = Sha256::digest(&read);
             let cached = facts
                 .get(path)
-                .filter(|fact| fact.hash == crate::vault::hex_sha256(&read));
+                .filter(|fact| fact.hash == crate::vault::hex_digest(&hash));
             let (keys, links) = if let Some(fact) = cached {
                 (fact.keys.clone(), fact.links.clone())
             } else if let Ok(text) = std::str::from_utf8(&read) {
@@ -151,7 +152,7 @@ impl Vault {
             if !keys.is_empty() {
                 extras.insert(path.clone(), keys);
             }
-            documents.insert(path.clone(), RenameDocument::new(read, links));
+            documents.insert(path.clone(), RenameDocument { bytes: read, links, hash: hash.into() });
         }
         Ok(RenameSnapshot {
             files: Vec::new(),
