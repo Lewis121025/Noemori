@@ -1,7 +1,6 @@
 import { type Node as PmNode } from "prosemirror-model";
-import { parseMarkdown } from "./parse";
-import { serializeMarkdown } from "./serialize";
-import { markdownProcessor } from "./markdown-processor";
+import { parseMarkdownDocument } from "../../shared/markdown/parse";
+import { sameMarkdownContent } from "../../shared/markdown/serialize";
 import { sourceTree, positionInTree, rangeInTree, sourceOffsetInTree } from "./source-map";
 import { renderSource } from "./source-render";
 import type { Transaction } from "prosemirror-state";
@@ -22,8 +21,9 @@ export type EditorSnapshot = { bytes: Uint8Array; revision: number };
 export function createMarkdownSession(source: string, recovery?: string) {
   const bom = source.startsWith("\uFEFF") ? 1 : 0;
   const body = source.slice(bom);
-  const doc = parseMarkdown(body);
-  let tree = sourceTree(markdownProcessor.parse(body), doc, bom);
+  const initial = parseMarkdownDocument(body);
+  const doc = initial.doc;
+  let tree = sourceTree(initial.tree, doc, bom);
   tree.start = bom;
   tree.end = source.length;
   const originalTree = tree;
@@ -65,10 +65,10 @@ export function createMarkdownSession(source: string, recovery?: string) {
         const cached = snapshots.get(current);
         // 字节生成始终锚定打开时的源码；保存点只重置导航映射，不能改变撤销的保真基准。
         text = cached ?? (doc.eq(current) ? source : renderSource(source, originalTree, current));
-        const parsed = parseMarkdown(text.slice(bom));
-        if (serializeMarkdown(parsed) !== serializeMarkdown(current))
+        const parsed = parseMarkdownDocument(text.slice(bom));
+        if (!sameMarkdownContent(parsed.doc, current))
           throw new Error("更新后的 Markdown 与当前编辑内容不一致");
-        tree = sourceTree(markdownProcessor.parse(text.slice(bom)), current, bom);
+        tree = sourceTree(parsed.tree, current, bom);
       } catch (cause) {
         throw new MarkdownSnapshotError(source, current, revision, cause);
       }

@@ -1,8 +1,8 @@
 import { toString } from "mdast-util-to-string";
-import { markdownProcessor } from "../markdown/markdown-processor";
+import { markdownProcessor } from "../../shared/markdown/markdown-processor";
 import { mimeFromPath } from "../preview/media";
 import type { VaultEntry } from "../../shared/api";
-import { isWhiteboardPath } from "../whiteboard/model";
+import { isWhiteboardPath } from "../../shared/whiteboard/model";
 
 /**
  * 为直接落笔选取未占用的本地路径，不创建或覆盖文件。

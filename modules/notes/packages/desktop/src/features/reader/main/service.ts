@@ -1,5 +1,6 @@
 /** 阅读器协议适配：业务和持久化由 Rust 运行时执行。 */
 import type * as NativeModule from "@noemori/vault-node";
+import type { ExportNativeAction, ExportRetainAction } from "./export/native";
 import type {
   Bookmark,
   FileSnapshot,
@@ -144,6 +145,19 @@ export function createReaderService(
   createControl: () => NativeModule.NativeControl,
 ) {
   return {
+    exportRecover: () => native.exportRecover(),
+    exportPrepare: (
+      root: string,
+      id: string,
+      paths: string[] | null,
+      hidden: boolean,
+      control: NativeModule.NativeControl,
+    ) => native.exportPrepare(root, id, paths, hidden, control),
+    exportAction: (
+      id: string,
+      action: ExportNativeAction | ExportRetainAction,
+      bytes?: Uint8Array,
+    ) => native.exportAction(id, action, bytes === undefined ? null : Buffer.from(bytes)),
     async vaultOpen(
       root: string,
       control: NativeModule.NativeControl = createControl(),

@@ -7,6 +7,7 @@
     | "move"
     | "trash"
     | "reveal"
+    | "export"
     | "collapse"
     | "locate"
     | "bookmark";
@@ -109,6 +110,7 @@
     <div class="separator" role="separator"></div>
     {#if !multiple}<button role="menuitem" onclick={() => choose("rename")}>重命名…</button>{/if}
     <button role="menuitem" onclick={() => choose("move")}>移动到…</button>
+    <button role="menuitem" onclick={() => choose("export")}>导出…</button>
     {#if !multiple}<button role="menuitem" onclick={() => choose("bookmark")}
         >{bookmarked(target) ? "移出书签" : "加入书签"}</button
       >

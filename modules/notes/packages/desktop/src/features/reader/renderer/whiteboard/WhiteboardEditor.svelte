@@ -2,8 +2,12 @@
   import { untrack } from "svelte";
   import type { WhiteboardEditorApi } from "../editor/editor-api";
   import { nativeInputOwnsHistory } from "../editor/history";
-  import { serializeWhiteboard, type InkPoint, type WhiteboardDocument } from "./model";
-  import { strokePath } from "./geometry";
+  import {
+    serializeWhiteboard,
+    type InkPoint,
+    type WhiteboardDocument,
+  } from "../../shared/whiteboard/model";
+  import { strokePath } from "../../shared/whiteboard/geometry";
   import { WhiteboardInput } from "./input";
 
   let {

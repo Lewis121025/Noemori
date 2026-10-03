@@ -31,7 +31,8 @@ pub struct VaultEvent {
 
 /// 顺序通道拥有的应用状态；不暴露跨线程可变库句柄。
 pub struct State {
-    user_data: PathBuf,
+    pub(crate) user_data: PathBuf,
+    pub(crate) export: Option<crate::export::ExportJob>,
     /// 会话操作必须通过同一顺序通道调用。
     pub sessions: SessionStore,
     active: Option<WatchedVault>,
@@ -55,6 +56,7 @@ impl State {
         Self {
             sessions: SessionStore::new(&user_data),
             user_data,
+            export: None,
             active: None,
             generation,
             sequence: 0,

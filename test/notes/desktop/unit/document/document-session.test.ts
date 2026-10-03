@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ReaderDocument } from "@reader/renderer/document/state.svelte";
 import type { ReaderApi, SavedCopy, WriteResult } from "@reader/shared/api";
 import { MarkdownSnapshotError } from "@reader/renderer/markdown/session-recovery";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 const snapshot = (text: string) => ({ bytes: encode(text), revision: 1 });

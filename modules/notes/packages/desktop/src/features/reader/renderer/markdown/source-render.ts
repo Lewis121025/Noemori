@@ -1,8 +1,9 @@
 import { type Fragment, type Node as PmNode } from "prosemirror-model";
-import { serializeMarkdown } from "./serialize";
+import { serializeMarkdown, serializeMarkdownFragment } from "../../shared/markdown/serialize";
 import { applySourceEdits, type SourceNode } from "./source-map";
 import { sourceLinePrefix, sourceTextOffsets } from "./source-text";
 import { renderTableSource } from "./source-table";
+import { renderFlowLayout } from "./source-flow";
 
 /**
  * 由只读源码映射生成局部替换，不修改编辑会话或磁盘。
@@ -18,11 +19,9 @@ export function renderSource(source: string, tree: SourceNode, current: PmNode):
 
 /** 局部渲染只持有原文；所有修改结果通过返回值传出。 */
 class SourceRenderer {
-  private readonly bom: number;
   private readonly newline: string;
 
   constructor(private readonly source: string) {
-    this.bom = source.startsWith("\uFEFF") ? 1 : 0;
     this.newline = source.includes("\r\n") ? "\r\n" : "\n";
   }
 
@@ -37,6 +36,14 @@ class SourceRenderer {
       const prefix = sourceLinePrefix(this.source, previous.start).replace(/[^\s>]/g, " ");
       return this.replacement(current, previous.start) + this.newline + prefix;
     }
+    const layout = renderFlowLayout(
+      this.source,
+      previous,
+      current,
+      (before, after) => this.render(before, after),
+      (node, at) => this.replacement(node, at),
+    );
+    if (layout !== null) return layout;
     if (current.type.name === "table" && previous.node.sameMarkup(current))
       return renderTableSource(this.source, previous, current, (before, after) =>
         this.render(before, after),
@@ -96,7 +103,8 @@ class SourceRenderer {
           `$1${current.attrs["checked"] ? "x" : " "}$2`,
         );
     }
-    if (current.type.name === "doc") return this.renderDocument(previous, current);
+    if (current.type.name === "doc")
+      return serializeMarkdownFragment(current).replace(/(?<!\r)\n/g, this.newline);
     if (["table_cell", "table_header"].includes(current.type.name)) {
       const schema = current.type.schema;
       const table = schema.node(
@@ -315,7 +323,7 @@ class SourceRenderer {
   private replacement(node: PmNode, at: number): string {
     let root = node;
     if (node.type.name === "list_item") root = node.type.schema.node("bullet_list", null, node);
-    let text = serializeMarkdown(node.type.schema.node("doc", null, root)).replace(/\n$/, "");
+    let text = serializeMarkdownFragment(node.type.schema.node("doc", null, root));
     if (node.type.name === "list_item") {
       const marker = /^(?:[-*+]|\d+[.)])[ \t]+/.exec(this.source.slice(at))?.[0];
       if (marker !== undefined) {
@@ -330,73 +338,4 @@ class SourceRenderer {
       : "";
     return text.replace(/(?<!\r)\n/g, `${this.newline}${continuation}`);
   }
-
-  private renderDocument(previous: SourceNode, current: PmNode): string {
-    const before = previous.children;
-    const after = current.content.content;
-    if (before.length === 0)
-      return serializeMarkdown(current)
-        .replace(/\n$/, "")
-        .replace(/(?<!\r)\n/g, this.newline);
-    let prefix = 0;
-    while (prefix < before.length && prefix < after.length && sameAt(before, prefix, after, prefix))
-      prefix++;
-    let suffix = 0;
-    while (
-      suffix < before.length - prefix &&
-      suffix < after.length - prefix &&
-      sameAt(before, before.length - suffix - 1, after, after.length - suffix - 1)
-    )
-      suffix++;
-    const oldMiddle = before.slice(prefix, before.length - suffix);
-    const newMiddle = after.slice(prefix, after.length - suffix);
-    if (oldMiddle.length === newMiddle.length) {
-      return applySourceEdits(
-        this.source.slice(this.bom),
-        oldMiddle.map((item, index) => ({
-          start: item.start - this.bom,
-          end: item.end - this.bom,
-          text: this.render(item, requiredNode(newMiddle, index)),
-        })),
-      );
-    }
-    const next = before[before.length - suffix];
-    const prior = before[prefix - 1];
-    const start = oldMiddle[0]?.start ?? next?.start ?? prior?.end ?? this.bom;
-    const end = oldMiddle.at(-1)?.end ?? start;
-    const text = newMiddle
-      .map((node) => {
-        const original = before.find((item) => item.node.eq(node));
-        return original === undefined
-          ? this.replacement(node, this.bom)
-          : this.source.slice(original.start, original.end);
-      })
-      .join(this.newline + this.newline);
-    const inserted =
-      oldMiddle.length === 0 && text !== ""
-        ? next === undefined
-          ? this.newline + this.newline + text
-          : text + this.newline + this.newline
-        : text;
-    return applySourceEdits(this.source.slice(this.bom), [
-      { start: start - this.bom, end: end - this.bom, text: inserted },
-    ]);
-  }
-}
-
-function requiredNode(nodes: readonly PmNode[], index: number): PmNode {
-  const node = nodes[index];
-  if (node === undefined) throw new Error("源码映射与文档结构不一致");
-  return node;
-}
-
-function sameAt(
-  before: readonly SourceNode[],
-  left: number,
-  after: readonly PmNode[],
-  right: number,
-): boolean {
-  const original = before[left];
-  const current = after[right];
-  return original !== undefined && current !== undefined && original.node.eq(current);
 }

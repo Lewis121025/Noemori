@@ -7,7 +7,7 @@
   import ImagePreview from "../preview/ImagePreview.svelte";
   import PdfPreview from "../preview/PdfPreview.svelte";
   import WhiteboardEditor from "../whiteboard/WhiteboardEditor.svelte";
-  import { isWhiteboardPath } from "../whiteboard/model";
+  import { isWhiteboardPath } from "../../shared/whiteboard/model";
   import type { MediaIo } from "../preview/media";
   import { markdownLinkCompletion } from "../editor/links/suggestions/codemirror";
   import type { ReaderPane } from "./pane.svelte";

@@ -50,6 +50,8 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
         command("open-vault"),
         { type: "separator" },
         command("save"),
+        command("export-document"),
+        command("export-vault"),
         { role: "close", label: "关闭窗口" },
       ],
     },

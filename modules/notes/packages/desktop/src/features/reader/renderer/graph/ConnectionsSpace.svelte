@@ -4,7 +4,7 @@
   import type { GraphNode } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import type { ConnectionView } from "../workspace/spaces.svelte";
-  import { isWhiteboardPath } from "../whiteboard/model";
+  import { isWhiteboardPath } from "../../shared/whiteboard/model";
   import GraphPanel from "./GraphPanel.svelte";
 
   let {

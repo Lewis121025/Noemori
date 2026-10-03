@@ -19,6 +19,8 @@
     "../../../../test/vitest.preview.config.ts",
     "../../../../test/vitest.performance.config.ts",
     "../../../../test/vitest.resources.config.ts",
+    "../../../../test/vitest.export-stress.config.ts",
+    "../../../../test/vitest.export-coverage.config.ts",
     "../../../../test/vitest.resource-contracts.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",

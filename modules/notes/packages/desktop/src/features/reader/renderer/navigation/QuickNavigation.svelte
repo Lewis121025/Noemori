@@ -5,7 +5,7 @@
   import { rankSwitcher, switcherEntries } from "./switcher";
   import { createCompositionGuard } from "../editor/composition";
   import { SvelteSet } from "svelte/reactivity";
-  import { isWhiteboardPath } from "../whiteboard/model";
+  import { isWhiteboardPath } from "../../shared/whiteboard/model";
   let {
     workspace,
     hidden,

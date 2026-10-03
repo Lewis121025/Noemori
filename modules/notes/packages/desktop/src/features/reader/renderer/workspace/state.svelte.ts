@@ -1,5 +1,12 @@
 import { tick } from "svelte";
 import type { VaultOpenProgress } from "../../shared/vault-opening";
+import type {
+  ExportFormat,
+  ExportRequest,
+  ExportResult,
+  ExportProgress,
+  ExportPlan,
+} from "../../shared/export";
 import { parseReadingBookmark } from "../../shared/reading-position";
 import type {
   Bookmark,
@@ -54,6 +61,92 @@ type WorkspaceNotice =
  * 保存；监视事件在切换或写盘结束后重新读取。
  */
 export class ReaderWorkspaceController {
+  /** 导出弹层的明确范围，打开后不跟随文件栏的后续选择变化。 */
+  exportScope = $state.raw<ExportRequest["scope"] | null>(null);
+  private exportRunning = false;
+  private exportStarted = false;
+  private exportStopBeforeStart = false;
+
+  /** 打开导出设置；空选择和未开库没有导出对象。 */
+  requestExport(scope: ExportRequest["scope"]): void {
+    if (
+      this.root === null ||
+      this.exportRunning ||
+      this.composing ||
+      (scope.kind === "selection" && scope.paths.length === 0)
+    )
+      return;
+    this.exportScope =
+      scope.kind === "vault" ? { kind: "vault" } : { kind: "selection", paths: [...scope.paths] };
+  }
+
+  /**
+   * 全栏保存及附件结算完成后才进入导出；取消不会撤销已经成功的前置保存。
+   * @returns 未保存、冲突和执行失败均有明确结果，原始编辑继续保留。
+   */
+  async runExport(
+    format: ExportFormat,
+    progress: (value: ExportProgress) => void,
+    plan: (value: ExportPlan) => void,
+  ): Promise<ExportResult> {
+    const scope = this.exportScope;
+    const root = this.root;
+    if (root === null || scope === null || this.exportRunning)
+      return {
+        status: "failed",
+        issues: [{ path: "", severity: "error", message: "当前没有可执行的导出选择" }],
+      };
+    this.exportRunning = true;
+    this.exportStopBeforeStart = false;
+    progress({ phase: "saving", completed: 0, total: null, path: null });
+    try {
+      const result = await this.withAllPanesSaved(async () => {
+        if (this.exportStopBeforeStart) return { status: "cancelled" } as const;
+        if (root !== this.root) throw new Error("笔记库已切换，请重新导出");
+        this.exportStarted = true;
+        return this.api.exportRun({ root, scope, format }, progress, plan);
+      });
+      return (
+        result ?? {
+          status: "failed",
+          issues: [
+            {
+              path: "",
+              severity: "error",
+              message: "请先完成输入、附件导入并处理保存冲突，然后重新导出",
+            },
+          ],
+        }
+      );
+    } catch (error) {
+      return {
+        status: "failed",
+        issues: [{ path: "", severity: "error", message: errorText(error) }],
+      };
+    } finally {
+      this.exportRunning = false;
+      this.exportStarted = false;
+    }
+  }
+
+  /** 提交边界前请求停止，保存门禁仍运行时阻止随后创建原生任务。 */
+  async cancelExport(): Promise<boolean> {
+    if (!this.exportRunning) return false;
+    if (!this.exportStarted) {
+      this.exportStopBeforeStart = true;
+      return true;
+    }
+    return this.api.exportCancel();
+  }
+
+  /** 显示当前窗口最后一次成功的导出结果，失败时保留可见原因。 */
+  async revealExport(): Promise<void> {
+    try {
+      await this.api.exportReveal();
+    } catch (error) {
+      this.report(`无法显示导出结果：${errorText(error)}`);
+    }
+  }
   /** 全库搜索；结果属于当前库，切库必须丢弃。 */
   readonly search: ReaderSearch;
   /** 当前库的书签；随目录刷新重读，改名后的路径由内核同步改写。 */
@@ -512,6 +605,9 @@ export class ReaderWorkspaceController {
     } finally {
       opening.finish();
       for (const pane of this.paneList) pane.finishTransition();
+      void this.api
+        .exportRecover()
+        .catch((error: unknown) => this.report(`上次导出结果检查失败：${errorText(error)}`));
     }
   }
 

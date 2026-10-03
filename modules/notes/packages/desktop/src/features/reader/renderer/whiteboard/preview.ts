@@ -1,5 +1,5 @@
-import type { WhiteboardDocument } from "./model";
-import { inkBounds, strokePath } from "./geometry";
+import type { WhiteboardDocument } from "../../shared/whiteboard/model";
+import { inkBounds, strokePath } from "../../shared/whiteboard/geometry";
 
 /**
  * 创建同一份矢量笔迹的轻量预览，不挂载编辑器，也不访问磁盘。

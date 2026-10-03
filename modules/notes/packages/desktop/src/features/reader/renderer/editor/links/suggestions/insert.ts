@@ -9,7 +9,7 @@
  */
 
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state";
-import { documentSchema } from "../../../markdown/schema";
+import { documentSchema } from "../../../../shared/markdown/schema";
 import type { SuggestRequest } from "./context";
 
 /**

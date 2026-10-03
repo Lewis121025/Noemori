@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { ReaderDocument } from "@reader/renderer/document/state.svelte";
 import { ReaderNavigation } from "@reader/renderer/navigation/state.svelte";
 import { WhiteboardInput } from "@reader/renderer/whiteboard/input";
-import { emptyWhiteboard, serializeWhiteboard } from "@reader/renderer/whiteboard/model";
+import { emptyWhiteboard, serializeWhiteboard } from "@reader/shared/whiteboard/model";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
 it("后台刷新等待当前笔画，不替用户抬笔；离开门禁仍提交完整笔画", async () => {

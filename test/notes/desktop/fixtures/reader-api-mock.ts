@@ -14,6 +14,12 @@ const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 /** 构造带默认行为的 ReaderApi mock；overrides 浅覆盖对应字段。 */
 export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderApi {
   const api: ReaderApi = {
+    exportRun: vi.fn(async () => {
+      throw new Error("测试尚未配置导出结果");
+    }),
+    exportCancel: vi.fn(async () => false),
+    exportReveal: vi.fn(async () => {}),
+    exportRecover: vi.fn(async () => {}),
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
       entries: await api.vaultEntries(),

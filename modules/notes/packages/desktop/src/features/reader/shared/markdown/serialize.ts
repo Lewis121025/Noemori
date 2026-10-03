@@ -8,7 +8,7 @@ import type {
   PhrasingContent,
   Root,
 } from "mdast";
-import type { Mark, Node as PmNode } from "prosemirror-model";
+import { Fragment, type Mark, type Node as PmNode } from "prosemirror-model";
 import { markdownProcessor } from "./markdown-processor";
 
 /** 可出现在根、引用与列表项里的块；脚注定义属于 mdast 的定义内容。 */
@@ -24,6 +24,39 @@ type FlowContent = BlockContent | DefinitionContent;
 export function serializeMarkdown(doc: PmNode): string {
   const root: Root = { type: "root", children: blocks(doc) };
   return markdownProcessor.stringify(root);
+}
+
+/**
+ * 生成嵌入已有源码的片段，只去除普通文档的终止换行，空段占用的换行必须保留。
+ * @param doc 待生成片段的文档节点。
+ * @returns 不额外追加文件终止换行的 Markdown；不支持的结构继续抛错。
+ */
+export function serializeMarkdownFragment(doc: PmNode): string {
+  const source = serializeMarkdown(doc);
+  return doc.lastChild?.type.name === "paragraph" && doc.lastChild.content.size === 0
+    ? source
+    : source.replace(/\n$/, "");
+}
+
+/**
+ * 比较可保存内容与空白布局；列表松紧是解析器推导的分隔样式，不是新增或丢失的内容。
+ * @param left 重新解析得到的文档。
+ * @param right 当前编辑文档。
+ * @returns 统一列表分隔样式后，所有可保存内容及空段布局是否一致。
+ * @throws 未支持的节点或格式仍由序列化器拒绝。
+ */
+export function sameMarkdownContent(left: PmNode, right: PmNode): boolean {
+  return (
+    serializeMarkdown(withoutListSpacing(left)) === serializeMarkdown(withoutListSpacing(right))
+  );
+}
+
+function withoutListSpacing(node: PmNode): PmNode {
+  if (node.isLeaf) return node;
+  const children = node.content.content.map(withoutListSpacing);
+  return ["bullet_list", "ordered_list", "list_item"].includes(node.type.name)
+    ? node.type.create({ ...node.attrs, spread: false }, children, node.marks)
+    : node.copy(Fragment.fromArray(children));
 }
 
 function blocks(node: PmNode): FlowContent[] {
@@ -127,6 +160,8 @@ function callout(node: PmNode): BlockContent {
   const first = children[0];
   const head: Paragraph = { type: "paragraph", children: [{ type: "rawMarkdown", value: marker }] };
   if (first?.type !== "paragraph") return { type: "blockquote", children: [head, ...children] };
+  if (first.children.length === 0 && children.length > 1)
+    return { type: "blockquote", children: [head, ...children] };
   if (first.children.length > 0)
     head.children.push({ type: "text", value: "\n" }, ...first.children);
   return { type: "blockquote", children: [head, ...children.slice(1)] };

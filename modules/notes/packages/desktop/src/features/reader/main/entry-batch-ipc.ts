@@ -26,7 +26,9 @@ export function registerEntryBatchIpc(core: ReaderClient): void {
       previous = version;
       sender.send("reader.entry.batch.progress", id, progress);
     };
-    const stop = (): void => { control.cancel(); };
+    const stop = (): void => {
+      control.cancel();
+    };
     sender.once("destroyed", stop);
     const timer = setInterval(report, 80);
     timer.unref();

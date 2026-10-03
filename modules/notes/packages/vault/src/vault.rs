@@ -633,28 +633,7 @@ impl Vault {
         let Some(inventory) = guard.as_ref() else {
             return LinkTarget::Dead;
         };
-        let (path, suffix) = crate::links::link::split_resource(raw.trim());
-        let anchor = crate::links::link::anchor_of(suffix, kind);
-        if path.is_empty() {
-            return match anchor {
-                Some(anchor) => LinkTarget::Resolved {
-                    path: from.to_string(),
-                    anchor: Some(anchor),
-                },
-                None => LinkTarget::Dead,
-            };
-        }
-        match kind {
-            crate::links::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
-                WikiHits::One(path) => LinkTarget::Resolved { path, anchor },
-                WikiHits::Many(candidates) => LinkTarget::Ambiguous { candidates, anchor },
-                WikiHits::None => LinkTarget::Dead,
-            },
-            crate::links::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
-                Some(path) => LinkTarget::Resolved { path, anchor },
-                None => LinkTarget::Dead,
-            },
-        }
+        resolve_target(inventory, from, raw, kind)
     }
 
     /// 一篇文件的全部标题，按文档顺序；供锚点解析与标题补全。
@@ -979,19 +958,35 @@ fn wiki_map(
     map
 }
 
+/// 附件没有正文派生结构，索引只保留路径身份及流式摘要。
+fn attachment_row(rel: &str, hash: String, mtime: i64) -> FileRow {
+    FileRow {
+        path: rel.to_string(),
+        title: file_title_fallback(rel),
+        kind: "other".to_string(),
+        mtime,
+        content_hash: hash,
+    }
+}
+
+/// 附件摘要以固定缓冲读取，避免监听刷新或开库时占用整份附件大小的内存。
+fn attachment_hash(path: &Path) -> Result<String, Error> {
+    let mut file = fs::File::open(path).map_err(|error| access(path, error))?;
+    crate::storage::hash::transfer_hashed(&mut file, &mut io::sink(), u64::MAX, &mut |_| Ok(()))
+        .map(|(hash, _)| hash)
+        .map_err(|error| match error {
+            Error::Io(source) => access(path, source),
+            other => other,
+        })
+}
+
 /// 从字节抽出文件行、出链和派生数据。
 ///
 /// 出链先保持未解析。标题和别名要等整库身份表齐了才能绑定，调用方负责 `assign_target`。
 fn index_bytes(rel: &str, bytes: &[u8], mtime: i64) -> (FileRow, Vec<LinkRecord>, DerivedRows) {
     if !is_markdown(rel) {
         return (
-            FileRow {
-                path: rel.to_string(),
-                title: file_title_fallback(rel),
-                kind: "other".to_string(),
-                mtime,
-                content_hash: hex_sha256(bytes),
-            },
+            attachment_row(rel, hex_sha256(bytes), mtime),
             Vec::new(),
             empty_derived(),
         );
@@ -1213,8 +1208,15 @@ fn collect_refresh_chunk(
             }
         }
         let path = resolve_in_root(root, rel)?;
-        let bytes = fs::read(&path).map_err(|error| access(&path, error))?;
-        let hash = hex_sha256(&bytes);
+        let bytes = if is_markdown(rel) {
+            Some(fs::read(&path).map_err(|error| access(&path, error))?)
+        } else {
+            None
+        };
+        let hash = match &bytes {
+            Some(bytes) => hex_sha256(bytes),
+            None => attachment_hash(&path)?,
+        };
         if !stale_scan {
             if let Some(old) = by_path.get(rel) {
                 if old.content_hash == hash {
@@ -1228,7 +1230,14 @@ fn collect_refresh_chunk(
                 }
             }
         }
-        let (row, outgoing, rows) = index_bytes(rel, &bytes, *mtime);
+        let (row, outgoing, rows) = match bytes {
+            Some(bytes) => index_bytes(rel, &bytes, *mtime),
+            None => (
+                attachment_row(rel, hash, *mtime),
+                Vec::new(),
+                empty_derived(),
+            ),
+        };
         file_rows.push(row);
         links.extend(outgoing);
         derived.push((rel.clone(), rows));
@@ -1420,4 +1429,36 @@ fn resolve_markdown(inventory: &Inventory, from: &str, raw: &str) -> Option<Stri
     }
     let rel = path_to_slashes(&out).ok()?;
     inventory.set.contains(&rel).then_some(rel)
+}
+
+/// 基于固定身份表解析目标，交互跳转与导出快照共用同一语义。
+pub(super) fn resolve_target(
+    inventory: &Inventory,
+    from: &str,
+    raw: &str,
+    kind: crate::LinkKind,
+) -> crate::LinkTarget {
+    use crate::LinkTarget;
+    let (path, suffix) = crate::links::link::split_resource(raw.trim());
+    let anchor = crate::links::link::anchor_of(suffix, kind);
+    if path.is_empty() {
+        return match anchor {
+            Some(anchor) => LinkTarget::Resolved {
+                path: from.to_string(),
+                anchor: Some(anchor),
+            },
+            None => LinkTarget::Dead,
+        };
+    }
+    match kind {
+        crate::links::link::LinkKind::Wiki => match resolve_wiki(inventory, path) {
+            WikiHits::One(path) => LinkTarget::Resolved { path, anchor },
+            WikiHits::Many(candidates) => LinkTarget::Ambiguous { candidates, anchor },
+            WikiHits::None => LinkTarget::Dead,
+        },
+        crate::links::link::LinkKind::Markdown => match resolve_markdown(inventory, from, path) {
+            Some(path) => LinkTarget::Resolved { path, anchor },
+            None => LinkTarget::Dead,
+        },
+    }
 }

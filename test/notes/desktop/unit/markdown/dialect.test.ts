@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Node as PmNode } from "prosemirror-model";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { documentSchema } from "@reader/shared/markdown/schema";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);

@@ -8,6 +8,7 @@ import { browserAdaptor } from "@mathjax/src/js/adaptors/browserAdaptor.js";
 import { RegisterHTMLHandler } from "@mathjax/src/js/handlers/html.js";
 import { TeX } from "@mathjax/src/js/input/tex.js";
 import "@mathjax/src/js/input/tex/ams/AmsConfiguration.js";
+import "@mathjax/src/js/input/tex/boldsymbol/BoldsymbolConfiguration.js";
 import "@mathjax/src/js/input/tex/newcommand/NewcommandConfiguration.js";
 import "@mathjax/src/js/input/tex/noundefined/NoUndefinedConfiguration.js";
 import "@mathjax/src/js/input/tex/textmacros/TextMacrosConfiguration.js";
@@ -58,14 +59,22 @@ function asHtml(value: unknown, what: string): HTMLElement {
 /**
  * 在浏览器 DOM 上创建一份 CHTML 引擎。
  *
- * @returns 可供 warmup / NodeView 复用的引擎；进程内只应创建一次。
+ * @param strict 导出拒绝未知命令；阅读器保持既有容错显示。
+ * @returns 独立宏作用域的引擎；阅读器复用，导出每篇新建。
  */
-export function createMathJaxEngine(): MathJaxEngine {
+export function createMathJaxEngine(strict = false): MathJaxEngine {
   installAsyncLoad();
   const adaptor = browserAdaptor();
   RegisterHTMLHandler(adaptor);
   const tex = new TeX({
-    packages: ["base", "ams", "newcommand", "noundefined", "textmacros"],
+    packages: [
+      "base",
+      "ams",
+      "boldsymbol",
+      "newcommand",
+      ...(strict ? [] : ["noundefined"]),
+      "textmacros",
+    ],
   });
   const chtml = new CHTML({
     fontData: MathJaxNewcmFont,

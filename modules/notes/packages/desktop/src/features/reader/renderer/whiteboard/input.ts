@@ -3,7 +3,7 @@ import {
   WhiteboardHistory,
   type InkPoint,
   type WhiteboardDocument,
-} from "./model";
+} from "../../shared/whiteboard/model";
 import {
   DEFAULT_MIN_SCALE,
   erasedStrokes,
@@ -15,7 +15,7 @@ import {
   zoomAt,
   type BoardViewport,
   type InkBounds,
-} from "./geometry";
+} from "../../shared/whiteboard/geometry";
 
 type Gesture =
   | { kind: "ink"; points: InkPoint[] }

@@ -8,7 +8,7 @@ import {
   type ImportedAttachment,
 } from "../../../shared/attachments";
 import { mimeFromPath, previewKindFromMime } from "../../preview/media";
-import { isWhiteboardPath } from "../../whiteboard/model";
+import { isWhiteboardPath } from "../../../shared/whiteboard/model";
 
 /** 导入进度与可重试错误；不包含正文或保存状态。 */
 export type AttachmentProgress =

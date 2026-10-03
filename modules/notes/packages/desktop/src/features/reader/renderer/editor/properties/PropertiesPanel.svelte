@@ -8,7 +8,7 @@
    */
   import type { EditorState } from "prosemirror-state";
   import type { EditorView } from "prosemirror-view";
-  import { documentSchema } from "../../markdown/schema";
+  import { documentSchema } from "../../../shared/markdown/schema";
   import { frontmatterEditKey } from "./frontmatter-presentation";
   import {
     addEntry,

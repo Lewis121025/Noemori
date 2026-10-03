@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import type { Node as PmNode } from "prosemirror-model";
 import { AllSelection, NodeSelection, TextSelection } from "prosemirror-state";
 import { EditorSelection, Text } from "@codemirror/state";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import {
   markdownReloadMapping,
   textReloadChanges,

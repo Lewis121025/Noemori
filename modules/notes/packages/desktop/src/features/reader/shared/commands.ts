@@ -30,6 +30,8 @@ export const READER_COMMANDS = [
   { id: "insert-whiteboard", label: "插入白板", shortcut: null },
   { id: "new-folder", label: "新建文件夹", shortcut: cmdShift("n") },
   { id: "save", label: "保存", shortcut: cmd("s") },
+  { id: "export-document", label: "导出当前文件…", shortcut: null },
+  { id: "export-vault", label: "导出笔记库…", shortcut: null },
   { id: "insert-attachment", label: "插入附件…", shortcut: cmdShift("i") },
   { id: "find", label: "文内查找", shortcut: cmd("f") },
   { id: "find-files", label: "查找文件", shortcut: cmdShift("f") },
@@ -157,6 +159,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "toggle-split":
       return true;
     case "quick-switcher":
+    case "export-vault":
     case "new-folder":
     case "find-files":
     case "show-bookmarks":
@@ -171,6 +174,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "find":
       return context.hasDocument && !context.whiteboard;
     case "rename-file":
+    case "export-document":
     case "bookmark-file":
       return context.hasDocument;
     case "toggle-source":

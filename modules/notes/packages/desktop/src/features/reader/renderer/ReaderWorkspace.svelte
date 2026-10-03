@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ExportDialog from "./export/ExportDialog.svelte";
   import VaultOpening from "./workspace/VaultOpening.svelte";
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
   import ReaderToolbar from "./workspace/ReaderToolbar.svelte";
@@ -13,7 +14,7 @@
   import ConnectionsSpace from "./graph/ConnectionsSpace.svelte";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
   import { untitledNotePath, untitledWhiteboardPath } from "./library/library";
-  import { emptyWhiteboard, serializeWhiteboard } from "./whiteboard/model";
+  import { emptyWhiteboard, serializeWhiteboard } from "../shared/whiteboard/model";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
   import { WorkspaceSpaces } from "./workspace/spaces.svelte";
   import { createBrowserMediaIo } from "./preview/media";
@@ -143,6 +144,12 @@
         break;
       case "save":
         workspace.requestSave();
+        break;
+      case "export-document":
+        if (doc.path !== null) workspace.requestExport({ kind: "selection", paths: [doc.path] });
+        break;
+      case "export-vault":
+        workspace.requestExport({ kind: "vault" });
         break;
       case "find":
         prepareDocumentAction();
@@ -520,6 +527,7 @@
       onEdit={(action, entry, parent) => void entryDialog?.open(action, entry, parent)}
     />
   </div>
+  {#if workspace.exportScope !== null}<ExportDialog {workspace} />{/if}
   {#if workspace.deadLinkOffer !== null}
     <DeadLinkDialog
       path={workspace.deadLinkOffer.path}

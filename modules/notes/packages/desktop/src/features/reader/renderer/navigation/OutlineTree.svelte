@@ -3,7 +3,7 @@
    * 递归画大纲树。三角折叠，标题文字才跳转。
    */
   import OutlineTree from "./OutlineTree.svelte";
-  import type { OutlineNode } from "./outline";
+  import type { OutlineNode } from "../../shared/markdown/outline";
 
   type Props = {
     nodes: OutlineNode[];

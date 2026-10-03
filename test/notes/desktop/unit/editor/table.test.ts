@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection, type Command } from "prosemirror-state";
 import { history, redo, undo } from "prosemirror-history";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { moveTableCell, tableCommands } from "@reader/renderer/editor/table/table";
 import { tableLineBreak } from "@reader/renderer/editor/table/table-input";
 

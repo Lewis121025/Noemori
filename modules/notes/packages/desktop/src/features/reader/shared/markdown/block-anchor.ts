@@ -6,7 +6,7 @@
  */
 
 import type { Node as PmNode } from "prosemirror-model";
-import { documentSchema } from "../markdown/schema";
+import { documentSchema } from "./schema";
 import { findHeadingPmPos } from "./heading-anchor";
 
 /**
@@ -20,22 +20,21 @@ export function findBlockPmPos(doc: PmNode, id: string): number | null {
   if (!/^[A-Za-z0-9-]+$/u.test(id)) return null;
   const mark = `^${id}`;
   let found: number | null = null;
-  let previous: number | null = null;
-  doc.descendants((node, pos) => {
-    if (found !== null) return false;
-    if (!node.isTextblock) return true;
-    const text = node.textContent.trim();
-    if (text === mark) {
-      if (previous !== null) found = previous;
-      return false;
-    }
-    if (text.endsWith(` ${mark}`) || text.endsWith(`\t${mark}`)) {
-      found = pos;
-      return false;
-    }
-    previous = pos;
-    return false;
-  });
+  const visit = (parent: PmNode, start: number): void => {
+    let previous: number | null = null;
+    parent.forEach((node, offset) => {
+      if (found !== null) return;
+      const position = start + offset;
+      if (node.isTextblock) {
+        const text = node.textContent.trim();
+        if (text === mark) found = previous;
+        else if (text.endsWith(` ${mark}`) || text.endsWith(`\t${mark}`)) found = position;
+      } else if (!node.isLeaf) visit(node, position + 1);
+      // 独立标识属于同一父节点的前一个完整块，不能泄漏最后一个子块位置。
+      previous = position;
+    });
+  };
+  visit(doc, 0);
   return found;
 }
 

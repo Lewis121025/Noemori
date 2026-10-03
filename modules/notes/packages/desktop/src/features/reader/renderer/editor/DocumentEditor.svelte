@@ -18,13 +18,13 @@
     mermaidFocusPlugin,
   } from "../markdown/views/dialect-view";
   import { createMarkdownSession } from "../markdown/source-session";
-  import { findHeadingPmPos } from "../links/heading-anchor";
-  import { findBlockPmPos } from "../links/block-anchor";
+  import { findHeadingPmPos } from "../../shared/markdown/heading-anchor";
+  import { findBlockPmPos } from "../../shared/markdown/block-anchor";
   import { createContentNodeViews } from "../markdown/views/content-view";
   import { findMentionPmPos } from "../links/mention-jump";
   import { utf8ByteToJsIndex } from "../document/source-offset";
   import { type MediaIo } from "../preview/media";
-  import { collectOutline, type OutlineItem } from "../navigation/outline";
+  import { collectOutline, type OutlineItem } from "../../shared/markdown/outline";
   import { writingPlugins } from "./writing";
   import { createSourceEditingPlugin } from "./source/source-editing";
   import { linkInteraction, type OpenContentLink } from "./links/link-interaction";
@@ -56,7 +56,7 @@
   import { bodySelection, frontmatterPresentation } from "./properties/frontmatter-presentation";
   import { createAttachmentEditing, type AttachmentProgress } from "./attachments/attachments";
   import type { AttachmentImporter } from "../../shared/attachments";
-  import { emptyWhiteboard, serializeWhiteboard } from "../whiteboard/model";
+  import { emptyWhiteboard, serializeWhiteboard } from "../../shared/whiteboard/model";
   import type { LinkKind, NoteKeys } from "../../shared/api";
   import {
     listDocBlocks,

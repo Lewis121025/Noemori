@@ -2,6 +2,7 @@
 
 mod batch;
 mod control;
+mod export;
 mod files;
 mod models;
 mod publication;

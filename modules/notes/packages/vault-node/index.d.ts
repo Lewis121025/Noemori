@@ -298,17 +298,6 @@ export interface JsVaultEvent {
   /** 失败时保留原因。 */
   message?: string
 }
-/** 内存控制句柄，取消和进度不排在正在执行的操作之后。 */
-export declare class NativeControl {
-  /** 创建可取消操作；磁盘工作由持有句柄的命令负责。 */
-  constructor()
-  /** 原子请求取消；已经提交的操作返回 false。 */
-  cancel(): boolean
-  /** 读取取消标记，目录对话框结束后仍能识别此前的取消。 */
-  get cancelled(): boolean
-  /** 当前阶段完整快照，不等待任何磁盘任务。 */
-  get progress(): unknown
-}
 /** 一个宿主的 Rust 运行时；显式 shutdown 负责等待磁盘任务与监听退出。 */
 export declare class NativeRuntime {
   /** 导入用户选择的附件字节，返回实际位置；路径、大小与写盘错误由内核传播。 */
@@ -358,6 +347,12 @@ export declare class NativeRuntime {
   entryRename(from: string, to: string): Promise<JsRenameOutcome>
   /** 执行整批请求；返回真实完成前缀，取消只能发生在事务边界。 */
   entryBatch(request: unknown, control: NativeControl): Promise<unknown>
+  /** 启动时核实未确认的导出结果，不自动重放原来的生成或覆盖操作。 */
+  exportRecover(): Promise<unknown>
+  /** 保存门禁后准备导出；控制句柄不经过磁盘任务队列。 */
+  exportPrepare(root: string, id: string, paths: Array<string> | undefined | null, hidden: boolean, control: NativeControl): Promise<unknown>
+  /** 原生校验动作和路径；动作不会作为通用文件系统能力暴露给页面。 */
+  exportAction(id: string, action: any, bytes?: Buffer | undefined | null): Promise<unknown>
   /**
    * 读取文件原始字节。
    *
@@ -472,6 +467,12 @@ export declare class NativeRuntime {
    * 未打开库。
    */
   indexHeadings(path: string): Promise<Array<JsHeadingRecord>>
+  /** 创建轻量句柄；初始化不读取磁盘，首个应用命令在后台执行。 */
+  constructor(userData: string, onChanged: (event: JsVaultEvent) => void)
+  /** 当前代次只访问原子内存，供宿主丢弃迟到事件。 */
+  get generation(): string
+  /** 关闭入口并排空所有已接受任务；Promise 完成才表示监听已停止。 */
+  shutdown(): Promise<void>
   /** 提交搜索；在调用线程登记会话，旧续页不能替换新搜索。 */
   searchQuery(query: JsSearchQuery, id: string, cursor?: string | undefined | null): Promise<JsSearchPage>
   /** 同会话的命中续页共享取消令牌，交付前再次验证归属。 */
@@ -500,10 +501,15 @@ export declare class NativeRuntime {
   readerSessionPatch(patch: unknown): Promise<void>
   /** 目录状态绑定库根，迟到的旧状态不能覆盖新库。 */
   readerFileTreeSave(root: string, tree: unknown): Promise<void>
-  /** 创建轻量句柄；初始化不读取磁盘，首个应用命令在后台执行。 */
-  constructor(userData: string, onChanged: (event: JsVaultEvent) => void)
-  /** 当前代次只访问原子内存，供宿主丢弃迟到事件。 */
-  get generation(): string
-  /** 关闭入口并排空所有已接受任务；Promise 完成才表示监听已停止。 */
-  shutdown(): Promise<void>
+}
+/** 内存控制句柄，取消和进度不排在正在执行的操作之后。 */
+export declare class NativeControl {
+  /** 创建可取消操作；磁盘工作由持有句柄的命令负责。 */
+  constructor()
+  /** 原子请求取消；已经提交的操作返回 false。 */
+  cancel(): boolean
+  /** 读取取消标记，目录对话框结束后仍能识别此前的取消。 */
+  get cancelled(): boolean
+  /** 当前阶段完整快照，不等待任何磁盘任务。 */
+  get progress(): unknown
 }

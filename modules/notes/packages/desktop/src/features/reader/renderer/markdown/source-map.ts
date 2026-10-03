@@ -32,8 +32,9 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
   // 标注的首段在语法树里还包着 `[!kind]` 标题行，与文档子节点不能逐一配对；
   // 整块作为叶子，内部编辑时整块重写。
   const branch =
-    ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(ast.type) &&
-    node.type.name !== "callout";
+    ["root", "blockquote", "list", "listItem", "footnoteDefinition", "table", "tableRow"].includes(
+      ast.type,
+    ) && node.type.name !== "callout";
   let children =
     branch && "children" in ast && ast.children.length === node.childCount
       ? ast.children.map((child, index) => sourceTree(child, node.child(index), offset))
@@ -79,6 +80,8 @@ export function sourceTree(ast: Nodes, node: PmNode, offset: number): SourceNode
       implicit: "leading",
     });
   }
+  if (branch && children.length !== node.childCount)
+    throw new Error("Markdown 块与编辑器布局无法对应，已停止生成源码位置");
   const text: SourceNode["text"] = [];
   const phrases: SourceNode["inline"] = [];
   const navigation: NonNullable<SourceNode["navigation"]> = [];

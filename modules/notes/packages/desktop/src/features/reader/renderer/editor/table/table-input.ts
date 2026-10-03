@@ -1,6 +1,6 @@
 import { Fragment, Slice, type Node as PmNode } from "prosemirror-model";
 import { Plugin, type Command, type EditorState } from "prosemirror-state";
-import { serializeMarkdown } from "../../markdown/serialize";
+import { serializeMarkdown } from "../../../shared/markdown/serialize";
 
 function withinCell(state: EditorState): boolean {
   const { $from, $to } = state.selection;

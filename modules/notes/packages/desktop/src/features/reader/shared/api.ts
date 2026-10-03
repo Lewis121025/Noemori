@@ -9,6 +9,7 @@ import type { VaultOpenProgress } from "./vault-opening";
 import type { SessionDocuments, ViewModes } from "./session";
 import type { FileTreeState } from "./file-browser";
 import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./entry-batch";
+import type { ExportRequest, ExportProgress, ExportPlan, ExportResult } from "./export";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
 export type HistoryAction = "undo" | "redo";
@@ -350,6 +351,18 @@ export type VaultEntry = {
  * 订阅返回取消函数，阅读器卸载时必须调用，避免继续接收旧实例事件。
  */
 export type ReaderApi = {
+  /** 全栏保存门禁之后生成并提交整批导出；取消与失败具有明确结果。 */
+  exportRun: (
+    request: ExportRequest,
+    onProgress?: (progress: ExportProgress) => void,
+    onPlan?: (plan: ExportPlan) => void,
+  ) => Promise<ExportResult>;
+  /** 取消当前窗口导出；已进入提交边界时返回 false，不能撤销已生成文件。 */
+  exportCancel: () => Promise<boolean>;
+  /** 在系统文件管理器中显示本窗口最后一次成功导出的结果。 */
+  exportReveal: () => Promise<void>;
+  /** 启动时核实并显示未确认的导出结果，不重放生成或覆盖。 */
+  exportRecover: () => Promise<void>;
   /** 弹出选目录对话框并打开库；取消时返回 `null`。 */
   vaultOpen: (
     onProgress?: (progress: VaultOpenProgress) => void,

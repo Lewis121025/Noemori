@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseMarkdown } from "@reader/renderer/markdown/markdown";
-import { findBlockPmPos } from "@reader/renderer/links/block-anchor";
+import { findBlockPmPos } from "@reader/shared/markdown/block-anchor";
 import {
   listDocBlocks,
   listSourceBlocks,

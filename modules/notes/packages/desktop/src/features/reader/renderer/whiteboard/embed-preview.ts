@@ -1,5 +1,5 @@
 import type { MediaIo } from "../preview/media";
-import { parseWhiteboard, type WhiteboardDocument } from "./model";
+import { parseWhiteboard, type WhiteboardDocument } from "../../shared/whiteboard/model";
 import { createWhiteboardPreview } from "./preview";
 
 /**

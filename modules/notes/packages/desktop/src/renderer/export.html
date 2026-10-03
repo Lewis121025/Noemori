@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; font-src 'self' blob:; connect-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
+    />
+    <title>Noemori 导出</title>
+  </head>
+  <body>
+    <main id="content" class="markdown-content reading"></main>
+    <script type="module" src="../features/reader/renderer/export/page.ts"></script>
+  </body>
+</html>

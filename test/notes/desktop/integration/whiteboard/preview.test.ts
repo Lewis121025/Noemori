@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { expect, it, vi } from "vitest";
 import { mountNotePreview } from "@reader/renderer/markdown/views/content-view";
-import { emptyWhiteboard, serializeWhiteboard } from "@reader/renderer/whiteboard/model";
+import { emptyWhiteboard, serializeWhiteboard } from "@reader/shared/whiteboard/model";
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {

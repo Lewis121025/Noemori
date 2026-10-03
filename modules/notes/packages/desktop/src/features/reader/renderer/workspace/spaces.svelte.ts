@@ -1,6 +1,6 @@
 import { untrack } from "svelte";
 import type { ReaderSpace } from "../../shared/api";
-import { isWhiteboardPath } from "../whiteboard/model";
+import { isWhiteboardPath } from "../../shared/whiteboard/model";
 import type { ReaderWorkspaceController } from "./state.svelte";
 
 /** 画布复用活动文档；列表与图谱只浏览资料，不替换编辑会话。 */

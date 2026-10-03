@@ -124,9 +124,18 @@
     await tick();
     // 搜索、标签切换或卸载可能发生在布局等待期间，焦点请求只属于发起时的视口。
     if (element !== viewport || !viewport.isConnected) return;
-    Array.from(viewport.querySelectorAll<HTMLButtonElement>("[data-path]"))
-      .find((button) => button.dataset.path === path)
-      ?.focus({ preventScroll: true });
+    const button = Array.from(viewport.querySelectorAll<HTMLButtonElement>("[data-path]")).find(
+      (button) => button.dataset.path === path,
+    );
+    if (!button) return;
+    // 模型用于先挂载远处行；浏览器会量化滚动偏移，最后以真实按钮边界校正。
+    const bounds = viewport.getBoundingClientRect();
+    const row = button.getBoundingClientRect();
+    if (row.top < bounds.top) viewport.scrollTop -= Math.ceil(bounds.top - row.top);
+    else if (row.bottom > bounds.bottom)
+      viewport.scrollTop += Math.ceil(row.bottom - bounds.bottom);
+    rememberPosition();
+    button.focus({ preventScroll: true });
   }
 </script>
 
@@ -158,7 +167,8 @@
     margin: 0;
     overflow: auto;
     flex: 1 1 auto;
-    min-height: 0;
+    /* 窄窗口仍须容纳一整行，否则任何滚动位置都无法完整显示键盘焦点。 */
+    min-height: var(--file-row-height);
     padding: 0 0.55rem 0.75rem;
     overflow-anchor: none;
   }
@@ -180,6 +190,7 @@
   }
   .empty-tree {
     flex: 0;
+    min-height: 0;
     padding: 0;
   }
 </style>

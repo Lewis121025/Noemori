@@ -48,6 +48,7 @@ beforeEach(() => {
     ["other.md", encode("other\n")],
   ]);
   api = {
+    exportRecover: vi.fn(async () => {}),
     vaultRestore: vi.fn(async () => ({
       root: "/notes",
       entries: await api.vaultEntries(),

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DOMParser, DOMSerializer } from "prosemirror-model";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { documentSchema } from "@reader/shared/markdown/schema";
 
 describe("PDF 附件引用保真", () => {
   it.each([

@@ -130,14 +130,11 @@ function createWindow(client: CoreClient): void {
 }
 
 app.whenReady().then(async () => {
-  const client = new CoreClient(
-    app.getPath("userData"),
-    (event) => {
-      if (mainWindow !== null && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send("reader.vault.changed", event);
-      }
-    },
-  );
+  const client = new CoreClient(app.getPath("userData"), (event) => {
+    if (mainWindow !== null && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("reader.vault.changed", event);
+    }
+  });
   core = client;
   registerIpc(() => mainWindow, closeGate, client);
   // 库根边界由内核 entryPath 校验；协议层只额外限制为音视频类型。

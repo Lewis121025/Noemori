@@ -109,6 +109,10 @@ name = "search_integration_hybrid"
 path = "../../../../test/notes/vault/integration/search/hybrid.rs"
 
 [[test]]
+name = "vault_unit_export"
+path = "../../../../test/notes/vault/unit/storage/export.rs"
+
+[[test]]
 name = "vault_unit_entries"
 path = "../../../../test/notes/vault/unit/storage/entries.rs"
 
@@ -121,6 +125,7 @@ name = "vault_unit_bookmarks"
 path = "../../../../test/notes/vault/unit/storage/bookmarks.rs"
 
 [dependencies]
+icu_casemap = "2.3.0"
 levenshtein_automata = "0.2.1"
 tantivy-fst = "0.5.0"
 markdown = "1.0.0"
@@ -138,6 +143,7 @@ serde_json = "1.0.151"
 sha2 = "0.11.0"
 tantivy = { version = "0.26.2", default-features = false, features = ["mmap"] }
 tempfile = "3.23.0"
+unicode-normalization = "0.1"
 yaml-rust2 = "0.13"
 
 [[test]]

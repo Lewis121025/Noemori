@@ -9,7 +9,7 @@
  */
 
 import type { Node as PmNode } from "prosemirror-model";
-import { splitLinkResource } from "../../shared/link-target";
+import { splitLinkResource } from "../link-target";
 import { documentSchema } from "./schema";
 
 /**

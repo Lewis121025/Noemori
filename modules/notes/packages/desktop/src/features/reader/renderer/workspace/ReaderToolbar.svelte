@@ -272,6 +272,14 @@
     disabled={busy}>打开笔记库…</button
   >
   {@render applicationMenu()}
+  <button
+    class="reader-button"
+    type="button"
+    popovertarget="library-menu"
+    popovertargetaction="hide"
+    disabled={busy || workspace.vaultRoot === null}
+    onclick={() => workspace.requestExport({ kind: "vault" })}>导出笔记库…</button
+  >
 </div>
 <div
   id="note-menu"
@@ -279,6 +287,16 @@
   popover="auto"
   class="reader-popover action-popover note-menu"
 >
+  <button
+    class="reader-button"
+    type="button"
+    popovertarget="note-menu"
+    popovertargetaction="hide"
+    disabled={busy || doc.path === null}
+    onclick={() => {
+      if (doc.path !== null) workspace.requestExport({ kind: "selection", paths: [doc.path] });
+    }}>导出…</button
+  >
   {#if doc.content?.kind === "markdown"}
     {#if workspace.viewMode !== "source"}<button
         class="reader-button"

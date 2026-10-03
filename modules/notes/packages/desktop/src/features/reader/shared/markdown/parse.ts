@@ -3,9 +3,10 @@ import type { Blockquote, Definition, Nodes, PhrasingContent, RootContent } from
 import { decodeString } from "micromark-util-decode-string";
 import type { Mark, Node as PmNode } from "prosemirror-model";
 import { markdownProcessor } from "./markdown-processor";
-import { previewKindFromReference } from "../preview/media";
+import { previewKindFromReference } from "../media-kind";
 import { noteEmbedFromParagraph } from "./embed";
 import { documentSchema } from "./schema";
+import { parseMarkdownLayout } from "./source-layout";
 
 type Definitions = ReadonlyMap<string, Definition>;
 
@@ -21,13 +22,25 @@ type Definitions = ReadonlyMap<string, Definition>;
  * @throws 语法无法被处理器承载时失败，禁止静默丢弃内容。
  */
 export function parseMarkdown(source: string): PmNode {
-  const tree = markdownProcessor.parse(source);
+  return parseMarkdownDocument(source).doc;
+}
+
+/**
+ * 一次解析同时生成编辑文档和空白布局，避免源码映射另行猜测段落数量。
+ * @param source 不含 BOM 的 Markdown 原文。
+ * @returns 同一源码版本的文档和语法树；解析失败时继续抛出原始异常。
+ */
+export function parseMarkdownDocument(source: string) {
+  const tree = parseMarkdownLayout(source);
   const definitions = new Map<string, Definition>();
   collectDefinitions(tree, definitions);
   const lifted = tree.children.map((node) => mapBlock(node, definitions)).map(liftEmbedParagraph);
   // 仅有属性的文件仍需可落笔的正文；空段不产生源码，首次输入才追加内容。
   if (tree.children.length === 1 && tree.children[0]?.type === "yaml") lifted.push(paragraph());
-  return documentSchema.node("doc", null, lifted.length === 0 ? [paragraph()] : lifted);
+  return {
+    doc: documentSchema.node("doc", null, lifted.length === 0 ? [paragraph()] : lifted),
+    tree,
+  };
 }
 
 /** 只含一条笔记嵌入的段落提升为嵌入块；句中嵌入保持链接，避免拆开句子。 */

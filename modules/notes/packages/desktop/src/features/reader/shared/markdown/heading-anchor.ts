@@ -11,7 +11,7 @@
  */
 
 import type { Node as PmNode } from "prosemirror-model";
-import { headingText } from "../navigation/outline";
+import { headingText } from "./outline";
 
 /** 锚点与标题文本的归一化：连续空白折叠、去首尾、小写。 */
 export function normalizeHeadingText(text: string): string {

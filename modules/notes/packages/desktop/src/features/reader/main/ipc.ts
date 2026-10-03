@@ -8,6 +8,7 @@ import { parseRecentFiles, parseViewModes } from "../shared/session";
 import { parseFileTreeMessage } from "../shared/file-browser";
 import { registerEntryBatchIpc } from "./entry-batch-ipc";
 import { registerVaultOpenIpc } from "./vault-open-ipc";
+import { registerExportIpc } from "./export/ipc";
 import type { ReaderService } from "./service";
 import {
   parseBookmarks,
@@ -42,6 +43,13 @@ export type ReaderClient = {
  * @throws IPC 重复注册或单次命令失败时由 Electron 传播错误。
  */
 export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: ReaderClient): void {
+  registerExportIpc(getWindow, {
+    createControl: () => core.createControl(),
+    recover: () => core.call("exportRecover"),
+    prepare: (root, id, paths, hidden, control) =>
+      core.call("exportPrepare", root, id, paths, hidden, control),
+    action: (id, action, bytes) => core.call("exportAction", id, action, bytes),
+  });
   ipcMain.handle("reader.links.openExternal", (_event, url: unknown) =>
     shell.openExternal(externalUrl(url)),
   );

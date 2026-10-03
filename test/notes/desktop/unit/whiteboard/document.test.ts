@@ -4,7 +4,7 @@ import {
   emptyWhiteboard,
   serializeWhiteboard,
   WhiteboardHistory,
-} from "@reader/renderer/whiteboard/model";
+} from "@reader/shared/whiteboard/model";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
 const encode = (text: string) => new TextEncoder().encode(text);

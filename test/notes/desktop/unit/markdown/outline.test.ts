@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectOutline, outlineEquals, buildOutlineTree } from "@reader/renderer/navigation/outline";
+import { collectOutline, outlineEquals, buildOutlineTree } from "@reader/shared/markdown/outline";
 import { parseMarkdown } from "@reader/renderer/markdown/markdown";
 
 describe("heading outline", () => {

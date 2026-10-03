@@ -74,18 +74,17 @@ impl ScannedMarkdown {
 /// 不能挡住库打开。
 #[must_use]
 pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
-    let options = ParseOptions {
-        constructs: Constructs {
-            frontmatter: true,
-            math_flow: true,
-            math_text: true,
-            ..Constructs::gfm()
-        },
-        ..ParseOptions::default()
-    };
-    let Ok(tree) = to_mdast(source, &options) else {
-        return ScannedMarkdown::empty();
-    };
+    scan_markdown_strict(from_path, source).unwrap_or_else(|_| ScannedMarkdown::empty())
+}
+
+/// 导出等内容事务使用严格解析；解析错误不能成为空文档或空身份表。
+/// # Errors
+/// Markdown 语法树无法构造时返回原始解析错误。
+pub(crate) fn scan_markdown_strict(
+    from_path: &str,
+    source: &str,
+) -> Result<ScannedMarkdown, markdown::message::Message> {
+    let tree = parse_tree_strict(source)?;
     let mut links = Vec::new();
     let mut excluded = Vec::new();
     let mut references = HashSet::new();
@@ -132,7 +131,7 @@ pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
         .headings
         .first()
         .map(|heading| heading.text.clone());
-    ScannedMarkdown {
+    Ok(ScannedMarkdown {
         title,
         links,
         headings: structure.headings,
@@ -140,8 +139,61 @@ pub fn scan_markdown(from_path: &str, source: &str) -> ScannedMarkdown {
         source_map: structure.source_map,
         tags,
         attributes,
+    })
+}
+
+/// 两条扫描路径必须使用相同语法树规则；索引的容错只保留在公开扫描入口。
+fn parse_tree_strict(source: &str) -> Result<Node, markdown::message::Message> {
+    let options = ParseOptions {
+        constructs: Constructs {
+            frontmatter: true,
+            math_flow: true,
+            math_text: true,
+            ..Constructs::gfm()
+        },
+        ..ParseOptions::default()
+    };
+    to_mdast(source, &options)
+}
+
+/// 只建立导出所需的身份键，不生成全文索引、出链和源码映射。
+/// # Errors
+/// 严格语法树解析失败时传播错误；标题和别名语义与完整索引相同。
+pub(crate) fn scan_identity_strict(source: &str) -> Result<Vec<String>, markdown::message::Message> {
+    let tree = parse_tree_strict(source)?;
+    let mut title = None;
+    let mut yaml = None;
+    collect_identity(&tree, &mut title, &mut yaml);
+    let attributes = yaml
+        .map(|source| frontmatter::parse(source).attributes)
+        .unwrap_or_default();
+    Ok(crate::links::identity::keys_from_metadata(
+        title.as_deref(),
+        &attributes,
+    ))
+}
+
+fn collect_identity<'a>(node: &'a Node, title: &mut Option<String>, yaml: &mut Option<&'a str>) {
+    match node {
+        Node::Heading(heading) if title.is_none() => {
+            *title = heading_record(heading).map(|record| record.text);
+        }
+        Node::Yaml(value) if yaml.is_none() => *yaml = Some(&value.value),
+        _ => {}
+    }
+    if title.is_some() && yaml.is_some() {
+        return;
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_identity(child, title, yaml);
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../../../test/notes/vault/unit/markdown/export_identity.rs"]
+mod export_identity_tests;
 
 /// 结构遍历的累积输出。
 #[derive(Default)]

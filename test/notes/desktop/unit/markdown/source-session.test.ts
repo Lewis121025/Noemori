@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { EditorState } from "prosemirror-state";
 import { closeHistory, history, undo, redo } from "prosemirror-history";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { documentSchema } from "@reader/shared/markdown/schema";
 
 function edit(source: string, needle: string, replacement: string): string {
   const session = createMarkdownSession(source);

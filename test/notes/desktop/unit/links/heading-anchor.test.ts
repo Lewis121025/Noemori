@@ -3,7 +3,7 @@ import { parseMarkdown } from "@reader/renderer/markdown/markdown";
 import {
   findHeadingPmPos,
   normalizeHeadingText,
-} from "@reader/renderer/links/heading-anchor";
+} from "@reader/shared/markdown/heading-anchor";
 
 describe("normalizeHeadingText", () => {
   it("折叠连续空白、去首尾并小写", () => {

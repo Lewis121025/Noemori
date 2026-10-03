@@ -14,8 +14,8 @@ import type { Node as PmNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { EditorView, type NodeViewConstructor } from "prosemirror-view";
 import { resolveMediaUrl, type MediaIo } from "../../preview/media";
-import { parseMarkdown } from "../parse";
-import { sliceEmbed } from "../../links/block-anchor";
+import { parseMarkdown } from "../../../shared/markdown/parse";
+import { sliceEmbed } from "../../../shared/markdown/block-anchor";
 import { documentAccess } from "../../editor/read-only";
 import {
   frontmatterPresentation,
@@ -36,7 +36,7 @@ import {
   footnoteNavigation,
 } from "./dialect-view";
 import "../../styles/content.css";
-import { isWhiteboardPath } from "../../whiteboard/model";
+import { isWhiteboardPath } from "../../../shared/whiteboard/model";
 import { mountWhiteboardPreview } from "../../whiteboard/embed-preview";
 
 /**

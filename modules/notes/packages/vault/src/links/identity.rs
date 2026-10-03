@@ -42,11 +42,19 @@ pub(crate) fn alias_keys(attributes: &[(String, String)]) -> Vec<String> {
 
 /// 一篇已扫描笔记的标题与别名，供改名时重建解析表。
 pub(crate) fn keys_from_scan(scanned: &ScannedMarkdown) -> Vec<String> {
+    keys_from_metadata(scanned.title.as_deref(), &scanned.attributes)
+}
+
+/// 完整索引与导出身份扫描共享键规范化；不得各自解释标题、别名或去重顺序。
+pub(crate) fn keys_from_metadata(
+    title: Option<&str>,
+    attributes: &[(String, String)],
+) -> Vec<String> {
     let mut keys = Vec::new();
-    if let Some(title) = &scanned.title {
+    if let Some(title) = title {
         push_key(&mut keys, title);
     }
-    for alias in alias_keys(&scanned.attributes) {
+    for alias in alias_keys(attributes) {
         push_key(&mut keys, &alias);
     }
     keys

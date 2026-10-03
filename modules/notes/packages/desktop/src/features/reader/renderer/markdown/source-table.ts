@@ -1,6 +1,6 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { SourceNode } from "./source-map";
-import { serializeMarkdown } from "./serialize";
+import { serializeMarkdown } from "../../shared/markdown/serialize";
 import { sourceLinePrefix } from "./source-text";
 
 /**

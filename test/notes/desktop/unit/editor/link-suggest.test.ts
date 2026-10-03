@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { documentSchema } from "@reader/shared/markdown/schema";
 import { suggestRequest } from "@reader/renderer/editor/links/suggestions/context";
 import { suggestInsertion } from "@reader/renderer/editor/links/suggestions/insert";
 import {

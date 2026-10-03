@@ -5,7 +5,7 @@ import { flushSync, mount, unmount, type Component } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DocumentEditor from "@reader/renderer/editor/DocumentEditor.svelte";
 import type { MarkdownEditorApi } from "@reader/renderer/editor/editor-api";
-import type { OutlineItem } from "@reader/renderer/navigation/outline";
+import type { OutlineItem } from "@reader/shared/markdown/outline";
 
 const OriginalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 

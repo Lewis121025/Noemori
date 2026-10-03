@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -57,11 +57,22 @@ function mathjaxWoffPlugin(): Plugin {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [
+      externalizeDepsPlugin(),
+      {
+        name: "bundled-pandoc",
+        writeBundle() {
+          cpSync(resolve(".cache/pandoc-3.12/bundle"), resolve("out/main/pandoc"), {
+            recursive: true,
+          });
+        },
+      },
+    ],
     build: {
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "export-worker": resolve("src/features/reader/main/export/worker.ts"),
         },
       },
     },
@@ -81,6 +92,14 @@ export default defineConfig({
     },
   },
   renderer: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/renderer/index.html"),
+          export: resolve("src/renderer/export.html"),
+        },
+      },
+    },
     resolve: {
       alias: {
         "@app": resolve("src/renderer"),

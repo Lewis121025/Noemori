@@ -10,6 +10,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/support/electron-lifecycle.ts",
     ],
     include: [
+      "../../../../test/notes/desktop/e2e/export.test.mts",
       "../../../../test/notes/desktop/e2e/vault-opening.test.mts",
       "../../../../test/notes/desktop/e2e/spaces.test.mts",
       "../../../../test/notes/desktop/e2e/attachments.test.mts",
@@ -39,6 +40,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/e2e/bookmarks.test.mts",
       "../../../../test/notes/desktop/e2e/graph.test.mts",
       "../../../../test/notes/desktop/e2e/source-mode.test.mts",
+      "../../../../test/notes/desktop/e2e/blank-layout.test.mts",
       "../../../../test/notes/desktop/e2e/recovery.test.mts",
       "../../../../test/notes/desktop/e2e/source-recovery.test.mts",
       "../../../../test/notes/desktop/e2e/visual-scenes.test.mts",

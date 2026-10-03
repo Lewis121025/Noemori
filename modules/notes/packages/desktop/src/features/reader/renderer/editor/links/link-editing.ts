@@ -7,7 +7,7 @@ import {
 } from "prosemirror-state";
 import type { LinkKind } from "../../../shared/api";
 import { externalUrl, hasUrlScheme } from "../../../shared/link-target";
-import { documentSchema } from "../../markdown/schema";
+import { documentSchema } from "../../../shared/markdown/schema";
 
 /** 链接弹窗打开前的选区书签；true 捕获、false 释放，其余事务只映射位置。 */
 export const linkSelectionKey = new PluginKey<SelectionBookmark | null>("linkSelection");

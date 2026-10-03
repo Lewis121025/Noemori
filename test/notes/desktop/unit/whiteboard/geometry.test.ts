@@ -4,8 +4,8 @@ import {
   lassoSelection,
   toWorld,
   zoomAt,
-} from "@reader/renderer/whiteboard/geometry";
-import type { InkPoint, InkStroke } from "@reader/renderer/whiteboard/model";
+} from "@reader/shared/whiteboard/geometry";
+import type { InkPoint, InkStroke } from "@reader/shared/whiteboard/model";
 
 const p = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.5 });
 const line: InkStroke = { id: "inside", width: 2, points: [p(40, 20), p(40, 80)] };

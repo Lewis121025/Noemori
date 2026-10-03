@@ -16,8 +16,8 @@ import type {
   WhiteboardEditorApi,
 } from "../editor/editor-api";
 import { mentionOccurrenceIndex } from "../links/backlinks";
-import { normalizeHeadingText } from "../links/heading-anchor";
-import { buildOutlineTree, outlineEquals, type OutlineItem } from "./outline";
+import { normalizeHeadingText } from "../../shared/markdown/heading-anchor";
+import { buildOutlineTree, outlineEquals, type OutlineItem } from "../../shared/markdown/outline";
 import type { ReaderDocument } from "../document/state.svelte";
 import type { EditorSnapshot } from "../markdown/source-session";
 import { verifySearchSnapshot } from "../search/locate";

@@ -4,8 +4,8 @@ import {
   emptyWhiteboard,
   parseWhiteboard,
   serializeWhiteboard,
-} from "@reader/renderer/whiteboard/model";
-import type { InkStroke } from "@reader/renderer/whiteboard/model";
+} from "@reader/shared/whiteboard/model";
+import type { InkStroke } from "@reader/shared/whiteboard/model";
 
 const stroke: InkStroke = {
   id: "a",

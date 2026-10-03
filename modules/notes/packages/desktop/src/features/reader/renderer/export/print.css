@@ -1,0 +1,81 @@
+@page {
+  size: A4 portrait;
+  margin: 20mm;
+}
+:root {
+  --bg: #fff;
+  --fg: #171717;
+  --muted: #525252;
+  --border: #d4d4d4;
+  color-scheme: light;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  color: #171717;
+}
+body {
+  width: 170mm;
+  font:
+    11pt/1.65 -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    sans-serif;
+}
+.markdown-content {
+  max-width: none;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  break-after: avoid;
+}
+.markdown-content :is(pre, table, blockquote) {
+  max-width: 100%;
+  overflow: visible;
+}
+.markdown-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown-content table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.markdown-content :is(th, td) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  border: 1px solid #d4d4d4;
+  padding: 4px 6px;
+}
+.markdown-content img {
+  max-width: 100%;
+  max-height: 240mm;
+  object-fit: contain;
+  height: auto;
+  break-inside: avoid;
+}
+.markdown-content li[data-checked] {
+  list-style: none;
+}
+.markdown-content li[data-checked="true"]::before {
+  content: "☑ ";
+}
+.markdown-content li[data-checked="false"]::before {
+  content: "☐ ";
+}
+.markdown-content .footnote-def {
+  border-top: 1px solid #d4d4d4;
+  font-size: 9pt;
+}
+.markdown-content :is([data-math-tex], mjx-container) {
+  overflow: visible;
+}
+@media print {
+  body {
+    width: auto;
+  }
+}

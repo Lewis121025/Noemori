@@ -14,7 +14,7 @@ import {
 } from "prosemirror-state";
 import type { Decoration, EditorView, NodeViewConstructor } from "prosemirror-view";
 import { peekRenderedTex, renderTex } from "./mathjax";
-import { documentSchema } from "../schema";
+import { documentSchema } from "../../../shared/markdown/schema";
 import { SourceNodeView } from "./source-node-view";
 import { sourceEditingKey } from "../../editor/source/source-editing";
 import { mathPlaceholderText } from "./viewport";

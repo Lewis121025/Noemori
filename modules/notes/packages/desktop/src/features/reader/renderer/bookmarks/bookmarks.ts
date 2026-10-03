@@ -6,7 +6,7 @@
  */
 
 import type { Bookmark, VaultEntry } from "../../shared/api";
-import { normalizeHeadingText } from "../links/heading-anchor";
+import { normalizeHeadingText } from "../../shared/markdown/heading-anchor";
 
 /**
  * 两条书签是否指向同一目标；显示名不参与比较。

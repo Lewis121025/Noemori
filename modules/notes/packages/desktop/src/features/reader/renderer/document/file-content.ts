@@ -1,5 +1,9 @@
 import { mimeFromPath } from "../preview/media";
-import { isWhiteboardPath, parseWhiteboard, type WhiteboardDocument } from "../whiteboard/model";
+import {
+  isWhiteboardPath,
+  parseWhiteboard,
+  type WhiteboardDocument,
+} from "../../shared/whiteboard/model";
 
 /** 文本才携带可编辑源码；附件始终保留原始字节。 */
 export type FileContent =

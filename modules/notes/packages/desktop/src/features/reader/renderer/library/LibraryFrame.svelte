@@ -106,6 +106,12 @@
       <button
         class="reader-button"
         type="button"
+        disabled={busy}
+        onclick={() => onAction("export", current)}>导出…</button
+      >
+      <button
+        class="reader-button"
+        type="button"
         aria-label="重命名"
         title="重命名"
         disabled={busy || current === null}

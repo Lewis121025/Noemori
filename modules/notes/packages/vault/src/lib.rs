@@ -5,6 +5,7 @@
 //! 本 crate 不依赖 Node-API，测试直接调用此处 API。
 
 mod error;
+pub mod export;
 mod index;
 mod links;
 mod markdown;

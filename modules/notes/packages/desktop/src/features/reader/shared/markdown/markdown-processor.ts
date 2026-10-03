@@ -8,6 +8,7 @@ import { unified } from "unified";
 import { remarkWiki, type WikiLink } from "./wiki";
 import { remarkObsidian } from "./obsidian";
 import type { Literal } from "mdast";
+import { layoutHandlers } from "./layout-serialization";
 
 /** 已确认的 Markdown 语法片段；不经过普通文本转义。 */
 export type RawMarkdown = Literal & { type: "rawMarkdown"; value: string };
@@ -39,7 +40,16 @@ export const markdownProcessor = unified()
     listItemIndent: "one",
     rule: "-",
     ruleSpaces: false,
+    // 空段占一条额外空行；正文到空段先保留普通块所需的分隔空行。
+    join: [
+      (left, right) => {
+        if (left.type === "paragraph" && left.children.length === 0) return 0;
+        if (right.type === "paragraph" && right.children.length === 0) return 1;
+        return undefined;
+      },
+    ],
     handlers: {
+      ...layoutHandlers,
       wikiLink: (node: WikiLink, _parent, state) =>
         state.stack.includes("tableCell") ? node.value.replace(/\|/g, "\\|") : node.value,
       rawMarkdown: (node: RawMarkdown, _parent, state) =>

@@ -4,6 +4,12 @@ import { parseVaultEvent } from "../shared/api";
 import { parseVaultOpenProgress, type VaultOpenProgress } from "../shared/vault-opening";
 import { parseEntryBatchProgress, parseEntryBatchResult } from "../shared/entry-batch";
 import { parseAttachmentReply } from "../shared/attachments";
+import {
+  parseExportResult,
+  parseExportProgress,
+  parseExportPlan,
+  parseExportRequest,
+} from "../shared/export";
 import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
 import {
   parseBookmarks,
@@ -33,6 +39,7 @@ import {
 export function createReaderApi(): ReaderApi {
   let batch: { id: string; root: string } | null = null;
   let opening: string | null = null;
+  let exporting: string | null = null;
   async function open<T>(
     channel: string,
     parse: (value: unknown) => T,
@@ -53,6 +60,58 @@ export function createReaderApi(): ReaderApi {
     }
   }
   return {
+    exportRun: async (request, onProgress, onPlan) => {
+      if (exporting !== null) throw new Error("已有导出任务正在执行");
+      const input = parseExportRequest(request);
+      const id = crypto.randomUUID();
+      exporting = id;
+      let warning: string | null = null;
+      const progress = (_event: Electron.IpcRendererEvent, eventId: unknown, value: unknown) => {
+        if (eventId !== id || exporting !== id) return;
+        try {
+          onProgress?.(parseExportProgress(value));
+        } catch (error) {
+          warning = `导出进度通知异常：${String(error)}`;
+        }
+      };
+      const plan = (_event: Electron.IpcRendererEvent, eventId: unknown, value: unknown) => {
+        if (eventId !== id || exporting !== id) return;
+        try {
+          onPlan?.(parseExportPlan(value));
+        } catch (error) {
+          warning = `导出预检通知异常：${String(error)}`;
+        }
+      };
+      ipcRenderer.on("reader.export.progress", progress);
+      ipcRenderer.on("reader.export.plan", plan);
+      try {
+        const result = parseExportResult(await ipcRenderer.invoke("reader.export.run", input, id));
+        if (result.status === "saved") {
+          try {
+            parseEmptyReply(await ipcRenderer.invoke("reader.export.acknowledge", id));
+          } catch (error) {
+            warning = [warning, `结果已生成，交付确认需要重试：${String(error)}`]
+              .filter(Boolean)
+              .join("；");
+          }
+        }
+        if (result.status === "saved" && warning)
+          result.warning = [result.warning, warning].filter(Boolean).join("；");
+        return result;
+      } finally {
+        ipcRenderer.removeListener("reader.export.progress", progress);
+        ipcRenderer.removeListener("reader.export.plan", plan);
+        exporting = null;
+      }
+    },
+    exportCancel: async () => {
+      if (exporting === null) return false;
+      const value: unknown = await ipcRenderer.invoke("reader.export.cancel", exporting);
+      if (typeof value !== "boolean") throw new Error("导出取消结果无效");
+      return value;
+    },
+    exportReveal: async () => parseEmptyReply(await ipcRenderer.invoke("reader.export.reveal")),
+    exportRecover: async () => parseEmptyReply(await ipcRenderer.invoke("reader.export.recover")),
     openExternal: async (url) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.links.openExternal", url)),
     vaultOpen: (progress) => open("reader.vault.open", parseVaultOpen, progress),

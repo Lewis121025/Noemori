@@ -2,7 +2,7 @@
 import { DOMParser, DOMSerializer } from "prosemirror-model";
 import { describe, expect, it } from "vitest";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { documentSchema } from "@reader/shared/markdown/schema";
 
 describe("源码节点的剪贴板保真", () => {
   it.each([

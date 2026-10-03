@@ -5,7 +5,7 @@ import { EditorView } from "prosemirror-view";
 import { history, undo, redo } from "prosemirror-history";
 import { createAttachmentEditing } from "@reader/renderer/editor/attachments/attachments";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { MAX_ATTACHMENT_BYTES, type ImportedAttachment } from "@reader/shared/attachments";
 
 const views: EditorView[] = [];

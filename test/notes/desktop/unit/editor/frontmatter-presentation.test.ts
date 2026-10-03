@@ -4,8 +4,8 @@ import { closeHistory, history, redo, undo } from "prosemirror-history";
 import { search, SearchQuery, setSearchState } from "prosemirror-search";
 import { baseKeymap } from "prosemirror-commands";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { documentSchema } from "@reader/shared/markdown/schema";
 import {
   bodySelection,
   frontmatterEditKey,

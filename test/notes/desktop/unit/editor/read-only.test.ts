@@ -10,7 +10,7 @@ import {
   focusDocument,
 } from "@reader/renderer/editor/read-only";
 import { replaceSearch } from "@reader/renderer/editor/search/search-replace";
-import { parseMarkdown } from "@reader/renderer/markdown/parse";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import {
   captureMarkdownReload,
   prepareMarkdownReload,

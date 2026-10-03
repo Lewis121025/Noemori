@@ -230,6 +230,11 @@
       return;
     }
     if (busy || workspace.vaultRoot === null) return;
+    if (kind === "export") {
+      const paths = selected.size > 1 ? [...selected] : entry ? [entry.path] : [...selected];
+      workspace.requestExport({ kind: "selection", paths });
+      return;
+    }
     if ((kind === "move" || kind === "trash") && selected.size > 1) {
       beginBatch(kind);
       return;

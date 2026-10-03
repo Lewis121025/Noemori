@@ -1,0 +1,21 @@
+{
+  "extends": "../modules/notes/packages/desktop/tsconfig.web.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "types": ["node", "svelte"],
+    "paths": {
+      "@reader/*": ["modules/notes/packages/desktop/src/features/reader/*"],
+      "electron": ["modules/notes/packages/desktop/node_modules/electron"],
+      "@cantoo/pdf-lib": ["modules/notes/packages/desktop/node_modules/@cantoo/pdf-lib"]
+    }
+  },
+  "include": [
+    "../modules/notes/packages/desktop/src/features/reader/main/export/**/*.ts",
+    "../modules/notes/packages/desktop/src/features/reader/renderer/export/**/*.ts",
+    "../modules/notes/packages/desktop/src/features/reader/shared/export*.ts",
+    "notes/desktop/unit/export/**/*.ts",
+    "notes/desktop/integration/export/**/*.ts",
+    "notes/desktop/unit/contracts/export.test.ts",
+    "../modules/notes/packages/desktop/src/renderer/env.d.ts"
+  ]
+}

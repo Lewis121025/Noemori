@@ -15,7 +15,7 @@ import {
 } from "prosemirror-schema-list";
 import type { Command, EditorState, Plugin, Transaction } from "prosemirror-state";
 import { liftTarget } from "prosemirror-transform";
-import { documentSchema } from "../markdown/schema";
+import { documentSchema } from "../../shared/markdown/schema";
 import { leaveTable, moveTableCell } from "./table/table";
 import { tableClipboard, tableLineBreak } from "./table/table-input";
 

@@ -1,6 +1,6 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { parseEditorRecovery } from "../../shared/editor-recovery";
-import { documentSchema } from "./schema";
+import { documentSchema } from "../../shared/markdown/schema";
 
 /** 原始源码用于重建保真映射，editor 保存最新不可变文档；两者都不能直接覆盖笔记。 */
 export type MarkdownRecoverySnapshot = { source: Uint8Array; editor: string; revision: number };

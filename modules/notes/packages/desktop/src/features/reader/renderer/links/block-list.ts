@@ -9,7 +9,7 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { Nodes } from "mdast";
 import { toString } from "mdast-util-to-string";
-import { markdownProcessor } from "../markdown/markdown-processor";
+import { markdownProcessor } from "../../shared/markdown/markdown-processor";
 
 /** 段落末尾的块 ID；标识只接受字母、数字与连字符。 */
 const TRAILING_ID = /(?:^|\s)\^([A-Za-z0-9-]+)$/;

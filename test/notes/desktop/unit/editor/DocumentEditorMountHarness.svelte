@@ -4,7 +4,7 @@
    */
   import DocumentEditor from "@reader/renderer/editor/DocumentEditor.svelte";
   import type { MarkdownEditorApi } from "@reader/renderer/editor/editor-api";
-  import { outlineEquals, type OutlineItem } from "@reader/renderer/navigation/outline";
+  import { outlineEquals, type OutlineItem } from "@reader/shared/markdown/outline";
 
   type Props = {
     onRegister: (api: MarkdownEditorApi | null) => void;

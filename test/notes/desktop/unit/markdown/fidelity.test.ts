@@ -5,7 +5,7 @@ import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { documentSchema } from "@reader/renderer/markdown/schema";
+import { documentSchema } from "@reader/shared/markdown/schema";
 
 const parser = unified()
   .use(remarkParse)

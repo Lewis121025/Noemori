@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { WhiteboardInput } from "@reader/renderer/whiteboard/input";
-import { inkBounds } from "@reader/renderer/whiteboard/geometry";
+import { inkBounds } from "@reader/shared/whiteboard/geometry";
 import {
   BOARD_COORDINATE_LIMIT,
   emptyWhiteboard,
   type InkPoint,
-} from "@reader/renderer/whiteboard/model";
+} from "@reader/shared/whiteboard/model";
 
 const p = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.5 });
 const initial = {

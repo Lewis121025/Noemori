@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import WhiteboardEditor from "@reader/renderer/whiteboard/WhiteboardEditor.svelte";
 import type { WhiteboardEditorApi } from "@reader/renderer/editor/editor-api";
-import { emptyWhiteboard, parseWhiteboard } from "@reader/renderer/whiteboard/model";
+import { emptyWhiteboard, parseWhiteboard } from "@reader/shared/whiteboard/model";
 
 let component: ReturnType<typeof mount> | undefined;
 const registered: { api: WhiteboardEditorApi | null } = { api: null };
