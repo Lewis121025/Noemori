@@ -1,85 +1,152 @@
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+/* 正文、源码与离线导出共用字体，避免切换视图时依赖机器是否安装代码字体。 */
+:root {
+  --font-document:
+    "Helvetica Neue", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-code: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 /* 正文、嵌入与悬浮预览共享排版；最小编辑高度由宿主表面负责。 */
 
 .markdown-content {
   outline: none;
   padding: 0.5rem;
+  font-family: var(--font-document);
   font-size: var(--font-reading);
   line-height: var(--line-reading);
+  letter-spacing: normal;
+}
+
+/* 中西文间距只改变字形布局；保持源码、复制内容和编辑器位置映射不变。 */
+.markdown-content :is(p, h1, h2, h3, h4, h5, h6, th, td) {
+  line-break: strict;
+  text-autospace: normal;
+}
+
+.markdown-content :is(code, .math-inline, .comment-inline, input, textarea) {
+  line-break: auto;
+  text-autospace: no-autospace;
 }
 
 .markdown-content :is(h1, h2, h3, h4, h5, h6) {
-  line-height: 1.35;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 1.8em 0 0.65em;
+  font-family: var(--font-interface, var(--font-document));
+  line-height: 1.45;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin: 1.75em 0 0.55em;
+  text-wrap: balance;
 }
 
 .markdown-content h1 {
-  font-size: 30px;
+  font-size: 1.9em;
+  line-height: 1.35;
 }
 .markdown-content h2 {
-  font-size: 24px;
+  font-size: 1.35em;
 }
 .markdown-content h3 {
-  font-size: 20px;
+  font-size: 1.15em;
 }
-.markdown-content :is(h4, h5, h6) {
-  font-size: 17px;
+.markdown-content h4 {
+  font-size: 1em;
+}
+.markdown-content h5 {
+  font-size: 0.94em;
+}
+.markdown-content h6 {
+  font-size: 0.88em;
+  color: var(--muted);
 }
 .markdown-content > :first-child,
 .markdown-content > [data-frontmatter] + * {
   margin-top: 0.5rem;
 }
 .markdown-content p {
-  margin: 0.85em 0;
+  margin: 0.7em 0;
+}
+.markdown-content strong {
+  font-weight: 600;
+}
+.markdown-content hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 .markdown-content :is(ul, ol) {
   padding-left: 1.6em;
-  margin: 1em 0;
+  margin: 0.8em 0;
 }
 .markdown-content li + li {
-  margin-top: 0.3em;
+  margin-top: 0.25em;
 }
 .markdown-content :is(ul, ol) :is(ul, ol) {
-  margin: 0.3em 0;
+  margin: 0.25em 0;
+}
+/* 编辑视图的列表多一层内容容器，与导出的普通列表保持相同的段落节奏。 */
+.markdown-content :is(li, .list-item-content) > p {
+  margin: 0.35em 0;
+}
+.markdown-content :is(li, .list-item-content) > :first-child {
+  margin-top: 0;
+}
+.markdown-content :is(li, .list-item-content) > :last-child {
+  margin-bottom: 0;
 }
 
 .markdown-content blockquote {
   margin: 1.2em 0;
-  padding-left: 1rem;
+  padding: 0.15em 0 0.15em 1em;
   border-left: 2px solid var(--border);
   color: var(--muted);
 }
+.markdown-content blockquote > :first-child {
+  margin-top: 0;
+}
+.markdown-content blockquote > :last-child {
+  margin-bottom: 0;
+}
 
 .markdown-content code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
+  font-family: var(--font-code);
+  font-size: 0.85em;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
   background: var(--sidebar);
   border-radius: 0.25rem;
-  padding: 0.1em 0.3em;
+  padding: 0.15em 0.35em;
 }
 
 .markdown-content pre {
-  padding: 1rem;
-  background: var(--sidebar);
-  border-radius: 0.6rem;
-  line-height: 1.6;
+  margin: 1.25em 0;
+  padding: 1em;
+  background: color-mix(in srgb, var(--sidebar) 70%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 0.5rem;
+  font-family: var(--font-code);
+  font-size: 0.85em;
+  line-height: 1.7;
   overflow-x: auto;
 }
 
 .markdown-content pre code {
   padding: 0;
   background: transparent;
+  font-size: inherit;
 }
 
-.markdown-content .wiki-link {
+.markdown-content :is(a, .wiki-link) {
+  color: var(--accent);
   text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  text-decoration-skip-ink: auto;
   cursor: text;
 }
 
-.markdown-content a {
-  color: inherit;
-  cursor: text;
+.markdown-content :is(a, .wiki-link):is(:hover, :focus-visible) {
+  text-decoration-color: currentColor;
 }
 
 .markdown-content .math-inline {
@@ -90,7 +157,7 @@
 
 .markdown-content .math-block {
   display: block;
-  margin: 0.5rem 0;
+  margin: 1.25em 0;
   overflow-x: auto;
   cursor: text;
 }
@@ -123,7 +190,7 @@
   border-radius: 0.4rem;
 }
 
-.markdown-content .note-image {
+.markdown-content :is(.note-image, .html-inline img, .html-block img) {
   max-width: 100%;
   height: auto;
   vertical-align: middle;
@@ -135,15 +202,23 @@
   overflow-x: auto;
   max-width: 100%;
   margin: 1.25em 0;
+  font-size: 0.94em;
+  line-height: 1.65;
 }
 
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid var(--border);
-  padding: 0.45rem 0.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0.65em 0.75em;
   min-width: 7em;
   max-width: 24em;
   vertical-align: top;
+}
+
+.markdown-content th {
+  background: color-mix(in srgb, var(--sidebar) 45%, var(--bg));
+  font-weight: 500;
 }
 
 .markdown-content li[data-checked] {
@@ -153,7 +228,8 @@
 .markdown-content .task-checkbox {
   position: absolute;
   right: calc(100% + 0.15rem);
-  top: -1px;
+  /* 点击区域保持 32px，视觉中心跟随正文或小预览的首行行高。 */
+  top: calc((1lh - 32px) / 2);
   width: 32px;
   height: 32px;
   border: 0;
@@ -174,6 +250,9 @@
 .markdown-content .task-checkbox:disabled {
   cursor: default;
 }
+.markdown-content .task-checkbox:hover:not(:disabled)::before {
+  border-color: var(--accent);
+}
 .markdown-content .task-checkbox[aria-checked="true"]::before {
   background: var(--accent-fill);
   border-color: var(--accent-fill);
@@ -188,9 +267,6 @@
   border: solid var(--accent-text);
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
-}
-.markdown-content .list-item-content > p:first-child {
-  margin-top: 0;
 }
 .markdown-content .ProseMirror-search-match {
   background: light-dark(#fff0a8, #625018);
@@ -208,7 +284,7 @@
   background: var(--sidebar);
   border: 1px solid var(--accent);
   border-radius: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.9em;
   line-height: 1.5;
   outline: none;
@@ -249,7 +325,7 @@
 
 .markdown-content :is(.comment-inline, .comment-block) {
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.85em;
   opacity: 0.8;
   cursor: text;
@@ -267,7 +343,7 @@
   background: var(--sidebar);
   border: 1px solid var(--accent);
   border-radius: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.9em;
   outline: none;
 }
@@ -275,10 +351,10 @@
 .markdown-content .callout {
   --callout: var(--accent);
   margin: 1.2em 0;
-  padding: 0.6rem 0.9rem;
-  border-left: 3px solid var(--callout);
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--callout) 8%, transparent);
+  padding: 0.75em 1em;
+  border-left: 2px solid var(--callout);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--callout) 6%, transparent);
 }
 .markdown-content
   .callout:is([data-callout="warning"], [data-callout="caution"], [data-callout="attention"]) {
@@ -394,6 +470,10 @@
 }
 
 /* 阅读视图：隐藏注释，链接可单击打开，标注标题只读。 */
+.markdown-content.reading p {
+  /* 仅只读段落优化尾行，输入时保留浏览器的常规断行。 */
+  text-wrap: pretty;
+}
 .markdown-content.reading :is(.comment-inline, .comment-block) {
   display: none;
 }

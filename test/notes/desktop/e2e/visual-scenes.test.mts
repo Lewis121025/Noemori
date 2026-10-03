@@ -72,8 +72,11 @@ test("固定内容在浅深色、长表格和三种窗口中保持可读并输�
         const editor = page.locator(".ProseMirror");
         expect(await editor.evaluate((element) => getComputedStyle(element).fontSize)).toBe("17px");
         expect(
-          await editor.evaluate((element) => element.getBoundingClientRect().width),
-        ).toBeLessThanOrEqual(720);
+          await editor
+            .locator(":scope > p")
+            .first()
+            .evaluate((element) => element.getBoundingClientRect().width),
+        ).toBeLessThanOrEqual(768);
         const checkbox = page.getByRole("checkbox").first();
         expect(
           await checkbox.evaluate((element) => element.getBoundingClientRect().width),

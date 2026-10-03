@@ -109,6 +109,7 @@ describe("可用性门禁", () => {
       "open-library",
       "new-note",
       "new-whiteboard",
+      "toggle-reading",
       "toggle-files",
       "toggle-split",
     ]);

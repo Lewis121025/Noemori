@@ -423,7 +423,7 @@ describe("资料管理与读写空间", () => {
     await manage();
     vi.mocked(api.sessionSetPanes).mockClear();
     vi.mocked(api.sessionSetDocuments).mockClear();
-    click("写作");
+    click("笔记");
     const removing = unmount(component!);
     component = undefined;
     await removing;
@@ -455,7 +455,7 @@ describe("资料管理与读写空间", () => {
     });
     expect(api.fileSnapshot).toHaveBeenCalledTimes(reads);
     expect(prose()).toBe(editor);
-    click("写作");
+    click("笔记");
     await vi.waitFor(() => {
       flushSync();
       expect(library().hidden).toBe(true);
@@ -577,7 +577,7 @@ describe("资料管理与读写空间", () => {
         expect.objectContaining({ browse: { query: "设计", section: "files" } }),
       ),
     );
-    click("写作");
+    click("笔记");
     await vi.waitFor(() =>
       expect(api.sessionSetPanes).toHaveBeenCalledWith(
         expect.objectContaining({ space: "writing" }),

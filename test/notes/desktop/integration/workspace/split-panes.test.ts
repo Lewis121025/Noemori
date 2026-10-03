@@ -2,7 +2,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
-import type { AppApi, AppCommand } from "../../../../../modules/notes/packages/desktop/src/shared/api";
+import type {
+  AppApi,
+  AppCommand,
+} from "../../../../../modules/notes/packages/desktop/src/shared/api";
 import type { FileSnapshot, ReaderApi, WriteResult } from "@reader/shared/api";
 import type { SessionDocuments } from "@reader/shared/session";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
@@ -290,28 +293,25 @@ describe("双栏编辑", () => {
     expect(searchBox?.disabled).toBe(false);
   });
 
-  it("文本格式入口指向活动栏，离开该栏时关闭其格式面板", async () => {
+  it("两栏的编辑工具栏绑定各自文档，模式切换对两栏同时生效", async () => {
     await start();
     target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
     flushSync();
     await openInPane(1, "other.md", "other");
-
-    const panels = [...target.querySelectorAll<HTMLElement>(".formatting-panel")];
-    expect(panels.map((panel) => panel.id)).toEqual(["editor-formatting-0", "editor-formatting-1"]);
-    const hide = panels.map((panel) => {
-      const spy = vi.fn();
-      panel.hidePopover = spy;
-      return spy;
-    });
     expect(
-      target.querySelector("button[aria-label='文本格式']")?.getAttribute("aria-controls"),
-    ).toBe("editor-formatting-1");
-
+      [...target.querySelectorAll<HTMLElement>(".formatting-panel")].map((panel) => panel.id),
+    ).toEqual(["editor-formatting-0", "editor-formatting-1"]);
+    target.querySelector<HTMLButtonElement>('[aria-label="切换阅读模式"]')!.click();
+    await vi.waitFor(() => expect(target.querySelectorAll(".formatting-panel")).toHaveLength(0));
+    expect(
+      [...target.querySelectorAll(".ProseMirror")].every(
+        (node) => node.getAttribute("contenteditable") === "true",
+      ),
+    ).toBe(true);
     activatePane(0);
-    expect(hide[1]).toHaveBeenCalled();
-    expect(
-      target.querySelector("button[aria-label='文本格式']")?.getAttribute("aria-controls"),
-    ).toBe("editor-formatting-0");
+    expect(target.querySelectorAll(".formatting-panel")).toHaveLength(0);
+    target.querySelector<HTMLButtonElement>('[aria-label="切换编辑模式"]')!.click();
+    await vi.waitFor(() => expect(target.querySelectorAll(".formatting-panel")).toHaveLength(2));
   });
 
   it("两栏的后退与滚动位置互不覆盖", async () => {

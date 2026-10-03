@@ -1,4 +1,3 @@
-import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,11 +48,16 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
     page.on("pageerror", (error) => errors.push(error.message));
     const editor = page.locator(".ProseMirror");
 
-    const panel = page.getByRole("group", { name: "文本格式", exact: true });
+    const panel = page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true });
     const run = async (name: string) => {
-      await noteAction(page, "文本格式");
+      await page
+        .locator(".pane-column.active")
+        .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+        .waitFor();
       await panel.getByRole("button", { name, exact: true }).click();
-      expect(await panel.isVisible()).toBe(false);
+      expect(await panel.isVisible()).toBe(true);
       expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
     };
     const save = async () => {
@@ -113,7 +117,10 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
         }, viewport);
         await expect.poll(() => page.evaluate(() => innerWidth)).toBe(viewport.width);
         await editor.locator("td").last().click();
-        await noteAction(page, "文本格式");
+        await page
+          .locator(".pane-column.active")
+          .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+          .waitFor();
         expect(await panel.getByRole("button", { name: "插入表格", exact: true }).count()).toBe(0);
         const bounds = await panel.boundingBox();
         if (bounds === null) throw new Error("表格面板不可见");

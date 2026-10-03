@@ -1,4 +1,3 @@
-import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -226,9 +225,12 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await page.keyboard.press("Escape");
     await quickFormat.waitFor();
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selection);
-    await noteAction(page, "文本格式");
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
+    await page.getByRole("combobox", { name: "段落格式" }).focus();
     await expect.poll(() => quickFormat.isVisible()).toBe(false);
-    await page.getByRole("combobox", { name: "段落格式" }).waitFor();
     await page.keyboard.press("Escape");
     await editor.focus();
     await page.keyboard.press("ArrowRight");

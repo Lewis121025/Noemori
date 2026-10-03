@@ -84,8 +84,12 @@ describe("会话写入失败与已完成操作的边界", () => {
 
   it("视图记忆失败保留当前视图，错误不会被后续打开和正文保存清除", async () => {
     vi.mocked(api.sessionSetViewModes).mockRejectedValueOnce(new Error("视图记忆不可写"));
-    await workspace.toggleReadingMode();
-    expect(workspace.viewMode).toBe("reading");
+    vi.spyOn(workspace.navigation, "snapshot").mockReturnValue({
+      bytes: new TextEncoder().encode("正文\n"),
+      revision: 0,
+    });
+    await workspace.toggleViewMode();
+    expect(workspace.viewMode).toBe("source");
     expect(workspace.message).toContain("视图记忆未能保存");
     expect(workspace.messageDetail).toBe("视图记忆不可写");
 
@@ -106,7 +110,11 @@ describe("会话写入失败与已完成操作的边界", () => {
 
   it("确认优先展示的操作错误后，仍能查看尚未确认的会话故障", async () => {
     vi.mocked(api.sessionSetViewModes).mockRejectedValueOnce(new Error("视图记忆不可写"));
-    await workspace.toggleReadingMode();
+    vi.spyOn(workspace.navigation, "snapshot").mockReturnValue({
+      bytes: new TextEncoder().encode("正文\n"),
+      revision: 0,
+    });
+    await workspace.toggleViewMode();
     workspace.report("文件操作失败", new Error("目标已存在"));
     expect(workspace.message).toBe("文件操作失败");
     expect(workspace.messageDetail).toBe("目标已存在");
@@ -245,7 +253,11 @@ describe("会话写入失败与已完成操作的边界", () => {
         reject = fail;
       });
       vi.mocked(api.sessionSetViewModes).mockReturnValueOnce(writing);
-      await workspace.toggleReadingMode();
+      vi.spyOn(workspace.navigation, "snapshot").mockReturnValue({
+        bytes: new TextEncoder().encode("正文\n"),
+        revision: 0,
+      });
+      await workspace.toggleViewMode();
       vi.mocked(api.vaultOpen).mockResolvedValueOnce({ root, entries: [] });
       await workspace.openVault();
       reject(new Error("旧库不可写"));

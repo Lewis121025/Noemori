@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
 import { documentSchema } from "@reader/shared/markdown/schema";
+import { documentAccess } from "@reader/renderer/editor/read-only";
 import { suggestRequest } from "@reader/renderer/editor/links/suggestions/context";
 import { suggestInsertion } from "@reader/renderer/editor/links/suggestions/insert";
 import {
@@ -278,4 +279,20 @@ describe("suggestInsertion 提交事务", () => {
     const stale = { ...request, from: state.doc.content.size + 10 };
     expect(suggestInsertion(state, stale, "x")).toBeNull();
   });
+});
+
+it("阅读模式输入链接语法保留正文，不弹出文件、标题或块的编辑补全", () => {
+  for (const text of ["[[笔记", "[[笔记#标题", "[[笔记#^块"]) {
+    const doc = documentSchema.nodes["doc"]!.create(
+      null,
+      documentSchema.nodes["paragraph"]!.create(null, documentSchema.text(text)),
+    );
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.atEnd(doc),
+      plugins: [documentAccess(false, true)],
+    });
+    expect(suggestRequest(state)).toBeNull();
+    expect(state.doc.textContent).toBe(text);
+  }
 });

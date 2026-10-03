@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import type { WhiteboardEditorApi } from "../editor/editor-api";
   import { nativeInputOwnsHistory } from "../editor/history";
   import {
@@ -15,12 +15,24 @@
     epoch,
     register,
     onDirty,
+    readOnly = false,
+    registerToolbar,
   }: {
     board: WhiteboardDocument;
     epoch: number;
     register: (api: WhiteboardEditorApi | null) => void;
     onDirty: () => void;
+    /** 阅读模式仅允许平移缩放，不修改笔迹。 */
+    readOnly?: boolean;
+    /** 工具栏占据分栏顶部，画布使用剩余高度，不覆盖笔迹。 */
+    registerToolbar?: (toolbar: Snippet | null) => void;
   } = $props();
+  $effect(() => {
+    const register = registerToolbar;
+    if (register === undefined) return;
+    register(readOnly ? null : editorToolbar);
+    return () => register(null);
+  });
   let host: HTMLDivElement;
   let input = $state.raw<WhiteboardInput | null>(null);
   let frame = $state(0);
@@ -30,6 +42,10 @@
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
   let holdAt: InkPoint | null = null;
   const hintId = $props.id();
+  const history = $derived.by(() => {
+    void frame;
+    return { undo: input?.canUndo ?? false, redo: input?.canRedo ?? false };
+  });
   const camera = $derived.by(() => {
     void frame;
     return input?.viewport ?? { x: 0, y: 0, scale: 1 };
@@ -83,7 +99,10 @@
     event.preventDefault();
     host.focus({ preventScroll: true });
     const started = attempt(() =>
-      input?.begin(point(event), space || event.button === 1 || event.pointerType === "touch"),
+      input?.begin(
+        point(event),
+        readOnly || space || event.button === 1 || event.pointerType === "touch",
+      ),
     );
     if (started) {
       pointer = event.pointerId;
@@ -136,10 +155,10 @@
       attempt(() => input?.cancel());
     } else if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
-      attempt(() => input?.deleteSelection());
+      if (!readOnly) attempt(() => input?.deleteSelection());
     } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
       event.preventDefault();
-      attempt(() => input?.selectAll());
+      if (!readOnly) attempt(() => input?.selectAll());
     } else if (
       !(event.metaKey || event.ctrlKey || event.altKey) &&
       event.key.toLowerCase() === "f"
@@ -201,6 +220,7 @@
         }),
         history: (action) => {
           if (nativeInputOwnsHistory(element)) return false;
+          if (readOnly) return true;
           stopHold();
           attempt(() => session.applyHistory(action));
           return true;
@@ -209,7 +229,7 @@
           void frame;
           return nativeInputOwnsHistory(element)
             ? null
-            : { undo: session.canUndo, redo: session.canRedo };
+            : { undo: !readOnly && session.canUndo, redo: !readOnly && session.canRedo };
         },
       });
       return () => {
@@ -223,11 +243,43 @@
   });
 </script>
 
+{#snippet editorToolbar()}
+  {#if !readOnly}
+    <div class="board-toolbar" role="toolbar" aria-label="白板编辑工具栏" tabindex="-1">
+      <button
+        class="reader-button"
+        type="button"
+        disabled={!history.undo}
+        onclick={() => attempt(() => input?.applyHistory("undo"))}>撤销</button
+      >
+      <button
+        class="reader-button"
+        type="button"
+        disabled={!history.redo}
+        onclick={() => attempt(() => input?.applyHistory("redo"))}>重做</button
+      >
+      <button
+        class="reader-button"
+        type="button"
+        disabled={selected.size === 0}
+        onclick={() => attempt(() => input?.deleteSelection())}>删除选中笔迹</button
+      >
+      <button
+        class="reader-button"
+        type="button"
+        onclick={() => attempt(() => input?.fit(host.clientWidth, host.clientHeight))}
+        >查看全部</button
+      >
+    </div>
+  {/if}
+{/snippet}
+{#if registerToolbar === undefined}{@render editorToolbar()}{/if}
+
 <!-- 图形编辑区需要键盘焦点以支持撤销、选择和移动；Svelte 将 application 归为非交互角色。 -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="whiteboard"
-  class:panning={space}
+  class:panning={space || readOnly}
   bind:this={host}
   role="application"
   tabindex="0"
@@ -275,13 +327,25 @@
       随手写下，慢慢想清楚。
     </div>{/if}
   <div class="hint" id={hintId}>
-    <span>写画 · 来回涂划删除 · 画圈停笔选择，再拖动</span>
+    {#if !readOnly}<span>写画 · 来回涂划删除 · 画圈停笔选择，再拖动</span>{/if}
     <span>空格拖动 · ⌘ / Ctrl 滚动缩放 · F 查看全部</span>
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </div>
 
 <style>
+  .board-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .board-toolbar button {
+    font-size: 0.8rem;
+    border-color: transparent;
+  }
   .whiteboard {
     position: relative;
     flex: 1;

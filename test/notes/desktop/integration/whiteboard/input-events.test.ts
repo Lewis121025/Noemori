@@ -27,12 +27,13 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function start() {
+async function start(readOnly = false) {
   component = mount(WhiteboardEditor, {
     target: document.body,
     props: {
       board: emptyWhiteboard(),
       epoch: 0,
+      readOnly,
       onDirty: () => {},
       register: (api: WhiteboardEditorApi | null) => {
         registered.api = api;
@@ -143,4 +144,15 @@ it("合并事件作为唯一真实采样，父事件的不同坐标不会额外�
   registered.api!.finishInput();
   const points = saved().strokes[0]!.points;
   expect(points).toEqual([0, 10, 20, 30].map((x) => ({ x, y: 0, pressure: 0.5 })));
+});
+
+it("阅读模式只平移白板，不落笔也不显示编辑工具", async () => {
+  const host = await start(true);
+  expect(host.querySelector('[aria-label="白板编辑工具栏"]')).toBeNull();
+  pointer(host, "pointerdown", 10, 20);
+  pointer(host, "pointermove", 70, 90);
+  pointer(host, "pointerup", 100, 120);
+  expect(saved().strokes).toEqual([]);
+  expect(host.querySelector("g")?.getAttribute("transform")).not.toContain("translate(0 0)");
+  expect(registered.api?.historyAvailability()).toEqual({ undo: false, redo: false });
 });

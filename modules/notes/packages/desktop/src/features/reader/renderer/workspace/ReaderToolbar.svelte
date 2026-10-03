@@ -68,6 +68,16 @@
     outlinePopover?.hidePopover();
     navigation.jumpOutline(pos);
   }
+  /** 宽栏复用已显示的目录，窄栏继续打开浮层；显示状态由分栏自身的容器布局决定。 */
+  function openOutline(): void {
+    onDocumentAction();
+    const sidebar = document.getElementById(`outline-sidebar-${workspace.activePane.id}`);
+    if (sidebar !== null && sidebar.getClientRects().length > 0) {
+      sidebar.querySelector<HTMLButtonElement>("button")?.focus();
+    } else {
+      outlinePopover?.togglePopover();
+    }
+  }
   /** 辅助面板独立于菜单；先把焦点交回稳定入口，关闭面板时不会返回隐藏的菜单项。 */
   function openDocumentPanel(id: string): void {
     const panel = document.getElementById(id);
@@ -127,7 +137,7 @@
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
         ><path d="M4 19.5h16M6 15l1-4L16 2l4 4-9 9-5 1M14 4l4 4" /></svg
-      >写作
+      >笔记
     </button>
     <button
       class="space-button"
@@ -159,6 +169,15 @@
     </button>
   </nav>
   <div class="actions">
+    <button
+      class="reader-button mode-toggle"
+      type="button"
+      aria-label={workspace.mode === "reading" ? "切换编辑模式" : "切换阅读模式"}
+      aria-pressed={workspace.mode === "editing"}
+      onclick={() => void workspace.toggleReadingMode()}
+      disabled={busy || workspace.isComposing}
+      >{workspace.mode === "reading" ? "阅读模式" : "编辑模式"}</button
+    >
     <WorkspaceFeedback {workspace} />
     <button
       class="reader-button icon-button"
@@ -203,10 +222,9 @@
       <button
         class="reader-button icon-button"
         type="button"
-        popovertarget="outline-panel"
         aria-label="目录"
         title="目录"
-        onclick={onDocumentAction}
+        onclick={openOutline}
         disabled={busy}
       >
         <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -248,17 +266,6 @@
         doc.conflict === null}
       role="status">{doc.canEdit ? saveStatus : "只读预览"}</span
     >
-    {#if doc.content?.kind === "markdown" && doc.canEdit}
-      <button
-        class="reading-toggle"
-        type="button"
-        aria-label={workspace.viewMode === "reading" ? "退出阅读视图" : "切换阅读视图"}
-        aria-pressed={workspace.viewMode === "reading"}
-        onclick={() => void workspace.toggleReadingMode()}
-        disabled={busy || workspace.isComposing}
-        >{workspace.viewMode === "reading" ? "阅读" : "编辑"}</button
-      >
-    {/if}
   </div>
 {/if}
 
@@ -298,7 +305,7 @@
     }}>导出…</button
   >
   {#if doc.content?.kind === "markdown"}
-    {#if workspace.viewMode !== "source"}<button
+    {#if workspace.mode === "editing" && workspace.viewMode !== "source"}<button
         class="reader-button"
         type="button"
         onclick={() => openDocumentPanel(`properties-editor-formatting-${workspace.activePane.id}`)}
@@ -311,17 +318,7 @@
       >关联图谱…</button
     >
   {/if}
-  {#if doc.content?.kind === "markdown" && workspace.viewMode === "wysiwyg"}
-    <button
-      class="reader-button"
-      type="button"
-      aria-label="文本格式"
-      aria-controls="editor-formatting-{workspace.activePane.id}"
-      onclick={() => openDocumentPanel(`editor-formatting-${workspace.activePane.id}`)}
-      onmousedown={(event) => event.preventDefault()}>文本格式…</button
-    >
-  {/if}
-  {#if doc.content?.kind === "markdown" && doc.canEdit}
+  {#if doc.content?.kind === "markdown" && doc.canEdit && workspace.mode === "editing"}
     <button
       class="reader-button"
       type="button"
@@ -391,9 +388,9 @@
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     gap: 1rem;
-    min-height: 68px;
+    min-height: 60px;
     flex-shrink: 0;
-    padding: 0.8rem 1.4rem;
+    padding: 0.65rem 1.25rem;
     border-bottom: 1px solid var(--border);
     background: var(--chrome);
   }
@@ -443,10 +440,10 @@
   }
   .spaces {
     display: flex;
-    padding: 4px;
+    padding: 3px;
     gap: 2px;
-    border-radius: 11px;
-    background: var(--sidebar);
+    border-radius: var(--radius-panel);
+    background: color-mix(in srgb, var(--sidebar) 70%, transparent);
   }
   .space-button {
     display: flex;
@@ -454,12 +451,13 @@
     justify-content: center;
     gap: 0.5rem;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--muted);
     min-height: 32px;
     padding: 0.3rem 1.2rem;
     cursor: pointer;
+    font-weight: 500;
     transition:
       background var(--motion-fast),
       color var(--motion-fast),
@@ -485,9 +483,9 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    min-height: 44px;
+    min-height: 40px;
     padding: 0.5rem 2rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     color: var(--muted);
   }
   .document-name {
@@ -495,25 +493,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.75rem;
+    font-weight: 500;
   }
   .save-status {
     white-space: nowrap;
     font-size: 0.72rem;
     color: var(--warning);
   }
-  .reading-toggle {
-    margin-left: auto;
-    border: 0;
-    background: transparent;
-    color: var(--muted);
+  .mode-toggle {
+    white-space: nowrap;
     font-size: 0.75rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 5px;
-    cursor: pointer;
+    color: var(--accent);
   }
-  .reading-toggle[aria-pressed="true"] {
+  .mode-toggle[aria-pressed="true"] {
     background: var(--selected);
-    color: var(--fg);
   }
   .quiet {
     position: absolute;

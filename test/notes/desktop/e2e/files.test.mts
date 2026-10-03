@@ -628,8 +628,16 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     await noteAction(page, "文内查找");
     await page.getByRole("form", { name: "文内查找替换" }).waitFor();
     await page.keyboard.press("Escape");
-    await noteAction(page, "文本格式");
-    expect(await page.getByRole("group", { name: "文本格式", exact: true }).isVisible()).toBe(true);
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
+    expect(
+      await page
+        .locator(".pane-column.active")
+        .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+        .isVisible(),
+    ).toBe(true);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     await quickFiles.locator('[data-path="收件箱/完成.md"]').click();
@@ -669,7 +677,9 @@ test("文件树支持搜索定位、新建、重名保护、键盘重命名、�
     await expect.poll(() => empty.locator(".document-name").textContent()).toBe("未命名 2.md");
     expect(await empty.getByRole("complementary", { name: "文件栏" }).isVisible()).toBe(false);
     await expect
-      .poll(() => empty.locator(".ProseMirror").evaluate((node) => node.contains(document.activeElement)))
+      .poll(() =>
+        empty.locator(".ProseMirror").evaluate((node) => node.contains(document.activeElement)),
+      )
       .toBe(true);
     await empty.keyboard.insertText("小窗口也能直接写下想法。");
     await empty.keyboard.press(`${modifier}+s`);

@@ -2,7 +2,7 @@
 .reader-input {
   font: inherit;
   color: inherit;
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   min-height: 32px;
@@ -10,11 +10,24 @@
 .reader-input {
   min-width: 0;
   padding: 0.5rem 0.65rem;
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast);
+}
+.reader-input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.reader-input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  outline-offset: 1px;
 }
 .reader-button {
   min-width: 32px;
   padding: 0.4rem 0.7rem;
   cursor: pointer;
+  font-weight: 500;
   transition:
     background var(--motion-fast),
     border-color var(--motion-fast),
@@ -26,6 +39,9 @@
 .reader-button[aria-pressed="true"] {
   background: var(--selected);
   color: var(--accent);
+}
+.reader-button:active:not(:disabled) {
+  box-shadow: inset 0 1px 3px var(--shadow);
 }
 .reader-button.primary {
   background: var(--accent-fill);
@@ -46,10 +62,10 @@
   inset: 4rem 1rem auto auto;
   margin: 0;
   color: var(--fg);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  box-shadow: 0 8px 30px var(--shadow);
+  box-shadow: var(--shadow-popover);
   padding: 0.4rem;
   max-width: calc(100vw - 2rem);
   max-height: calc(100dvh - 5rem);
@@ -57,11 +73,11 @@
 }
 
 .reader-icon {
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.125rem;
+  height: 1.125rem;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   flex-shrink: 0;

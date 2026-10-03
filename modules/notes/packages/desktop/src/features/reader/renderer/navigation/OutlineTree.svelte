@@ -34,7 +34,12 @@
     {:else}
       <span class="twist-space"></span>
     {/if}
-    <button type="button" class="label" onclick={() => onJump(node.item.pos)}>
+    <button
+      type="button"
+      class="label"
+      title={node.item.text}
+      onclick={() => onJump(node.item.pos)}
+    >
       {node.item.text}
     </button>
   </div>
@@ -82,6 +87,13 @@
     font: inherit;
     cursor: pointer;
     padding: 0.15rem 0.2rem;
+    border-radius: 0.25rem;
+  }
+
+  .label:hover,
+  .label:focus-visible {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--selected) 65%, transparent);
   }
 
   .kids {

@@ -2,7 +2,7 @@
   /**
    * 可编辑代码表面：CodeMirror 6 挂载一次，文本即文件。
    */
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import {
     defaultKeymap,
     history,
@@ -38,6 +38,10 @@
   type Props = {
     /** 文档加载代次；文本相同的重载只重新登记表面归属。 */
     epoch?: number;
+    /** 阅读模式可修改文本，但不显示编辑工具栏。 */
+    reading?: boolean;
+    /** 将工具栏交给分栏独立排版；独立挂载时使用普通文档流。 */
+    registerToolbar?: (toolbar: Snippet | null) => void;
     /** 打开时的文本。 */
     source: string;
     /** 用于选择高亮语言的库内路径。 */
@@ -52,7 +56,23 @@
     completions?: Extension;
   };
 
-  let { source, path, onDirty, onSave, register, completions, epoch = 0 }: Props = $props();
+  let {
+    source,
+    path,
+    onDirty,
+    onSave,
+    register,
+    completions,
+    epoch = 0,
+    reading = false,
+    registerToolbar,
+  }: Props = $props();
+  $effect(() => {
+    const register = registerToolbar;
+    if (register === undefined) return;
+    register(reading ? null : editorToolbar);
+    return () => register(null);
+  });
   let host: HTMLDivElement | undefined = $state();
   let editorState = $state.raw<EditorState | null>(null);
   let publicApi = $state.raw<CodeEditorApi | null>(null);
@@ -136,8 +156,16 @@
                 backgroundColor: "var(--bg)",
                 color: "var(--fg)",
               },
-              ".cm-content": {
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+              ".cm-scroller": {
+                fontFamily: "var(--font-code)",
+                fontSize: "14px",
+                lineHeight: "1.7",
+                fontVariantLigatures: "none",
+              },
+              ".cm-gutters": {
+                color: "var(--muted)",
+                backgroundColor: "var(--chrome)",
+                borderColor: "var(--border)",
               },
             }),
             langConf.of([]),
@@ -219,9 +247,50 @@
   });
 </script>
 
+{#snippet editorToolbar()}
+  {#if !reading}
+    <div
+      class="code-toolbar"
+      role="toolbar"
+      aria-label="文本编辑工具栏"
+      tabindex="-1"
+      onmousedown={(event) => event.preventDefault()}
+    >
+      <button
+        type="button"
+        class="reader-button"
+        disabled={editorState === null || undoDepth(editorState) === 0}
+        onclick={() => publicApi?.history("undo")}>撤销</button
+      >
+      <button
+        type="button"
+        class="reader-button"
+        disabled={editorState === null || redoDepth(editorState) === 0}
+        onclick={() => publicApi?.history("redo")}>重做</button
+      >
+      <button type="button" class="reader-button" onclick={() => publicApi?.openSearch()}
+        >查找</button
+      >
+    </div>
+  {/if}
+{/snippet}
+{#if registerToolbar === undefined}{@render editorToolbar()}{/if}
 <div class="surface" bind:this={host}></div>
 
 <style>
+  .code-toolbar {
+    display: flex;
+    gap: 0.3rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem;
+    margin: 0;
+  }
+  .code-toolbar button {
+    font-size: 0.8rem;
+    border-color: transparent;
+  }
+
   .surface {
     min-height: 16rem;
   }

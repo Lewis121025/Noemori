@@ -30,6 +30,8 @@ export default defineConfig({
       "../../../../test/notes/desktop/e2e/hover-preview.test.mts",
       "../../../../test/notes/desktop/e2e/link-completion.test.mts",
       "../../../../test/notes/desktop/e2e/reading-view.test.mts",
+      "../../../../test/notes/desktop/e2e/modes.test.mts",
+      "../../../../test/notes/desktop/e2e/editor-toolbar-layout.test.mts",
       "../../../../test/notes/desktop/e2e/media-embed.test.mts",
       "../../../../test/notes/desktop/e2e/links-navigation.test.mts",
       "../../../../test/notes/desktop/e2e/dead-link-create.test.mts",
@@ -44,6 +46,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/e2e/recovery.test.mts",
       "../../../../test/notes/desktop/e2e/source-recovery.test.mts",
       "../../../../test/notes/desktop/e2e/visual-scenes.test.mts",
+      "../../../../test/notes/desktop/e2e/adaptive-layout.test.mts",
     ],
     environment: "node",
     // 原生窗口共享系统焦点和菜单，键盘旅程必须串行，避免多个应用争抢组合键。

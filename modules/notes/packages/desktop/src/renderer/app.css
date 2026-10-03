@@ -1,19 +1,20 @@
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#fcfbf9, #202022);
-  --surface: light-dark(#ffffff, #303033);
-  --chrome: light-dark(#faf9f7, #252527);
-  --fg: light-dark(#30312f, #eeeef0);
-  --border: light-dark(#e8e6e1, #3b3b40);
-  --sidebar: light-dark(#f1f0ed, #28282b);
-  --selected: light-dark(#e7e5e0, #3c3c41);
-  --muted: light-dark(#62646b, #b0b0ba);
-  --accent: light-dark(#386f9e, #89bde8);
-  --accent-fill: light-dark(#386f9e, #286ca6);
+  --bg: light-dark(#fcfbf8, #202122);
+  --surface: light-dark(#ffffff, #303234);
+  --chrome: light-dark(#f7f6f2, #242627);
+  --fg: light-dark(#30332f, #e6e7e3);
+  --border: light-dark(#e3e2db, #393c3d);
+  --sidebar: light-dark(#f0efe9, #27292a);
+  --selected: light-dark(#e5e5dd, #363a3c);
+  --muted: light-dark(#626862, #a6ada8);
+  --accent: light-dark(#386b87, #91bdd0);
+  --accent-fill: light-dark(#386b87, #31647d);
   --accent-text: #ffffff;
   --warning: light-dark(#996412, #d9a34a);
   --danger: light-dark(#aa3232, #f09494);
-  --shadow: light-dark(#25231c0c, #00000048);
+  --shadow: light-dark(#262a2210, #00000040);
+  --shadow-popover: 0 4px 12px var(--shadow), 0 16px 40px var(--shadow);
   --scrim: light-dark(#00000025, #00000055);
   --space-1: 4px;
   --space-2: 8px;
@@ -25,9 +26,11 @@
   --radius-control: 8px;
   --radius-panel: 12px;
   --motion-fast: 120ms;
-  --reading-width: 720px;
+  --font-interface:
+    -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", "Segoe UI", sans-serif;
+  --reading-width: 48rem;
   --font-reading: 17px;
-  --line-reading: 1.85;
+  --line-reading: 1.75;
 }
 
 html,
@@ -37,7 +40,7 @@ body,
   height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", "Segoe UI", sans-serif;
+  font-family: var(--font-interface);
 }
 
 * {

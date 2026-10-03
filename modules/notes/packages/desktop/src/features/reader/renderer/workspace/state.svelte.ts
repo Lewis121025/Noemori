@@ -12,6 +12,7 @@ import type {
   Bookmark,
   NoteKeys,
   ReaderApi,
+  ReaderMode,
   TagCount,
   VaultEntry,
   VaultGraph,
@@ -157,6 +158,8 @@ export class ReaderWorkspaceController {
   private paneList = $state<ReaderPane[]>([]);
   private activeId = $state(0);
   private paneSeq = 1;
+  private interactionMode = $state<ReaderMode>("editing");
+  private modeRestored = false;
   /** 会话内按文件记住源码或阅读视图，随会话持久化。非响应式记录表。 */
   private readonly viewModes: ViewModes = {};
   /** 最近打开的文件，最新在前；跨栏共享，随会话持久化。 */
@@ -198,7 +201,11 @@ export class ReaderWorkspaceController {
   private readonly documentSession: SessionWrite;
 
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
-  constructor(private readonly api: ReaderApi) {
+  constructor(
+    private readonly api: ReaderApi,
+    /** 模式提交后由布局宿主串行保存偏好；恢复阶段不触发写入。 */
+    private readonly onModeChange: () => void = () => {},
+  ) {
     this.documentSession = createSessionWrite({
       delayMs: 300,
       write: (isCurrent) => this.writeDocuments(isCurrent),
@@ -215,7 +222,12 @@ export class ReaderWorkspaceController {
     // 对象字面量的 getter 里 this 指向 host 自身，用闭包读工作区实时状态。
     const vaultRoot = () => this.root;
     const composing = () => this.composing;
+    const mode = () => this.mode;
     this.host = {
+      get mode() {
+        return mode();
+      },
+      toggleReadingMode: () => this.toggleReadingMode(),
       get vaultRoot() {
         return vaultRoot();
       },
@@ -426,9 +438,85 @@ export class ReaderWorkspaceController {
   get toggleViewMode() {
     return this.activePane.toggleViewMode;
   }
-  get toggleReadingMode() {
-    return this.activePane.toggleReadingMode;
+  /** 当前应用模式，文件操作与导航不改变它。 */
+  get mode(): ReaderMode {
+    return this.interactionMode;
   }
+
+  /** 启动时恢复全局模式；未提供时允许旧活动笔记的阅读视图迁移。 */
+  restoreMode(mode: ReaderMode | undefined): void {
+    this.modeRestored = mode !== undefined;
+    this.interactionMode = mode ?? "editing";
+  }
+
+  /** 全栏结束挂起输入后原子切换模式；未保存编辑随会话保留，源码换面先捕获完整快照。 */
+  toggleReadingMode = async (): Promise<void> => {
+    if (this.composing || this.paneList.some((pane) => !pane.idle)) return;
+    const target = this.mode === "reading" ? "editing" : "reading";
+    let committed = false;
+    try {
+      // inert 会改变浏览器的坐标命中；阅读锚点必须在进入异步门禁前捕获。
+      const before = this.paneList.map((pane) => ({
+        pane,
+        revision: pane.document.editRevision,
+        position: pane.navigation.capturePosition(),
+      }));
+      const positions = await this.withAllPanesGated(async () => {
+        for (const pane of this.paneList) if (!(await pane.settleForModeChange())) return undefined;
+        const sources = this.paneList
+          .filter(
+            (pane) =>
+              pane.view === "source" &&
+              pane.document.content?.kind === "markdown" &&
+              !pane.document.needsSourceRepair,
+          )
+          .map((pane) => ({
+            pane,
+            text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+              pane.navigation.snapshot().bytes,
+            ),
+          }));
+        // 全部快照成功后才发布；源码与排版切换时始终携带最新文本。
+        for (const { pane, text } of sources) pane.document.replaceSourceText(text);
+        // 恢复草稿可能只有排版模型能表达；返回编辑必须允许修复，不能被旧源码偏好困在阅读模式。
+        const repairs = this.paneList.filter(
+          (pane) => pane.view === "source" && pane.document.needsSourceRepair,
+        );
+        for (const pane of repairs) {
+          pane.view = "wysiwyg";
+          if (pane.document.path !== null) delete this.viewModes[pane.document.path];
+        }
+        if (repairs.length > 0) this.persistViewModes();
+        this.interactionMode = target;
+        this.modeRestored = true;
+        committed = true;
+        this.onModeChange();
+        await tick();
+        return before.map(({ pane, revision, position }) => ({
+          pane,
+          // 附件结算可能改写内容；阅读锚点可以重定位，旧字节选区不能跨修订盲用。
+          position:
+            position !== null && pane.document.editRevision !== revision
+              ? { ...position, selection: null }
+              : position,
+        }));
+      });
+      if (positions !== undefined) {
+        // 先解除分栏门禁并交接焦点，再恢复阅读锚点，避免浏览器为旧光标滚动覆盖恢复结果。
+        this.navigation.focusEditor();
+        await Promise.all(
+          positions.map(({ pane, position }) =>
+            position === null ? undefined : pane.navigation.restorePosition(position),
+          ),
+        );
+      }
+    } catch (error) {
+      this.report(
+        `${committed ? "模式已切换，但阅读位置恢复失败" : "切换模式失败"}：${errorText(error)}`,
+        error,
+      );
+    }
+  };
   get markDirty() {
     return this.activePane.markDirty;
   }
@@ -571,6 +659,13 @@ export class ReaderWorkspaceController {
       // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
       this.clearViewModes();
       Object.assign(this.viewModes, restored.viewModes);
+      if (!this.modeRestored) {
+        const path = restored.documents.panes[restored.documents.active]?.currentPath;
+        this.interactionMode =
+          path && restored.viewModes[path] === "reading" ? "reading" : "editing";
+        this.modeRestored = true;
+        this.onModeChange();
+      }
       this.recent = restored.recentFiles.filter((path) => this.files.includes(path));
       // 按会话恢复分栏；启动栏复用（保持门禁），第二栏按需补建。
       const sessions = restored.documents.panes;
@@ -1131,15 +1226,20 @@ export class ReaderWorkspaceController {
    * @returns 门禁放行且操作完成时返回操作结果；被拒绝时 undefined。
    */
   private async withAllPanesSaved<T>(operation: () => Promise<T>): Promise<T | undefined> {
+    return this.withAllPanesGated(async () => {
+      for (const pane of this.paneList) if (!(await pane.settleForLeave())) return undefined;
+      return operation();
+    });
+  }
+
+  /** 工作区级串行门禁；保存和模式切换分别决定如何结算，不能互相穿插提交。 */
+  private async withAllPanesGated<T>(operation: () => Promise<T>): Promise<T | undefined> {
     if (this.composing) return undefined;
     const gated: ReaderPane[] = [];
     try {
       for (const pane of this.paneList) {
         if (!pane.beginGate()) return undefined;
         gated.push(pane);
-      }
-      for (const pane of gated) {
-        if (!(await pane.settleForLeave())) return undefined;
       }
       return await operation();
     } finally {

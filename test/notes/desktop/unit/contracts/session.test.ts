@@ -114,3 +114,10 @@ describe("阅读器会话边界", () => {
     expect(mapPathList(recent, (path) => path)).toBeNull();
   });
 });
+
+it("应用模式属于布局，合法模式跨会话保留，旧会话不伪造选择", () => {
+  expect(parseReaderSession({ mode: "reading" }).mode).toBe("reading");
+  expect(parseReaderSession({ mode: "editing" }).mode).toBe("editing");
+  expect(parseReaderSession({ mode: "unknown" }).mode).toBeUndefined();
+  expect(parseReaderSession({}).mode).toBeUndefined();
+});

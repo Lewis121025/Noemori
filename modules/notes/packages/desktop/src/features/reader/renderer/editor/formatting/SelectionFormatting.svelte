@@ -3,6 +3,7 @@
   import { TextSelection, type Command, type EditorState, type Selection } from "prosemirror-state";
   import type { EditorView } from "prosemirror-view";
   import InlineFormatting from "./InlineFormatting.svelte";
+  import { readInlineMarkStates } from "./inline-formatting";
   import { writingCommands } from "../writing";
   import { placeSelectionToolbar } from "./selection-toolbar";
   import { isCompositionKey } from "../composition";
@@ -12,20 +13,24 @@
     state,
     blocked,
     onLink,
+    reading = false,
   }: {
     view: EditorView;
     state: EditorState;
     blocked: boolean;
+    /** 阅读模式的选区只提供高亮，不暴露完整格式或插入入口。 */
+    reading?: boolean;
     onLink: () => void;
   } = $props();
   let panel: HTMLDivElement;
   let frame = 0;
   let dragging = false;
   let dismissed: Selection | null = null;
+  const highlight = $derived(readInlineMarkStates(state).highlight);
   const applicable = $derived(
     state.selection instanceof TextSelection &&
       !state.selection.empty &&
-      writingCommands.bold(state),
+      writingCommands.highlight(state),
   );
 
   function enabledButtons(): HTMLButtonElement[] {
@@ -179,24 +184,34 @@
   onmousedown={(event) => event.preventDefault()}
 >
   {#if applicable}
-    <InlineFormatting {state} onFormat={run} />
-    <span class="separator" aria-hidden="true"></span>
-    <button
-      class="reader-button link-button"
-      type="button"
-      aria-label="链接…"
-      title="链接（⌘/Ctrl + K）"
-      disabled={!state.selection.$from.sameParent(state.selection.$to)}
-      onclick={() => {
-        panel.hidden = true;
-        onLink();
-      }}
-      ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-        ><path
-          d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
-        /></svg
-      ></button
-    >
+    {#if reading}
+      <button
+        class="reader-button"
+        type="button"
+        aria-label="高亮"
+        aria-pressed={highlight}
+        onclick={() => run(writingCommands.highlight)}>高亮</button
+      >
+    {:else}
+      <InlineFormatting {state} onFormat={run} />
+      <span class="separator" aria-hidden="true"></span>
+      <button
+        class="reader-button link-button"
+        type="button"
+        aria-label="链接…"
+        title="链接（⌘/Ctrl + K）"
+        disabled={!state.selection.$from.sameParent(state.selection.$to)}
+        onclick={() => {
+          panel.hidden = true;
+          onLink();
+        }}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path
+            d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
+          /></svg
+        ></button
+      >
+    {/if}
   {/if}
 </div>
 

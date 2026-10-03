@@ -1,3 +1,4 @@
+import { canUseEditingTools } from "../../editor/read-only";
 /**
  * Obsidian 方言节点的排版视图：注释、标注、脚注与 Mermaid 图表。
  *
@@ -94,7 +95,7 @@ class CalloutView implements NodeView {
     this.dom.dataset["calloutFold"] = fold;
     this.fold.hidden = fold === "";
     this.title.placeholder = calloutDefaultTitle(kind);
-    this.title.readOnly = !this.view.editable;
+    this.title.readOnly = !this.view.editable || !canUseEditingTools(this.view.state);
     this.title.setAttribute("aria-label", `${calloutDefaultTitle(kind)} 标注标题`);
     if (document.activeElement !== this.title && this.title.value !== title)
       this.title.value = title;
@@ -121,7 +122,7 @@ class CalloutView implements NodeView {
     composition.bind(this.title);
     this.title.addEventListener("input", () => {
       const pos = this.getPos();
-      if (!this.view.editable) {
+      if (!this.view.editable || !canUseEditingTools(this.view.state)) {
         this.title.value = String(this.node.attrs["title"] ?? "");
         return;
       }
@@ -284,7 +285,7 @@ class MermaidView implements NodeView {
   private editSource(): void {
     const pos = this.getPos();
     // 阅读视图只看图表，不展开源码。
-    if (pos === undefined || !this.view.editable) return;
+    if (pos === undefined || !this.view.editable || !canUseEditingTools(this.view.state)) return;
     const { state } = this.view;
     const end = pos + 1 + this.node.content.size;
     this.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, end)));
@@ -292,7 +293,8 @@ class MermaidView implements NodeView {
   }
 
   private syncAccess(): void {
-    if (this.view.editable) this.preview.title = "点击编辑图表源码";
+    if (this.view.editable && canUseEditingTools(this.view.state))
+      this.preview.title = "点击编辑图表源码";
     else this.preview.removeAttribute("title");
   }
 

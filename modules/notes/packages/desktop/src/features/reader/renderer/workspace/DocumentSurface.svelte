@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import BacklinksPane from "../links/BacklinksPane.svelte";
   import OutlinksPane from "../links/OutlinksPane.svelte";
   import LocalGraphPane from "../graph/LocalGraphPane.svelte";
@@ -17,11 +18,14 @@
     workspace,
     pane,
     mediaIo,
+    registerToolbar,
   }: {
     workspace: ReaderWorkspaceController;
     /** 本栏文档面；文档、导航与链接动作都归属这一栏。 */
     pane: ReaderPane;
     mediaIo: MediaIo;
+    /** 将当前表面的工具注册到分栏顶部，卸载或阅读模式时撤下。 */
+    registerToolbar: (toolbar: Snippet | null) => void;
   } = $props();
   const doc = $derived(pane.document);
   const navigation = $derived(pane.navigation);
@@ -40,15 +44,18 @@
     {#key doc.path}
       {#if doc.content?.kind === "whiteboard"}
         <WhiteboardEditor
+          {registerToolbar}
           board={doc.content.board}
+          readOnly={workspace.mode === "reading"}
           epoch={doc.epoch}
           register={navigation.registerWhiteboard}
           onDirty={pane.markDirty}
         />
       {:else if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor
+          {registerToolbar}
           epoch={doc.epoch}
-          readOnly={pane.viewMode === "reading"}
+          reading={workspace.mode === "reading"}
           formattingId="editor-formatting-{pane.id}"
           active={workspace.activePane.id === pane.id}
           linkTargets={workspace.files.filter(
@@ -73,6 +80,8 @@
         />
       {:else if doc.content?.kind === "markdown" || doc.content?.kind === "text"}
         <CodeEditor
+          {registerToolbar}
+          reading={workspace.mode === "reading"}
           epoch={doc.epoch}
           source={doc.content.source}
           path={doc.path}

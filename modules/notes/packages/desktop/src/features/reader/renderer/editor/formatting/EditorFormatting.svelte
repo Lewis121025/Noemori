@@ -1,6 +1,5 @@
 <script lang="ts">
-  /** 格式面板按需出现；所有命令仍使用编辑器选区，不把文档状态复制到控件中。 */
-  import { flushSync } from "svelte";
+  /** 编辑模式常驻工具栏；所有命令直接使用所属编辑器选区，不复制文档状态。 */
   import type { Command, EditorState } from "prosemirror-state";
   import type { EditorView } from "prosemirror-view";
   import { undo, redo } from "prosemirror-history";
@@ -15,18 +14,14 @@
     state: editorState,
     onLink,
     onAttachment,
-    onOpenChange,
   }: {
-    /** 面板 DOM id。分栏时各栏必须不同，工具栏才能把弹层指到活动栏。 */
+    /** 工具栏 DOM id；各分栏身份独立，操作始终作用于所属编辑器。 */
     id?: string;
     view: EditorView;
     state: EditorState;
     onLink: () => void;
     onAttachment: () => void;
-    onOpenChange: (open: boolean) => void;
   } = $props();
-  let panel: HTMLDivElement;
-  let open = $state(false);
   const blocks = [
     { name: "paragraph", label: "正文" },
     { name: "heading1", label: "标题 1" },
@@ -62,6 +57,7 @@
     { name: "alignCenter", value: "center", label: "列居中对齐", icon: "M4 6h16M7 12h10M4 18h16" },
     { name: "alignRight", value: "right", label: "列右对齐", icon: "M4 6h16M10 12h10M4 18h16" },
   ] as const;
+  const table = $derived(inTable(editorState));
   const block = $derived(
     editorState.selection.$from.parent.type.name === "heading"
       ? `heading${String(editorState.selection.$from.parent.attrs["level"])}`
@@ -72,12 +68,7 @@
 
   function run(command: Command): void {
     command(view.state, view.dispatch, view);
-    dismiss();
     view.focus();
-  }
-  /** 切换到查找等编辑操作时关闭面板，焦点由后续操作接管。 */
-  export function dismiss(): void {
-    panel.hidePopover();
   }
   function setBlock(value: string): void {
     const option = blocks.find((item) => item.name === value);
@@ -85,219 +76,214 @@
   }
 </script>
 
-<!-- 顶部 Aa 通过原生 popovertarget 指向本栏；id 由调用方按分栏区分。 -->
 <div
   {id}
-  popover="auto"
-  class="reader-popover formatting-panel"
-  bind:this={panel}
-  role="group"
-  aria-label="文本格式"
-  onbeforetoggle={(event) => {
-    if (event.newState !== "open") return;
-    // 原生弹层测量与分配焦点前，内容必须已挂载。
-    flushSync(() => {
-      open = true;
-      onOpenChange(true);
-    });
-  }}
-  ontoggle={(event) => {
-    // 关闭后才卸载，让浏览器先把焦点还给触发按钮。
-    if (event.newState === "closed") {
-      open = false;
-      onOpenChange(false);
-    }
+  class="formatting-panel"
+  role="toolbar"
+  aria-label="编辑工具栏"
+  tabindex="-1"
+  onmousedown={(event) => {
+    if (event.target instanceof HTMLElement && event.target.closest("button"))
+      event.preventDefault();
   }}
 >
-  {#if open}
-    {@const table = inTable(editorState)}
-    <div class="panel-heading">{table ? "表格" : "文本格式"}</div>
-    {#if !table}
-      <select
-        class="reader-input"
-        aria-label="段落格式"
-        value={block}
-        onchange={(event) => setBlock(event.currentTarget.value)}
-      >
-        {#each blocks as option (option.name)}
-          <option
-            value={option.name}
-            disabled={option.name !== block && !writingCommands[option.name](editorState)}
-            >{option.label}</option
+  {#if !table}
+    <select
+      class="reader-input"
+      aria-label="段落格式"
+      value={block}
+      onchange={(event) => setBlock(event.currentTarget.value)}
+    >
+      {#each blocks as option (option.name)}
+        <option
+          value={option.name}
+          disabled={option.name !== block && !writingCommands[option.name](editorState)}
+          >{option.label}</option
+        >
+      {/each}
+    </select>
+  {/if}
+  <div class="inline-controls">
+    <InlineFormatting state={editorState} onFormat={run} />
+  </div>
+  <div class="structures">
+    {#if table}
+      <div class="table-structure">
+        {#each tableStructure as action (action.name)}
+          <button
+            class="reader-button"
+            type="button"
+            disabled={!tableCommands[action.name](editorState)}
+            onclick={() => run(tableCommands[action.name])}>{action.label}</button
           >
         {/each}
-      </select>
-    {/if}
-    <div class="inline-controls">
-      <InlineFormatting state={editorState} onFormat={run} />
-    </div>
-    <div class="structures">
-      {#if table}
-        <div class="table-structure">
-          {#each tableStructure as action (action.name)}
-            <button
-              class="reader-button"
-              type="button"
-              disabled={!tableCommands[action.name](editorState)}
-              onclick={() => run(tableCommands[action.name])}>{action.label}</button
-            >
-          {/each}
-        </div>
-        <div class="column-alignment" role="group" aria-label="列对齐">
-          {#each alignments as alignment (alignment.name)}
-            <button
-              class="reader-button"
-              type="button"
-              aria-label={alignment.label}
-              title={alignment.label}
-              aria-pressed={editorState.selection.$from.parent.attrs["align"] === alignment.value}
-              onclick={() => run(tableCommands[alignment.name])}
-            >
-              <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-                ><path d={alignment.icon} /></svg
-              >
-            </button>
-          {/each}
-        </div>
-        <div class="table-structure">
-          <button class="reader-button" type="button" onclick={() => run(leaveTable)}
-            >返回正文</button
-          >
-          <button class="reader-button" type="button" onclick={() => run(tableCommands.remove)}
-            >删除表格</button
-          >
-        </div>
-      {:else}
-        {#each structures as format (format.name)}
+      </div>
+      <div class="column-alignment" role="group" aria-label="列对齐">
+        {#each alignments as alignment (alignment.name)}
           <button
-            class="reader-button action"
+            class="reader-button"
             type="button"
-            disabled={!writingCommands[format.name](editorState)}
-            onclick={() => run(writingCommands[format.name])}
+            aria-label={alignment.label}
+            title={alignment.label}
+            aria-pressed={editorState.selection.$from.parent.attrs["align"] === alignment.value}
+            onclick={() => run(tableCommands[alignment.name])}
           >
             <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-              ><path d={format.icon} /></svg
-            >{format.label}
+              ><path d={alignment.icon} /></svg
+            >
           </button>
         {/each}
+      </div>
+      <div class="table-structure">
+        <button class="reader-button" type="button" onclick={() => run(leaveTable)}>返回正文</button
+        >
+        <button class="reader-button" type="button" onclick={() => run(tableCommands.remove)}
+          >删除表格</button
+        >
+      </div>
+    {:else}
+      {#each structures as format (format.name)}
         <button
           class="reader-button action"
           type="button"
-          disabled={!tableCommands.insert(editorState)}
-          onclick={() => run(tableCommands.insert)}
+          aria-label={format.label}
+          title={format.label}
+          disabled={!writingCommands[format.name](editorState)}
+          onclick={() => run(writingCommands[format.name])}
         >
           <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-            ><path d="M4 4h16v16H4zM4 10h16M10 4v16" /></svg
-          >
-          插入表格
+            ><path d={format.icon} /></svg
+          ><span class="action-label">{format.label}</span>
         </button>
-      {/if}
+      {/each}
       <button
         class="reader-button action"
         type="button"
-        disabled={!!editorState.selection.$from.parent.type.spec.code}
-        onclick={() => {
-          dismiss();
-          onLink();
-        }}
+        aria-label="插入表格"
+        title="插入表格"
+        disabled={!tableCommands.insert(editorState)}
+        onclick={() => run(tableCommands.insert)}
       >
         <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path
-            d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
-          /></svg
-        >链接…
-      </button>
-      <button
-        class="reader-button action"
-        type="button"
-        disabled={!canInsertAttachment(editorState)}
-        onclick={() => {
-          dismiss();
-          onAttachment();
-        }}
-      >
-        <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8M7 13l6-6" /></svg
+          ><path d="M4 4h16v16H4zM4 10h16M10 4v16" /></svg
         >
-        插入附件…
+        插入表格
       </button>
-    </div>
-    <div class="history">
-      <button
-        class="reader-button"
-        type="button"
-        disabled={!undo(editorState)}
-        onclick={() => run(undo)}>撤销</button
+    {/if}
+    <button
+      class="reader-button action"
+      type="button"
+      aria-label="链接…"
+      title="链接"
+      disabled={!!editorState.selection.$from.parent.type.spec.code}
+      onclick={() => {
+        onLink();
+      }}
+    >
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><path
+          d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
+        /></svg
+      >链接…
+    </button>
+    <button
+      class="reader-button action"
+      type="button"
+      aria-label="插入附件…"
+      title="插入附件"
+      disabled={!canInsertAttachment(editorState)}
+      onclick={() => {
+        onAttachment();
+      }}
+    >
+      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8M7 13l6-6" /></svg
       >
-      <button
-        class="reader-button"
-        type="button"
-        disabled={!redo(editorState)}
-        onclick={() => run(redo)}>重做</button
-      >
-    </div>
-  {/if}
+      插入附件…
+    </button>
+  </div>
+  <div class="history">
+    <button
+      class="reader-button"
+      type="button"
+      disabled={!undo(editorState)}
+      onclick={() => run(undo)}>撤销</button
+    >
+    <button
+      class="reader-button"
+      type="button"
+      disabled={!redo(editorState)}
+      onclick={() => run(redo)}>重做</button
+    >
+  </div>
 </div>
 
 <style>
   .formatting-panel {
-    width: 16rem;
-    padding: 0.5rem;
-  }
-  .panel-heading {
-    color: var(--muted);
-    font-size: 0.75rem;
-    margin: 0 0.25rem 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.55rem;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control, 0.5rem);
+    background: var(--bg);
+    box-shadow: 0 2px 8px var(--shadow);
   }
   select {
-    width: 100%;
+    width: 6.5rem;
   }
-  .inline-controls {
-    margin: 0.5rem 0;
+  .inline-controls,
+  .structures,
+  .history,
+  .column-alignment,
+  .table-structure {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem;
   }
   .structures {
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    padding: 0.25rem 0;
+    display: contents;
+  }
+  .inline-controls {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .inline-controls :global(.marks) {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .inline-controls :global(.marks > button) {
+    flex: 0 0 2rem;
   }
   .action {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 0.7rem;
-    text-align: left;
-    border-color: transparent;
-    padding: 0.25rem 0.5rem;
-  }
-  .history {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    padding-top: 0.25rem;
-  }
-  .table-structure,
-  .column-alignment {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.4rem;
-  }
-  .column-alignment {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    margin: 0.5rem 0;
-  }
-  .table-structure button,
-  .column-alignment button {
-    border-color: transparent;
-    font-size: 0.85rem;
-  }
-  .column-alignment button {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-  .history button {
-    border-color: transparent;
+    width: 2rem;
+    height: 2rem;
     padding: 0.3rem;
-    font-size: 0.85rem;
+    font-size: 0;
+  }
+  .action-label {
+    display: none;
+  }
+  .reader-button {
+    border-color: transparent;
+    background: transparent;
+  }
+  .history {
+    margin-left: auto;
+  }
+  .history button,
+  .table-structure button {
+    font-size: 0.75rem;
+    padding: 0.35rem;
+  }
+  .column-alignment button {
+    display: flex;
+    padding: 0.35rem;
   }
 </style>

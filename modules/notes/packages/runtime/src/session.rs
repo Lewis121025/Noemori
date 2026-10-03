@@ -366,6 +366,9 @@ pub fn normalize(value: &Value) -> Value {
     let mut r = json!({"vaultRoot": text(&reader["vaultRoot"]), "documents": documents(&reader["documents"], reader),
         "viewModes": modes, "recentFiles": paths(&reader["recentFiles"], 50, false), "fileTree": file_tree(&reader["fileTree"]),
         "filesCollapsed": reader["filesCollapsed"] == true, "leftWidth": width});
+    if matches!(reader["mode"].as_str(), Some("reading" | "editing")) {
+        r["mode"] = reader["mode"].clone();
+    }
     if matches!(
         reader["space"].as_str(),
         Some("writing" | "library" | "connections")

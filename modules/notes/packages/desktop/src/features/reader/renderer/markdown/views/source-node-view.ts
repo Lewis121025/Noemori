@@ -1,3 +1,4 @@
+import { canUseEditingTools } from "../../editor/read-only";
 /** 公式、HTML 与注释共用源码编辑和预览生命周期，具体排版与资源由各自的预览实现负责。 */
 import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Decoration, EditorView, NodeView } from "prosemirror-view";
@@ -78,7 +79,8 @@ export class SourceNodeView implements NodeView {
   }
 
   private startEditing(): void {
-    if (this.sourceEl !== null || !this.view.editable) return;
+    if (this.sourceEl !== null || !this.view.editable || !canUseEditingTools(this.view.state))
+      return;
     // 块级预览切换为源码时保留原占位，避免后续正文突然向上跳动。
     if (this.display) this.dom.style.minHeight = `${this.dom.getBoundingClientRect().height}px`;
     this.cancelPreview();
@@ -134,10 +136,12 @@ export class SourceNodeView implements NodeView {
   }
 
   private syncAccess(): void {
-    if (this.view.editable) this.dom.title = "双击或选中后按 Enter 编辑，Esc 返回正文";
+    if (this.view.editable && canUseEditingTools(this.view.state))
+      this.dom.title = "双击或选中后按 Enter 编辑，Esc 返回正文";
     else this.dom.removeAttribute("title");
     const empty = this.dom.querySelector<HTMLButtonElement>(".source-empty");
-    if (empty !== null) empty.disabled = !this.view.editable;
+    if (empty !== null)
+      empty.disabled = !this.view.editable || !canUseEditingTools(this.view.state);
   }
 
   private sizeField(): void {
@@ -172,7 +176,13 @@ export class SourceNodeView implements NodeView {
       button.textContent = `补充${SOURCE_LABEL[this.preview.kind]}`;
       button.onclick = () => {
         const pos = this.getPos();
-        if (pos === undefined || this.view.isDestroyed || !this.view.editable) return;
+        if (
+          pos === undefined ||
+          this.view.isDestroyed ||
+          !this.view.editable ||
+          !canUseEditingTools(this.view.state)
+        )
+          return;
         this.view.dispatch(
           this.view.state.tr
             .setSelection(NodeSelection.create(this.view.state.doc, pos))

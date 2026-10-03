@@ -1,3 +1,4 @@
+import { canUseEditingTools } from "../read-only";
 import { NodeSelection, Plugin, PluginKey, type Command } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { isCompositionKey } from "../composition";
@@ -9,7 +10,7 @@ const sourceNodes = new Set(["math_inline", "math_block", "html_inline", "html_b
 
 /** 仅显式操作进入源码；普通节点选择继续保留预览和正文焦点。 */
 export const editSelectedSource: Command = (state, dispatch, view) => {
-  if (view !== undefined && !view.editable) return false;
+  if (!canUseEditingTools(state) || (view !== undefined && !view.editable)) return false;
   const selection = state.selection;
   if (!(selection instanceof NodeSelection) || !sourceNodes.has(selection.node.type.name))
     return false;
@@ -29,7 +30,9 @@ export function createSourceEditingPlugin(initial = false) {
     key: sourceEditingKey,
     state: {
       init: () => initial,
-      apply(tr, editing, previous) {
+      apply(tr, editing, previous, state) {
+        // 权限插件先更新；源码会话自己结束临时编辑，避免权限层反向依赖具体编辑工具。
+        if (!canUseEditingTools(state)) return false;
         const explicit: unknown = tr.getMeta(sourceEditingKey);
         if (typeof explicit === "boolean") return explicit;
         return tr.selection.eq(previous.selection) && editing;
@@ -55,7 +58,13 @@ export function createSourceEditingPlugin(initial = false) {
         return event.key === "Enter" && editSelectedSource(view.state, view.dispatch, view);
       },
       handleDoubleClickOn(view, _pos, node, nodePos, event) {
-        if (!view.editable || event.ctrlKey || event.metaKey || !sourceNodes.has(node.type.name))
+        if (
+          !view.editable ||
+          !canUseEditingTools(view.state) ||
+          event.ctrlKey ||
+          event.metaKey ||
+          !sourceNodes.has(node.type.name)
+        )
           return false;
         view.dispatch(
           view.state.tr

@@ -58,11 +58,8 @@ function restoreViewport(
   else {
     const top = topAt();
     if (top === null) return;
-    const inset = Math.max(
-      -scroller.clientHeight,
-      Math.min(scroller.clientHeight - 24, reading.inset),
-    );
-    scroller.scrollTop += top - scroller.getBoundingClientRect().top - inset;
+    // 不透明长块只能恢复到源码边界，完整偏移可能超过一屏，不能截断到块首附近。
+    scroller.scrollTop += top - scroller.getBoundingClientRect().top - reading.inset;
   }
 }
 
@@ -86,7 +83,11 @@ export function markdownPosition(
           view.dom,
           source,
           session.sourceOffsetAt,
-          (at) => view.posAtCoords(at)?.pos ?? null,
+          (at) => {
+            const pos = view.posAtCoords(at)?.pos;
+            // 源码映射可能退到整个标注块的边界；捕获和恢复必须测量同一个位置。
+            return pos === undefined ? null : session.positionAt(session.sourceOffsetAt(pos));
+          },
           (pos) => view.coordsAtPos(pos).top,
         ),
         selection: {

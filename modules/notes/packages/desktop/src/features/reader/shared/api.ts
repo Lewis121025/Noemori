@@ -278,6 +278,14 @@ export const SIDEBAR_LAYOUT = {
 /** 用户所在的工作空间；读写、资料与关联共用笔记库及保存契约。 */
 export type ReaderSpace = "writing" | "library" | "connections";
 
+/** 应用交互模式：阅读保留正文修改与标注，编辑提供完整格式和结构工具。 */
+export type ReaderMode = "reading" | "editing";
+
+/** @returns 是否为有效应用模式；未知输入返回 false，不抛出异常。 */
+export function isReaderMode(value: unknown): value is ReaderMode {
+  return value === "reading" || value === "editing";
+}
+
 /**
  * 会话恢复与 IPC 共用页面枚举，避免新增页面只被其中一条链路接受。
  * @param value 未经验证的页面值。
@@ -287,8 +295,10 @@ export function isReaderSpace(value: unknown): value is ReaderSpace {
   return value === "writing" || value === "library" || value === "connections";
 }
 
-/** 工作空间与轻量导航布局；旧会话缺少 space 时恢复读写空间。 */
+/** 工作空间、共享交互模式与导航布局；旧会话缺少 space 时恢复读写空间。 */
 export type PaneLayout = {
+  /** 全部笔记与分栏共享的模式；旧会话缺省时从活动笔记的视图迁移。 */
+  mode?: ReaderMode;
   /** 当前空间；可缺省以读取旧版会话。 */
   space?: ReaderSpace;
   /** 文件栏是否收起。 */

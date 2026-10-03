@@ -7,6 +7,7 @@ import {
   wrappingInputRule,
 } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
+import { editingCommand } from "./read-only";
 import {
   liftListItem,
   sinkListItem,
@@ -150,24 +151,30 @@ const codeFence: Command = (state, dispatch) => {
 
 /** 常用写作命令；只改变当前文档事务，保存与撤销由编辑器统一处理。 */
 export const writingCommands = {
-  paragraph: setBlockType(nodes["paragraph"]!),
-  heading1: setBlockType(nodes["heading"]!, { level: 1 }),
-  heading2: setBlockType(nodes["heading"]!, { level: 2 }),
-  heading3: setBlockType(nodes["heading"]!, { level: 3 }),
-  heading4: setBlockType(nodes["heading"]!, { level: 4 }),
-  heading5: setBlockType(nodes["heading"]!, { level: 5 }),
-  heading6: setBlockType(nodes["heading"]!, { level: 6 }),
+  paragraph: editingCommand(setBlockType(nodes["paragraph"]!)),
+  heading1: editingCommand(setBlockType(nodes["heading"]!, { level: 1 })),
+  heading2: editingCommand(setBlockType(nodes["heading"]!, { level: 2 })),
+  heading3: editingCommand(setBlockType(nodes["heading"]!, { level: 3 })),
+  heading4: editingCommand(setBlockType(nodes["heading"]!, { level: 4 })),
+  heading5: editingCommand(setBlockType(nodes["heading"]!, { level: 5 })),
+  heading6: editingCommand(setBlockType(nodes["heading"]!, { level: 6 })),
   // 混合选区一次统一应用；只有全部应用时才取消，工具条与快捷键共用此语义。
-  bold: toggleMark(documentSchema.marks["strong"]!, null, { removeWhenPresent: false }),
-  italic: toggleMark(documentSchema.marks["em"]!, null, { removeWhenPresent: false }),
-  strike: toggleMark(documentSchema.marks["strike"]!, null, { removeWhenPresent: false }),
+  bold: editingCommand(
+    toggleMark(documentSchema.marks["strong"]!, null, { removeWhenPresent: false }),
+  ),
+  italic: editingCommand(
+    toggleMark(documentSchema.marks["em"]!, null, { removeWhenPresent: false }),
+  ),
+  strike: editingCommand(
+    toggleMark(documentSchema.marks["strike"]!, null, { removeWhenPresent: false }),
+  ),
   highlight: toggleMark(documentSchema.marks["highlight"]!, null, { removeWhenPresent: false }),
-  code: inlineCode,
-  bulletList: listCommand("bullet_list"),
-  orderedList: listCommand("ordered_list"),
-  taskList,
-  quote,
-  codeBlock,
+  code: editingCommand(inlineCode),
+  bulletList: editingCommand(listCommand("bullet_list")),
+  orderedList: editingCommand(listCommand("ordered_list")),
+  taskList: editingCommand(taskList),
+  quote: editingCommand(quote),
+  codeBlock: editingCommand(codeBlock),
 } satisfies Record<string, Command>;
 
 function taskInput(
@@ -231,9 +238,9 @@ export function writingPlugins(actions: { link: () => void; search: () => void }
       },
       "Mod-Enter": chainCommands(leaveTable, exitCode),
       "Shift-Enter": tableLineBreak,
-      Enter: chainCommands(moveTableCell("down"), codeFence, splitItem),
-      Tab: chainCommands(moveTableCell("next"), sinkListItem(itemType)),
-      "Shift-Tab": chainCommands(moveTableCell("previous"), liftListItem(itemType)),
+      Enter: chainCommands(moveTableCell("down"), editingCommand(codeFence), splitItem),
+      Tab: chainCommands(moveTableCell("next"), editingCommand(sinkListItem(itemType))),
+      "Shift-Tab": chainCommands(moveTableCell("previous"), editingCommand(liftListItem(itemType))),
       Backspace: undoInputRule,
     }),
     tableClipboard,

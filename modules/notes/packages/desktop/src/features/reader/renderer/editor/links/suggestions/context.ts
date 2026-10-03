@@ -9,6 +9,7 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { EditorState } from "prosemirror-state";
 import type { LinkKind } from "../../../../shared/api";
+import { canUseEditingTools } from "../../read-only";
 
 /** 内联补全请求；`from` 是查询文本起点（替换范围到当前光标）。 */
 export type SuggestRequest =
@@ -49,6 +50,7 @@ const NO_SUGGEST_BLOCKS = new Set(["code_block", "markdown_block"]);
  * @returns 触发中的请求；不在链接语法内时返回 `null`。
  */
 export function suggestRequest(state: EditorState): SuggestRequest | null {
+  if (!canUseEditingTools(state)) return null;
   const { $from, empty } = state.selection;
   if (!empty) return null;
   const parent = $from.parent;

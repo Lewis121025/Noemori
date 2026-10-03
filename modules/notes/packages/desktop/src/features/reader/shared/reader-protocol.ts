@@ -29,7 +29,7 @@ import type {
   VaultOpenSnapshot,
   WriteResult,
 } from "./api";
-import { isReaderSpace, SIDEBAR_LAYOUT } from "./api";
+import { isReaderMode, isReaderSpace, SIDEBAR_LAYOUT } from "./api";
 import { parseFileTreeState } from "./file-browser";
 import {
   parseRecentFiles,
@@ -241,13 +241,15 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     !Number.isFinite(value.leftWidth) ||
     value.leftWidth < SIDEBAR_LAYOUT.minWidth ||
     value.leftWidth > SIDEBAR_LAYOUT.maxWidth ||
-    (value.space !== undefined && !isReaderSpace(value.space))
+    (value.space !== undefined && !isReaderSpace(value.space)) ||
+    (value.mode !== undefined && !isReaderMode(value.mode))
   )
     throw new Error("文件栏布局参数无效");
   return {
     filesCollapsed: value.filesCollapsed,
     leftWidth: Math.round(value.leftWidth),
     ...(value.space === undefined ? {} : { space: value.space }),
+    ...(value.mode === undefined ? {} : { mode: value.mode }),
   };
 }
 

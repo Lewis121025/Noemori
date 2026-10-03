@@ -2,7 +2,7 @@
   /**
    * 可编辑 Markdown 表面：ProseMirror 挂载一次，不把文档树放进 Svelte VDOM。
    */
-  import { untrack } from "svelte";
+  import { untrack, type Snippet } from "svelte";
   import { baseKeymap } from "prosemirror-commands";
   import { undo, redo, history, undoDepth, redoDepth } from "prosemirror-history";
   import { keymap } from "prosemirror-keymap";
@@ -98,16 +98,16 @@
     onOutline: (items: OutlineItem[]) => void;
     /** 注册/注销序列化入口。 */
     register: (api: MarkdownEditorApi | null) => void;
-    /**
-     * 格式面板 DOM id。
-     *
-     * 工具栏的 Aa 用 popovertarget 指向它；分栏同时挂载多篇文档时必须各不相同。
-     */
+    /** 工具栏 DOM id；同时挂载的分栏必须各不相同。 */
     formattingId?: string;
-    /** 本栏是否为活动栏。失去活动时关闭格式面板，避免弹层还作用在背后那一栏。 */
+    /** 分栏工具栏入口；未提供时按普通文档流显示，供独立编辑表面使用。 */
+    registerToolbar?: (toolbar: Snippet | null) => void;
+    /** 本栏是否为活动栏；选区浮动工具只属于活动编辑器。 */
     active?: boolean;
     /** 阅读视图：同一编辑器严格只读，链接单击即打开。 */
     readOnly?: boolean;
+    /** 阅读模式保留正文与标注，隐藏完整编辑工具。 */
+    reading?: boolean;
     /** 库内链接候选；仅用于交互，不参与文档挂载依赖。 */
     linkTargets?: string[];
     /**
@@ -145,18 +145,26 @@
     suggestBlocks,
     ensureBlockId,
     formattingId = "editor-formatting",
+    registerToolbar,
     active = true,
     readOnly = false,
+    reading = false,
   }: Props = $props();
   let host: HTMLDivElement | undefined = $state();
   let editor = $state.raw<EditorView | null>(null);
   let editorState = $state.raw<EditorState | null>(null);
+  const hasToolbar = $derived(!readOnly && !reading && editor !== null && editorState !== null);
+
+  $effect(() => {
+    const register = registerToolbar;
+    if (register === undefined) return;
+    register(hasToolbar ? editorToolbar : null);
+    return () => register(null);
+  });
   let publicApi = $state.raw<MarkdownEditorApi | null>(null);
   let showLink = $state(false);
   let showSearch = $state(false);
-  let formattingOpen = $state(false);
   let searchPanel: EditorSearch | undefined = $state();
-  let formattingPanel: EditorFormatting | undefined = $state();
   let attachmentPanel: EditorAttachments | undefined = $state();
   let attachments = $state.raw<ReturnType<typeof createAttachmentEditing> | null>(null);
   let attachmentProgress = $state<AttachmentProgress>(null);
@@ -381,29 +389,22 @@
   }
 
   function openAttachments(): void {
-    formattingPanel?.dismiss();
+    if (readOnly || reading) return;
     attachmentPanel?.pick();
   }
 
   function openSearch(): void {
-    formattingPanel?.dismiss();
     showSearch = true;
     searchPanel?.focusQuery();
   }
-
-  // 活动栏切走后，已打开的格式面板仍绑定着这一栏的编辑器，必须关掉。
-  $effect(() => {
-    if (!active) formattingPanel?.dismiss();
-  });
 
   // 排版与阅读共用同一视图：只切换可编辑性，不重建编辑器、不丢撤销历史与滚动位置。
   $effect(() => {
     const locked = readOnly;
     const view = editor;
     if (view === null) return;
-    setDocumentReadOnly(view, locked);
-    if (locked) {
-      formattingPanel?.dismiss();
+    setDocumentReadOnly(view, locked, reading);
+    if (locked || reading) {
       showLink = false;
       closeSuggest();
     }
@@ -444,7 +445,7 @@
           doc,
           selection: bodySelection(doc, reload?.selection),
           plugins: [
-            documentAccess(locked),
+            documentAccess(locked, reading),
             frontmatterPresentation(),
             // 补全弹层激活时优先接管导航键；未激活时完全透明。
             linkSuggestPlugin(suggestKeys),
@@ -460,7 +461,7 @@
             ...mathInputPlugins(),
             ...writingPlugins({
               link: () => {
-                if (created.editable) showLink = true;
+                if (created.editable && !reading) showLink = true;
               },
               search: openSearch,
             }),
@@ -625,16 +626,18 @@
   }
 </script>
 
+{#snippet editorToolbar()}
+  {#if hasToolbar && editor !== null && editorState !== null}<EditorFormatting
+      id={formattingId}
+      view={editor}
+      state={editorState}
+      onLink={() => (showLink = true)}
+      onAttachment={openAttachments}
+    />{/if}
+{/snippet}
+
+{#if registerToolbar === undefined}{@render editorToolbar()}{/if}
 {#if editor !== null && editorState !== null}
-  <EditorFormatting
-    bind:this={formattingPanel}
-    id={formattingId}
-    view={editor}
-    state={editorState}
-    onLink={() => (showLink = true)}
-    onAttachment={openAttachments}
-    onOpenChange={(open) => (formattingOpen = open)}
-  />
   {#if attachments}<EditorAttachments
       bind:this={attachmentPanel}
       view={editor}
@@ -644,14 +647,15 @@
   <SelectionFormatting
     view={editor}
     state={editorState}
-    blocked={readOnly || showSearch || showLink || formattingOpen}
+    blocked={readOnly || !active || showSearch || showLink}
+    {reading}
     onLink={() => (showLink = true)}
   />
   {#if showSearch}<EditorSearch
       bind:this={searchPanel}
       view={editor}
       state={editorState}
-      {readOnly}
+      readOnly={readOnly || reading}
       onClose={() => (showSearch = false)}
     />{/if}
   {#if showLink}<EditorLink
@@ -665,10 +669,10 @@
     class="reader-popover properties-popover"
     aria-label="笔记属性"
   >
-    <PropertiesPanel view={editor} state={editorState} {readOnly} />
+    <PropertiesPanel view={editor} state={editorState} readOnly={readOnly || reading} />
   </div>
 {/if}
-<div class="surface" class:reading={readOnly} bind:this={host}></div>
+<div class="surface" class:reading={readOnly || reading} bind:this={host}></div>
 {#if suggest !== null && suggest.items.length > 0}
   <LinkSuggestPopup
     items={suggest.items}

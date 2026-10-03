@@ -9,7 +9,7 @@ import { _electron as electron, type ElectronApplication } from "playwright-core
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("无工具栏白板：正文插入、手势编辑、保存重启、改名和嵌入关系", async (t) => {
+test("白板模式与工具栏：正文插入、手势编辑、保存重启、改名和嵌入关系", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-whiteboard-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -175,7 +175,13 @@ test("无工具栏白板：正文插入、手势编辑、保存重启、改名�
     await page.getByRole("button", { name: "关联与白板", exact: true }).click();
     await page.getByRole("button", { name: "新建白板", exact: true }).click();
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
-    expect(await page.locator(".whiteboard button").count()).toBe(0);
+    await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
+    await page.getByRole("button", { name: "切换阅读模式", exact: true }).click();
+    await expect
+      .poll(() => page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).count())
+      .toBe(0);
+    await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
+    await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     // 停笔保留自由笔迹，抬笔提交相同轮廓且可整体撤销。
     const inputBox = await page

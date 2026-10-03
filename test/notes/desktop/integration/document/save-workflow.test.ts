@@ -3,7 +3,10 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
 import { emptyReaderSession } from "@reader/shared/session";
-import type { AppApi, AppCommand } from "../../../../../modules/notes/packages/desktop/src/shared/api";
+import type {
+  AppApi,
+  AppCommand,
+} from "../../../../../modules/notes/packages/desktop/src/shared/api";
 import type {
   FileSnapshot,
   Mentions,
@@ -221,6 +224,11 @@ function beginTrash(path: string): void {
   click("移到废纸篓");
 }
 
+function beginSidebarTrash(path: string): void {
+  click(`将 ${path} 移到废纸篓`);
+  click("移到废纸篓");
+}
+
 describe("保存、冲突与恢复的完整界面流程", () => {
   it("外部刷新等待附件插入，完成后保留引用并报告版本冲突", async () => {
     const imported = deferred<{ path: string; warning: string | null }>();
@@ -389,7 +397,53 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(api.entryRename).not.toHaveBeenCalled();
   });
 
-  it("删除当前笔记先保存最新编辑，成功后清空当前文档和会话", async () => {
+  it("侧栏删除可以取消，确认框明确显示目标且保持当前文档", async () => {
+    await start();
+    click("将 other.md 移到废纸篓");
+    expect(target.querySelector(".entry-dialog")?.textContent).toContain(
+      "将“other.md”移到系统废纸篓",
+    );
+    expect(api.entryTrash).not.toHaveBeenCalled();
+    click("取消");
+    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
+    expect(disk.has("other.md")).toBe(true);
+    expect(target.querySelector(".document-name")?.textContent).toBe("note.md");
+  });
+
+  it("侧栏删除文件夹先保存其中的笔记，清除整棵子树并将焦点交还文件栏", async () => {
+    disk.set("项目/子目录/草稿.md", encode("draft\n"));
+    await start();
+    for (const path of ["项目", "项目/子目录", "项目/子目录/草稿.md"]) {
+      target.querySelector<HTMLButtonElement>(`.quick-navigation [data-path="${path}"]`)!.click();
+      flushSync();
+    }
+    await vi.waitFor(() => expect(target.querySelector(".ProseMirror")?.textContent).toBe("draft"));
+    target.querySelector<HTMLElement>(".ProseMirror")!.blur();
+    await edit("saved before folder trash");
+    vi.mocked(api.entryTrash).mockImplementation(async (path) => {
+      expect(path).toBe("项目");
+      expect(decode(disk.get("项目/子目录/草稿.md")!)).toBe("saved before folder trash\n");
+      for (const item of disk.keys()) if (item.startsWith(`${path}/`)) disk.delete(item);
+      return { warning: null };
+    });
+    click("将 项目 移到废纸篓");
+    expect(target.querySelector(".entry-dialog")?.textContent).toContain(
+      "其中的所有文件会一起移动",
+    );
+    click("移到废纸篓");
+    await vi.waitFor(() => {
+      expect(target.querySelector('.quick-navigation [data-path="项目"]')).toBeNull();
+      expect(target.querySelector(".ProseMirror")).toBeNull();
+      expect(document.activeElement?.getAttribute("role")).toBe("treeitem");
+    });
+    expect(api.entryTrash).toHaveBeenCalledExactlyOnceWith("项目");
+    expect(disk.has("note.md")).toBe(true);
+  });
+
+  it.each([
+    { source: "资料管理", trash: beginTrash },
+    { source: "笔记侧栏", trash: beginSidebarTrash },
+  ])("删除当前笔记先保存最新编辑，成功后清空当前文档和会话（$source）", async ({ trash }) => {
     await start();
     await edit("before trash");
     vi.mocked(api.entryTrash).mockImplementation(async (path) => {
@@ -397,7 +451,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       disk.delete(path);
       return { warning: null };
     });
-    beginTrash("note.md");
+    trash("note.md");
     await vi.waitFor(() => {
       flushSync();
       expect(target.querySelector(".ProseMirror")).toBeNull();
@@ -412,11 +466,17 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(disk.has("other.md")).toBe(true);
   });
 
-  it("当前编辑有保存冲突时阻止新建和删除，原编辑仍可处理", async () => {
+  it.each([
+    { source: "资料管理", trash: beginTrash },
+    { source: "笔记侧栏", trash: beginSidebarTrash },
+  ])("当前编辑有保存冲突时阻止新建和删除，原编辑仍可处理（$source）", async ({ trash }) => {
     await start();
-    vi.mocked(api.fileWrite).mockResolvedValue({ status: "conflict", disk: encode("external\n") });
+    vi.mocked(api.fileWrite).mockResolvedValue({
+      status: "conflict",
+      disk: encode("external\n"),
+    });
     await edit("my unsaved work");
-    beginTrash("note.md");
+    trash("note.md");
     await vi.waitFor(() => {
       flushSync();
       expect(status()).toBe("存在保存冲突");
@@ -473,7 +533,8 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     disk.set("失踪/草稿.md", encode("recovered\n"));
     vi.mocked(api.entryCreate).mockRejectedValue(new Error("父文件夹不存在"));
     await start();
-    click("失踪");
+    target.querySelector<HTMLButtonElement>('.library [data-path="失踪"]')!.click();
+    flushSync();
     target.querySelector<HTMLButtonElement>(".library-heading .primary")!.click();
     flushSync();
     expect(target.querySelector(".entry-dialog .hint")?.textContent).toBe("位置：失踪");
@@ -542,10 +603,13 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(decode(disk.get("替换.md/child.md")!)).toBe("目录中的文件\n");
   });
 
-  it("系统废纸篓失败时保留文件、当前选择和可重试的对话框", async () => {
+  it.each([
+    { source: "资料管理", trash: beginTrash },
+    { source: "笔记侧栏", trash: beginSidebarTrash },
+  ])("系统废纸篓失败时保留文件、当前选择和可重试的对话框（$source）", async ({ trash }) => {
     await start();
     vi.mocked(api.entryTrash).mockRejectedValue(new Error("废纸篓不可用"));
-    beginTrash("note.md");
+    trash("note.md");
     await vi.waitFor(() => {
       flushSync();
       expect(target.querySelector('[role="alert"]')?.textContent).toContain("废纸篓不可用");

@@ -76,6 +76,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
       filesCollapsed: session.filesCollapsed,
       leftWidth: session.leftWidth,
       ...(session.space === undefined ? {} : { space: session.space }),
+      ...(session.mode === undefined ? {} : { mode: session.mode }),
     };
   });
 

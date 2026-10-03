@@ -94,10 +94,10 @@ $$
     page.on("pageerror", (error) => errors.push(error.message));
     await page.locator(".ProseMirror").waitFor();
     await page.locator(".references summary").waitFor();
-    expect(await page.locator("aside").count()).toBe(1);
+    expect(await page.locator(".file-sidebar").count()).toBe(1);
     // PDF 预览的全局样式不能给文件栏添加浮层圆角、内边距或阴影。
     expect(
-      await page.locator("aside").evaluate((aside) => {
+      await page.locator(".file-sidebar").evaluate((aside) => {
         const style = getComputedStyle(aside);
         return { radius: style.borderRadius, padding: style.paddingTop, shadow: style.boxShadow };
       }),

@@ -8,6 +8,12 @@
   }: { register: (api: MarkdownEditorApi | null) => void; onDirty: () => void } = $props();
   let readOnly = $state(false);
   let epoch = $state(0);
+  let reading = $state(false);
+
+  /** 切换轻量阅读模式，正文输入保持可用。 */
+  export function setReading(value: boolean): void {
+    reading = value;
+  }
 
   /** 在同一文档会话中切换读写，验证历史和选区不会因重建而丢失。 */
   export function setReadOnly(value: boolean): void {
@@ -23,6 +29,7 @@
 <DocumentEditor
   {epoch}
   {readOnly}
+  {reading}
   {register}
   {onDirty}
   source={"# 阅读\n\n目标 目标\n\n- [ ] 任务\n\n$x$\n\n> [!note]- 提示\n> 标注正文\n"}

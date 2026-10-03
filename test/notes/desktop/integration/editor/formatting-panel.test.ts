@@ -5,49 +5,34 @@ import { expect, it, vi } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { parseMarkdown } from "@reader/renderer/markdown/markdown";
-import { writingCommands } from "@reader/renderer/editor/writing";
 import Harness from "./EditorFormattingHarness.svelte";
 
-it("关闭的格式面板不计算命令状态，重新打开使用最新选区", async () => {
+it("编辑工具栏常驻，随选区更新格式状态，应用命令后仍保持可用", async () => {
   const host = document.createElement("div");
   const target = document.createElement("div");
   document.body.append(host, target);
-  const view = new EditorView(host, { state: EditorState.create({ doc: parseMarkdown("正文") }) });
+  const view = new EditorView(host, {
+    state: EditorState.create({ doc: parseMarkdown("正文") }),
+    handleScrollToSelection: () => true,
+  });
   const state = writable(view.state);
-  const check = vi.spyOn(writingCommands, "taskList");
   const app = mount(Harness, { target, props: { view, state } });
   try {
     flushSync();
-    for (let index = 0; index < 10; index++) {
-      view.dispatch(view.state.tr.insertText("新"));
-      state.set(view.state);
-      flushSync();
-    }
-    expect(check.mock.calls.length).toBe(0);
-    const panel = target.querySelector<HTMLDivElement>("[popover]")!;
-    // jsdom 不实现原生 popover；这里只模拟生命周期，原生焦点行为由 Electron 验收。
-    const toggle = (newState: "open" | "closed") => {
-      panel.dispatchEvent(Object.assign(new Event("beforetoggle"), { newState }));
-      panel.dispatchEvent(Object.assign(new Event("toggle"), { newState }));
-      flushSync();
-    };
-    toggle("open");
-    expect(check).toHaveBeenCalledOnce();
-    expect(target.querySelector('button[aria-label="加粗"]')?.getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    toggle("closed");
-    check.mockClear();
+    expect(target.querySelector('[role="toolbar"][aria-label="编辑工具栏"]')).not.toBeNull();
+    expect(target.querySelector("[popover]")).toBeNull();
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)));
-    writingCommands.bold(view.state, view.dispatch);
     state.set(view.state);
     flushSync();
-    expect(check.mock.calls.length).toBe(0);
-    toggle("open");
-    expect(check).toHaveBeenCalledOnce();
-    expect(target.querySelector('button[aria-label="加粗"]')?.getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    const bold = target.querySelector<HTMLButtonElement>('[aria-label="加粗"]')!;
+    expect(bold.getAttribute("aria-pressed")).toBe("false");
+    bold.click();
+    state.set(view.state);
+    flushSync();
+    expect(bold.getAttribute("aria-pressed")).toBe("true");
+    expect(view.state.doc.textContent).toBe("正文");
+    expect(target.querySelector('[aria-label="插入表格"]')).not.toBeNull();
+    expect(target.querySelector('[aria-label="插入附件…"]')).not.toBeNull();
   } finally {
     await unmount(app);
     view.destroy();

@@ -7,4 +7,4 @@
   let { view, state }: { view: EditorView; state: Readable<EditorState> } = $props();
 </script>
 
-<EditorFormatting {view} state={$state} onLink={() => {}} onAttachment={() => {}} onOpenChange={() => {}} />
+<EditorFormatting {view} state={$state} onLink={() => {}} onAttachment={() => {}} />

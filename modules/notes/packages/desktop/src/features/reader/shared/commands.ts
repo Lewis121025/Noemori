@@ -38,7 +38,7 @@ export const READER_COMMANDS = [
   { id: "go-back", label: "后退", shortcut: cmd("[") },
   { id: "go-forward", label: "前进", shortcut: cmd("]") },
   { id: "toggle-source", label: "切换排版/源码视图", shortcut: cmd("e") },
-  { id: "toggle-reading", label: "切换阅读视图", shortcut: cmdShift("e") },
+  { id: "toggle-reading", label: "切换阅读 / 编辑模式", shortcut: cmdShift("e") },
   { id: "toggle-files", label: "显示或隐藏文件栏", shortcut: cmd("\\") },
   { id: "toggle-split", label: "切换分栏", shortcut: null },
   { id: "rename-file", label: "重命名当前文件…", shortcut: null },
@@ -157,6 +157,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "new-whiteboard":
     case "toggle-files":
     case "toggle-split":
+    case "toggle-reading":
       return true;
     case "quick-switcher":
     case "export-vault":
@@ -178,7 +179,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "bookmark-file":
       return context.hasDocument;
     case "toggle-source":
-    case "toggle-reading":
+      return context.hasDocument && context.markdown && !context.reading;
     case "bookmark-heading":
       return context.hasDocument && context.markdown;
     case "go-back":

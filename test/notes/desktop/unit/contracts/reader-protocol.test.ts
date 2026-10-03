@@ -367,3 +367,13 @@ it("链接解析响应按状态判别，损坏响应不退化成死链", () => {
   ])
     expect(() => parseLinkTarget(invalid)).toThrow("链接解析响应无效");
 });
+
+it("应用模式经 IPC 严格校验，缺省保留旧版会话迁移能力", () => {
+  const layout = { filesCollapsed: false, leftWidth: 232 };
+  for (const mode of ["reading", "editing"])
+    expect(parsePaneLayoutMessage({ ...layout, mode })).toEqual({ ...layout, mode });
+  expect(parsePaneLayoutMessage(layout)).toEqual(layout);
+  expect(() => parsePaneLayoutMessage({ ...layout, mode: "unknown" })).toThrow(
+    "文件栏布局参数无效",
+  );
+});

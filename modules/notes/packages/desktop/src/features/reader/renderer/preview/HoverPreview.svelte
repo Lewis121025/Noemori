@@ -150,6 +150,8 @@
 
 <style>
   .hover-preview {
+    --font-reading: 15px;
+    --line-reading: 1.7;
     position: fixed;
     z-index: 20;
     width: min(28rem, calc(100vw - 1rem));
@@ -157,12 +159,10 @@
     overflow: auto;
     padding: 0.5rem 0.85rem 0.75rem;
     color: var(--fg);
-    background: var(--bg);
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 0.7rem;
-    box-shadow:
-      0 8px 24px var(--shadow),
-      0 16px 48px var(--shadow);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-popover);
     font-size: 0.9rem;
   }
   .title {
@@ -178,8 +178,16 @@
   .body :global(.ProseMirror) {
     outline: none;
   }
-  .body :global(.ProseMirror :is(h1, h2, h3)) {
-    font-size: 1.05rem;
+  .body :global(.ProseMirror :is(h1, h2, h3, h4, h5, h6)) {
     margin: 0.6em 0 0.3em;
+  }
+  .body :global(.ProseMirror h1) {
+    font-size: 1.3em;
+  }
+  .body :global(.ProseMirror h2) {
+    font-size: 1.2em;
+  }
+  .body :global(.ProseMirror h3) {
+    font-size: 1.1em;
   }
 </style>

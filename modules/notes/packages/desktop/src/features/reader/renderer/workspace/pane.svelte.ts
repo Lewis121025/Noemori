@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import type { LinkKind, MentionRecord, ReaderApi } from "../../shared/api";
+import type { LinkKind, MentionRecord, ReaderApi, ReaderMode } from "../../shared/api";
 import type { ReadingBookmark } from "../../shared/reading-position";
 import type { RememberedView } from "../../shared/session";
 import { deadLinkCreatePath, type DeadLinkOffer } from "../links/dead-link";
@@ -46,6 +46,9 @@ export function missingAnchor(anchor: string | null, openedFile: boolean): strin
  * 提示、组词与会话持久化属于工作区级协调，分栏不各自持有。
  */
 export type PaneHost = {
+  /** 全工作区统一的交互模式，不随文件导航改变。 */
+  mode: ReaderMode;
+  toggleReadingMode(): Promise<void>;
   /** 当前库根；附件导入归属校验用。 */
   vaultRoot: string | null;
   /** 输入法组词是否进行中；组词期间暂停保存与切换。 */
@@ -149,7 +152,7 @@ export class ReaderPane {
   }
   /** 当前 Markdown 文档的视图模式。 */
   get viewMode(): ViewMode {
-    return this.view;
+    return this.host.mode === "reading" ? "reading" : this.view;
   }
 
   /** 释放本栏计时器；卸载或关栏时调用。 */
@@ -311,11 +314,12 @@ export class ReaderPane {
 
   /** 源码视图与排版/阅读视图之间切换（排版与阅读都回到排版）。 */
   toggleViewMode = (): Promise<void> =>
-    this.switchView(this.view === "source" ? "wysiwyg" : "source");
+    this.host.mode === "reading"
+      ? Promise.resolve()
+      : this.switchView(this.view === "source" ? "wysiwyg" : "source");
 
   /** 阅读视图与排版视图之间切换；从源码视图进入阅读视图同样交接文本。 */
-  toggleReadingMode = (): Promise<void> =>
-    this.switchView(this.view === "reading" ? "wysiwyg" : "reading");
+  toggleReadingMode = (): Promise<void> => this.host.toggleReadingMode();
 
   /**
    * 切换 Markdown 视图并记住选择。
@@ -571,15 +575,21 @@ export class ReaderPane {
 
   /** 附件结算 + 保存冲刷 + 脏检查；调用方须已持有门禁。 */
   async settleForLeave(): Promise<boolean> {
+    if (!(await this.settleForModeChange())) return false;
+    if (this.document.dirty) {
+      this.host.noticeSaveBlocked(this);
+      return false;
+    }
+    return true;
+  }
+
+  /** 结束挂起输入并尝试保存；模式切换保留同一编辑会话，保存失败不能阻止返回编辑修复。 */
+  async settleForModeChange(): Promise<boolean> {
     if (!(await this.navigation.settleEditing())) {
       this.host.report("附件尚未完成导入，请重试剩余附件，或关闭附件错误提示后再离开。");
       return false;
     }
     await this.autosave.flush();
-    if (this.document.dirty) {
-      this.host.noticeSaveBlocked(this);
-      return false;
-    }
     return !this.host.composing;
   }
 
@@ -633,7 +643,9 @@ export class ReaderPane {
     // 否则记住的源码视图会让未写入磁盘的编辑静默缺席。
     const remembered = this.host.viewModeOf(path);
     this.view =
-      remembered === null || (remembered === "source" && this.document.needsSourceRepair)
+      remembered === null ||
+      remembered === "reading" ||
+      (remembered === "source" && this.document.needsSourceRepair)
         ? "wysiwyg"
         : remembered;
     this.navigation.resetReferences();

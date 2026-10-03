@@ -61,10 +61,11 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     const editor = page.locator(".ProseMirror");
     await ready("写作.md");
     await editor.waitFor();
-    const formatting = page.getByRole("group", { name: "文本格式", exact: true });
-    const formatButton = page.getByRole("button", { name: "文本格式", exact: true });
+    const formatting = page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true });
 
-    expect(await formatting.isVisible()).toBe(false);
+    expect(await formatting.isVisible()).toBe(true);
     expect(await page.getByRole("form", { name: "文内查找替换" }).isVisible()).toBe(false);
     await editor.click();
     await page.keyboard.type("# ");
@@ -91,7 +92,10 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
 
-    await noteAction(page, "文本格式");
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
     await formatting.getByRole("button", { name: "链接…", exact: true }).click();
     const link = page.getByRole("dialog", { name: "插入链接" });
     await link.getByLabel("链接目标").fill("参考.md");
@@ -128,7 +132,10 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await search.getByRole("button", { name: "关闭查找" }).click();
     await page.keyboard.press("ControlOrMeta+z");
     expect(await editor.locator("strong").innerText()).toBe("重点");
-    await noteAction(page, "文本格式");
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
     await formatting.getByRole("button", { name: "重做", exact: true }).click();
     expect(await editor.locator("strong").innerText()).toBe("关键");
     await page.keyboard.press("ControlOrMeta+s");
@@ -149,7 +156,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       .getByRole("treeitem", { name: "文本.txt", exact: true })
       .click();
     await ready("文本.txt");
-    expect(await formatButton.isVisible()).toBe(false);
+    expect(await formatting.isVisible()).toBe(false);
     await noteAction(page, "文内查找");
     const textSearch = page.locator(".cm-search");
     await textSearch.getByLabel("查找", { exact: true }).fill("查找目标");
@@ -183,11 +190,17 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       selection?.addRange(range);
       document.dispatchEvent(new Event("selectionchange"));
     });
-    await noteAction(page, "文本格式");
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
     await formatting.getByRole("button", { name: "斜体", exact: true }).click();
     expect(await editor.locator("em").innerText()).toBe("关键");
-    expect(await formatting.isVisible()).toBe(false);
-    await noteAction(page, "文本格式");
+    expect(await formatting.isVisible()).toBe(true);
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
     expect(
       await formatting
         .getByRole("button", { name: "斜体", exact: true })
@@ -210,11 +223,8 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (process.env.NOEMORI_WRITING_SCREENSHOT)
       await page.screenshot({ path: process.env.NOEMORI_WRITING_SCREENSHOT });
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-narrow.png") });
-    // 原生弹层支持键盘进入与 Escape 返回入口，不能让隐藏控件挤占正文。
-    await page.getByRole("button", { name: "笔记操作", exact: true }).click();
-    await formatButton.focus();
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Tab");
+    // 常驻工具栏可直接进入段落选择；不需要先打开笔记菜单。
+    await formatting.getByLabel("段落格式").focus();
     expect(
       await formatting
         .getByLabel("段落格式")
@@ -222,12 +232,15 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     ).toBe(true);
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-formatting.png") });
     await page.keyboard.press("Escape");
-    expect(await formatting.isVisible()).toBe(false);
-    await noteAction(page, "文本格式");
+    expect(await formatting.isVisible()).toBe(true);
+    await page
+      .locator(".pane-column.active")
+      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+      .waitFor();
     expect(await formatting.isVisible()).toBe(true);
     await page.keyboard.press("ControlOrMeta+f");
     await search.waitFor();
-    expect(await formatting.isVisible()).toBe(false);
+    expect(await formatting.isVisible()).toBe(true);
     await search.getByLabel("查找", { exact: true }).fill("关键");
     await search.getByRole("button", { name: "下一处" }).click();
     await page.keyboard.press("ControlOrMeta+f");

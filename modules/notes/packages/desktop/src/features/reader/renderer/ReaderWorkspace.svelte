@@ -34,7 +34,7 @@
   let { api, applicationMenu }: { api: ReaderApi; applicationMenu: Snippet } = $props();
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
-  const workspace = new ReaderWorkspaceController(readerApi);
+  const workspace = new ReaderWorkspaceController(readerApi, persistPanes);
   const spaces = new WorkspaceSpaces(workspace, prepareSpaceInput, persistPanes);
   const mediaIo = createBrowserMediaIo(readerApi);
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
@@ -49,12 +49,14 @@
   const layoutWrites = createSessionWrite({
     delayMs: 300,
     write: async (isCurrent) => {
-      if (isCurrent()) await readerApi.sessionSetPanes({ filesCollapsed, leftWidth, space });
+      if (isCurrent())
+        await readerApi.sessionSetPanes({ filesCollapsed, leftWidth, space, mode: workspace.mode });
     },
     report: reportLayoutFailure,
   });
   let entryDialog: FileEntryDialog | undefined = $state();
   let fileList: LibraryBrowser | undefined = $state();
+  let fileNavigation: QuickNavigation | undefined = $state();
   let toolbar: ReaderToolbar | undefined = $state();
   /** 当前打开的选择弹层；同一时间至多一个。 */
   let picker = $state<"switcher" | "palette" | null>(null);
@@ -76,7 +78,7 @@
       vaultOpen: workspace.vaultRoot !== null,
       hasDocument: documentVisible && doc.path !== null,
       canEdit: documentVisible && doc.canEdit,
-      reading: workspace.viewMode === "reading",
+      reading: workspace.mode === "reading",
       markdown: doc.content?.kind === "markdown",
       source: workspace.viewMode === "source",
       whiteboard: doc.content?.kind === "whiteboard",
@@ -239,6 +241,7 @@
       const panes = await readerApi.sessionGetPanes();
       filesCollapsed = panes.filesCollapsed;
       leftWidth = panes.leftWidth;
+      workspace.restoreMode(panes.mode);
       return panes.space ?? "writing";
     } catch (error) {
       workspace.report(
@@ -396,6 +399,7 @@
       change.action === "create" && change.entry.kind === "file" && doc.path === change.entry.path;
     await fileList?.reflectChange(change, space === "library" && !writing);
     if (writing) finishFileNavigation();
+    else if (space === "writing" && change.action === "trash") await fileNavigation?.focusFiles();
   }
 
   function onWorkspaceShortcut(event: KeyboardEvent): void {
@@ -495,11 +499,12 @@
         ></button>
       {/if}
       <QuickNavigation
+        bind:this={fileNavigation}
         {workspace}
         hidden={filesCollapsed || space !== "writing"}
         width={leftWidth}
-        onLibrary={() => void showLibrary()}
         onOpen={(path) => void openFile(path)}
+        onTrash={(entry) => void entryDialog?.open("trash", entry, parentDirectory(entry.path))}
         onWidth={(width) => {
           leftWidth = width;
           layoutWrites.request();
@@ -622,7 +627,7 @@
     display: none;
   }
   /* 分栏之间的视觉分隔；相邻选择器跨组件实例，需要全局作用域。 */
-  .panes :global(.main + .main) {
+  .panes :global(.pane-column + .pane-column) {
     border-left: 1px solid var(--border);
   }
   @media (max-width: 640px) {

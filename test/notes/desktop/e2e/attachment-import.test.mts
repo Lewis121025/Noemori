@@ -1,4 +1,3 @@
-import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,8 +72,13 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
       () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
     );
     const choose = async (files: { name: string; mimeType: string; buffer: Buffer }[]) => {
-      await noteAction(page, "文本格式");
-      const panel = page.getByRole("group", { name: "文本格式", exact: true });
+      await page
+        .locator(".pane-column.active")
+        .getByRole("toolbar", { name: "编辑工具栏", exact: true })
+        .waitFor();
+      const panel = page
+        .locator(".pane-column.active")
+        .getByRole("toolbar", { name: "编辑工具栏", exact: true });
       const bounds = await panel.boundingBox();
       const lastAction = await panel
         .getByRole("button", { name: "重做", exact: true })

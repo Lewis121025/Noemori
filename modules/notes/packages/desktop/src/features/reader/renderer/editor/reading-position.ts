@@ -26,8 +26,11 @@ export function captureReadingPosition(
   const bounds = scroller.getBoundingClientRect();
   const content = editor.getBoundingClientRect();
   const top = Math.max(bounds.top + 8, content.top + 1);
-  if (top >= Math.min(bounds.bottom, content.bottom)) return result;
-  const position = positionAt({ left: Math.max(bounds.left, content.left) + 8, top });
+  const left = Math.max(bounds.left, content.left);
+  const right = Math.min(bounds.right, content.right);
+  if (top >= Math.min(bounds.bottom, content.bottom) || left >= right) return result;
+  // 文字栏可居中于更宽的表面，左侧留白会命中块边界；从可见中线捕获文字位置。
+  const position = positionAt({ left: (left + right) / 2, top });
   const at = position === null ? null : topAt(position);
   if (position !== null && at !== null) result.anchor = { position, offset: at - bounds.top };
   return result;

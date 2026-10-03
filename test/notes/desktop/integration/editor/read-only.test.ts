@@ -6,6 +6,7 @@ import Harness from "./ReadOnlyHarness.svelte";
 
 let component: ReturnType<typeof mount> & {
   setReadOnly: (value: boolean) => void;
+  setReading: (value: boolean) => void;
   reloadIdentity: () => void;
 };
 let target: HTMLDivElement;
@@ -175,4 +176,29 @@ it("内容未变化的文档代次更新只重新注册表面，保留原 DOM �
   expect(api().historyAvailability()?.redo).toBe(true);
   api().history("redo");
   expect(source()).toContain("- [x] 任务");
+});
+
+it("阅读模式保留正文、待办和撤销，只隐藏完整编辑工具与源码入口", () => {
+  const editor = target.querySelector<HTMLElement>(".ProseMirror")!;
+  expect(target.querySelector('[aria-label="编辑工具栏"]')).not.toBeNull();
+  component.setReading(true);
+  flushSync();
+  expect(target.querySelector(".ProseMirror")).toBe(editor);
+  expect(editor.getAttribute("contenteditable")).toBe("true");
+  expect(target.querySelector('[aria-label="编辑工具栏"]')).toBeNull();
+  expect(target.querySelector(".math-inline")?.getAttribute("title")).toBeNull();
+  const task = target.querySelector<HTMLButtonElement>(".task-checkbox")!;
+  expect(task.disabled).toBe(false);
+  task.click();
+  flushSync();
+  expect(source()).toContain("- [x] 任务");
+  expect(dirty).toHaveBeenCalled();
+  api().focus();
+  expect(api().historyAvailability()?.undo).toBe(true);
+  api().history("undo");
+  expect(source()).toContain("- [ ] 任务");
+  component.setReading(false);
+  flushSync();
+  expect(target.querySelector('[aria-label="编辑工具栏"]')).not.toBeNull();
+  expect(target.querySelector(".ProseMirror")).toBe(editor);
 });
