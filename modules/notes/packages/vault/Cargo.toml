@@ -105,6 +105,10 @@ path = "../../../../test/notes/vault/integration/search/index_sync.rs"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [[test]]
+name = "search_integration_hybrid"
+path = "../../../../test/notes/vault/integration/search/hybrid.rs"
+
+[[test]]
 name = "vault_unit_entries"
 path = "../../../../test/notes/vault/unit/storage/entries.rs"
 
@@ -117,8 +121,15 @@ name = "vault_unit_bookmarks"
 path = "../../../../test/notes/vault/unit/storage/bookmarks.rs"
 
 [dependencies]
+levenshtein_automata = "0.2.1"
+tantivy-fst = "0.5.0"
 markdown = "1.0.0"
 notify = "8.2.0"
+ort = "=2.0.0-rc.13"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls", "system-proxy"] }
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
+usearch = "2.26.3"
+uuid = { version = "1", features = ["v4"] }
 percent-encoding = "2.3.2"
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled", "functions", "hooks"] }

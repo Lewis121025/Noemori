@@ -37,7 +37,8 @@ pub struct State {
     active: Option<WatchedVault>,
     generation: Arc<AtomicU64>,
     sequence: u64,
-    search: crate::scheduler::SearchSession,
+    search: crate::scheduler::ScopedReadSession,
+    model: crate::scheduler::ScopedReadSession,
     publisher: crate::publication::Publisher,
     notify: Arc<dyn Fn(VaultEvent) + Send + Sync>,
 }
@@ -47,7 +48,8 @@ impl State {
         user_data: PathBuf,
         generation: Arc<AtomicU64>,
         notify: Arc<dyn Fn(VaultEvent) + Send + Sync>,
-        search: crate::scheduler::SearchSession,
+        search: crate::scheduler::ScopedReadSession,
+        model: crate::scheduler::ScopedReadSession,
         publisher: crate::publication::Publisher,
     ) -> Self {
         Self {
@@ -58,12 +60,18 @@ impl State {
             sequence: 0,
             notify,
             search,
+            model,
             publisher,
         }
     }
 
     pub(crate) fn matches(&self, generation: u64) -> bool {
         self.generation.load(Ordering::Acquire) == generation
+    }
+
+    /// 长生命周期任务绑定库代次；重新打开同一路径也不能复用旧任务。
+    pub(crate) fn current_generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     /// 当前库只在顺序通道内取得；未打开时返回错误。
@@ -124,6 +132,7 @@ impl State {
             Err(noemori_vault::Error::OpenCancelled) => return Ok(Value::Null),
             Err(error) => return Err(error.into()),
         };
+        vault.configure_search_model(&self.user_data.join("models"))?;
         self.sequence += 1;
         let generation = self.sequence;
         let candidate = WatchedVault::new(
@@ -157,13 +166,14 @@ impl State {
         } else {
             self.sessions.patch_reader(&json!({"vaultRoot": root, "documents": crate::session::empty_documents(), "viewModes": {}, "recentFiles": [], "fileTree": null}))?;
         }
-        self.cancel_search();
+        self.cancel_read_tasks();
         self.generation.store(generation, Ordering::Release);
         self.active = Some(candidate);
         // 旧监听器已 join，才能清掉它最后提交的排名请求；否则队列会长期保留旧 Vault。
         self.publisher.clear();
         if let Some(active) = &self.active {
             active.activate();
+            active.publish(&self.publisher);
         }
         Ok(result)
     }
@@ -199,7 +209,7 @@ impl State {
     /// # Errors
     /// 当前实现无额外失败点，保留结果用于停机契约。
     pub fn close(&mut self) -> Result<()> {
-        self.cancel_search();
+        self.cancel_read_tasks();
         // 无活动库也是新的生命周期阶段；回到 0 会让迟到通知的代次排序失效。
         self.sequence += 1;
         self.generation.store(self.sequence, Ordering::Release);
@@ -224,15 +234,9 @@ impl State {
         }
     }
 
-    fn cancel_search(&self) {
-        if let Some((_, _, token)) = self
-            .search
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            token.cancel();
-        }
+    fn cancel_read_tasks(&self) {
+        crate::scheduler::cancel_session(&self.search, None);
+        crate::scheduler::cancel_session(&self.model, None);
     }
 
     /// 文件提交之后更新会话；失败仅追加警告，不能把成功操作重新列入重试。

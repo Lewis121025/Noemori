@@ -138,9 +138,38 @@ export type SearchQuery = {
   limit: number;
 };
 
+/** 融合筛选只描述元数据，不能把关键词条件当成语义硬约束。 */
+export type SearchFilter =
+  | { kind: "and" | "or"; children: SearchFilter[] }
+  | { kind: "not"; child: SearchFilter }
+  | { kind: "tag" | "path" | "file"; value: string }
+  | { kind: "attr"; key: string; value: string | null };
+
+/** 普通文本的融合请求与既有严格查询保持明确边界。 */
+export type HybridSearchQuery = {
+  kind: "hybrid";
+  text: string;
+  filter: SearchFilter;
+  limit: number;
+};
+/** 搜索入口接受严格表达式或自然语言融合请求。 */
+export type SearchRequest = SearchQuery | HybridSearchQuery;
+/** 模型准备与向量覆盖状态；失败必须与正常无结果区分。 */
+export type SemanticStatus = {
+  state: "missing" | "indexing" | "ready" | "error";
+  indexed: number;
+  total: number;
+  message: string | null;
+};
+/** 相关内容的原文证据，语义段落不贡献精确命中计数。 */
+export type HybridEvidence = SearchMatch & { kind: "lexical" | "fuzzy" | "semantic" };
+
 /** 一页准确命中；不提供未经完整统计的总数，续页必须使用原查询。 */
 export type SearchPage = {
   hits: SearchHit[];
+  /** 仅融合查询提供语义状态与候选上限标识。 */
+  semantic?: SemanticStatus;
+  limited?: boolean;
   /** 绑定查询和资料库版本；null 表示已结束，资料库改变后旧游标会拒绝。 */
   nextCursor: string | null;
 };
@@ -153,6 +182,8 @@ export type SearchMatchesPage = {
 
 /** 一条搜索命中。 */
 export type SearchHit = {
+  /** 仅融合结果提供；包含可定位的容错与语义证据。 */
+  evidence?: HybridEvidence[];
   /** 命中文件库内相对路径。 */
   path: string;
   /** 展示标题。 */
@@ -421,9 +452,13 @@ export type ReaderApi = {
   /** 出链。 */
   indexLinksFrom: (path: string) => Promise<LinkRecord[]>;
   /** 结构化全文搜索：正文词、标签、属性与路径谓词组合。 */
-  searchQuery: (query: SearchQuery, id: string, cursor: string | null) => Promise<SearchPage>;
+  searchQuery: (query: SearchRequest, id: string, cursor: string | null) => Promise<SearchPage>;
   /** 在同一搜索会话内加载更多具体命中；版本变化或已取消时拒绝。 */
-  searchMatches: (query: SearchQuery, id: string, cursor: string) => Promise<SearchMatchesPage>;
+  searchMatches: (query: SearchRequest, id: string, cursor: string) => Promise<SearchMatchesPage>;
+  /** 下载固定语义模型并索引当前库；import 时由主进程选择本地模型目录。 */
+  searchModelInstall: (mode: "download" | "import", id: string) => Promise<SemanticStatus | null>;
+  /** 只取消模型下载或导入，保留当前查询和已提交模型。 */
+  searchModelCancel: (id: string) => Promise<void>;
   /** 取消指定查询；迟到的取消不影响后发查询，已完成或关闭时幂等。 */
   searchCancel: (id: string) => Promise<void>;
   /** 一篇文件的全部标题，按文档顺序；供锚点解析与标题补全。 */

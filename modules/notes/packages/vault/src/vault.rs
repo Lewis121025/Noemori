@@ -1,5 +1,7 @@
 //! 笔记库：根目录约束下的原始字节读写与链接索引。
 
+mod retrieval;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -28,6 +30,8 @@ pub struct Vault {
     conn: Mutex<Connection>,
     /// 排名快照在 `SQLite` 正文事务内同步并查询，不能与来源版本交叉使用。
     search_index: Mutex<crate::index::fulltext::SearchIndex>,
+    semantic: crate::search::semantic::Semantic,
+    hybrid_sessions: Mutex<crate::search::hybrid::Sessions>,
     /// 最近一次扫描的库内路径。列目录和解析链接走这里，避免每次下盘。
     inventory: Mutex<Option<Inventory>>,
     /// 空目录也参与监视变更判断，文件树不能依赖文件索引推断全部目录。
@@ -106,6 +110,8 @@ impl Vault {
         let conn = index::open_connection(&index_dir.join("index.sqlite"))?;
         let search_index = crate::index::fulltext::SearchIndex::open(&index_dir)?;
         let vault = Self {
+            semantic: crate::search::semantic::Semantic::new(&index_dir),
+            hybrid_sessions: Mutex::new(crate::search::hybrid::Sessions::default()),
             root,
             index_dir,
             conn: Mutex::new(conn),
@@ -423,6 +429,18 @@ impl Vault {
     ///
     /// 索引查询失败。单个 Markdown 读失败则跳过该文件。
     pub fn mentions_to(&self, path: &str) -> Result<Mentions, Error> {
+        self.mentions_to_cancellable(path, &crate::SearchCancellation::default())
+    }
+
+    /// 按文件边界取消未链接提及扫描，避免退出时等待整个大库重新解析。
+    /// # Errors
+    /// 索引读取失败或收到取消；不会修改文件、草稿或索引。
+    pub fn mentions_to_cancellable(
+        &self,
+        path: &str,
+        cancellation: &crate::SearchCancellation,
+    ) -> Result<Mentions, Error> {
+        cancellation.check()?;
         let (files, linked_links) = {
             let conn = self.lock_conn()?;
             (index::load_files(&conn)?, index::links_to(&conn, path)?)
@@ -436,6 +454,7 @@ impl Vault {
         let linked = self.mentions_from_links(&linked_links, &file_map);
         let mut unlinked = Vec::new();
         for rel in self.list_files()? {
+            cancellation.check()?;
             if rel == path || !is_markdown(&rel) {
                 continue;
             }

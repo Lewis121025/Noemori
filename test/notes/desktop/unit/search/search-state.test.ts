@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ReaderSearch } from "@reader/renderer/search/state.svelte";
 import type { ReaderApi, SearchHit, SearchPage, SearchMatchesPage } from "@reader/shared/api";
-import { parseSearchQuery } from "@reader/renderer/search/query";
+import { parseSearchRequest } from "@reader/renderer/search/query";
 import { SEARCH_DEPTH_LIMIT } from "@reader/shared/reader-protocol";
 
 const hit = (path: string): SearchHit => ({
@@ -96,7 +96,7 @@ describe("ReaderSearch", () => {
     search.markStale();
     expect(search.stale).toBe(true);
     expect(search.hits[0]).toBe(previous);
-    expect(search.query).toEqual(parseSearchQuery("alpha"));
+    expect(search.query).toEqual(parseSearchRequest("alpha"));
     expect(searchCancel).toHaveBeenCalledWith(searchQuery.mock.calls[0]?.[1]);
     await search.loadMore();
     expect(searchQuery).toHaveBeenCalledOnce();
@@ -159,7 +159,7 @@ describe("ReaderSearch", () => {
     await search.loadMore();
     expect(searchQuery).toHaveBeenCalledTimes(2);
     expect(searchQuery.mock.calls[1]).toEqual([
-      parseSearchQuery("alpha"),
+      parseSearchRequest("alpha"),
       searchQuery.mock.calls[0]?.[1],
       "cursor-1",
     ]);
@@ -230,7 +230,7 @@ describe("ReaderSearch", () => {
     await search.run("alpha tag:keep");
     expect(search.active).toBe(true);
     expect(searchQuery).toHaveBeenCalledWith(
-      parseSearchQuery("alpha tag:keep"),
+      parseSearchRequest("alpha tag:keep"),
       expect.any(String),
       null,
     );

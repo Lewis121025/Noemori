@@ -18,6 +18,10 @@ import type {
   SearchMatch,
   SearchMatchesPage,
   SearchQuery,
+  SearchRequest,
+  SearchFilter,
+  SemanticStatus,
+  HybridEvidence,
   TagCount,
   VaultEntry,
   VaultGraph,
@@ -360,6 +364,91 @@ export function parseSearchQueryArgument(value: unknown): SearchQuery {
   };
 }
 
+/**
+ * 验证两种查询请求，拒绝混合字段和非元数据的融合筛选。
+ * @param value 跨进程传入的未知值。
+ * @returns 字段已校验且页长归一化的请求。
+ * @throws 类型、文本长度、表达式复杂度或筛选谓词不合法。
+ */
+export function parseSearchRequestArgument(value: unknown): SearchRequest {
+  if (!record(value)) throw new Error("检索条件无效");
+  if (value.kind === undefined) {
+    if (value.text !== undefined || value.filter !== undefined)
+      throw new Error("严格查询不能携带融合字段");
+    return parseSearchQueryArgument(value);
+  }
+  if (
+    value.kind !== "hybrid" ||
+    value.expr !== undefined ||
+    typeof value.text !== "string" ||
+    value.text.trim() === "" ||
+    new TextEncoder().encode(value.text).length > 4096
+  )
+    throw new Error("融合查询文本或类型无效");
+  const validated = parseSearchQueryArgument({ expr: value.filter, limit: value.limit });
+  function filter(expr: SearchExpr): SearchFilter {
+    switch (expr.kind) {
+      case "and":
+      case "or":
+        return { kind: expr.kind, children: expr.children.map(filter) };
+      case "not":
+        return { kind: "not", child: filter(expr.child) };
+      case "tag":
+      case "path":
+      case "file":
+        return { kind: expr.kind, value: expr.value };
+      case "attr":
+        return expr;
+      default:
+        throw new Error("融合筛选只允许元数据条件");
+    }
+  }
+  return {
+    kind: "hybrid",
+    text: value.text.trim(),
+    filter: filter(validated.expr),
+    limit: validated.limit,
+  };
+}
+
+/**
+ * 模型覆盖数量是当前快照的统计，异常状态必须附带具体原因。
+ * @param value 原生模型状态响应。
+ * @returns 已验证的状态和覆盖数量。
+ * @throws 状态、数量或错误描述违反协议。
+ */
+export function parseSemanticStatus(value: unknown): SemanticStatus {
+  if (!record(value)) throw new Error("语义索引状态无效");
+  const state = value.state;
+  if (
+    (state !== "missing" && state !== "indexing" && state !== "ready" && state !== "error") ||
+    !byteOffset(value.indexed) ||
+    !byteOffset(value.total) ||
+    value.indexed > value.total ||
+    !warning(value.message) ||
+    (state === "error" ? !value.message : value.message !== null) ||
+    (state === "ready" && value.indexed !== value.total) ||
+    (state === "indexing" && value.indexed === value.total)
+  )
+    throw new Error("语义索引状态无效");
+  return { state, indexed: value.indexed, total: value.total, message: value.message };
+}
+
+function parseEvidence(value: unknown): HybridEvidence[] {
+  if (!Array.isArray(value) || value.length > 3) throw new Error("融合证据无效");
+  const kinds = new Set<string>();
+  return value.map((item: unknown) => {
+    if (
+      !record(item) ||
+      (item.kind !== "lexical" && item.kind !== "fuzzy" && item.kind !== "semantic")
+    )
+      throw new Error("融合证据类型无效");
+    if (kinds.has(item.kind)) throw new Error("融合证据来源重复");
+    kinds.add(item.kind);
+    return { ...parseSearchMatch(item), kind: item.kind };
+  });
+}
+
 function parseSearchExpr(value: unknown, depth: number, budget: { nodes: number }): SearchExpr {
   if (depth > SEARCH_DEPTH_LIMIT) throw new Error("检索条件嵌套过深");
   budget.nodes += 1;
@@ -422,6 +511,7 @@ export function parseSearchHits(value: unknown): SearchHit[] {
     )
       throw new Error("检索命中总数与续页不一致");
     return {
+      ...(item.evidence === undefined ? {} : { evidence: parseEvidence(item.evidence) }),
       path: item.path,
       title: item.title,
       snippet: item.snippet,
@@ -484,6 +574,17 @@ export function parseSearchPage(value: unknown): SearchPage {
     (hits.length === 0 && nextCursor !== null)
   )
     throw new Error("搜索分页结果重复或续页无效");
+  if ((value.semantic === undefined) !== (value.limited === undefined))
+    throw new Error("融合分页状态不完整");
+  if (value.semantic !== undefined && typeof value.limited !== "boolean")
+    throw new Error("融合候选上限无效");
+  if (value.semantic !== undefined && typeof value.limited === "boolean")
+    return {
+      hits,
+      nextCursor,
+      semantic: parseSemanticStatus(value.semantic),
+      limited: value.limited,
+    };
   return { hits, nextCursor };
 }
 

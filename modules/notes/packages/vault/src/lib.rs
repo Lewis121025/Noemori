@@ -22,6 +22,7 @@ pub use links::identity::NoteKeys;
 pub use links::link::{LinkKind, LinkRecord, LinkResolution, LinkTarget};
 pub use links::mention::{MentionKind, MentionRecord, Mentions};
 pub use rename::{RenameBatchIssue, RenameBatchOutcome, RenameOutcome};
+pub use search::hybrid::{HybridQuery, HybridHit, HybridEvidence, HybridPage, SemanticStatus, SemanticState, EvidenceKind};
 pub use search::cancellation::SearchCancellation;
 pub use search::{
     SearchExpr, SearchHit, SearchLocation, SearchMatch, SearchMatchesPage, SearchPage, SearchQuery,

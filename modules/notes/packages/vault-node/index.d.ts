@@ -189,6 +189,10 @@ export interface JsSearchPage {
   hits: Array<JsSearchHit>
   /** 没有更多命中时明确为 null。 */
   nextCursor: string | null
+  /** 融合结果的语义覆盖；严格查询省略。 */
+  semantic?: JsSemanticStatus
+  /** 融合召回是否达到候选预算。 */
+  limited?: boolean
 }
 /** 同版本文件内的下一批具体命中，最多二十处。 */
 export interface JsSearchMatchesPage {
@@ -216,7 +220,13 @@ export interface JsSearchExpr {
 /** 一次检索：表达式与每页文件数。 */
 export interface JsSearchQuery {
   /** 检索表达式。 */
-  expr: JsSearchExpr
+  expr?: JsSearchExpr
+  /** hybrid 表示融合查询；省略表示既有严格查询。 */
+  kind?: string
+  /** 融合文本。 */
+  text?: string
+  /** 融合硬筛选。 */
+  filter?: JsSearchExpr
   /** 每页文件数；非正数按内核默认值处理。 */
   limit: number
 }
@@ -236,6 +246,8 @@ export interface JsSearchHit {
   matchCount: number
   /** 单篇后续命中的游标，没有更多时明确为 null。 */
   matchesCursor: string | null
+  /** 融合来源证据，不能计入精确正文命中数。 */
+  evidence?: Array<JsHybridEvidence>
 }
 /** 一处命中的源码位置与上下文。 */
 export interface JsSearchMatch {
@@ -252,6 +264,26 @@ export interface JsSearchLocation {
   endByte: number
   /** 一基行号。 */
   line: number
+}
+/** 语义模型和索引覆盖状态。 */
+export interface JsSemanticStatus {
+  /** missing、indexing、ready 或 error。 */
+  state: string
+  /** 已完成的有效笔记数。 */
+  indexed: number
+  /** Markdown 笔记总数。 */
+  total: number
+  /** 具体故障原因。 */
+  message: string | null
+}
+/** 一条相关段落或纠错证据；位置属于结果携带的内容版本。 */
+export interface JsHybridEvidence {
+  /** lexical、fuzzy 或 semantic。 */
+  kind: string
+  /** 原文摘要。 */
+  snippet: string
+  /** 可证明的源码范围。 */
+  location: JsSearchLocation | null
 }
 /** 监视事件携带代次，主线程交付时过滤已关闭的库。 */
 export interface JsVaultEvent {
@@ -446,6 +478,12 @@ export declare class NativeRuntime {
   searchMatches(query: JsSearchQuery, id: string, cursor: string): Promise<JsSearchMatchesPage>
   /** 取消仅匹配 ID 的会话，不经过磁盘队列。 */
   searchCancel(id: string): void
+  /** 在选择本地目录前登记安装会话；明确取消或切库后不能重新启动旧安装。 */
+  searchModelBegin(id: string): void
+  /** 取消指定模型安装；普通搜索会话保持有效。 */
+  searchModelCancel(id: string): void
+  /** 下载或导入固定 Harrier 模型并调度当前库索引；只等待模型安装，不阻塞保存。 */
+  searchModelInstall(source: string | undefined | null, id: string): Promise<JsSemanticStatus>
   /** 准备候选库并原子切换；取消返回 null，失败保留旧库。 */
   vaultOpen(root: string, control: NativeControl): Promise<unknown>
   /** 在后台创建默认目录并打开，主线程只负责提供系统路径。 */

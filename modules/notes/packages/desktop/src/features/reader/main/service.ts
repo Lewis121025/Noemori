@@ -14,7 +14,7 @@ import type {
   SearchExpr,
   SearchPage,
   SearchMatchesPage,
-  SearchQuery,
+  SearchRequest,
   TagCount,
   VaultRestore,
   VaultOpenSnapshot,
@@ -42,11 +42,12 @@ import {
   parseMentions,
   parseNoteKeys,
   parseSearchPage,
+  parseSemanticStatus,
   parseSearchId,
   parseSearchCursor,
   parseSearchMatchesCursor,
   parseSearchMatchesPage,
-  parseSearchQueryArgument,
+  parseSearchRequestArgument,
   parseTagCounts,
   parseWriteResult,
   parseSavedCopy,
@@ -86,6 +87,17 @@ function mapMention(mention: NativeModule.JsMentionRecord) {
  *
  * exactOptionalPropertyTypes：缺省字段必须省略键，不能传 undefined。
  */
+function nativeSearchRequest(request: SearchRequest): NativeModule.JsSearchQuery {
+  return "kind" in request
+    ? {
+        kind: "hybrid",
+        text: request.text,
+        filter: nativeSearchExpr(request.filter),
+        limit: request.limit,
+      }
+    : { expr: nativeSearchExpr(request.expr), limit: request.limit };
+}
+
 function nativeSearchExpr(expr: SearchExpr): NativeModule.JsSearchExpr {
   switch (expr.kind) {
     case "and":
@@ -301,28 +313,41 @@ export function createReaderService(
           null,
       });
     },
-    async searchQuery(query: SearchQuery, id: string, cursor: string | null): Promise<SearchPage> {
-      const request = parseSearchQueryArgument(query);
+    async searchQuery(
+      query: SearchRequest,
+      id: string,
+      cursor: string | null,
+    ): Promise<SearchPage> {
+      const request = parseSearchRequestArgument(query);
       return parseSearchPage(
         await native.searchQuery(
-          { expr: nativeSearchExpr(request.expr), limit: request.limit },
+          nativeSearchRequest(request),
           parseSearchId(id),
           parseSearchCursor(cursor),
         ),
       );
     },
+    searchModelCancel(id: string): void {
+      native.searchModelCancel(parseSearchId(id));
+    },
+    searchModelBegin(id: string): void {
+      native.searchModelBegin(parseSearchId(id));
+    },
+    async searchModelInstall(source: string | null, id: string) {
+      return parseSemanticStatus(await native.searchModelInstall(source, parseSearchId(id)));
+    },
     searchCancel(id: string): void {
       native.searchCancel(parseSearchId(id));
     },
     async searchMatches(
-      query: SearchQuery,
+      query: SearchRequest,
       id: string,
       cursor: string,
     ): Promise<SearchMatchesPage> {
-      const request = parseSearchQueryArgument(query);
+      const request = parseSearchRequestArgument(query);
       return parseSearchMatchesPage(
         await native.searchMatches(
-          { expr: nativeSearchExpr(request.expr), limit: request.limit },
+          nativeSearchRequest(request),
           parseSearchId(id),
           parseSearchMatchesCursor(cursor),
         ),

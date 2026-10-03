@@ -11,6 +11,49 @@ import { DatabaseSync } from "node:sqlite";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 
+test.skipIf(!process.env.NOEMORI_HARRIER_MODEL_SOURCE)("Harrier 离线导入后在后台索引，后发查询不取消索引生命周期", async (t) => {
+  const source = process.env.NOEMORI_HARRIER_MODEL_SOURCE;
+  assert.ok(source);
+  const { roots: [root], start } = await fixture(t);
+  await Promise.all(Array.from({ length: 8 }, (_, i) => writeFile(join(root, `${i}.md`), `# 幂等性方案 ${i}\n\n请求携带唯一编号，重复提交只返回之前的结果，避免重复扣款。\n`)));
+  const { core } = start();
+  await core.call("vaultOpen", root);
+  await core.call("searchModelBegin", "install-real");
+  let installedBeforeQuery = false;
+  const installation = core.call("searchModelInstall", source, "install-real").then((status) => { installedBeforeQuery = true; return status; });
+  const during = await core.call("searchQuery", { kind: "hybrid", text: "幂等性", filter: { kind: "and", children: [] }, limit: 100 }, "during-install", null);
+  assert.equal(during.hits.length, 8);
+  assert.equal(installedBeforeQuery, false, "模型安装不能持有查询依赖的状态锁");
+  const installed = await installation;
+  assert.equal(installed.state, "indexing");
+  for (let i = 0; i < 100; i += 1) {
+    const page = await core.call("searchQuery", { kind: "hybrid", text: "How to avoid charging twice for the same request?", filter: { kind: "and", children: [] }, limit: 100 }, `after-install-${i}`, null);
+    if (page.semantic?.state === "ready") {
+      assert.ok(page.hits.some((hit) => hit.evidence?.some((evidence) => evidence.kind === "semantic" && evidence.location !== null)));
+      return;
+    }
+    assert.notEqual(page.semantic?.state, "error");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail("后台语义索引没有完成");
+}, 30000);
+
+test("模型安装与查询独立取消，切库使旧安装失效", async (t) => {
+  const { roots: [first, second], start } = await fixture(t);
+  await writeFile(join(first, "a.md"), "# Search\n\nsearch engine\n");
+  const { core } = start();
+  await core.call("vaultOpen", first);
+  await core.call("searchModelBegin", "install-old");
+  const query: SearchQuery = { expr: { kind: "term", value: "search" }, limit: 100 };
+  await core.call("searchQuery", query, "query-new", null);
+  await core.call("searchModelCancel", "install-old");
+  await assert.rejects(core.call("searchModelInstall", first, "install-old"), /取消/);
+  assert.equal((await core.call("searchQuery", query, "query-new", null)).hits.length, 1);
+  await core.call("searchModelBegin", "install-before-switch");
+  await core.call("vaultOpen", second);
+  await assert.rejects(core.call("searchModelInstall", first, "install-before-switch"), /取消/);
+});
+
 test("会话中的有限大数仍作为 JavaScript number 恢复，不能让整个会话变成 BigInt 错误", async (t) => {
   const { roots: [root], userData, start } = await fixture(t);
   await mkdir(userData);

@@ -14,7 +14,7 @@ use tokio::{
     task::JoinSet,
 };
 
-pub(crate) type SearchSession = Arc<Mutex<Option<(u64, String, SearchCancellation)>>>;
+pub(crate) type ScopedReadSession = Arc<Mutex<Option<(u64, String, SearchCancellation)>>>;
 
 type Work = Box<dyn FnOnce(&mut State) + Send>;
 type Read = Box<dyn FnOnce(Arc<Vault>) + Send>;
@@ -62,7 +62,9 @@ pub struct Runtime {
     admission: Mutex<Admission>,
     generation: Arc<AtomicU64>,
     failed: Arc<AtomicBool>,
-    search: SearchSession,
+    search: ScopedReadSession,
+    model: ScopedReadSession,
+    read_cancellation: SearchCancellation,
 }
 
 impl Runtime {
@@ -72,6 +74,7 @@ impl Runtime {
         let generation = Arc::new(AtomicU64::new(0));
         let failed = Arc::new(AtomicBool::new(false));
         let search = Arc::new(Mutex::new(None));
+        let model = Arc::new(Mutex::new(None));
         let notify: Arc<dyn Fn(VaultEvent) + Send + Sync> = Arc::new(notify);
         let (publisher, publication) = crate::publication::Publisher::start(Arc::clone(&notify));
         let state = State::new(
@@ -79,6 +82,7 @@ impl Runtime {
             Arc::clone(&generation),
             notify,
             Arc::clone(&search),
+            Arc::clone(&model),
             publisher,
         );
         tokio::spawn(run(receiver, state, Arc::clone(&failed), publication));
@@ -91,7 +95,14 @@ impl Runtime {
             generation,
             failed,
             search,
+            model,
+            read_cancellation: SearchCancellation::default(),
         }
+    }
+
+    /// 长时间只读扫描共享停机信号；持久写事务仍必须排空，不借此中断提交。
+    pub fn read_cancellation(&self) -> SearchCancellation {
+        self.read_cancellation.clone()
     }
 
     /// 当前库代次用于结果交付复核；只读取原子内存。
@@ -178,37 +189,31 @@ impl Runtime {
         if a.closed {
             return Err(Error::State("内核正在关闭".into()));
         }
-        let generation = self.generation();
-        let mut search = self
-            .search
+        session_token(&self.search, self.generation(), id, continuation)
+    }
+
+    /// 模型安装有独立会话，普通搜索不会取消正在进行的模型下载或导入。
+    /// # Errors
+    /// 运行时已关闭，或安装已取消／所属库已改变。
+    pub fn model_session(&self, id: String, continuation: bool) -> Result<SearchCancellation> {
+        let admission = self
+            .admission
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((g, current, token)) = &*search {
-            if *g == generation && current == &id {
-                return Ok(token.clone());
-            }
+        if admission.closed {
+            return Err(Error::State("内核正在关闭".into()));
         }
-        if continuation {
-            return Err(noemori_vault::Error::SearchCancelled.into());
-        }
-        let token = SearchCancellation::default();
-        if let Some((_, _, old)) = search.replace((generation, id, token.clone())) {
-            old.cancel();
-        }
-        Ok(token)
+        session_token(&self.model, self.generation(), id, continuation)
+    }
+
+    /// 只取消指定模型安装，不影响当前搜索或已交给库生命周期的后台索引。
+    pub fn cancel_model(&self, id: &str) {
+        cancel_session(&self.model, Some(id));
     }
 
     /// 只取消匹配的会话；迟到的取消不影响新搜索。
     pub fn cancel_search(&self, id: &str) {
-        let mut search = self
-            .search
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if search.as_ref().is_some_and(|(_, current, _)| current == id) {
-            if let Some((_, _, token)) = search.take() {
-                token.cancel();
-            }
-        }
+        cancel_session(&self.search, Some(id));
     }
 
     /// 同步关闭入口，异步等待写入、读取和资源释放；不可强制中止写事务。
@@ -221,14 +226,9 @@ impl Runtime {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         a.closed = true;
-        if let Some((_, _, token)) = self
-            .search
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            token.cancel();
-        }
+        self.read_cancellation.cancel();
+        cancel_session(&self.search, None);
+        cancel_session(&self.model, None);
         for control in a.controls.drain(..) {
             let _ = control.cancel();
         }
@@ -238,6 +238,46 @@ impl Runtime {
             received
                 .await
                 .map_err(|_| Error::State("内核未完成停机".into()))?
+        }
+    }
+}
+
+fn session_token(
+    session: &ScopedReadSession,
+    generation: u64,
+    id: String,
+    continuation: bool,
+) -> Result<SearchCancellation> {
+    let mut slot = session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((current_generation, current, token)) = &*slot {
+        if *current_generation == generation && current == &id {
+            return Ok(token.clone());
+        }
+    }
+    if continuation {
+        return Err(noemori_vault::Error::SearchCancelled.into());
+    }
+    let token = SearchCancellation::default();
+    if let Some((_, _, previous)) = slot.replace((generation, id, token.clone())) {
+        previous.cancel();
+    }
+    Ok(token)
+}
+
+/// 切库、停机或明确取消使用同一释放规则；迟到的任务 ID 不能撤销后发任务。
+pub(crate) fn cancel_session(session: &ScopedReadSession, id: Option<&str>) {
+    let mut slot = session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if id.is_none()
+        || slot
+            .as_ref()
+            .is_some_and(|(_, current, _)| Some(current.as_str()) == id)
+    {
+        if let Some((_, _, token)) = slot.take() {
+            token.cancel();
         }
     }
 }

@@ -19,6 +19,7 @@ import {
   parsePaneLayoutMessage,
   parseSavedCopy,
   parseSearchPage,
+  parseSemanticStatus,
   parseSearchMatchesPage,
   parseTagCounts,
   parseVaultEntries,
@@ -156,6 +157,11 @@ export function createReaderApi(): ReaderApi {
       parseLinkRecords(await ipcRenderer.invoke("reader.index.linksFrom", path)),
     searchQuery: async (query, id, cursor) =>
       parseSearchPage(await ipcRenderer.invoke("reader.search.query", query, id, cursor)),
+    searchModelCancel: async (id) => ipcRenderer.invoke("reader.search.modelCancel", id),
+    searchModelInstall: async (mode, id) => {
+      const result: unknown = await ipcRenderer.invoke("reader.search.modelInstall", mode, id);
+      return result === null ? null : parseSemanticStatus(result);
+    },
     searchCancel: async (id) => ipcRenderer.invoke("reader.search.cancel", id),
     searchMatches: async (query, id, cursor) =>
       parseSearchMatchesPage(await ipcRenderer.invoke("reader.search.matches", query, id, cursor)),

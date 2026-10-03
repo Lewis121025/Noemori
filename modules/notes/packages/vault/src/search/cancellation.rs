@@ -2,7 +2,7 @@
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex, Weak,
 };
 
 use tantivy::{
@@ -13,19 +13,58 @@ use tantivy::{
 use crate::Error;
 
 /// 一次搜索任务的协作取消信号；克隆后共享状态，取消不可撤销且不影响写盘。
-#[derive(Clone, Debug, Default)]
-pub struct SearchCancellation(Arc<AtomicBool>);
+#[derive(Clone, Default)]
+pub struct SearchCancellation(Arc<Cancellation>);
+
+#[derive(Default)]
+struct Cancellation {
+    cancelled: AtomicBool,
+    inference: Mutex<Vec<Weak<ort::session::RunOptions>>>,
+}
+
+impl std::fmt::Debug for SearchCancellation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SearchCancellation")
+            .field("cancelled", &self.is_cancelled())
+            .finish()
+    }
+}
 
 impl SearchCancellation {
     /// 请求终止本次搜索；不等待后台线程，也不获取库锁。
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.0.cancelled.store(true, Ordering::Release);
+        let active = self
+            .0
+            .inference
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for options in active.iter().filter_map(Weak::upgrade) {
+            // 原生中断仅加快退出；即使运行时拒绝中断，交付前仍以取消标志拒绝结果。
+            let _ = options.terminate();
+        }
     }
 
     /// 是否已取消；供查询循环和 SQL progress handler 检查。
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.0.cancelled.load(Ordering::Acquire)
+    }
+
+    /// 注册当前推理的终止选项；弱引用不延长已结束推理的资源生命周期。
+    pub(crate) fn inference_options(&self) -> Result<Arc<ort::session::RunOptions>, Error> {
+        self.check()?;
+        let options = Arc::new(ort::session::RunOptions::new().map_err(std::io::Error::other)?);
+        let mut active = self
+            .0
+            .inference
+            .lock()
+            .map_err(|_| std::io::Error::other("推理取消锁已失效"))?;
+        active.retain(|item| item.strong_count() > 0);
+        active.push(Arc::downgrade(&options));
+        self.check()?;
+        Ok(options)
     }
 
     /// 取消时返回独立错误，禁止把部分命中当作完整的一页。

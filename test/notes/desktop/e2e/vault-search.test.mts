@@ -93,7 +93,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     page.on("pageerror", (error) => errors.push(error.message));
     const files = page.locator(".library").getByRole("navigation", { name: "文件列表" });
     const search = files.getByRole("searchbox");
-    const status = files.getByRole("status");
+    const status = files.locator(".status");
     const hitPaths = async () =>
       files.locator(".hit .path").evaluateAll((nodes) => nodes.map((node) => node.textContent));
 
@@ -104,9 +104,17 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
         !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
+    await openLibrary(page);
+    await search.fill("quantumTken");
+    await search.press("Enter");
+    await files.locator(".hit").first().waitFor();
+    expect(await files.locator(".semantic-status").textContent()).toContain("安装本地模型");
+    expect(await files.locator(".semantic-evidence").first().textContent()).toContain("拼写近似");
+    expect(await hitPaths()).toContain("设计笔记.md");
+
     // 长词走 trigram 索引；结果替换文件树，摘要圈出命中词。
     await openLibrary(page);
-    await search.fill("量子检索");
+    await search.fill('"量子检索"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
     expect(await status.textContent()).toContain("共 1 篇");
@@ -127,7 +135,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
 
     // 围栏代码里的命中同样可定位（全文索引覆盖代码块）。
     await openLibrary(page);
-    await search.fill("quantumToken");
+    await search.fill('"quantumToken"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
     await files.locator(".hit").first().click();
@@ -138,7 +146,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
 
     // 跨格式的完整词按真实范围选中；第二处不能回到第一处同名文本。
     await openLibrary(page);
-    await search.fill("预算审批");
+    await search.fill('"预算审批"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 2 处命中");
     await files.getByRole("button", { name: "展开 设计笔记 的 2 处命中" }).click();
@@ -196,7 +204,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
 
     // 中文两字短词走短词索引：结果仍然完整。
     await openLibrary(page);
-    await search.fill("量子");
+    await search.fill('"量子"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
@@ -224,13 +232,13 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     // 无结果与退出：第一次 Escape 回到文件树并保留查询词（树仍按其过滤），
     // 第二次 Escape 清空过滤词，恢复完整文件树。
     await openLibrary(page);
-    await search.fill("绝对不存在的词");
+    await search.fill('"绝对不存在的词"');
     await search.press("Enter");
     await expect
       .poll(async () => files.locator(".empty").textContent())
       .toContain("没有匹配的笔记");
     await search.press("Escape");
-    expect(await search.inputValue()).toBe("绝对不存在的词");
+    expect(await search.inputValue()).toBe('"绝对不存在的词"');
     expect(await files.getByRole("treeitem").count()).toBe(0);
     await search.press("Escape");
     expect(await search.inputValue()).toBe("");
@@ -249,7 +257,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
 
     // 单篇首批五处，继续展开才读取下一批；计数不随加载变化，最后一处仍可精确定位。
     await openLibrary(page);
-    await search.fill("denseneedle");
+    await search.fill('"denseneedle"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 46 处命中");
     await files.getByRole("button", { name: "展开 密集 的 46 处命中", exact: true }).click();
@@ -320,7 +328,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
       .toBe(neighbor);
 
     // 外部新增、修改与删除都自动更新当前查询，保留仍存在的命中节点和焦点。
-    await search.fill("autorefreshproof");
+    await search.fill('"autorefreshproof"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 0 篇");
     const external = join(vault, "自动刷新.md");
@@ -333,7 +341,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     expect(
       await retained!.evaluate((node) => node.isConnected && node === document.activeElement),
     ).toBe(true);
-    expect(await search.inputValue()).toBe("autorefreshproof");
+    expect(await search.inputValue()).toBe('"autorefreshproof"');
     await rm(external);
     await expect.poll(() => status.textContent()).toContain("共 0 篇");
     await expect.poll(() => search.evaluate((node) => node === document.activeElement)).toBe(true);

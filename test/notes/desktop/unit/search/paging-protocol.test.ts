@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+
 import {
+  parseSemanticStatus,
   parseSearchCursor,
   parseSearchId,
   parseSearchPage,
@@ -18,7 +20,28 @@ const hit = {
   matchesCursor: null,
 };
 
+describe("语义响应状态契约", () => {
+  it.each([
+    { state: "ready", indexed: 1, total: 2, message: null },
+    { state: "indexing", indexed: 2, total: 2, message: null },
+    { state: "ready", indexed: 2, total: 2, message: "失败" },
+    { state: "missing", indexed: 0, total: 2, message: "失败" },
+  ])("拒绝互相矛盾的状态和覆盖信息：%o", (value) => {
+    expect(() => parseSemanticStatus(value)).toThrow();
+  });
+});
 describe("搜索分页边界", () => {
+  it("同一文件的证据来源必须唯一，避免结果列表出现重复键", () => {
+    const evidence = { kind: "semantic", snippet: "相关段落", location: null };
+    expect(() =>
+      parseSearchPage({
+        hits: [{ ...hit, evidence: [evidence, evidence] }],
+        nextCursor: null,
+        semantic: { state: "ready", indexed: 1, total: 1, message: null },
+        limited: false,
+      }),
+    ).toThrow();
+  });
   it("命中总数和续页必须一致，拒绝无限响应和虚假结束", () => {
     const match = { snippet: "needle", location: { startByte: 0, endByte: 6, line: 1 } };
     for (const invalid of [

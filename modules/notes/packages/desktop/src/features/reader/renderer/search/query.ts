@@ -14,8 +14,12 @@
  * 大小写与 `#` 前缀的规范化由内核统一执行，这里保留用户原文。
  */
 
-import type { SearchExpr, SearchQuery } from "../../shared/api";
-import { parseSearchQueryArgument, SEARCH_DEPTH_LIMIT } from "../../shared/reader-protocol";
+import type { SearchExpr, SearchQuery, SearchRequest } from "../../shared/api";
+import {
+  parseSearchQueryArgument,
+  parseSearchRequestArgument,
+  SEARCH_DEPTH_LIMIT,
+} from "../../shared/reader-protocol";
 
 /** 结果上限；与内核默认一致，界面不提供调项。 */
 export const SEARCH_LIMIT = 100;
@@ -45,8 +49,41 @@ export function parseSearchQuery(text: string): SearchQuery {
   return parseSearchQueryArgument({ expr: parser.parse(), limit: SEARCH_LIMIT });
 }
 
+/**
+ * 普通文本进入融合检索；显式表达式与带引号的字面请求沿用严格语义。
+ * @param text 搜索框原文，保留引号及运算符的意图。
+ * @returns 融合请求或原有严格表达式，空白仍返回空严格查询。
+ * @throws 查询超出文本或表达式复杂度预算。
+ */
+export function parseSearchRequest(text: string): SearchRequest {
+  const tokens = tokenize(text);
+  const strict = parseSearchQuery(text);
+  if (
+    tokens.some((token) => token.type !== "word" && token.type !== "bracket") ||
+    tokens.some(
+      (token) =>
+        token.type === "word" &&
+        token.quoteStart >= 0 &&
+        word(token.text, token.quoteStart)?.kind === "term",
+    )
+  )
+    return strict;
+  const children = strict.expr.kind === "and" ? strict.expr.children : [strict.expr];
+  if (children.some((node) => !["term", "tag", "path", "file", "attr"].includes(node.kind)))
+    return strict;
+  const terms = children.flatMap((node) => (node.kind === "term" ? [node.value] : []));
+  if (terms.length === 0) return strict;
+  return parseSearchRequestArgument({
+    kind: "hybrid",
+    text: terms.join(" "),
+    filter: and(children.filter((node) => node.kind !== "term")),
+    limit: SEARCH_LIMIT,
+  });
+}
+
 /** 条件是否为空：没有任何条件时不应发起检索。 */
-export function isEmptyQuery(query: SearchQuery): boolean {
+export function isEmptyQuery(query: SearchRequest): boolean {
+  if ("kind" in query) return query.text.trim() === "";
   return query.expr.kind === "and" && query.expr.children.length === 0;
 }
 

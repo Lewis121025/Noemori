@@ -38,7 +38,8 @@ impl Publisher {
                 let cancellation = request.cancellation.clone();
                 let generation = request.generation;
                 let result = tokio::task::spawn_blocking(move || {
-                    request.vault.publish_search_index(&request.cancellation)
+                    request.vault.publish_search_index(&request.cancellation)?;
+                    request.vault.publish_semantic_index(&request.cancellation)
                 })
                 .await;
                 if cancellation.is_cancelled() {

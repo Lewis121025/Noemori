@@ -81,9 +81,28 @@ pub(crate) fn execute(
     cursor: &str,
     cancellation: &SearchCancellation,
 ) -> Result<SearchMatchesPage, Error> {
+    execute_with_identity(
+        conn,
+        index,
+        query,
+        &fingerprint(query)?,
+        cursor,
+        cancellation,
+    )
+}
+
+/// 表达式负责定位，完整请求身份负责游标归属；融合筛选不能在字面投影时丢失。
+pub(crate) fn execute_with_identity(
+    conn: &Connection,
+    index: &SearchSnapshot,
+    query: &SearchQuery,
+    identity: &str,
+    cursor: &str,
+    cancellation: &SearchCancellation,
+) -> Result<SearchMatchesPage, Error> {
     cancellation.check()?;
     let mut cursor: MatchCursor = serde_json::from_str(cursor).map_err(|_| invalid_cursor())?;
-    if cursor.query != fingerprint(query)? {
+    if cursor.query != identity {
         return Err(invalid_cursor());
     }
     if cursor.revision != index.revision {
@@ -134,7 +153,7 @@ pub(crate) fn execute(
     })
 }
 
-fn render(candidate: &Candidate, range: Range<usize>) -> SearchMatch {
+pub(super) fn render(candidate: &Candidate, range: Range<usize>) -> SearchMatch {
     let location = candidate
         .source_map
         .locate(range.clone())

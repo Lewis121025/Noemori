@@ -83,6 +83,37 @@ async function typeAndSubmit(text: string): Promise<void> {
 }
 
 describe("侧栏全文搜索", () => {
+  it("融合状态与相关段落独立展示，不虚构精确命中数", async () => {
+    const searchQuery = vi.fn(async (): Promise<SearchPage> => ({
+      hits: [{ path: "notes/beta.md", title: "幂等性", snippet: "重复请求只处理一次", contentHash: "a".repeat(64), matches: [], matchCount: 0, matchesCursor: null,
+        evidence: [{ kind: "semantic", snippet: "重复请求只处理一次", location: { startByte: 2, endByte: 8, line: 1 } }] }],
+      nextCursor: null, semantic: { state: "indexing", indexed: 1, total: 2, message: null }, limited: true,
+    }));
+    await startList(createApi({ searchQuery }));
+    await typeAndSubmit("如何防止重复处理");
+    expect(target.querySelector(".status")?.textContent).toContain("1 篇相关笔记");
+    expect(target.querySelector(".semantic-status")?.textContent).toContain("1 / 2");
+    expect(target.querySelector(".semantic-evidence")?.textContent).toContain("相关段落");
+    expect(target.querySelector(".expand")).toBeNull();
+    const evidence = target.querySelector<HTMLButtonElement>(".semantic-evidence")!;
+    evidence.focus();
+    evidence.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(document.activeElement).toBe(target.querySelector(".hit"));
+  });
+
+  it("模型下载仅由明确点击发起", async () => {
+    const searchQuery = vi.fn(async (): Promise<SearchPage> => ({ hits: [], nextCursor: null,
+      semantic: { state: "missing", indexed: 0, total: 2, message: null }, limited: false }));
+    const searchModelInstall = vi.fn(async () => null);
+    await startList(createApi({ searchQuery, searchModelInstall }));
+    await typeAndSubmit("如何检索");
+    expect(searchModelInstall).not.toHaveBeenCalled();
+    const download = Array.from(target.querySelectorAll("button")).find((button) => button.textContent?.includes("下载语义模型"));
+    download?.click();
+    await settle();
+    expect(searchModelInstall).toHaveBeenCalledWith("download", expect.any(String));
+  });
+
   it.each([false, true])(
     "库变化自动更新结果（包含命中：%s），刷新期间保留查询和焦点",
     async (hasHit) => {
@@ -467,13 +498,9 @@ describe("侧栏全文搜索", () => {
 
     expect(searchQuery).toHaveBeenCalledWith(
       {
-        expr: {
-          kind: "and",
-          children: [
-            { kind: "term", value: "hit" },
-            { kind: "term", value: "word" },
-          ],
-        },
+        kind: "hybrid",
+        text: "hit word",
+        filter: { kind: "and", children: [] },
         limit: 100,
       },
       expect.any(String),

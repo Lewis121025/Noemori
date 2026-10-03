@@ -3,6 +3,7 @@
 mod batch;
 mod control;
 mod files;
+mod models;
 mod publication;
 mod scheduler;
 pub mod session;

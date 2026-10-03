@@ -157,6 +157,7 @@ fn initialize_tables(conn: Connection) -> Result<Connection, Error> {
         ",
     )?;
     ensure_search_tables(&conn)?;
+    crate::search::semantic::initialize(&conn)?;
     if tables != 9 {
         // 派生表被移除后，新建空表必须同时失效旧扫描版本；恢复库始终独立保留。
         conn.pragma_update(None, "user_version", 0)?;

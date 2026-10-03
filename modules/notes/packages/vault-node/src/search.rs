@@ -14,6 +14,10 @@ pub struct JsSearchPage {
     pub hits: Vec<JsSearchHit>,
     /// 没有更多命中时明确为 null。
     pub next_cursor: Either<String, Null>,
+    /// 融合结果的语义覆盖；严格查询省略。
+    pub semantic: Option<JsSemanticStatus>,
+    /// 融合召回是否达到候选预算。
+    pub limited: Option<bool>,
 }
 
 /// 同版本文件内的下一批具体命中，最多二十处。
@@ -39,16 +43,19 @@ impl NativeRuntime {
         if id.is_empty() || id.len() > 128 || cursor.as_ref().is_some_and(|c| c.len() > 8192) {
             return Err(Error::from_reason("搜索请求标识或续页游标无效"));
         }
-        let query = SearchQuery {
-            expr: search_expr(query.expr, 0)?,
-            limit: i64::from(query.limit),
-        };
+        let query = parse_query(query)?;
         let cancellation = self.inner.search(id, cursor.is_some()).map_err(to_napi)?;
         let token = cancellation.clone();
         let generation = self.inner.generation();
         let runtime = Arc::clone(&self.inner);
-        let pending =
-            runtime.read(move |vault| vault.search_page(&query, cursor.as_deref(), &token));
+        let pending = runtime.read(move |vault| match query {
+            Request::Strict(query) => vault
+                .search_page(&query, cursor.as_deref(), &token)
+                .map(map_page),
+            Request::Hybrid(query) => vault
+                .search_hybrid(&query, cursor.as_deref(), &token)
+                .map(map_hybrid_page),
+        });
         let waiting = cancellation.clone();
         env.execute_tokio_future(
             async move {
@@ -62,10 +69,7 @@ impl NativeRuntime {
                 if cancellation.is_cancelled() || runtime.generation() != generation {
                     return Err(to_napi(noemori_vault::Error::SearchCancelled));
                 }
-                Ok(JsSearchPage {
-                    hits: page.hits.into_iter().map(map_hit).collect(),
-                    next_cursor: page.next_cursor.map_or(Either::B(Null), Either::A),
-                })
+                Ok(page)
             },
         )
     }
@@ -82,15 +86,15 @@ impl NativeRuntime {
         if id.is_empty() || id.len() > 128 || cursor.is_empty() || cursor.len() > 8192 {
             return Err(Error::from_reason("搜索请求标识或命中续页游标无效"));
         }
-        let query = SearchQuery {
-            expr: search_expr(query.expr, 0)?,
-            limit: i64::from(query.limit),
-        };
+        let query = parse_query(query)?;
         let cancellation = self.inner.search(id, true).map_err(to_napi)?;
         let token = cancellation.clone();
         let generation = self.inner.generation();
         let runtime = Arc::clone(&self.inner);
-        let pending = runtime.read(move |vault| vault.search_matches(&query, &cursor, &token));
+        let pending = runtime.read(move |vault| match query {
+            Request::Strict(query) => vault.search_matches(&query, &cursor, &token),
+            Request::Hybrid(query) => vault.hybrid_matches(&query, &cursor, &token),
+        });
         let waiting = cancellation.clone();
         env.execute_tokio_future(
             async move {
@@ -128,6 +132,7 @@ fn map_hit(hit: noemori_vault::SearchHit) -> JsSearchHit {
         matches: hit.matches.into_iter().map(map_match).collect(),
         match_count: hit.match_count,
         matches_cursor: hit.matches_cursor.map_or(Either::B(Null), Either::A),
+        evidence: None,
     }
 }
 
@@ -164,7 +169,13 @@ pub struct JsSearchExpr {
 #[napi(object)]
 pub struct JsSearchQuery {
     /// 检索表达式。
-    pub expr: JsSearchExpr,
+    pub expr: Option<JsSearchExpr>,
+    /// hybrid 表示融合查询；省略表示既有严格查询。
+    pub kind: Option<String>,
+    /// 融合文本。
+    pub text: Option<String>,
+    /// 融合硬筛选。
+    pub filter: Option<JsSearchExpr>,
     /// 每页文件数；非正数按内核默认值处理。
     pub limit: i32,
 }
@@ -231,6 +242,8 @@ pub struct JsSearchHit {
     pub match_count: i64,
     /// 单篇后续命中的游标，没有更多时明确为 null。
     pub matches_cursor: Either<String, Null>,
+    /// 融合来源证据，不能计入精确正文命中数。
+    pub evidence: Option<Vec<JsHybridEvidence>>,
 }
 
 /// 一处命中的源码位置与上下文。
@@ -251,4 +264,169 @@ pub struct JsSearchLocation {
     pub end_byte: i64,
     /// 一基行号。
     pub line: i64,
+}
+
+/// 语义模型和索引覆盖状态。
+#[napi(object)]
+pub struct JsSemanticStatus {
+    /// missing、indexing、ready 或 error。
+    pub state: String,
+    /// 已完成的有效笔记数。
+    pub indexed: i64,
+    /// Markdown 笔记总数。
+    pub total: i64,
+    /// 具体故障原因。
+    pub message: Either<String, Null>,
+}
+
+/// 一条相关段落或纠错证据；位置属于结果携带的内容版本。
+#[napi(object)]
+pub struct JsHybridEvidence {
+    /// lexical、fuzzy 或 semantic。
+    pub kind: String,
+    /// 原文摘要。
+    pub snippet: String,
+    /// 可证明的源码范围。
+    pub location: Either<JsSearchLocation, Null>,
+}
+
+enum Request {
+    Strict(SearchQuery),
+    Hybrid(noemori_vault::HybridQuery),
+}
+fn parse_query(query: JsSearchQuery) -> Result<Request> {
+    if query.kind.as_deref() == Some("hybrid") {
+        if query.expr.is_some() {
+            return Err(Error::from_reason("融合查询不能同时携带严格表达式"));
+        }
+        Ok(Request::Hybrid(noemori_vault::HybridQuery {
+            text: query
+                .text
+                .ok_or_else(|| Error::from_reason("融合查询缺少文本"))?,
+            filter: search_expr(
+                query
+                    .filter
+                    .ok_or_else(|| Error::from_reason("融合查询缺少筛选"))?,
+                0,
+            )?,
+            limit: i64::from(query.limit),
+        }))
+    } else if query.kind.is_none() && query.text.is_none() && query.filter.is_none() {
+        Ok(Request::Strict(SearchQuery {
+            expr: search_expr(
+                query
+                    .expr
+                    .ok_or_else(|| Error::from_reason("严格查询缺少表达式"))?,
+                0,
+            )?,
+            limit: i64::from(query.limit),
+        }))
+    } else {
+        Err(Error::from_reason("未知查询类型"))
+    }
+}
+
+fn map_status(status: noemori_vault::SemanticStatus) -> JsSemanticStatus {
+    use noemori_vault::SemanticState;
+    let (state, message) = match status.state {
+        SemanticState::Missing => ("missing", None),
+        SemanticState::Indexing => ("indexing", None),
+        SemanticState::Ready => ("ready", None),
+        SemanticState::Failed { message } => ("error", Some(message)),
+    };
+    JsSemanticStatus {
+        state: state.into(),
+        indexed: status.indexed,
+        total: status.total,
+        message: message.map_or(Either::B(Null), Either::A),
+    }
+}
+fn map_page(page: noemori_vault::SearchPage) -> JsSearchPage {
+    JsSearchPage {
+        hits: page.hits.into_iter().map(map_hit).collect(),
+        next_cursor: page.next_cursor.map_or(Either::B(Null), Either::A),
+        semantic: None,
+        limited: None,
+    }
+}
+fn map_hybrid_page(page: noemori_vault::HybridPage) -> JsSearchPage {
+    JsSearchPage {
+        hits: page
+            .hits
+            .into_iter()
+            .map(|item| {
+                let mut hit = map_hit(item.hit);
+                hit.evidence = Some(
+                    item.evidence
+                        .into_iter()
+                        .map(|e| {
+                            let mapped = map_match(noemori_vault::SearchMatch {
+                                snippet: e.snippet,
+                                location: e.location,
+                            });
+                            JsHybridEvidence {
+                                kind: match e.kind {
+                                    noemori_vault::EvidenceKind::Lexical => "lexical",
+                                    noemori_vault::EvidenceKind::Fuzzy => "fuzzy",
+                                    noemori_vault::EvidenceKind::Semantic => "semantic",
+                                }
+                                .into(),
+                                snippet: mapped.snippet,
+                                location: mapped.location,
+                            }
+                        })
+                        .collect(),
+                );
+                hit
+            })
+            .collect(),
+        next_cursor: page.next_cursor.map_or(Either::B(Null), Either::A),
+        semantic: Some(map_status(page.semantic)),
+        limited: Some(page.limited),
+    }
+}
+
+#[napi]
+impl NativeRuntime {
+    /// 在选择本地目录前登记安装会话；明确取消或切库后不能重新启动旧安装。
+    #[napi]
+    pub fn search_model_begin(&self, id: String) -> Result<()> {
+        if id.is_empty() || id.len() > 128 {
+            return Err(Error::from_reason("模型安装请求标识无效"));
+        }
+        self.inner.model_session(id, false).map_err(to_napi)?;
+        Ok(())
+    }
+
+    /// 取消指定模型安装；普通搜索会话保持有效。
+    #[napi]
+    pub fn search_model_cancel(&self, id: String) {
+        self.inner.cancel_model(&id);
+    }
+
+    /// 下载或导入固定 Harrier 模型并调度当前库索引；只等待模型安装，不阻塞保存。
+    #[napi(ts_return_type = "Promise<JsSemanticStatus>")]
+    pub fn search_model_install(
+        &self,
+        env: Env,
+        source: Option<String>,
+        id: String,
+    ) -> Result<Object> {
+        if id.is_empty() || id.len() > 128 {
+            return Err(Error::from_reason("模型安装请求标识无效"));
+        }
+        let cancellation = self.inner.model_session(id, true).map_err(to_napi)?;
+        let pending = self
+            .inner
+            .install_search_model(source.map(std::path::PathBuf::from), cancellation.clone());
+        env.execute_tokio_future(
+            async move { pending.await.map_err(to_napi) },
+            move |_, status| {
+                if cancellation.is_cancelled() {
+                    return Err(to_napi(noemori_vault::Error::SearchCancelled));
+                }
+                Ok(map_status(status))
+            },
+        )
+    }
 }

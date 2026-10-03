@@ -188,8 +188,11 @@ impl NativeRuntime {
     /// 未打开库。
     #[napi(ts_return_type = "Promise<JsMentions>")]
     pub fn index_mentions_to(&self, env: Env, path: String) -> Result<Object> {
+        let cancellation = self.inner.read_cancellation();
         self.read(env, move |vault| {
-            let mentions = with_vault(vault, |vault| vault.mentions_to(&path))?;
+            let mentions = with_vault(vault, |vault| {
+                vault.mentions_to_cancellable(&path, &cancellation)
+            })?;
             Ok(JsMentions {
                 linked: mentions
                     .linked

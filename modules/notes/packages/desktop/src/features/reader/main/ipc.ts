@@ -1,5 +1,5 @@
 import type { NativeControl } from "@noemori/vault-node";
-import { ipcMain, shell, type BrowserWindow } from "electron";
+import { ipcMain, shell, dialog, type BrowserWindow } from "electron";
 import { externalUrl } from "../shared/link-target";
 import type { PaneLayout } from "../shared/api";
 import { parseAttachmentRequest, type AttachmentReply } from "../shared/attachments";
@@ -19,7 +19,7 @@ import {
   parsePaneLayoutMessage,
   parsePathArgument,
   parseSessionDocumentsMessage,
-  parseSearchQueryArgument,
+  parseSearchRequestArgument,
   parseSearchId,
   parseSearchCursor,
   parseSearchMatchesCursor,
@@ -204,10 +204,32 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.search.query", (_event, query: unknown, id: unknown, cursor: unknown) =>
     core.call(
       "searchQuery",
-      parseSearchQueryArgument(query),
+      parseSearchRequestArgument(query),
       parseSearchId(id),
       parseSearchCursor(cursor),
     ),
+  );
+  ipcMain.handle("reader.search.modelInstall", async (_event, mode: unknown, id: unknown) => {
+    const requestId = parseSearchId(id);
+    if (mode !== "download" && mode !== "import") throw new Error("模型安装方式无效");
+    await core.call("searchModelBegin", requestId);
+    let source: string | null = null;
+    if (mode === "import") {
+      const options = { title: "选择 Harrier 模型目录", properties: ["openDirectory" as const] };
+      const window = getWindow();
+      const chosen = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options);
+      if (chosen.canceled || !chosen.filePaths[0]) {
+        await core.call("searchModelCancel", requestId);
+        return null;
+      }
+      source = chosen.filePaths[0];
+    }
+    return core.call("searchModelInstall", source, requestId);
+  });
+  ipcMain.handle("reader.search.modelCancel", (_event, id: unknown) =>
+    core.call("searchModelCancel", parseSearchId(id)),
   );
   ipcMain.handle("reader.search.cancel", (_event, id: unknown) =>
     core.call("searchCancel", parseSearchId(id)),
@@ -215,7 +237,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.search.matches", (_event, query: unknown, id: unknown, cursor: unknown) =>
     core.call(
       "searchMatches",
-      parseSearchQueryArgument(query),
+      parseSearchRequestArgument(query),
       parseSearchId(id),
       parseSearchMatchesCursor(cursor),
     ),

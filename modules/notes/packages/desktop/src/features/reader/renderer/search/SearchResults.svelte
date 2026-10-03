@@ -40,9 +40,11 @@
         ? "笔记库已变化，正在更新搜索结果…"
         : search.busy
           ? "正在搜索…"
-          : search.hasMore
-            ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
-            : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
+          : search.semantic !== null
+            ? `${search.hasMore ? "已显示 " : ""}${hits.length} 篇相关笔记${search.limited ? " · 可缩小范围继续查找" : ""}${search.loadingMore ? " · 正在加载…" : ""}`
+            : search.hasMore
+              ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
+              : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
   );
 
   $effect.pre(() => {
@@ -159,6 +161,27 @@
   }}
 >
   <div class="status" role="status">{status}</div>
+  {#if search.semantic !== null && search.semantic.state !== "ready"}
+    <div class="semantic-status" role="status">
+      {#if search.modelInstalling}
+        <span>正在下载或导入本地语义模型…</span>
+        <button onclick={() => search.cancelModel()}>取消</button>
+      {:else if search.semantic.state === "missing"}
+        <span>已启用关键词和拼写容错。安装本地模型后可按意思查找。</span>
+        <button onclick={() => search.installModel("download")}>下载语义模型（约 1.1 GB）</button>
+        <button onclick={() => search.installModel("import")}>导入模型</button>
+      {:else if search.semantic.state === "error"}
+        <span>语义搜索暂不可用：{search.semantic.message}</span>
+        <button onclick={() => search.installModel("download")}>重试</button>
+        <button onclick={() => search.installModel("import")}>导入模型</button>
+      {:else}
+        <span
+          >语义索引准备中：{search.semantic.indexed} / {search.semantic.total} 篇。当前结果可能不完整。</span
+        >
+        <button onclick={() => search.refresh()}>刷新</button>
+      {/if}
+    </div>
+  {/if}
   {#if search.busy && hits.length === 0}
     <!-- 新查询不显示旧内容；同一查询的后台刷新保留已显示的节点和焦点。 -->
   {:else if !search.stale && search.error === null && hits.length === 0}
@@ -179,7 +202,11 @@
             data-path={hit.path}
             tabindex={tabPath === hit.path ? 0 : -1}
             title={hit.path}
-            onclick={() => onActivate(hit)}
+            onclick={() =>
+              onActivate(
+                hit,
+                hit.matches[0] ?? hit.evidence?.find((item) => item.location !== null),
+              )}
             onkeydown={keydown}
           >
             <span class="title">{hit.title}</span>
@@ -192,6 +219,24 @@
               </span>
             {/if}
           </button>
+          {#each hit.evidence ?? [] as evidence (evidence.kind)}
+            {#if evidence.kind !== "lexical"}
+              <button
+                class="semantic-evidence"
+                data-search-focus="evidence"
+                data-path={hit.path}
+                data-version={hit.contentHash}
+                data-occurrence={evidence.kind}
+                onclick={() => onActivate(hit, evidence)}
+                onkeydown={keydown}
+              >
+                <span>{evidence.kind === "semantic" ? "相关段落" : "拼写近似"}</span>
+                {#each snippetParts(evidence.snippet) as part, partIndex (partIndex)}
+                  {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                {/each}
+              </button>
+            {/if}
+          {/each}
           {#if hit.matchCount > 0}
             <button
               class="expand"
@@ -280,6 +325,25 @@
 </section>
 
 <style>
+  .semantic-status {
+    display: grid;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .semantic-evidence {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 12px;
+    white-space: normal;
+  }
+  .semantic-evidence > span {
+    display: block;
+    opacity: 0.65;
+    font-size: 11px;
+  }
+
   .results {
     flex: 1 1 auto;
     min-height: 0;

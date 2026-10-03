@@ -1,0 +1,56 @@
+{
+  "titles": [
+    "Protein needs",
+    "Summit",
+    "幂等性设计",
+    "数据库事务",
+    "花园养护",
+    "二分查找"
+  ],
+  "documents": [
+    "As a general guideline, the CDC's average requirement of protein for women ages 19 to 70 is 46 grams per day. But, as you can see from this chart, you'll need to increase that if you're expecting or training for a marathon. Check out the chart below to see how much protein you should be eating each day.",
+    "Definition of summit for English Language Learners. : 1  the highest point of a mountain : the top of a mountain. : 2  the highest level. : 3  a meeting or series of meetings between the leaders of two or more governments.",
+    "幂等性设计：为每次请求分配唯一标识，重复提交时返回之前的结果，避免重复扣款。",
+    "数据库事务保证原子性和一致性，失败时回滚全部修改。",
+    "花园里的玫瑰在春季开花，需要充足的阳光和适量浇水。",
+    "二分查找每轮排除一半候选，在有序数组中定位目标元素。"
+  ],
+  "queries": [
+    {
+      "text": "how much protein should a female eat",
+      "expected": 0
+    },
+    {
+      "text": "summit define",
+      "expected": 1
+    },
+    {
+      "text": "怎样防止同一个请求扣款两次",
+      "expected": 2
+    },
+    {
+      "text": "写入一半失败了，如何撤销已经执行的更新",
+      "expected": 3
+    },
+    {
+      "text": "春天怎么养护蔷薇科花卉",
+      "expected": 4
+    },
+    {
+      "text": "How can I efficiently find a number in sorted data?",
+      "expected": 5
+    },
+    {
+      "text": "微服务收到重发消息怎么确保只生效一次",
+      "expected": 2
+    },
+    {
+      "text": "How to undo partial database writes?",
+      "expected": 3
+    },
+    {
+      "text": "植物的光照和浇水管理",
+      "expected": 4
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 pub(crate) mod attachments;
 pub(crate) mod bookmarks;
 pub(crate) mod entries;
+pub(crate) mod hash;
 pub(crate) mod path;
 pub(crate) mod recovery;
 pub(crate) mod save;

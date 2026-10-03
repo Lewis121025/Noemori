@@ -60,7 +60,13 @@ async fn writes_keep_submission_order_and_shutdown_drains() {
             .patch(&json!({"window": {"x":1,"y":2,"width":800,"height":600,"maximized":false}}))
     });
     let third = runtime.write(false, |s| s.sessions.load());
+    let read_cancellation = runtime.read_cancellation();
+    assert!(!read_cancellation.is_cancelled());
     let stopping = runtime.shutdown();
+    assert!(
+        read_cancellation.is_cancelled(),
+        "停机先取消只读扫描，仍等待已接受的写入完成"
+    );
     assert!(runtime.write(false, |_| ()).wait().await.is_err());
     release.send(()).unwrap();
     first.wait().await.unwrap();

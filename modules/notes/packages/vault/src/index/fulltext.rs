@@ -4,6 +4,7 @@
 //! 同版本只读快照后释放；确认失败可幂等重试，缺失索引可从正文完整重建。
 
 mod sources;
+pub(crate) mod lexical;
 
 pub(crate) use sources::SourceQuery;
 
@@ -72,6 +73,7 @@ pub(crate) struct SearchIndex {
     title: Field,
     body: Field,
     revision: Option<String>,
+    lexical: lexical::Fields,
 }
 
 impl SearchIndex {
@@ -114,6 +116,7 @@ impl SearchIndex {
                 .set_tokenizer("trigram")
                 .set_index_option(IndexRecordOption::WithFreqsAndPositions),
         );
+        let lexical = lexical::Fields::build(&mut schema);
         let title = schema.add_text_field("title", text.clone());
         let body = schema.add_text_field("body", text);
         let mut index = Index::open_or_create(
@@ -146,6 +149,7 @@ impl SearchIndex {
             title,
             body,
             revision: None,
+            lexical,
         })
     }
 
@@ -237,6 +241,7 @@ impl SearchIndex {
                 let title: String = row.get(1)?;
                 let body: String = row.get(2)?;
                 let mut document = TantivyDocument::new();
+                self.lexical.add(&mut document, conn, &path, &title, &body)?;
                 document.add_text(self.path, path);
                 document.add_u64(self.source, source);
                 document.add_text(self.title, fold(&title));
@@ -263,6 +268,7 @@ impl SearchIndex {
             searcher: self.reader.searcher(),
             title: self.title,
             body: self.body,
+            lexical: self.lexical,
             revision: self
                 .revision
                 .clone()
@@ -277,6 +283,7 @@ pub(crate) struct SearchSnapshot {
     title: Field,
     body: Field,
     pub revision: String,
+    lexical: lexical::Fields,
 }
 
 impl SearchSnapshot {
@@ -294,6 +301,19 @@ impl SearchSnapshot {
             ),
             (Occur::Should, phrase(self.body, term)),
         ]))
+    }
+
+    /// 精确身份键独立召回，不能因普通词法候选窗口不足而失去置顶资格。
+    pub(crate) fn identity_query(&self, text: &str, filter: Box<dyn Query>, token: &SearchCancellation) -> RankedQuery {
+        let query = Box::new(TermQuery::new(Term::from_field_text(self.lexical.1, &fold(text)), IndexRecordOption::Basic));
+        self.ranked(lexical::filtered(query, Some(filter)), token)
+    }
+
+    /// 在同一排名快照上召回完整词项；返回容错展开词供真实位置证据使用。
+    pub(crate) fn lexical_query(&self, words: &[String], fuzzy: bool, filter: Option<Box<dyn Query>>, token: &SearchCancellation) -> Result<(RankedQuery, Vec<String>), Error> {
+        let words = if fuzzy { self.lexical.expand(&self.searcher, words, token)? } else { words.to_vec() };
+        let query = lexical::filtered(self.lexical.query(&words), filter);
+        Ok((self.ranked(query, token), words))
     }
 
     /// 以同一 reader 快照执行所有分页；候选筛选发生在结果上限之前。

@@ -1,19 +1,20 @@
 import type {
   ReaderApi,
   SearchHit,
-  SearchQuery,
+  SearchRequest,
+  SemanticStatus,
   SearchPage,
   SearchMatchesPage,
 } from "../../shared/api";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { isEmptyQuery, parseSearchQuery } from "./query";
+import { isEmptyQuery, parseSearchRequest } from "./query";
 
 /** 文件续页只能追加同一次读取中尚未出现的路径，失败前不改变已发布内容。 */
 function appendPage(previous: SearchPage, next: SearchPage): SearchPage {
   const paths = new SvelteSet(previous.hits.map((hit) => hit.path));
   if (next.hits.some((hit) => paths.has(hit.path)) || next.nextCursor === previous.nextCursor)
     throw new Error("搜索续页未前进，请重新搜索");
-  return { hits: [...previous.hits, ...next.hits], nextCursor: next.nextCursor };
+  return { ...next, hits: [...previous.hits, ...next.hits] };
 }
 
 /** 单篇续页与精确总数共用校验，手动展开和后台补齐不能形成不同契约。 */
@@ -36,13 +37,17 @@ function appendMatches(hit: SearchHit, page: SearchMatchesPage): void {
  */
 export class ReaderSearch {
   // 查询按提交整体替换，保留可跨进程序列化的原始值，不生成深层响应式代理。
-  private submitted = $state.raw<SearchQuery | null>(null);
+  private submitted = $state.raw<SearchRequest | null>(null);
   private results = $state<SearchHit[]>([]);
   private failure = $state<string | null>(null);
   private running = $state(false);
   private paging = $state(false);
   private outdated = $state(false);
   private published = $state(0);
+  private semanticState = $state<SemanticStatus | null>(null);
+  private limitedResults = $state(false);
+  private modelRequestId: string | null = null;
+  private installing = $state(false);
   private cursor = $state<string | null>(null);
   private matchRequests = $state<Record<string, { busy: boolean; error: string | null }>>({});
   private generation = 0;
@@ -52,7 +57,10 @@ export class ReaderSearch {
 
   /** @param api 检索与取消命令；report 让退出搜索后发生的取消失败仍可见。 */
   constructor(
-    private readonly api: Pick<ReaderApi, "searchQuery" | "searchCancel" | "searchMatches">,
+    private readonly api: Pick<
+      ReaderApi,
+      "searchQuery" | "searchCancel" | "searchMatches" | "searchModelInstall" | "searchModelCancel"
+    >,
     private readonly report: (message: string) => void,
   ) {}
 
@@ -61,9 +69,22 @@ export class ReaderSearch {
     return this.submitted !== null || this.failure !== null;
   }
   /** 已提交的有效检索条件；未提交或解析失败时为 null。 */
-  get query(): SearchQuery | null {
+  get query(): SearchRequest | null {
     return this.submitted;
   }
+  /** 当前融合查询的模型覆盖状态。 */
+  get semantic(): SemanticStatus | null {
+    return this.semanticState;
+  }
+  /** 有限候选不能声称枚举全部相关结果。 */
+  get limited(): boolean {
+    return this.limitedResults;
+  }
+  /** 模型准备期间允许取消，不阻塞编辑器。 */
+  get modelInstalling(): boolean {
+    return this.installing;
+  }
+
   /** 当前查询已加载的文件，续页只追加同版本结果。 */
   get hits(): SearchHit[] {
     return this.results;
@@ -149,7 +170,7 @@ export class ReaderSearch {
     this.text = text;
     this.failure = null;
     try {
-      const query = parseSearchQuery(text);
+      const query = parseSearchRequest(text);
       if (isEmptyQuery(query)) return false;
       const id = crypto.randomUUID();
       this.requestId = id;
@@ -157,6 +178,8 @@ export class ReaderSearch {
       this.running = true;
       const page = await this.readSnapshot(query, id, generation, coverage);
       if (page === null || generation !== this.generation) return false;
+      this.semanticState = page.semantic ?? null;
+      this.limitedResults = page.limited ?? false;
       this.results = page.hits;
       this.cursor = page.nextCursor;
       this.outdated = false;
@@ -172,7 +195,7 @@ export class ReaderSearch {
 
   /** 新版本按原已加载范围补齐后一次发布；任何页面失败或代次变化都保留旧快照。 */
   private async readSnapshot(
-    query: SearchQuery,
+    query: SearchRequest,
     id: string,
     generation: number,
     coverage: ReadonlyMap<string, number>,
@@ -245,12 +268,47 @@ export class ReaderSearch {
     }, 250);
   }
 
+  /** 明确操作后下载或导入模型；完成后重新查询以采用新的语义覆盖。 */
+  async installModel(mode: "download" | "import"): Promise<void> {
+    if (this.installing) return;
+    const generation = this.generation;
+    const id = crypto.randomUUID();
+    this.modelRequestId = id;
+    this.installing = true;
+    try {
+      const status = await this.api.searchModelInstall(mode, id);
+      if (this.modelRequestId !== id) return;
+      if (status !== null && this.active) await this.refresh();
+    } catch (error) {
+      if (this.modelRequestId === id && generation === this.generation)
+        this.failure = this.message(error);
+    } finally {
+      if (this.modelRequestId === id) {
+        this.modelRequestId = null;
+        this.installing = false;
+      }
+    }
+  }
+
+  /** 明确取消模型安装；输入新查询只取消查询任务，不撤销已经发起的下载。 */
+  cancelModel(): void {
+    const id = this.modelRequestId;
+    this.modelRequestId = null;
+    this.installing = false;
+    if (id !== null)
+      void this.api
+        .searchModelCancel(id)
+        .catch((error: unknown) => this.report(this.message(error)));
+  }
+
   /** 退出结果模式，立即请求内核取消并丢弃在途响应；取消失败由工作区报告。 */
   reset(): void {
     this.cancelReads();
     this.text = "";
     this.submitted = null;
     this.results = [];
+    this.semanticState = null;
+    this.limitedResults = false;
     this.cursor = null;
     this.failure = null;
     this.outdated = false;
