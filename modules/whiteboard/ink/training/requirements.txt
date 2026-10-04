@@ -2,6 +2,7 @@ torch==2.14.1
 torchvision==0.29.1
 timm==1.0.30
 numpy==2.5.3
+scipy==1.18.1
 pillow==12.1.0
 svgelements==1.9.6
 onnx==1.23.1

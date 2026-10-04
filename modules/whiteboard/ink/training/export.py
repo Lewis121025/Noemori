@@ -55,6 +55,18 @@ def export_model(checkpoint: Path, dataset: Path, output: Path) -> dict:
         selected = records[::max(1, len(records) // 32)][:32]
         image_paths.extend(path for path, _ in selected)
         input_counts["mmg_val"] = len(selected)
+    if metadata.get("external_datasets"):
+        from .external import load_external_packages
+        packages = load_external_packages([Path(row["directory"]) for row in metadata["external_datasets"]])
+        if [(row["directory"], row["manifest"]) for row in packages["metadata"]] != [
+                (row["directory"], row["manifest"]) for row in metadata["external_datasets"]]:
+            raise ValueError("导出验收真实包与训练来源不符")
+        for source in sorted(set(packages["sources"]["val"])):
+            records = [record for record, origin in zip(packages["records"]["val"], packages["sources"]["val"])
+                       if origin == source]
+            selected = records[::max(1, len(records) // 32)][:32]
+            image_paths.extend(path for path, _ in selected)
+            input_counts["external/" + source] = len(selected)
     inputs = []
     for image_path in image_paths:
         with Image.open(image_path) as image:

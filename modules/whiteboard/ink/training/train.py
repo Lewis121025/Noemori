@@ -34,7 +34,8 @@ def write_json(path: Path, value: dict) -> None:
 
 def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
                   workers: int, seed: int, pin_memory: bool, supplement: dict | None = None,
-                  gestures: dict | None = None, native_images: Path | None = None) -> dict:
+                  gestures: dict | None = None, native_images: Path | None = None,
+                  external: dict | None = None) -> dict:
     """建立三个独立加载器；仅训练启用增强，真实补充必须由复核入口提供。"""
     loaders, datasets = {}, {}
     for split in ("train", "val", "test"):
@@ -55,6 +56,11 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
             combined[split] = ImageDataset([record for record, _ in retained] + native[split], data.transform,
                                            [source for _, source in retained] + details["sources"][split])
         datasets = combined
+    if external:
+        from .external import merge_external
+        reserved = set(json.loads((native_images / "manifest.json").read_text()).get("reserved_pixel_sha256", [])) if native_images else set()
+        datasets, exclusions = merge_external(datasets, external, reserved)
+        external["exclusions"] = exclusions
     for split, data in datasets.items():
         if split == "train" and len(data) < batch_size:
             raise ValueError("训练集不足一个完整批次，请降低 batch-size")
@@ -67,6 +73,14 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
         loaders["gesture_test"] = DataLoader(
             ImageDataset(gestures["test"], image_transform(mean, std, False)), batch_size=batch_size,
             num_workers=workers, pin_memory=pin_memory, worker_init_fn=seed_worker)
+    if external:
+        test = datasets["test"]
+        for source in sorted(set(external["sources"]["test"])):
+            records = [record for record, origin in zip(test.records, test.sources) if origin == source]
+            if records:
+                loaders["source_test/" + source] = DataLoader(
+                    ImageDataset(records, test.transform, [source] * len(records)), batch_size=batch_size,
+                    num_workers=workers, pin_memory=pin_memory, worker_init_fn=seed_worker)
     return loaders
 
 
@@ -117,8 +131,13 @@ def configure(args) -> tuple:
     if args.gesture_dataset is not None:
         from .gestures import load_gesture_records
         gestures, gesture_metadata = load_gesture_records(args.gesture_dataset)
+    external = None
+    if getattr(args, "external_datasets", None):
+        from .external import load_external_packages
+        external = load_external_packages(args.external_datasets)
     loaders = build_loaders(args.dataset, mean, std, args.batch_size, args.workers,
-                            args.seed, device.type == "cuda", supplement, gestures, args.native_images)
+                            args.seed, device.type == "cuda", supplement, gestures, args.native_images, external)
+    from .external import source_counts
     metadata = {
         "model": MODEL, "labels": list(LABELS), "dataset": str(args.dataset.resolve()),
         "dataset_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
@@ -136,7 +155,11 @@ def configure(args) -> tuple:
         "precision": "fp32", "tf32": False,
         "versions": {name: version(name) for name in ("torch", "torchvision", "timm", "pillow", "numpy")},
         "counts": {split: loader.dataset.counts for split, loader in loaders.items()},
-        "evaluation_scope": ("synthetic_and_writer_isolated_mmg" if gestures else
+        "source_view_counts": {split: source_counts(loaders[split].dataset) for split in ("train", "val", "test")},
+        "external_datasets": external["metadata"] if external else [],
+        "external_exclusions": external.get("exclusions") if external else None,
+        "evaluation_scope": ("synthetic_and_source_separated_real_packages" if external else
+                             "synthetic_and_writer_isolated_mmg" if gestures else
                              "synthetic_with_ai_reviewed_negative_validation" if supplement else "synthetic_only"),
         "reviewed_negatives": supplement_metadata,
         "gesture_dataset": gesture_metadata,
@@ -218,9 +241,13 @@ def finalize(model, loaders, device, args, metadata, best_epoch: int, last_epoch
     result = {"state": "completed", "best_epoch": best_epoch, "last_epoch": last_epoch,
             "validation": best["validation"], "test": test,
             "evaluation_scope": metadata["evaluation_scope"],
-            "test_scope": "synthetic_and_writer_isolated_mmg" if metadata["gesture_dataset"] else "synthetic_only"}
+            "test_scope": metadata["evaluation_scope"]}
     if "gesture_test" in loaders:
         result["gesture_test"] = run_epoch(model, loaders["gesture_test"], device)
+    source_tests = {name.removeprefix("source_test/"): run_epoch(model, loader, device)
+                    for name, loader in loaders.items() if name.startswith("source_test/")}
+    if source_tests:
+        result["source_tests"] = source_tests
     return result
 
 
@@ -240,6 +267,7 @@ def main() -> None:
     parser.add_argument("--heldout-review", type=Path)
     parser.add_argument("--gesture-dataset", type=Path)
     parser.add_argument("--native-images", type=Path)
+    parser.add_argument("--external-datasets", type=Path, nargs="+")
     parser.add_argument("--initialize", type=Path)
     args = parser.parse_args()
     if (args.reviewed_negatives is None) != (args.heldout_review is None):
