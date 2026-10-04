@@ -18,7 +18,7 @@ pub const LABELS: [&str; 8] = [
     "other",
 ];
 /// 固定候选的权重散列；切换模型须重新验证分类顺序、预处理与质量。
-pub const MODEL_SHA256: &str = "adb4e298df627314306fa99971c00b0ea4d5e273e5cc099d29bd4c986b807e89";
+pub const MODEL_SHA256: &str = "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c";
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// 一个 CPU 分类会话；调用方负责串行运行与生命周期，不阻塞 UI 线程。

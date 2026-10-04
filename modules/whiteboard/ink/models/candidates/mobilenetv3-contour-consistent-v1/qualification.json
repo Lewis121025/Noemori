@@ -1,0 +1,882 @@
+{
+  "state": "qualified_for_current_single_continuous_stroke_repair_with_limits",
+  "default_model_replaced": true,
+  "candidate": {
+    "bytes": 17135980,
+    "sha256": "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c"
+  },
+  "parameters": 4212280,
+  "deployment_views": 1,
+  "current_product_input_contract": "NativeInk.classify接受一个连续笔迹；停笔只发送active.points，不推断多笔归属。",
+  "qualification_basis": [
+    "同数据对照，仅改变成对/粗尺度分类及特征一致性目标；两组均固定BN部署统计、使用相同初始化与采样。",
+    "已按来源与类别验证选择第8轮，旧验证召回约束通过；test不参与选模。",
+    "当前输入范围内的单笔MMG244例保持244/244，但其中单笔箭头只有5例，覆盖有限。",
+    "旧合成测试由455/456提升至456/456，旧AI复核一致数由88/90提升至89/90。",
+    "干净矩形保持36/36，干净椭圆由6/12提升至9/12。",
+    "合成3%尺寸抖动分类由42/112提升至103/112，联合修复由41/112提升至87/112。"
+  ],
+  "best_epoch": 8,
+  "completed_epochs": 8,
+  "validation_macro_f1": 0.9831159368450139,
+  "mixed_test_macro_f1": 0.9777920668595999,
+  "selection": {
+    "source_class_macro_f1": 0.9676053643025184,
+    "source_class_pairs": 29,
+    "legacy_recall_tolerance": 0.02,
+    "passes_legacy_retention": true,
+    "legacy_regressions": [],
+    "worst_excess_drop": 0.0
+  },
+  "ablation": {
+    "control": {
+      "best_epoch": 4,
+      "completed_epochs": 7,
+      "validation_macro_f1": 0.9760215105555045,
+      "mixed_test_macro_f1": 0.9707452766788376
+    },
+    "training_views": 109021,
+    "objective": {
+      "views": [
+        "original",
+        "same_parent_reference",
+        "coarse_64"
+      ],
+      "auxiliary_classification_weight": 0.25,
+      "feature_agreement_weight": 0.05,
+      "weight": 1.0,
+      "batch_norm": "frozen_statistics_trainable_affine",
+      "deployment_views": 1
+    },
+    "interpretation": "对照比较整个辅助训练目标，不声称单独证明特征一致性损失的贡献。"
+  },
+  "detail_test_comparison": [
+    {
+      "run": "mobilenetv3-native-coverage-v1",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "accuracy": 0.9910714285714286,
+          "correct_at_0.5": 110
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "accuracy": 0.7767857142857143,
+          "correct_at_0.5": 87
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "accuracy": 0.375,
+          "correct_at_0.5": 42
+        },
+        "retrace/0": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-control-v1",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "accuracy": 0.9732142857142857,
+          "correct_at_0.5": 109
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "accuracy": 0.9017857142857143,
+          "correct_at_0.5": 99
+        },
+        "retrace/0": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-consistent-v1",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "accuracy": 1.0,
+          "correct_at_0.5": 64
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "accuracy": 0.9732142857142857,
+          "correct_at_0.5": 109
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "accuracy": 0.9196428571428571,
+          "correct_at_0.5": 102
+        },
+        "retrace/0": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "accuracy": 1.0,
+          "correct_at_0.5": 112
+        }
+      }
+    }
+  ],
+  "joint_detail_test": [
+    {
+      "model": "app",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "classifiedCorrect": 111,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 110,
+          "correctRepairAfter": 110,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "classifiedCorrect": 87,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 87,
+          "correctRepairAfter": 87,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "classifiedCorrect": 42,
+          "oracleBefore": 97,
+          "oracleAfter": 95,
+          "correctRepairBefore": 41,
+          "correctRepairAfter": 41,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        }
+      }
+    },
+    {
+      "model": "control",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "classifiedCorrect": 109,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 109,
+          "correctRepairAfter": 109,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "classifiedCorrect": 101,
+          "oracleBefore": 97,
+          "oracleAfter": 95,
+          "correctRepairBefore": 88,
+          "correctRepairAfter": 87,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        }
+      }
+    },
+    {
+      "model": "consistent",
+      "by_detail": {
+        "clean": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.005": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.015": {
+          "samples": 112,
+          "classifiedCorrect": 109,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 109,
+          "correctRepairAfter": 109,
+          "wrongClassRepairAfter": 0
+        },
+        "jitter/0.03": {
+          "samples": 112,
+          "classifiedCorrect": 103,
+          "oracleBefore": 97,
+          "oracleAfter": 95,
+          "correctRepairBefore": 88,
+          "correctRepairAfter": 87,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "retrace/0.002": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 44,
+          "oracleAfter": 112,
+          "correctRepairBefore": 44,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.02": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "tail/0.05": {
+          "samples": 112,
+          "classifiedCorrect": 112,
+          "oracleBefore": 112,
+          "oracleAfter": 112,
+          "correctRepairBefore": 112,
+          "correctRepairAfter": 112,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.01": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        },
+        "gap/0.02": {
+          "samples": 64,
+          "classifiedCorrect": 64,
+          "oracleBefore": 64,
+          "oracleAfter": 64,
+          "correctRepairBefore": 64,
+          "correctRepairAfter": 64,
+          "wrongClassRepairAfter": 0
+        }
+      }
+    }
+  ],
+  "legacy_test_comparison": [
+    {
+      "run": "mobilenetv3-native-coverage-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.9444444444444444,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.5,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.9757575757575757,
+          "recall": {
+            "line": 0.9916666666666667,
+            "arrow": 0.975,
+            "other": 0.9740740740740741
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9777777777777777,
+          "recall": {
+            "line": 1.0,
+            "circle": 0.8,
+            "ellipse": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 0.9978070175438597,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0,
+            "other": 0.9871794871794872
+          }
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-control-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.8888888888888888,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.75,
+            "arc": 1.0,
+            "rectangle": 0.75,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.9795454545454545,
+          "recall": {
+            "line": 0.9916666666666667,
+            "arrow": 0.875,
+            "other": 0.9898148148148148
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9777777777777777,
+          "recall": {
+            "line": 1.0,
+            "circle": 0.8,
+            "ellipse": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 0.9978070175438597,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0,
+            "other": 0.9871794871794872
+          }
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-consistent-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.9722222222222222,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.75,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.9886363636363636,
+          "recall": {
+            "line": 0.9916666666666667,
+            "arrow": 0.9333333333333333,
+            "other": 0.9944444444444445
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9888888888888889,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 1.0,
+          "recall": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0,
+            "other": 1.0
+          }
+        }
+      }
+    }
+  ],
+  "real_source_comparison": [
+    {
+      "run": "mobilenetv3-native-coverage-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 0.16856060606060605,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9998105342932929,
+          "negative_shape_candidates_at_0.5": 1
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.9206062793215446,
+          "negative_shape_candidates_at_0.5": 205
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.8602150537634409,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.6821705426356589,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "synthetic_detail/synthetic_geometry": {
+          "samples": 1024,
+          "accuracy": 0.90625,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-control-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9982948086396363,
+          "negative_shape_candidates_at_0.5": 9
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.975821003247925,
+          "negative_shape_candidates_at_0.5": 62
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.8888888888888888,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.8062015503875969,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "synthetic_detail/synthetic_geometry": {
+          "samples": 1024,
+          "accuracy": 0.986328125,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-contour-consistent-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9990526714664646,
+          "negative_shape_candidates_at_0.5": 4
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.9815950920245399,
+          "negative_shape_candidates_at_0.5": 48
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.899641577060932,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.8449612403100775,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "synthetic_detail/synthetic_geometry": {
+          "samples": 1024,
+          "accuracy": 0.98828125,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    }
+  ],
+  "broader_input_limits": [
+    "完整MMG箭头召回由117/120下降至112/120，新增漏识5例均为两笔输入；这些结果完整保留，不宣称多笔箭头通用性通过。",
+    "历史字符负例的0.5分数候选由1增加至4；分数候选尚未经过几何校验，不等同实际误修。",
+    "在3%抖动组仍有分类与拟合拒绝，联合通过87/112，不能把分类103/112当作实际修复数。",
+    "三角形改按边界提取并验证局部周长回描；强噪声测试中少量候选比旧拟合更严格，未放宽双向误差门槛。",
+    "近圆边界AI标注此前审计存在判据不一致，其84.50%一致率仅作为有限诊断。",
+    "只有合成扰动、来源手写/字符数据和接入测试，没有新增Noemori真实设备实采。"
+  ],
+  "parity": {
+    "samples": 288,
+    "top1_mismatches": 0,
+    "probability_atol": 0.001,
+    "max_logit_abs_error": 0.0007798671722412109,
+    "max_probability_abs_error": 0.00012916326522827148
+  },
+  "native_parity": {
+    "samples": 160,
+    "top1_mismatches": 0,
+    "probability_atol": 0.001,
+    "max_logit_abs_error": 0.0005929470062255859,
+    "max_probability_abs_error": 6.32554292678833e-05,
+    "scope": "product_rendered_validation_input_parity"
+  },
+  "cpu_benchmark": {
+    "scope": "local_server_cpu_benchmark",
+    "cpu": "INTEL(R) XEON(R) GOLD 6530",
+    "threads": 4,
+    "warm_inference": {
+      "count": 200,
+      "p50_ms": 2.998175099492073,
+      "p95_ms": 5.350502673536539,
+      "p99_ms": 5.380195239558816
+    },
+    "png_preprocess_inference": {
+      "count": 200,
+      "p50_ms": 3.864066209644079,
+      "p95_ms": 7.35552916303277,
+      "p99_ms": 7.444884432479738
+    },
+    "rss_increment_bytes": 56672256,
+    "limitations": [
+      "Xeon服务器实测，不是普通用户电脑或最低配置验收。",
+      "包含PNG读取与归一化，不含笔迹分组、SVG栅格化、IPC、几何拟合和UI绘制。",
+      "模型与图片可能已在文件系统缓存；不能作为冷磁盘首次启动耗时。"
+    ]
+  },
+  "reports": {
+    "detail": {
+      "bytes": 106012,
+      "sha256": "bf727fd6586a40779f360ad85e632a07a3faaacfbc84ff687a54e187822858d4"
+    },
+    "joint": {
+      "bytes": 8720,
+      "sha256": "3911452774dfc69f1077216bccce2426586f3851a2ab932e3c0e6bfa816e77e0"
+    },
+    "legacy": {
+      "bytes": 41017,
+      "sha256": "59b5fb5d05d9610997cd9c8a3e95c7df4e198a1e4abf889f4bcb4ad2e7d235ec"
+    },
+    "real": {
+      "bytes": 94702,
+      "sha256": "20b8f43381c1d66b12ab6570573dd58d2f0986c7520da5efe69ddffaf0f1e015"
+    },
+    "stroke_count": {
+      "bytes": 19094,
+      "sha256": "2aa743de0dbc0c73230978d47a7f7e650e9a31d01e2b047bb5fe6d14ae815eea"
+    }
+  },
+  "tests": {
+    "python": 195,
+    "python_subtests": 56,
+    "whiteboard_typescript": 71,
+    "desktop_typecheck": "0 errors,0 warnings",
+    "rust_runtime": 4,
+    "native_binding_and_editor_fitter": 4,
+    "native_build": "passed; existing Enumeration.hidden dead_code warning",
+    "desktop_renderer_build": {
+      "status": "passed",
+      "config": "临时配置仅选取仓库原electron.vite.config.ts的renderer配置，未修改产品构建配置。",
+      "duration_seconds": 32.37
+    },
+    "desktop_full_build": {
+      "status": "blocked_on_linux_by_existing_platform_support",
+      "cause": "bundled-pandoc缺少.cache/pandoc-3.12/bundle；prepare-pandoc.mjs当前只支持macOS arm64。",
+      "scope": "原生构建、前端生产构建、类型检查与接入测试通过，未完成完整桌面发行构建。"
+    },
+    "model_bundle_sha256_verified": "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c"
+  },
+  "native_smoke": {
+    "file": "contour-native-binding-smoke-v1.json",
+    "sha256": "3b374cb74641307282c8cb5f9a5185cc1fcbb937ea23569073eaf7627c489d6b"
+  }
+}

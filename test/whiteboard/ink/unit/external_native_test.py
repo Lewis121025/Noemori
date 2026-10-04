@@ -8,7 +8,8 @@ import unittest
 from PIL import Image
 
 from modules.whiteboard.ink.dataset.classification.acquire import file_record, write_json
-from modules.whiteboard.ink.training.external import load_external_native
+from modules.whiteboard.ink.training.data import ImageDataset
+from modules.whiteboard.ink.training.external import load_external_native, merge_external
 from modules.whiteboard.ink.training.native_images import pixel_hash
 
 
@@ -50,3 +51,48 @@ class ExternalNativeTests(unittest.TestCase):
                     "vectors": {str(root / "source" / "image.png"): [[[0, 0], [1, 1]]]}}
             with self.assertRaisesRegex(ValueError, "快照"):
                 load_external_native(root, data)
+
+    def test_product_rendered_pairs_require_the_same_renderer_and_keep_their_reference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, bundle = root / "detail", root / "cache"
+            source.mkdir()
+            bundle.mkdir()
+            path = source / "input.png"
+            Image.new("RGB", (224, 224), "white").save(path)
+            renderer = {"bytes": 7, "sha256": "b" * 64}
+            (bundle / "records.jsonl").write_text("")
+            write_json(bundle / "manifest.json", {"sources": [], "renderer": renderer,
+                                                    "records": file_record(bundle / "records.jsonl")})
+            data = {"metadata": [{"directory": str(source), "manifest": {}}],
+                    "native_sources": {str(source): renderer}, "vectors": {str(path): [[[0, 0], [1, 1]]]},
+                    "records": {"train": [(path, 4)], "val": [], "test": []},
+                    "sources": {"train": ["detail"], "val": [], "test": []},
+                    "pixels": {str(path): pixel_hash(path)}, "references": {str(path): path}}
+            result = load_external_native(bundle, data)
+            self.assertEqual(result["records"]["train"], [(path, 4)])
+            self.assertEqual(result["references"][str(path)], path)
+            result["native_sources"][str(source)] = {"bytes": 8, "sha256": "c" * 64}
+            with self.assertRaisesRegex(ValueError, "渲染器"):
+                load_external_native(bundle, result)
+
+    def test_clean_reference_leak_removes_the_derived_training_view(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = []
+            for i, color in enumerate(("black", "red", "yellow", "green", "blue")):
+                path = root / f"{i}.png"
+                Image.new("RGB", (224, 224), color).save(path)
+                paths.append(path)
+            train, clean, val, test, noisy = paths
+            base = {"train": ImageDataset([(train, 4)], None),
+                    "val": ImageDataset([(clean, 4), (val, 4)], None),
+                    "test": ImageDataset([(test, 4)], None)}
+            external = {"records": {"train": [(noisy, 4)], "val": [], "test": []},
+                        "sources": {"train": ["detail"], "val": [], "test": []},
+                        "pixels": {str(noisy): pixel_hash(noisy), str(clean): pixel_hash(clean)},
+                        "references": {str(noisy): clean}}
+            result, exclusions = merge_external(base, external)
+            self.assertEqual(result["train"].records, [(train, 4)])
+            self.assertEqual(result["val"].records, [(val, 4)])
+            self.assertEqual({r["path"] for r in exclusions["removed"]}, {str(clean), str(noisy)})

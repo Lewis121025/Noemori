@@ -57,12 +57,20 @@ class SourceMetrics:
 
 def run_epoch(model: nn.Module, loader, device: torch.device,
               optimizer: torch.optim.Optimizer | None = None, *,
-              teacher: nn.Module | None = None, report_sources: bool = False) -> dict:
+              teacher: nn.Module | None = None, report_sources: bool = False, contour: bool = False,
+              contour_weight: float = 1.) -> dict:
     """遍历一个划分并返回损失与混淆矩阵；非有限损失或空数据集立即报错。"""
     training = optimizer is not None
-    if (teacher is not None and not training) or (report_sources and training):
+    if not math.isfinite(contour_weight) or contour_weight < 0:
+        raise ValueError("轮廓训练权重必须为非负有限数")
+    if (teacher is not None and not training) or (report_sources and training) or (contour and not training):
         raise ValueError("旧模型约束仅训练使用，来源位置统计仅顺序评价使用")
     model.train(training)
+    if contour:
+        # 三视图不能把部署统计改成粗图/原图混合分布；仿射参数仍参与梯度更新。
+        for module in model.modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                module.eval()
     source_metrics = SourceMetrics(loader, device) if report_sources else None
     if teacher is not None:
         teacher.eval()
@@ -72,7 +80,10 @@ def run_epoch(model: nn.Module, loader, device: torch.device,
     count = 0
     with torch.set_grad_enabled(training):
         for batch in loader:
-            if teacher is None:
+            if contour:
+                images, targets, retained = batch["image"], batch["label"], batch["retain"]
+                retained = retained.to(device) if teacher is not None else None
+            elif teacher is None:
                 images, targets = batch
                 retained = None
             else:
@@ -82,11 +93,19 @@ def run_epoch(model: nn.Module, loader, device: torch.device,
             targets = targets.to(device, non_blocking=True)
             if optimizer is not None:
                 optimizer.zero_grad(set_to_none=True)
-            logits = model(images)
+            auxiliary = None
+            if contour:
+                from .contour import contour_forward
+                logits, auxiliary = contour_forward(model, images, batch["reference"].to(device),
+                                                     batch["coarse"].to(device), targets)
+            else:
+                logits = model(images)
             if logits.shape != (len(targets), size):
                 raise ValueError("模型输出与固定类别契约不符")
             losses = nn.functional.cross_entropy(logits, targets, reduction="none")
             loss = losses.mean()
+            if auxiliary is not None:
+                loss = loss + contour_weight * auxiliary
             if retained is not None and retained.any():
                 with torch.no_grad():
                     old_logits = teacher(images[retained])

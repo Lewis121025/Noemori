@@ -2,11 +2,15 @@ import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 import { RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
 import {
   distance,
+  angleAdvance,
+  contourHull,
   fitAgrees,
   leastSquares,
   principalLine,
+  perimeterAdvance,
   resample,
   simplify,
+  traceAdvance,
   type FitPoint,
 } from "./fitting-math";
 
@@ -25,10 +29,8 @@ function line(points: readonly FitPoint[]): FitPoint[] | null {
   };
   const result = [project(points[0]!), project(points.at(-1)!)];
   // 横向于主轴的手抖不能当成涂划；只有主轴上的往返才消耗净推进比例。
-  const traveled = points
-    .slice(1)
-    .reduce((sum, p, i) => sum + Math.abs(along(p) - along(points[i]!)), 0);
-  return Math.abs(along(points.at(-1)!) - along(points[0]!)) >= traveled * 0.9 ? result : null;
+  const advance = traceAdvance(points.slice(1).map((p, i) => along(p) - along(points[i]!)));
+  return advance === null ? null : result;
 }
 
 function closed(points: readonly FitPoint[]): boolean {
@@ -46,17 +48,8 @@ function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
   const radius = Math.sqrt(constant! + cx! * cx! + cy! * cy!);
   if (!Number.isFinite(radius) || radius < 0.08 || radius > 3) return null;
   const angles = points.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
-  let sweep = 0,
-    travel = 0;
-  for (let i = 1; i < angles.length; i++) {
-    const delta = Math.atan2(
-      Math.sin(angles[i]! - angles[i - 1]!),
-      Math.cos(angles[i]! - angles[i - 1]!),
-    );
-    sweep += delta;
-    travel += Math.abs(delta);
-  }
-  if (Math.abs(sweep) < travel * 0.9) return null;
+  let sweep = angleAdvance(angles);
+  if (sweep === null) return null;
   if (
     arc
       ? Math.abs(sweep) < 0.4 || Math.abs(sweep) > Math.PI * 1.9
@@ -98,15 +91,8 @@ function ellipse(points: readonly FitPoint[]): FitPoint[] | null {
       ((p.x - cx) * dx + (p.y - cy) * dy) / major,
     );
   const start = angleAt(points[0]!);
-  let sweep = 0,
-    travel = 0;
-  for (let i = 1; i < points.length; i++) {
-    const delta = angleAt(points[i]!) - angleAt(points[i - 1]!);
-    const wrapped = Math.atan2(Math.sin(delta), Math.cos(delta));
-    sweep += wrapped;
-    travel += Math.abs(wrapped);
-  }
-  if (Math.abs(sweep) < travel * 0.9 || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
+  const sweep = angleAdvance(points.map(angleAt));
+  if (sweep === null || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
   const result = Array.from({ length: 129 }, (_, i) => {
     const angle = start + (Math.sign(sweep) * 2 * Math.PI * i) / 128;
     const x = major * Math.cos(angle),
@@ -147,11 +133,13 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
 
 function triangle(points: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
-  const start = points[0]!;
+  // 顶点属于可见边界，不属于访问顺序；回描不能制造额外的几何角点。
+  const hull = contourHull(points);
+  if (hull.length < 3) return null;
   let split = 1;
-  for (let i = 2; i < points.length; i++)
-    if (distance(start, points[i]!) > distance(start, points[split]!)) split = i;
-  const ring = [...points.slice(0, -1), start];
+  for (let i = 2; i < hull.length; i++)
+    if (distance(hull[0]!, hull[i]!) > distance(hull[0]!, hull[split]!)) split = i;
+  const ring = [...hull, hull[0]!];
   const vertices = [
     ...simplify(ring.slice(0, split + 1), 0.04).slice(0, -1),
     ...simplify(ring.slice(split), 0.04).slice(0, -1),
@@ -176,7 +164,11 @@ function triangle(points: readonly FitPoint[]): FitPoint[] | null {
   if (vertices.length !== 3) return null;
   const [a, b, c] = vertices;
   const area = Math.abs((b!.x - a!.x) * (c!.y - a!.y) - (b!.y - a!.y) * (c!.x - a!.x));
-  return area < 0.08 ? null : [...vertices, vertices[0]!];
+  const result = [...vertices, vertices[0]!];
+  const advance = perimeterAdvance(points, result);
+  return area < 0.08 || advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI)
+    ? null
+    : result;
 }
 
 function arrow(points: readonly FitPoint[]): FitPoint[] | null {

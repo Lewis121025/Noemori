@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fitShape } from "@reader/shared/whiteboard/fitting";
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "@reader/shared/whiteboard/model";
+import { angleAdvance, traceAdvance } from "@reader/shared/whiteboard/fitting-math";
 import {
   parseRecognitionPoints,
   parseShapePrediction,
@@ -36,6 +37,14 @@ function polygon(vertices: InkPoint[]): InkPoint[] {
 }
 
 describe("分类后的几何拟合与拒绝条件", () => {
+  it("局部回描预算按净推进计算，方向翻转和圆周跨接缝不改变判据", () => {
+    expect(traceAdvance([0.6, -0.125, 0.525])).toBeCloseTo(1);
+    expect(traceAdvance([-0.6, 0.125, -0.525])).toBeCloseTo(-1);
+    expect(traceAdvance([0.6, -0.13, 0.53])).toBeNull();
+    expect(traceAdvance([1, -1])).toBeNull();
+    expect(traceAdvance([NaN])).toBeNull();
+    expect(angleAdvance([3.1, -3.1, -3, -2.9])).toBeCloseTo(2 * Math.PI - 6);
+  });
   it("直线用向量拟合保留位置、方向与长度，拒绝折线和来回涂划", () => {
     const points = Array.from({ length: 100 }, (_, i) =>
       p(50 + i, 200 + i * 0.7 + Math.sin(i) * 0.6),
@@ -159,5 +168,66 @@ describe("分类后的几何拟合与拒绝条件", () => {
     expect(fitShape(points, { label: "rectangle", confidence: 0.55 }, 1)).toHaveLength(5);
     expect(fitShape(points, { label: "line", confidence: 0.55 }, 1)).toBeNull();
     expect(fitShape(points, { label: "rectangle", confidence: 0.49 }, 1)).toBeNull();
+  });
+
+  it("局部回描保持完整轮廓时可修复，不能把大范围折返或重复整圈当成局部误差", () => {
+    const retrace = (points: InkPoint[], at: number, count: number) => [
+      ...points.slice(0, at + 1),
+      ...points.slice(at - count, at).reverse(),
+      ...points.slice(at - count + 1),
+    ];
+    const cases: [ShapeLabel, InkPoint[], number][] = [
+      ["line", Array.from({ length: 101 }, (_, i) => p(i * 2, 0)), 70],
+      ["circle", contour(100, 100), 70],
+      ["ellipse", contour(110, 60), 70],
+      ["arc", contour(100, 100, Math.PI * 1.5), 70],
+      ["triangle", polygon([p(0, 0), p(200, 0), p(100, 170), p(0, 0)]), 65],
+      ["arrow", polygon([p(0, 0), p(200, 0), p(150, 40), p(200, 0), p(150, -40)]), 65],
+    ];
+    for (const [label, points, at] of cases) {
+      expect(fit(points, label), `${label}干净母图`).not.toBeNull();
+      expect(fit(retrace(points, at, 10), label), `${label}局部回描`).not.toBeNull();
+      expect(fit(retrace(points, at, 38), label), `${label}大范围折返`).toBeNull();
+    }
+    expect(fit(contour(100, 100, Math.PI * 4), "circle")).toBeNull();
+    const triangle = cases[4]![1];
+    expect(fit([...triangle, ...triangle.slice(1)], "triangle")).toBeNull();
+  });
+
+  it("跨三角形角点的局部回描不应因同一顶点出现多次而被拒绝", () => {
+    const size = 234.797381372,
+      height = size * 0.777178443,
+      apex = size * 0.259698438,
+      angle = (80.612291697 * Math.PI) / 180;
+    const vertices = [
+      p(-size / 2, height / 3),
+      p(size / 2, height / 3),
+      p(apex, (-2 * height) / 3),
+      p(-size / 2, height / 3),
+    ];
+    const source = [vertices[0]!];
+    for (let i = 1; i < vertices.length; i++) {
+      const a = vertices[i - 1]!,
+        b = vertices[i]!;
+      const count = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / (size / 96));
+      for (let j = 1; j <= count; j++)
+        source.push(p(a.x + ((b.x - a.x) * j) / count, a.y + ((b.y - a.y) * j) / count));
+    }
+    const points = source.map((point) =>
+      p(
+        point.x * Math.cos(angle) - point.y * Math.sin(angle),
+        point.x * Math.sin(angle) + point.y * Math.cos(angle),
+      ),
+    );
+    const start = Math.round((points.length - 1) * 0.24),
+      end = start + Math.round((points.length - 1) * 0.12);
+    const retraced = [
+      ...points.slice(0, end + 1),
+      ...points.slice(start, end).reverse(),
+      ...points.slice(start + 1),
+    ];
+    expect(fit(points, "triangle")).toHaveLength(4);
+    expect(fit(retraced, "triangle")).toHaveLength(4);
+    expect(fit([...retraced].reverse(), "triangle")).toHaveLength(4);
   });
 });

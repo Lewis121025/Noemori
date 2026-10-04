@@ -6,6 +6,103 @@ export function distance(a: FitPoint, b: FitPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+/**
+ * 投影后的反向推进最多占净推进的八分之一；允许局部回描，拒绝大范围往返。
+ * 横向抖动不计入该预算，调用方仍须验证完整覆盖和原始轮廓误差。
+ * @param deltas 已归一化轨迹在拟合轴或圆周参数上的有向增量。
+ * @returns 满足回描预算的净推进量；零推进、非有限值或超预算返回 null，不抛异常。
+ */
+export function traceAdvance(deltas: readonly number[]): number | null {
+  const advance = deltas.reduce((sum, value) => sum + value, 0);
+  const travel = deltas.reduce((sum, value) => sum + Math.abs(value), 0);
+  const reversed = (travel - Math.abs(advance)) / 2;
+  return Math.abs(advance) > 1e-8 && reversed <= Math.abs(advance) / 8 + 1e-8 ? advance : null;
+}
+
+/**
+ * 圆周参数的有向净推进；每段取连续短弧，重复整圈由调用方的覆盖范围约束拒绝。
+ * @param angles 按轮廓顺序排列的弧度，调用方须先保证采样间隔小于半圈。
+ * @returns 满足局部回描预算的有向扫角；非法或超预算返回 null，不抛异常。
+ */
+export function angleAdvance(angles: readonly number[]): number | null {
+  return traceAdvance(
+    angles.slice(1).map((angle, i) => {
+      const delta = angle - angles[i]!;
+      return Math.atan2(Math.sin(delta), Math.cos(delta));
+    }),
+  );
+}
+
+/**
+ * 单调链构造已选多边形拟合族的边界候选，不改变分类输入或原始笔迹。
+ * @param points 已校验的有限归一化点；允许回描造成的重复访问。
+ * @returns 去重后的凸边界顶点；退化点集返回至多两个点，不抛异常。
+ */
+export function contourHull(points: readonly FitPoint[]): FitPoint[] {
+  const sorted = [...points]
+    .sort((a, b) => a.x - b.x || a.y - b.y)
+    .filter((point, i, all) => i === 0 || point.x !== all[i - 1]!.x || point.y !== all[i - 1]!.y);
+  if (sorted.length < 3) return sorted;
+  const cross = (a: FitPoint, b: FitPoint, c: FitPoint) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const half = (values: readonly FitPoint[]) => {
+    const hull: FitPoint[] = [];
+    for (const point of values) {
+      while (hull.length > 1 && cross(hull.at(-2)!, hull.at(-1)!, point) <= 0) hull.pop();
+      hull.push(point);
+    }
+    return hull.slice(0, -1);
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+/**
+ * 把闭合多边形轨迹投影到候选周长，回描预算按实际边长计算，不受重复顶点影响。
+ * @param source 按采样顺序的原始点列，相邻采样不得跨越半个候选周长。
+ * @param fitted 首尾相同的闭合拟合候选；完整覆盖与偏差仍须由调用方校验。
+ * @returns 满足局部回描预算的有向周数；退化候选或过量折返返回 null，不抛异常。
+ */
+export function perimeterAdvance(
+  source: readonly FitPoint[],
+  fitted: readonly FitPoint[],
+): number | null {
+  const lengths = fitted.slice(1).map((point, i) => distance(point, fitted[i]!));
+  const total = lengths.reduce((sum, value) => sum + value, 0);
+  if (!(total > 0)) return null;
+  const along = source.map((point) => {
+    let offset = 0,
+      position = 0,
+      best = Infinity;
+    for (let i = 1; i < fitted.length; i++) {
+      const a = fitted[i - 1]!,
+        b = fitted[i]!,
+        length = lengths[i - 1]!;
+      const dx = b.x - a.x,
+        dy = b.y - a.y;
+      const t =
+        length === 0
+          ? 0
+          : Math.max(
+              0,
+              Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (length * length)),
+            );
+      const error = Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy);
+      if (error < best) {
+        best = error;
+        position = offset + t * length;
+      }
+      offset += length;
+    }
+    return position / total;
+  });
+  return traceAdvance(
+    along.slice(1).map((position, i) => {
+      const delta = position - along[i]!;
+      return delta - Math.round(delta);
+    }),
+  );
+}
+
 /** 点到有限线段距离；零长度线段按端点处理。 */
 export function segmentDistance(p: FitPoint, a: FitPoint, b: FitPoint): number {
   const dx = b.x - a.x,

@@ -26,6 +26,9 @@ def _validate(directory: Path, dataset: str) -> None:
     elif dataset == "chinese-handwriting-negatives-v1":
         from ..dataset.chinese.package import validate_dataset
         validate_dataset(directory)
+    elif dataset == "shape-detail-invariance-v1":
+        from ..dataset.detail.package import validate_dataset
+        validate_dataset(directory)
     else:
         raise ValueError("外部包未经来源专用验证器支持，拒绝接受监督标签")
 
@@ -34,7 +37,7 @@ def load_external_packages(directories: list[Path]) -> dict:
     """完整核验固定格式真实包；只返回accepted的监督划分，候选/review包不得混入。"""
     records = {split: [] for split in ("train", "val", "test")}
     sources = {split: [] for split in records}
-    metadata, seen, groups, pixels, vectors = [], set(), {}, {}, {}
+    metadata, seen, groups, pixels, vectors, references, native_sources = [], set(), {}, {}, {}, {}, {}
     roots = [directory.resolve() for directory in directories]
     if len(set(roots)) != len(roots):
         raise ValueError("外部数据包目录重复")
@@ -44,6 +47,8 @@ def load_external_packages(directories: list[Path]) -> dict:
         _validate(directory, dataset)
         if manifest.get("classes") != list(LABELS):
             raise ValueError("外部数据包类别顺序不符")
+        if dataset == "shape-detail-invariance-v1":
+            native_sources[str(directory)] = manifest["renderer"]["binary"]
         counts = Counter()
         for split in records:
             with (directory / f"{split}.jsonl").open() as handle:
@@ -74,13 +79,20 @@ def load_external_packages(directories: list[Path]) -> dict:
                     pixels[str(path)] = row["pixel_sha256"]
                     if row.get("paths"):
                         vectors[str(path)] = row["paths"]
+                    if dataset == "shape-detail-invariance-v1":
+                        clean = (directory / row["clean_image"]).resolve()
+                        if not clean.is_relative_to(directory):
+                            raise ValueError("干净母图路径越出来源包")
+                        references[str(path)] = clean
+                        pixels[str(clean)] = row["clean_pixel_sha256"]
                     counts[split, row["label"], sampling_source] += 1
         metadata.append({"directory": str(directory), "dataset": dataset,
                          "manifest": file_record(directory / "manifest.json"), "source_counts": manifest["counts"],
                          "accepted": [{"split": split, "label": label, "source": source, "count": count}
                                       for (split, label, source), count in sorted(counts.items())],
                          "limitations": manifest.get("limitations", [])})
-    return {"records": records, "sources": sources, "metadata": metadata, "pixels": pixels, "vectors": vectors}
+    return {"records": records, "sources": sources, "metadata": metadata, "pixels": pixels, "vectors": vectors,
+            "references": references, "native_sources": native_sources}
 
 
 def load_external_native(directory: Path, external: dict) -> dict:
@@ -88,7 +100,11 @@ def load_external_native(directory: Path, external: dict) -> dict:
     manifest = json.loads((directory / "manifest.json").read_text())
     expected = {row["directory"]: row["manifest"] for row in external["metadata"]}
     actual = {row["directory"]: row["manifest"] for row in manifest["sources"]}
-    vector_roots = {root for root in expected if any(Path(path).is_relative_to(root) for path in external["vectors"])}
+    prepared = external.get("native_sources", {})
+    if any(renderer != manifest["renderer"] for renderer in prepared.values()):
+        raise ValueError("已发布端侧图与训练缓存的产品渲染器不符")
+    vector_roots = {root for root in expected if root not in prepared
+                    and any(Path(path).is_relative_to(root) for path in external["vectors"])}
     if (any(actual.get(root) != expected[root] for root in vector_roots)
             or any(actual[root] != expected[root] for root in actual.keys() & expected.keys())
             or file_record(directory / "records.jsonl") != manifest["records"]):
@@ -102,7 +118,7 @@ def load_external_native(directory: Path, external: dict) -> dict:
     for split in ("train", "val", "test"):
         records, sources = [], []
         for (path, label), source in zip(external["records"][split], external["sources"][split]):
-            if str(path) not in external["vectors"]:
+            if str(path) not in external["vectors"] or any(path.is_relative_to(root) for root in prepared):
                 records.append((path, label))
                 sources.append(source)
                 continue
@@ -138,14 +154,22 @@ def merge_external(datasets: dict, external: dict, reserved_pixels: set[str] | N
             if key not in digest_cache:
                 digest_cache[key] = pixel_hash(path)
             by_pixel[digest_cache[key]].add(split)
+            reference = external.get("references", {}).get(key)
+            if reference is not None:
+                reference_key = str(reference.resolve())
+                if reference_key not in digest_cache:
+                    digest_cache[reference_key] = pixel_hash(reference)
+                by_pixel[digest_cache[reference_key]].add(split)
     conflicts = {digest for digest, splits in by_pixel.items() if len(splits) > 1}
     removed, retained = [], {}
     for split, data in combined.items():
         records, sources = [], []
         for (path, label), source in zip(data.records, data.sources):
             digest = digest_cache[str(path.resolve())]
-            reserved = split in ("train", "val") and digest in (reserved_pixels or set())
-            if digest in conflicts or reserved:
+            reference = external.get("references", {}).get(str(path.resolve()))
+            dependencies = {digest, digest_cache[str(reference.resolve())]} if reference is not None else {digest}
+            reserved = split in ("train", "val") and bool(dependencies & (reserved_pixels or set()))
+            if dependencies & conflicts or reserved:
                 removed.append({"path": str(path), "split": split, "source": source,
                                 "pixel_sha256": digest, "reason": "reserved_diagnostic" if reserved else "cross_split_pixel_duplicate"})
                 continue
