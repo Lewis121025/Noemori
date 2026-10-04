@@ -36,6 +36,27 @@ function polygon(vertices: InkPoint[]): InkPoint[] {
     .concat(vertices.at(-1)!);
 }
 
+/** 空间连续的有界抖动；同一个角点回访时偏移相同，避免把箭尖拆成不同位置。 */
+function noisyPolygon(vertices: InkPoint[], phase: number, rotation: number): InkPoint[] {
+  const points = vertices.slice(1).flatMap((end, i) => {
+    const start = vertices[i]!;
+    const count = Math.ceil(Math.hypot(end.x - start.x, end.y - start.y) / 2);
+    return Array.from({ length: count }, (_, j) =>
+      p(start.x + ((end.x - start.x) * j) / count, start.y + ((end.y - start.y) * j) / count),
+    );
+  });
+  return [...points, vertices.at(-1)!].map((point) => {
+    const x = point.x * Math.cos(rotation) - point.y * Math.sin(rotation),
+      y = point.x * Math.sin(rotation) + point.y * Math.cos(rotation);
+    const u = x / 200,
+      v = y / 200;
+    return p(
+      x + (6 / Math.sqrt(2)) * Math.sin(2 * Math.PI * (11 * u + 7 * v) + phase),
+      y + (6 / Math.sqrt(2)) * Math.sin(2 * Math.PI * (9 * u - 8 * v) - phase),
+    );
+  });
+}
+
 describe("分类后的几何拟合与拒绝条件", () => {
   it("局部回描预算按净推进计算，方向翻转和圆周跨接缝不改变判据", () => {
     expect(traceAdvance([0.6, -0.125, 0.525])).toBeCloseTo(1);
@@ -229,5 +250,41 @@ describe("分类后的几何拟合与拒绝条件", () => {
     expect(fit(points, "triangle")).toHaveLength(4);
     expect(fit(retraced, "triangle")).toHaveLength(4);
     expect(fit([...retraced].reverse(), "triangle")).toHaveLength(4);
+  });
+
+  it.each([0, 0.37, 1.1])("有界强抖动不应把三角形和箭头边上的波纹当成额外角点 %s", (rotation) => {
+    const shapes: [ShapeLabel, InkPoint[], number][] = [
+      ["triangle", [p(0, 0), p(200, 0), p(130, 160), p(0, 0)], 4],
+      ["arrow", [p(0, 0), p(200, 0), p(145, 40), p(200, 0), p(145, -40)], 5],
+    ];
+    for (const [label, vertices, count] of shapes)
+      for (const phase of [0, 0.7, 2.1]) {
+        const points = noisyPolygon(vertices, phase, rotation);
+        const result = fit(points, label)!;
+        expect(result, `${label}/${phase}`).toHaveLength(count);
+        expect(fit([...points].reverse(), label), `${label}/${phase}/反向`).toHaveLength(count);
+        for (const vertex of vertices) {
+          const x = vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation),
+            y = vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation);
+          expect(
+            Math.min(...result.map((point) => Math.hypot(point.x - x, point.y - y))),
+          ).toBeLessThan(12);
+        }
+      }
+  });
+
+  it("固定角点数只生成候选，额外折线、非三角闭合轮廓和内部涂划仍须拒绝", () => {
+    for (const points of [
+      contour(100, 100),
+      polygon([p(0, 0), p(200, 0), p(230, 100), p(120, 190), p(-30, 100), p(0, 0)]),
+      polygon([p(0, 0), p(200, 0), p(100, 170), p(0, 0), p(110, 65), p(0, 0)]),
+    ])
+      expect(fit(points, "triangle")).toBeNull();
+    for (const vertices of [
+      [p(0, 0), p(70, 60), p(140, -60), p(200, 0), p(145, 40), p(200, 0), p(145, -40)],
+      [p(0, 0), p(200, 0), p(145, 40), p(200, 0), p(145, -40), p(80, -110)],
+      [p(0, 0), p(200, 0), p(145, 40)],
+    ])
+      expect(fit(polygon(vertices), "arrow")).toBeNull();
   });
 });

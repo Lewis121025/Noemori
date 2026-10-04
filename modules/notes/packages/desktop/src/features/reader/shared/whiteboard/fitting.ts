@@ -8,8 +8,8 @@ import {
   leastSquares,
   principalLine,
   perimeterAdvance,
+  polylineCorners,
   resample,
-  simplify,
   traceAdvance,
   type FitPoint,
 } from "./fitting-math";
@@ -136,44 +136,46 @@ function triangle(points: readonly FitPoint[]): FitPoint[] | null {
   // 顶点属于可见边界，不属于访问顺序；回描不能制造额外的几何角点。
   const hull = contourHull(points);
   if (hull.length < 3) return null;
-  let split = 1;
-  for (let i = 2; i < hull.length; i++)
-    if (distance(hull[0]!, hull[i]!) > distance(hull[0]!, hull[split]!)) split = i;
-  const ring = [...hull, hull[0]!];
-  const vertices = [
-    ...simplify(ring.slice(0, split + 1), 0.04).slice(0, -1),
-    ...simplify(ring.slice(split), 0.04).slice(0, -1),
-  ];
-  // 起笔可能在边中间，环形简化必须也检查跨越起点的那一条边。
-  let changed = true;
-  while (vertices.length > 3 && changed) {
-    changed = false;
-    for (let i = 0; i < vertices.length; i++) {
-      const a = vertices[(i + vertices.length - 1) % vertices.length]!,
-        p = vertices[i]!;
-      const b = vertices[(i + 1) % vertices.length]!;
-      const deviation =
-        Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / distance(a, b);
-      if (deviation < 0.04) {
-        vertices.splice(i, 1);
-        changed = true;
-        break;
+  let area = 0,
+    vertices: FitPoint[] = [];
+  // 已由模型选定三角形族；最大面积三点保留主体角点，边上细小凸起不增加边数。
+  // 凸包至多包含192个重采样点，后续仍用原始轮廓拒绝矩形、缺边与额外笔画。
+  for (let i = 0; i < hull.length - 2; i++) {
+    const a = hull[i]!;
+    for (let j = i + 1; j < hull.length - 1; j++) {
+      const b = hull[j]!;
+      for (let k = j + 1; k < hull.length; k++) {
+        const c = hull[k]!;
+        const current = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+        if (current > area) {
+          area = current;
+          vertices = [a, b, c];
+        }
       }
     }
   }
-  if (vertices.length !== 3) return null;
-  const [a, b, c] = vertices;
-  const area = Math.abs((b!.x - a!.x) * (c!.y - a!.y) - (b!.y - a!.y) * (c!.x - a!.x));
+  if (area < 0.08) return null;
   const result = [...vertices, vertices[0]!];
   const advance = perimeterAdvance(points, result);
-  return area < 0.08 || advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI)
-    ? null
-    : result;
+  return advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI) ? null : result;
 }
 
 function arrow(points: readonly FitPoint[]): FitPoint[] | null {
-  const vertices = simplify(points, 0.035);
-  if (vertices.length !== 5) return null;
+  const corners = polylineCorners(points, 5);
+  if (corners.length !== 5) return null;
+  const vertices = corners.map((index) => points[index]!);
+  // 箭头本来会沿第一翼返回箭尖；每段按自身方向计推进，额外折返才消耗回描预算。
+  const deltas = corners.slice(1).flatMap((end, i) => {
+    const start = corners[i]!,
+      a = points[start]!,
+      b = points[end]!;
+    const length = distance(a, b);
+    return points.slice(start + 1, end + 1).map((point, offset) => {
+      const previous = points[start + offset]!;
+      return ((point.x - previous.x) * (b.x - a.x) + (point.y - previous.y) * (b.y - a.y)) / length;
+    });
+  });
+  if (traceAdvance(deltas) === null) return null;
   const [first, tip, middle, returned, last] = vertices;
   if (distance(tip!, returned!) > 0.07) return null;
   const ends = [first!, middle!, last!].sort((a, b) => distance(b, tip!) - distance(a, tip!));
