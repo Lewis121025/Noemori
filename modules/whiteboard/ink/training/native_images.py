@@ -27,8 +27,14 @@ def prepare_native_images(datasets: list[Path], renderer: Path, output: Path,
     sources, samples = [], []
     for dataset in datasets:
         manifest = json.loads((dataset / "manifest.json").read_text())
+        flat = manifest.get("dataset") in ("hds-real-shapes-v1", "quickdraw-real-shapes-v1",
+                                          "whiteboard-handwriting-negatives-v1", "shape-boundary-review-v1",
+                                          "chinese-handwriting-negatives-v1")
         if manifest.get("dataset") == "gesture-classification-v1":
             validate_gestures(dataset)
+        elif flat:
+            from .external import _validate
+            _validate(dataset, manifest["dataset"])
         else:
             validate_dataset(dataset)
         sources.append({"directory": str(dataset.resolve()), "manifest": file_record(dataset / "manifest.json")})
@@ -36,7 +42,9 @@ def prepare_native_images(datasets: list[Path], renderer: Path, output: Path,
             path = dataset / f"{split}.jsonl"
             if path.exists():
                 for row in map(json.loads, path.read_text().splitlines()):
-                    sample = row["sample"]
+                    sample = row if flat else row["sample"]
+                    if flat and not sample.get("paths"):
+                        continue
                     samples.append((dataset, split, sample, row))
     with publication(output) as staging:
         (staging / "images").mkdir()

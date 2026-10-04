@@ -36,7 +36,7 @@ def _rows(directory):
 
 
 def _preview(destination, items, columns):
-    sheet = Image.new("RGB", (224 * columns, 248 * ((len(items) + columns - 1) // columns)), "#eeeeee")
+    sheet = Image.new("RGB", (224 * columns, 248 * max(1, (len(items) + columns - 1) // columns)), "#eeeeee")
     draw = ImageDraw.Draw(sheet)
     for index, (data, caption) in enumerate(items):
         x, y = index % columns * 224, index // columns * 248
@@ -122,6 +122,7 @@ def _supplement(staging, diagnostics, parent_rows):
     with (diagnostics / "cases.jsonl").open() as handle:
         diagnostic_hashes = {json.loads(line)["image_sha256"] for line in handle}
     image_splits = {row["image_sha256"]: row["sample"]["split"] for row in parent_rows}
+    parent_ids = {row["sample"]["sample_id"]: row for row in parent_rows}
     if diagnostic_hashes.intersection(digest for digest, split in image_splits.items() if split != "review"):
         raise ValueError("诊断图像与原始包重复，需要先明确诊断独立性")
     rows, metadata, exclusions, previews = [], [], [], {}
@@ -139,6 +140,11 @@ def _supplement(staging, diagnostics, parent_rows):
                         exclusions.append({**parameters, "reason": "母图哈希落入test桶；本补充仅追加train/val，不产生新测试样本。"})
                         continue
                     data, digest = _png(sample["paths"], width)
+                    existing = parent_ids.get(sample["sample_id"])
+                    if existing:
+                        if existing["sample"] != sample or existing["image_sha256"] != digest:
+                            raise ValueError("同一覆盖样本身份对应不同几何或渲染内容")
+                        continue
                     if digest in diagnostic_hashes:
                         exclusions.append({**parameters, "reason": "与预先保留的独立诊断图像完全相同。", "image_sha256": digest})
                         continue
@@ -209,9 +215,18 @@ def generate_coverage_dataset(parent: Path, diagnostics: Path, destination: Path
         with (staging / "coverage-parameters.jsonl").open("w") as handle:
             for record in parameters:
                 handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        source_groups = []
+        inherited = parent / "coverage-source-groups.jsonl"
+        if inherited.exists():
+            source_groups.extend(json.loads(line) for line in inherited.read_text().splitlines())
+        source_groups.extend({"sample_id": p["sample_id"], "group_id": p["group_id"], "source": "synthetic_boundary"}
+                             for p in parameters if p["case_name"].startswith("ellipse-boundary-"))
+        with (staging / "coverage-source-groups.jsonl").open("w") as handle:
+            for entry in source_groups:
+                handle.write(json.dumps(entry) + "\n")
         write_json(staging / "coverage-excluded.json", excluded)
         manifest = dict(parent_manifest)
-        names = [*parent_manifest["files"], "parent-manifest.json", "coverage-parameters.jsonl", "coverage-excluded.json", "coverage-preview.png"]
+        names = [*parent_manifest["files"], "parent-manifest.json", "coverage-parameters.jsonl", "coverage-excluded.json", "coverage-preview.png", "coverage-source-groups.jsonl"]
         manifest.update({"counts": _counts([*parent_rows, *added]),
                          "files": {name: file_record(staging / name) for name in names},
                          "parent": {"path": str(parent.resolve()), "manifest_sha256": file_record(parent / "manifest.json")["sha256"],
@@ -253,6 +268,14 @@ def validate_coverage_dataset(directory: Path, parent: Path, diagnostics: Path) 
         parameters = [json.loads(line) for line in handle]
     if {p["sample_id"] for p in parameters} != set(rows) - original_ids or len(parameters) != len(rows) - len(original_ids):
         raise ValueError("补充参数与新增样本不一一对应")
+    inherited_file = parent / "coverage-source-groups.jsonl"
+    expected_sources = ([json.loads(line) for line in inherited_file.read_text().splitlines()]
+                        if inherited_file.exists() else [])
+    expected_sources.extend({"sample_id": p["sample_id"], "group_id": p["group_id"], "source": "synthetic_boundary"}
+                            for p in parameters if p["case_name"].startswith("ellipse-boundary-"))
+    source_entries = [json.loads(line) for line in (directory / "coverage-source-groups.jsonl").read_text().splitlines()]
+    if source_entries != expected_sources or any(rows[r["sample_id"]]["sample"]["group_id"] != r["group_id"] for r in source_entries):
+        raise ValueError("合成边界来源声明与参数/父包不符")
     with (diagnostics / "cases.jsonl").open() as handle:
         diagnostic_hashes = {json.loads(line)["image_sha256"] for line in handle}
     if diagnostic_hashes.intersection(row["image_sha256"] for row in rows.values() if row["sample"]["split"] != "review"):

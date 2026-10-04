@@ -12,6 +12,7 @@ from modules.whiteboard.ink.training.data import ImageDataset
 from modules.whiteboard.ink.training.external import load_external_packages, merge_external
 from modules.whiteboard.ink.training.native_images import pixel_hash
 from modules.whiteboard.ink.training.train import build_loaders
+from modules.whiteboard.ink.dataset.classification.schema import LABELS
 
 
 class ExternalDataTests(unittest.TestCase):
@@ -25,6 +26,22 @@ class ExternalDataTests(unittest.TestCase):
                 load_external_packages([root])
             with self.assertRaisesRegex(ValueError, "重复"):
                 load_external_packages([root, root])
+
+    def test_same_quickdraw_key_cannot_leak_between_different_package_versions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directories = []
+            for index, (version, split) in enumerate((("quickdraw-real-shapes-v1", "train"), ("shape-boundary-review-v1", "val"))):
+                directory = Path(temporary) / str(index)
+                directory.mkdir(); directories.append(directory)
+                (directory / "manifest.json").write_text(json.dumps({"dataset": version, "classes": list(LABELS), "counts": {}}))
+                for partition in ("train", "val", "test"):
+                    row = {"split": split, "label": "ellipse", "annotation_status": "accepted", "sample_id": str(index),
+                           "group_id": "quickdraw-key-123", "image": "unused.png", "annotation_kind": "ai_visual_review",
+                           "pixel_sha256": str(index), "provenance": {}}
+                    (directory / f"{partition}.jsonl").write_text(json.dumps(row) + "\n" if partition == split else "")
+            with patch("modules.whiteboard.ink.training.external._validate"):
+                with self.assertRaisesRegex(ValueError, "跨划分"):
+                    load_external_packages(directories)
 
     def test_cross_source_duplicate_is_removed_from_both_splits(self):
         with tempfile.TemporaryDirectory() as temporary:

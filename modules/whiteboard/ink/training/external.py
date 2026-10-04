@@ -20,6 +20,12 @@ def _validate(directory: Path, dataset: str) -> None:
     elif dataset == "whiteboard-handwriting-negatives-v1":
         from ..dataset.handwriting.package import validate_dataset
         validate_dataset(directory)
+    elif dataset == "shape-boundary-review-v1":
+        from ..dataset.boundary.package import validate_dataset
+        validate_dataset(directory)
+    elif dataset == "chinese-handwriting-negatives-v1":
+        from ..dataset.chinese.package import validate_dataset
+        validate_dataset(directory)
     else:
         raise ValueError("外部包未经来源专用验证器支持，拒绝接受监督标签")
 
@@ -28,7 +34,7 @@ def load_external_packages(directories: list[Path]) -> dict:
     """完整核验固定格式真实包；只返回accepted的监督划分，候选/review包不得混入。"""
     records = {split: [] for split in ("train", "val", "test")}
     sources = {split: [] for split in records}
-    metadata, seen, groups, pixels = [], set(), {}, {}
+    metadata, seen, groups, pixels, vectors = [], set(), {}, {}, {}
     roots = [directory.resolve() for directory in directories]
     if len(set(roots)) != len(roots):
         raise ValueError("外部数据包目录重复")
@@ -50,25 +56,75 @@ def load_external_packages(directories: list[Path]) -> dict:
                     if identity in seen:
                         raise ValueError("外部监督身份重复")
                     seen.add(identity)
-                    group = (dataset, row["group_id"])
+                    # 同一个QuickDraw原key在不同发布版本中仍是同一个来源，版本名不能隔离泄漏。
+                    domain = "quickdraw" if dataset in ("quickdraw-real-shapes-v1", "shape-boundary-review-v1") else dataset
+                    group = (domain, row["group_id"])
                     if groups.setdefault(group, split) != split:
                         raise ValueError("外部来源组跨划分")
                     path = (directory / row["image"]).resolve()
                     if not path.is_relative_to(directory):
                         raise ValueError("外部图像路径越出来源包")
                     source = ("hds" if dataset == "hds-real-shapes-v1" else
+                              "quickdraw_boundary" if dataset == "shape-boundary-review-v1" else
+                              "chinese_numbers" if dataset == "chinese-handwriting-negatives-v1" else
                               "quickdraw" if dataset == "quickdraw-real-shapes-v1" else row["provenance"]["source"])
                     sampling_source = f"{source}/{row['annotation_kind']}"
                     records[split].append((path, LABELS.index(row["label"])))
                     sources[split].append(sampling_source)
                     pixels[str(path)] = row["pixel_sha256"]
+                    if row.get("paths"):
+                        vectors[str(path)] = row["paths"]
                     counts[split, row["label"], sampling_source] += 1
         metadata.append({"directory": str(directory), "dataset": dataset,
                          "manifest": file_record(directory / "manifest.json"), "source_counts": manifest["counts"],
                          "accepted": [{"split": split, "label": label, "source": source, "count": count}
                                       for (split, label, source), count in sorted(counts.items())],
                          "limitations": manifest.get("limitations", [])})
-    return {"records": records, "sources": sources, "metadata": metadata, "pixels": pixels}
+    return {"records": records, "sources": sources, "metadata": metadata, "pixels": pixels, "vectors": vectors}
+
+
+def load_external_native(directory: Path, external: dict) -> dict:
+    """把真实原矢量替换为产品渲染输入；纯栅格来源保留原图，不增加原始记录数。"""
+    manifest = json.loads((directory / "manifest.json").read_text())
+    expected = {row["directory"]: row["manifest"] for row in external["metadata"]}
+    actual = {row["directory"]: row["manifest"] for row in manifest["sources"]}
+    vector_roots = {root for root in expected if any(Path(path).is_relative_to(root) for path in external["vectors"])}
+    if (any(actual.get(root) != expected[root] for root in vector_roots)
+            or any(actual[root] != expected[root] for root in actual.keys() & expected.keys())
+            or file_record(directory / "records.jsonl") != manifest["records"]):
+        raise ValueError("外部端侧视图与来源快照不符")
+    indexed = {}
+    for row in map(json.loads, (directory / "records.jsonl").read_text().splitlines()):
+        if row["original"] in indexed:
+            raise ValueError("外部端侧视图原始身份重复")
+        indexed[row["original"]] = row
+    removed = []
+    for split in ("train", "val", "test"):
+        records, sources = [], []
+        for (path, label), source in zip(external["records"][split], external["sources"][split]):
+            if str(path) not in external["vectors"]:
+                records.append((path, label))
+                sources.append(source)
+                continue
+            row = indexed.get(str(path))
+            if (row is None or row["label"] != LABELS[label] or row["split"] != split
+                    or file_record(path)["sha256"] != row["original_sha256"]):
+                raise ValueError("外部矢量端侧视图缺失或标签/划分不符")
+            target = (directory / row["image"]).resolve()
+            if (not target.is_relative_to(directory.resolve()) or file_record(target)["sha256"] != row["image_sha256"]
+                    or pixel_hash(target) != row["pixel_sha256"]):
+                raise ValueError("外部端侧图像散列或路径不符")
+            if row["exclude_native"] or row["exclude_original"]:
+                removed.append({"path": str(path), "split": split, "reason": "reserved_or_cross_split_pixel_duplicate"})
+                continue
+            records.append((target, label))
+            sources.append(source)
+            external["pixels"][str(target)] = row["pixel_sha256"]
+        external["records"][split], external["sources"][split] = records, sources
+    external["native"] = {"directory": str(directory.resolve()), "manifest": file_record(directory / "manifest.json"),
+                           "replacement_policy": "real_vectors_only_raster_sources_preserved", "removed": removed,
+                           "snapshot_scope": "vector_sources_required_raster_sources_verified_by_original_reader"}
+    return external
 
 
 def merge_external(datasets: dict, external: dict, reserved_pixels: set[str] | None = None) -> tuple[dict, dict]:

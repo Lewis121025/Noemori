@@ -6,22 +6,78 @@ from pathlib import Path
 
 import torch
 from torch import nn
+from torch.utils.data import SequentialSampler
 
 from ..dataset.classification.schema import LABELS
 from .metrics import classification_report
+from .selection import canonical_source
+
+
+def retention_loss(student: torch.Tensor, teacher: torch.Tensor, temperature: float = 2.) -> torch.Tensor:
+    """比较旧训练样本的概率结构；教师不提供真值，新增监督仍以独立标签计算交叉熵。"""
+    if (student.shape != teacher.shape or student.ndim != 2 or not len(student)
+            or not math.isfinite(temperature) or temperature <= 0):
+        raise ValueError("保留约束的模型输出不符")
+    return nn.functional.kl_div(nn.functional.log_softmax(student / temperature, dim=1),
+                               nn.functional.softmax(teacher.detach() / temperature, dim=1),
+                               reduction="batchmean").clamp_min(0) * temperature ** 2
+
+
+class SourceMetrics:
+    """仅顺序评价可按位置映射来源；训练的随机采样不能借此制造来源指标。"""
+
+    def __init__(self, loader, device: torch.device):
+        """建立来源索引；非顺序、丢尾或无来源的数据加载器拒绝。"""
+        if (not isinstance(loader.sampler, SequentialSampler) or loader.drop_last
+                or not hasattr(loader.dataset, "sources") or len(loader.dataset.sources) != len(loader.dataset)):
+            raise ValueError("逐来源评价需要完整顺序数据及来源索引")
+        self.names = [canonical_source(source) for source in loader.dataset.sources]
+        self.position = 0
+        self.confusions = {name: torch.zeros(8, 8, dtype=torch.int64, device=device) for name in set(self.names)}
+        self.losses = {name: torch.zeros((), device=device) for name in self.confusions}
+        self.counts = {name: 0 for name in self.confusions}
+
+    def update(self, indices: torch.Tensor, losses: torch.Tensor) -> None:
+        """同步累积同批的来源矩阵和损失；不重跑模型，也不依赖预测选择样本。"""
+        batch = self.names[self.position:self.position + len(indices)]
+        for name in set(batch):
+            mask = torch.tensor([source == name for source in batch], device=indices.device)
+            self.confusions[name] += torch.bincount(indices[mask], minlength=64).reshape(8, 8)
+            self.losses[name] += losses.detach()[mask].sum()
+            self.counts[name] += batch.count(name)
+        self.position += len(indices)
+
+    def report(self) -> dict:
+        """输出独立的来源报告；输入未遍历完整时拒绝不完整评价。"""
+        if self.position != len(self.names):
+            raise ValueError("逐来源评价未遍历完整输入")
+        return {name: classification_report(self.confusions[name].cpu().tolist(), LABELS,
+                                             self.losses[name].item() / self.counts[name]) for name in sorted(self.confusions)}
 
 
 def run_epoch(model: nn.Module, loader, device: torch.device,
-              optimizer: torch.optim.Optimizer | None = None) -> dict:
+              optimizer: torch.optim.Optimizer | None = None, *,
+              teacher: nn.Module | None = None, report_sources: bool = False) -> dict:
     """遍历一个划分并返回损失与混淆矩阵；非有限损失或空数据集立即报错。"""
     training = optimizer is not None
+    if (teacher is not None and not training) or (report_sources and training):
+        raise ValueError("旧模型约束仅训练使用，来源位置统计仅顺序评价使用")
     model.train(training)
+    source_metrics = SourceMetrics(loader, device) if report_sources else None
+    if teacher is not None:
+        teacher.eval()
     size = len(LABELS)
     confusion = torch.zeros(size, size, dtype=torch.int64, device=device)
     total_loss = torch.zeros((), device=device)
     count = 0
     with torch.set_grad_enabled(training):
-        for images, targets in loader:
+        for batch in loader:
+            if teacher is None:
+                images, targets = batch
+                retained = None
+            else:
+                images, targets, retained = batch
+                retained = retained.to(device)
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
             if optimizer is not None:
@@ -29,7 +85,12 @@ def run_epoch(model: nn.Module, loader, device: torch.device,
             logits = model(images)
             if logits.shape != (len(targets), size):
                 raise ValueError("模型输出与固定类别契约不符")
-            loss = nn.functional.cross_entropy(logits, targets)
+            losses = nn.functional.cross_entropy(logits, targets, reduction="none")
+            loss = losses.mean()
+            if retained is not None and retained.any():
+                with torch.no_grad():
+                    old_logits = teacher(images[retained])
+                loss = loss + .15 * retention_loss(logits[retained], old_logits)
             if not torch.isfinite(loss).item():
                 raise ValueError("训练损失非有限，停止以保留故障现场")
             if optimizer is not None:
@@ -40,8 +101,13 @@ def run_epoch(model: nn.Module, loader, device: torch.device,
             count += len(targets)
             indices = targets * size + logits.detach().argmax(dim=1)
             confusion += torch.bincount(indices, minlength=size * size).reshape(size, size)
-    return classification_report(confusion.cpu().tolist(), LABELS,
-                                 total_loss.item() / count if count else math.nan)
+            if source_metrics:
+                source_metrics.update(indices, losses)
+    result = classification_report(confusion.cpu().tolist(), LABELS,
+                                   total_loss.item() / count if count else math.nan)
+    if source_metrics:
+        result["sources"] = source_metrics.report()
+    return result
 
 
 def save_checkpoint(path: Path, value: dict) -> None:

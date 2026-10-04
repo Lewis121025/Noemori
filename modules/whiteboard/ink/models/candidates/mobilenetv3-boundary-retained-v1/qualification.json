@@ -1,0 +1,488 @@
+{
+  "candidate": {
+    "bytes": 17135980,
+    "sha256": "635608d8c79b2f4948035c35f19204bea35601c29188233dc789f575d5707dd5"
+  },
+  "state": "trained_and_exported_candidate_not_qualified",
+  "default_model_replaced": false,
+  "best_epoch": 8,
+  "training_interruption": {
+    "exit_code": 143,
+    "signal": "SIGTERM",
+    "cause": "unconfirmed",
+    "planned_epochs": 12,
+    "completed_epochs": 11,
+    "optimizer_resumed": false,
+    "policy": "evaluate_complete_validation_selected_checkpoint_without_additional_training"
+  },
+  "validation_macro_f1": 0.9389956653314386,
+  "test_macro_f1": 0.9608443583071984,
+  "training_views": 102419,
+  "selection": {
+    "source_class_macro_f1": 0.9096913628473752,
+    "source_class_pairs": 25,
+    "legacy_recall_tolerance": 0.02,
+    "passes_legacy_retention": false,
+    "legacy_regressions": [
+      {
+        "source": "synthetic",
+        "label": "rectangle",
+        "before_recall": 0.992526158445441,
+        "after_recall": 0.9626307922272048,
+        "excess_drop": 0.009895366218236185
+      },
+      {
+        "source": "synthetic",
+        "label": "triangle",
+        "before_recall": 1.0,
+        "after_recall": 0.9444444444444444,
+        "excess_drop": 0.035555555555555576
+      },
+      {
+        "source": "synthetic",
+        "label": "arrow",
+        "before_recall": 1.0,
+        "after_recall": 0.9649122807017544,
+        "excess_drop": 0.015087719298245612
+      }
+    ],
+    "worst_excess_drop": 0.035555555555555576
+  },
+  "added_data": {
+    "real_boundary": {
+      "train": 462,
+      "val": 119,
+      "test": 129,
+      "review": 410,
+      "annotation_kind": "ai_visual_review",
+      "qualification": "limited_diagnostic_annotation_consistency_issues"
+    },
+    "synthetic_ellipse_boundary": {
+      "train": 564,
+      "val": 60,
+      "test": 0
+    },
+    "modern_chinese_negatives": {
+      "train": 4800,
+      "val": 600,
+      "test": 600,
+      "review": 9000,
+      "writers": 100,
+      "eligible_characters": [
+        "零",
+        "五",
+        "六",
+        "百",
+        "万",
+        "亿"
+      ],
+      "annotation_kind": "mapped_source_character"
+    }
+  },
+  "reasons": [
+    "旧来源验证召回约束未通过：矩形、三角形和箭头退步。",
+    "干净椭圆由6/12提升到9/12，但干净矩形由36/36下降到27/36。",
+    "固定旧AI复核一致数由88/90下降到85/90；旧端侧合成测试由455/456下降到446/456。",
+    "HDS来源、MMG手势、数字负例及上一轮中文退步得到改善，但这些收益不能消除其他来源退步。",
+    "训练集定向审计发现近圆标签判据不一致；新边界成绩仅作为AI标签有限诊断。"
+  ],
+  "real_test_comparison": [
+    {
+      "run": "mobilenetv3-native-coverage-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 0.16856060606060605,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9998105342932929,
+          "negative_shape_candidates_at_0.5": 1
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.9206062793215446,
+          "negative_shape_candidates_at_0.5": 205
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.8602150537634409,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.6821705426356589,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-real-expanded-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 0.9416666666666667,
+          "negative_shape_candidates_at_0.5": 34
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 0.9962121212121212,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9969685486926866,
+          "negative_shape_candidates_at_0.5": 16
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.9945867917719234,
+          "negative_shape_candidates_at_0.5": 15
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.8566308243727598,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.7131782945736435,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-boundary-retained-v1",
+      "sources": {
+        "chinese_numbers/mapped_source_character": {
+          "samples": 600,
+          "accuracy": 1.0,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "hds/human_annotation": {
+          "samples": 1056,
+          "accuracy": 0.9971590909090909,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "kuzushiji_kanji/mapped_source_character": {
+          "samples": 5278,
+          "accuracy": 0.9992421371731717,
+          "negative_shape_candidates_at_0.5": 4
+        },
+        "pendigits/mapped_source_character": {
+          "samples": 2771,
+          "accuracy": 0.9938650306748467,
+          "negative_shape_candidates_at_0.5": 15
+        },
+        "quickdraw/ai_visual_review": {
+          "samples": 279,
+          "accuracy": 0.8888888888888888,
+          "negative_shape_candidates_at_0.5": 0
+        },
+        "quickdraw_boundary/ai_visual_review": {
+          "samples": 129,
+          "accuracy": 0.7596899224806202,
+          "negative_shape_candidates_at_0.5": 0
+        }
+      }
+    }
+  ],
+  "legacy_test_comparison": [
+    {
+      "run": "mobilenetv3-native-coverage-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.9444444444444444,
+          "recalls": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.5,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.9757575757575757,
+          "recalls": {
+            "line": 0.9916666666666667,
+            "arrow": 0.975,
+            "other": 0.9740740740740741
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9777777777777777,
+          "recalls": {
+            "line": 1.0,
+            "circle": 0.8,
+            "ellipse": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 0.9978070175438597,
+          "recalls": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0,
+            "other": 0.9871794871794872
+          }
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-real-expanded-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.9444444444444444,
+          "recalls": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.5,
+            "arc": 1.0,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.9856060606060606,
+          "recalls": {
+            "line": 0.9916666666666667,
+            "arrow": 0.9583333333333334,
+            "other": 0.9879629629629629
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9555555555555556,
+          "recalls": {
+            "line": 1.0,
+            "circle": 0.8,
+            "ellipse": 0.3333333333333333,
+            "rectangle": 1.0,
+            "triangle": 1.0,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 0.9912280701754386,
+          "recalls": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 0.9583333333333334,
+            "triangle": 1.0,
+            "arrow": 0.9861111111111112,
+            "other": 1.0
+          }
+        }
+      }
+    },
+    {
+      "run": "mobilenetv3-boundary-retained-v1",
+      "sources": {
+        "clean_geometry_protocol_native": {
+          "samples": 108,
+          "accuracy": 0.8888888888888888,
+          "recalls": {
+            "line": 1.0,
+            "circle": 1.0,
+            "ellipse": 0.75,
+            "arc": 1.0,
+            "rectangle": 0.75,
+            "triangle": 1.0,
+            "arrow": 1.0
+          }
+        },
+        "mmg_native_test": {
+          "samples": 1320,
+          "accuracy": 0.990909090909091,
+          "recalls": {
+            "line": 0.9833333333333333,
+            "arrow": 0.9916666666666667,
+            "other": 0.9916666666666667
+          }
+        },
+        "quickdraw_native_ai_review": {
+          "samples": 90,
+          "accuracy": 0.9444444444444444,
+          "recalls": {
+            "line": 1.0,
+            "circle": 0.8,
+            "ellipse": 0.6666666666666666,
+            "rectangle": 0.9,
+            "triangle": 0.9333333333333333,
+            "other": 0.9767441860465116
+          }
+        },
+        "synthetic_native_test": {
+          "samples": 456,
+          "accuracy": 0.9780701754385965,
+          "recalls": {
+            "line": 0.9777777777777777,
+            "circle": 1.0,
+            "ellipse": 1.0,
+            "arc": 1.0,
+            "rectangle": 0.9444444444444444,
+            "triangle": 0.9047619047619048,
+            "arrow": 0.9861111111111112,
+            "other": 1.0
+          }
+        }
+      }
+    }
+  ],
+  "parity": {
+    "samples": 288,
+    "top1_mismatches": 0,
+    "probability_atol": 0.001,
+    "max_logit_abs_error": 0.00029087066650390625,
+    "max_probability_abs_error": 9.85562801361084e-05
+  },
+  "native_validation_parity": {
+    "samples": 160,
+    "top1_mismatches": 0,
+    "probability_atol": 0.001,
+    "max_logit_abs_error": 0.00021004676818847656,
+    "max_probability_abs_error": 4.082918167114258e-05,
+    "scope": "product_rust_rendered_validation_inputs_cpu_pytorch_ort"
+  },
+  "cpu_benchmark": {
+    "scope": "local_server_cpu_benchmark",
+    "cpu": "INTEL(R) XEON(R) GOLD 6530",
+    "threads": 4,
+    "warm_inference": {
+      "count": 200,
+      "p50_ms": 2.2323080338537693,
+      "p95_ms": 2.282031299546361,
+      "p99_ms": 2.315078228712082
+    },
+    "png_preprocess_inference": {
+      "count": 200,
+      "p50_ms": 3.1730979681015015,
+      "p95_ms": 3.244994720444083,
+      "p99_ms": 3.3946342486888135
+    },
+    "rss_increment_bytes": 56696832,
+    "limitations": [
+      "Xeon服务器实测，不是普通用户电脑或最低配置验收。",
+      "包含PNG读取与归一化，不含笔迹分组、SVG栅格化、IPC、几何拟合和UI绘制。",
+      "模型与图片可能已在文件系统缓存；不能作为冷磁盘首次启动耗时。"
+    ]
+  },
+  "annotation_audit": {
+    "dataset": "shape-boundary-review-v1",
+    "reviewer": "codex_visual_second_pass",
+    "scope": "training_only_targeted_annotation_consistency_audit",
+    "reviewed_counts": {
+      "ellipse_axis_ratio_over_093": 18,
+      "circle_axis_ratio_below_090": 16
+    },
+    "reviewed_count_is_error_count": false,
+    "val_test_or_predictions_read": false,
+    "frozen_data_changed": false,
+    "qualification": "limited_diagnostic_not_geometry_gold",
+    "findings": [
+      "不同标签接受的整体形变程度重叠，近圆歧义未一致隔离。",
+      "两类各使用固定概括理由，不能充分解释逐图标签差异。",
+      "QuickDraw提示词和轴比统计不能补足用户意图或几何真值。"
+    ],
+    "examples": [
+      {
+        "sample_id": "9aff2673725f7bfaa38b8d543d008e87",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/9aff2673725f7bfaa38b8d543d008e87.png",
+        "frozen_label": "ellipse",
+        "axis_ratio": 0.96192123,
+        "finding": "整体近圆，稳定椭圆长轴证据不足。"
+      },
+      {
+        "sample_id": "6806926bdf5a61417a066dd642c22e4b",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/6806926bdf5a61417a066dd642c22e4b.png",
+        "frozen_label": "ellipse",
+        "axis_ratio": 0.9333268,
+        "finding": "近圆伴右侧平直，椭圆长轴不明确。"
+      },
+      {
+        "sample_id": "8a46891a94ffbf67ae86b1c946f00b02",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/8a46891a94ffbf67ae86b1c946f00b02.png",
+        "frozen_label": "ellipse",
+        "axis_ratio": 0.93772172,
+        "finding": "带直边的近圆轮廓，冻结理由不足。"
+      },
+      {
+        "sample_id": "3a715be96001f3224f0ae6fc5fd17ff5",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/3a715be96001f3224f0ae6fc5fd17ff5.png",
+        "frozen_label": "ellipse",
+        "axis_ratio": 0.94515734,
+        "finding": "顶部与底部平直，边界类别歧义。"
+      },
+      {
+        "sample_id": "f49e873c79d351e3dff6fbb70bd76769",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/f49e873c79d351e3dff6fbb70bd76769.png",
+        "frozen_label": "circle",
+        "axis_ratio": 0.83011369,
+        "finding": "整体水平拉长，与椭圆接受判据不一致。"
+      },
+      {
+        "sample_id": "078f1cbc9d738ce2ff1da7074d065820",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/078f1cbc9d738ce2ff1da7074d065820.png",
+        "frozen_label": "circle",
+        "axis_ratio": 0.83833535,
+        "finding": "整体水平压扁，不只是局部抖动。"
+      },
+      {
+        "sample_id": "f21c592b594b284d63f0620e38268f6f",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/f21c592b594b284d63f0620e38268f6f.png",
+        "frozen_label": "circle",
+        "axis_ratio": 0.88068782,
+        "finding": "斜向长轴较连贯，两类视觉判据重叠。"
+      },
+      {
+        "sample_id": "ec47507b7d3f6a2782f75f2476196f52",
+        "image": "/data/pxy/Nous/.artifacts/whiteboard/shape-boundary-review-v1/images/ec47507b7d3f6a2782f75f2476196f52.png",
+        "frozen_label": "circle",
+        "axis_ratio": 0.80953626,
+        "finding": "局部凹陷、收笔及不对称使标签不确定。"
+      }
+    ],
+    "required_for_gold": "独立人工盲审、标注一致性检查及近圆歧义隔离。"
+  },
+  "comparison_reports": {
+    "real": {
+      "bytes": 78915,
+      "sha256": "046557ab50474b765511cb0dd0c21cc9945bcdbaba4cd9d5db82773b7a467330"
+    },
+    "legacy": {
+      "bytes": 42057,
+      "sha256": "21ecdc5889111c506b9420585a48dab04c892c1c0dbdca5d17e7d260b2b59701"
+    }
+  },
+  "limitations": [
+    "训练和测试不包含Noemori真实设备实采，不能声称产品端到端修复准确率。",
+    "现代中文仅覆盖六个复杂数字字类，扫描栅格不等同于白板轨迹。",
+    "分类候选数量未经过产品几何修复校验，不等同于实际误修次数。",
+    "SIGTERM终止原因未确认；只验收已完整保存的11轮中所选权重，没有假装精确恢复优化器。"
+  ]
+}

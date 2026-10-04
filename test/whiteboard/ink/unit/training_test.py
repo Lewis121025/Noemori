@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from modules.whiteboard.ink.training.data import ImageDataset, ShapeDataset, balanced_sampler, image_transform
+from modules.whiteboard.ink.training.data import ImageDataset, RetentionDataset, ShapeDataset, balanced_sampler, image_transform
 from modules.whiteboard.ink.training.metrics import classification_report
 from modules.whiteboard.ink.training.train import build_loaders
 
@@ -86,6 +86,14 @@ class TrainingContractTests(unittest.TestCase):
         self.assertLess(counts["reviewed"], 600)
         self.assertGreater(counts["letters"], 400)
         self.assertLess(counts["letters"], 600)
+
+    def test_new_boundary_sources_are_not_retained_from_the_old_teacher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.png"
+            Image.new("RGB", (224, 224), "white").save(path)
+            data = RetentionDataset([(path, 2)] * 3, image_transform((0,) * 3, (1,) * 3, False),
+                                    ["synthetic_native", "synthetic_boundary_native", "quickdraw_boundary/ai_visual_review"])
+            self.assertEqual([data[i][2] for i in range(3)], [True, False, False])
 
     def test_only_training_discards_tiny_tail_batch(self):
         class InMemoryImages(ImageDataset):

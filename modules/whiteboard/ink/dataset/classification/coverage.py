@@ -43,6 +43,11 @@ def coverage_specs() -> Iterator[GeometrySpec]:
                                                             "apex_offset": (-35, 0, 35)[index % 3]}, angle)
         yield GeometrySpec(f"arrow-{index}", "arrow", {"length": 240, "head_length": 45 + index * 7,
                                                        "head_half_width": 32 + index * 3}, angle)
+    # 原椭圆只到0.8附近，边界段需明确参数监督；不根据保留诊断的预测挑选角度。
+    for ratio in (.82, .86, .88, .90, .92, .94, .96):
+        for angle in (7, 19, 33, 51, 76, 103, 129, 167):
+            yield GeometrySpec(f"ellipse-boundary-{ratio}-angle-{angle}", "ellipse",
+                               {"rx": 120, "ry": 120 * ratio}, angle)
 
 
 def diagnostic_specs() -> Iterator[GeometrySpec]:

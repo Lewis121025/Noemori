@@ -79,6 +79,13 @@ class CleanCoverageTests(unittest.TestCase):
         for actual, expected in zip(lengths, (250, 240, 250, 240)):
             self.assertAlmostEqual(actual, expected, places=6)
 
+    def test_explicit_ellipse_boundary_grid_covers_missing_axis_ratios(self):
+        ellipses = [spec for spec in coverage_specs() if spec.name.startswith("ellipse-boundary-")]
+        self.assertEqual(len(ellipses), 56)
+        ratios = {round(spec.parameters["ry"] / spec.parameters["rx"], 2) for spec in ellipses}
+        self.assertEqual(ratios, {.82, .86, .88, .9, .92, .94, .96})
+        self.assertTrue(all(spec.label == "ellipse" for spec in ellipses))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -106,6 +106,14 @@ class CoveragePublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "参数复现"):
             validate_coverage_dataset(destination, self.parent, self.diagnostics)
 
+    def test_reapplying_known_grid_preserves_rows_without_duplicate_views(self):
+        first, second = self.root / "first", self.root / "second"
+        generate_coverage_dataset(self.parent, self.diagnostics, first)
+        generate_coverage_dataset(first, self.diagnostics, second)
+        for split in ("train", "val", "test", "review"):
+            self.assertEqual((first / f"{split}.jsonl").read_bytes(), (second / f"{split}.jsonl").read_bytes())
+        self.assertEqual(len(list((first / "images").iterdir())), len(list((second / "images").iterdir())))
+
     def test_diagnostics_cover_seven_classes_and_never_enter_training(self):
         counts = validate_diagnostics(self.diagnostics)
         self.assertEqual(counts["cases"], 108)

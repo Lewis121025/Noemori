@@ -67,6 +67,14 @@ class ShapeDataset(ImageDataset):
         self.directory = directory.resolve()
         self.records = []
         sources = []
+        source_file = directory / "coverage-source-groups.jsonl"
+        source_groups = {}
+        if source_file.exists():
+            for entry in map(json.loads, source_file.read_text().splitlines()):
+                if (entry["sample_id"] in source_groups or entry["source"] != "synthetic_boundary"
+                        or not entry["group_id"]):
+                    raise ValueError("合成边界来源身份无效")
+                source_groups[entry["sample_id"]] = entry
         counts = [0] * len(LABELS)
         with (directory / f"{split}.jsonl").open() as handle:
             for line in handle:
@@ -81,7 +89,10 @@ class ShapeDataset(ImageDataset):
                 label = LABELS.index(sample["label"])
                 counts[label] += 1
                 self.records.append((image_path, label))
-                sources.append("synthetic")
+                origin = source_groups.get(sample["sample_id"])
+                if origin and origin["group_id"] != sample["group_id"]:
+                    raise ValueError("合成边界来源组与样本不符")
+                sources.append(origin["source"] if origin else "synthetic")
         if extra_records:
             if split == "test":
                 raise ValueError("补充数据不能改变保留测试集")
@@ -96,13 +107,25 @@ class ShapeDataset(ImageDataset):
         super().__init__(self.records, transform, sources)
 
 
-def balanced_sampler(data: ImageDataset, seed: int) -> WeightedRandomSampler:
+class RetentionDataset(ImageDataset):
+    """训练时标记可重放的旧来源；该标记不进入图像或部署模型。"""
+
+    def __getitem__(self, index: int):
+        """返回图像、真值及旧来源布尔标记；独立复核的新图形不采用旧模型约束。"""
+        from .selection import legacy_source
+        tensor, label = super().__getitem__(index)
+        return tensor, label, legacy_source(self.sources[index])
+
+
+def balanced_sampler(data: ImageDataset, seed: int, num_samples: int | None = None) -> WeightedRandomSampler:
     """先均衡类别，再均衡该类的来源，防止大规模字母集淹没几何或少量动物负例。"""
     counts = Counter((label, source) for (_, label), source in zip(data.records, data.sources))
     origins = Counter(label for label, _ in counts)
     weights = [1 / (origins[label] * counts[label, source])
                for (_, label), source in zip(data.records, data.sources)]
-    return WeightedRandomSampler(weights, len(data), replacement=True,
+    if num_samples is not None and (type(num_samples) is not int or num_samples < 1):
+        raise ValueError("均衡采样数量必须为正整数")
+    return WeightedRandomSampler(weights, len(data) if num_samples is None else num_samples, replacement=True,
                                  generator=torch.Generator().manual_seed(seed))
 
 

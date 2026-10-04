@@ -15,8 +15,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from ..dataset.classification.schema import LABELS
-from .data import ImageDataset, ShapeDataset, balanced_sampler, image_transform, seed_worker
+from .data import ImageDataset, RetentionDataset, ShapeDataset, balanced_sampler, image_transform, seed_worker
 from .engine import reestimate_batch_norm, run_epoch, save_checkpoint
+from .selection import selection_key, selection_report
 
 MODEL = "mobilenetv3_large_100.ra_in1k"
 
@@ -35,7 +36,7 @@ def write_json(path: Path, value: dict) -> None:
 def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
                   workers: int, seed: int, pin_memory: bool, supplement: dict | None = None,
                   gestures: dict | None = None, native_images: Path | None = None,
-                  external: dict | None = None) -> dict:
+                  external: dict | None = None, retention: bool = False) -> dict:
     """建立三个独立加载器；仅训练启用增强，真实补充必须由复核入口提供。"""
     loaders, datasets = {}, {}
     for split in ("train", "val", "test"):
@@ -62,6 +63,8 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
         datasets, exclusions = merge_external(datasets, external, reserved)
         external["exclusions"] = exclusions
     for split, data in datasets.items():
+        if split == "train" and retention:
+            data = RetentionDataset(data.records, data.transform, data.sources)
         if split == "train" and len(data) < batch_size:
             raise ValueError("训练集不足一个完整批次，请降低 batch-size")
         loaders[split] = DataLoader(
@@ -135,8 +138,22 @@ def configure(args) -> tuple:
     if getattr(args, "external_datasets", None):
         from .external import load_external_packages
         external = load_external_packages(args.external_datasets)
+        if getattr(args, "external_native", None):
+            from .external import load_external_native
+            external = load_external_native(args.external_native, external)
     loaders = build_loaders(args.dataset, mean, std, args.batch_size, args.workers,
-                            args.seed, device.type == "cuda", supplement, gestures, args.native_images, external)
+                            args.seed, device.type == "cuda", supplement, gestures, args.native_images, external,
+                            bool(getattr(args, "retain_checkpoint", None)))
+    teacher, retention_metadata = None, None
+    if getattr(args, "retain_checkpoint", None):
+        from .inference import load_classifier
+        from ..dataset.classification.acquire import file_record
+        teacher, _, parent = load_classifier(args.retain_checkpoint, device)
+        teacher.requires_grad_(False)
+        reference = run_epoch(teacher, loaders["val"], device, report_sources=True)
+        retention_metadata = {"checkpoint": str(args.retain_checkpoint.resolve()),
+                              "file": file_record(args.retain_checkpoint), "reference_validation": reference,
+                              "temperature": 2., "strength": .15, "scope": "legacy_training_sources_only"}
     from .external import source_counts
     metadata = {
         "model": MODEL, "labels": list(LABELS), "dataset": str(args.dataset.resolve()),
@@ -158,6 +175,9 @@ def configure(args) -> tuple:
         "source_view_counts": {split: source_counts(loaders[split].dataset) for split in ("train", "val", "test")},
         "external_datasets": external["metadata"] if external else [],
         "external_exclusions": external.get("exclusions") if external else None,
+        "external_native": external.get("native") if external else None,
+        "retention": retention_metadata,
+        "selection_protocol": "source_class_with_legacy_retention" if teacher is not None else "pooled_macro_f1",
         "evaluation_scope": ("synthetic_and_source_separated_real_packages" if external else
                              "synthetic_and_writer_isolated_mmg" if gestures else
                              "synthetic_with_ai_reviewed_negative_validation" if supplement else "synthetic_only"),
@@ -172,10 +192,35 @@ def configure(args) -> tuple:
         "limitations": ["合成保留测试集不代表真实手写准确率。", "QuickDraw 未复核提示标签不参与训练或模型选择。",
                         "other 仅覆盖本数据集负例，不构成未知输入拒绝能力保证。"],
     }
-    return model.to(device), loaders, device, metadata
+    return model.to(device), loaders, device, metadata, teacher
 
 
-def fit(model, loaders, device, args, metadata) -> dict:
+def calibrated_validation(model, loaders, device, args, metadata) -> tuple[dict, dict]:
+    """以未增强训练图估计当前候选的部署统计；只用验证集选择统计，不接触测试集。"""
+    train = loaders["train"].dataset
+    preprocessing = metadata["preprocessing"]
+    native = ImageDataset(train.records, image_transform(tuple(preprocessing["mean"]),
+                          tuple(preprocessing["std"]), False), train.sources)
+    loader = DataLoader(native, batch_size=args.batch_size, num_workers=min(args.workers, 4),
+                        sampler=balanced_sampler(native, args.seed, min(len(native), args.batch_size * 64)), drop_last=True)
+    buffers = {name: value.clone() for name, value in model.named_buffers()}
+    details = reestimate_batch_norm(model, loader, device)
+    after = run_epoch(model, loaders["val"], device, report_sources=True)
+    candidate_buffers = {name: value.clone() for name, value in model.named_buffers()}
+    for name, value in model.named_buffers():
+        value.copy_(buffers[name])
+    before = run_epoch(model, loaders["val"], device, report_sources=True)
+    reference = metadata["retention"]["reference_validation"]
+    selected = selection_key(after, reference) > selection_key(before, reference)
+    if selected:
+        for name, value in model.named_buffers():
+            value.copy_(candidate_buffers[name])
+    return (after if selected else before), {"selected_reestimation": selected, "details": details,
+                                             "before_selection": selection_report(before, reference),
+                                             "after_selection": selection_report(after, reference)}
+
+
+def fit(model, loaders, device, args, metadata, teacher=None) -> dict:
     """按验证集宏 F1 选择最佳权重；早停不查看测试集，失败保留已保存的完整权重。"""
     head_ids = {id(p) for p in model.get_classifier().parameters()}
     backbone = [p for p in model.parameters() if id(p) not in head_ids]
@@ -183,28 +228,35 @@ def fit(model, loaders, device, args, metadata) -> dict:
         {"params": backbone, "lr": args.learning_rate},
         {"params": model.get_classifier().parameters(), "lr": args.learning_rate * 10}], weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    best_key = (-1.0, -math.inf)
+    guarded = metadata.get("selection_protocol") == "source_class_with_legacy_retention"
+    reference = metadata["retention"]["reference_validation"] if guarded else None
+    best_key = None
     best_epoch = 0
     for epoch in range(1, args.epochs + 1):
         started = time.monotonic()
-        train = run_epoch(model, loaders["train"], device, optimizer)
-        validation = run_epoch(model, loaders["val"], device)
+        train = run_epoch(model, loaders["train"], device, optimizer, teacher=teacher)
+        normalization = None
+        if guarded:
+            validation, normalization = calibrated_validation(model, loaders, device, args, metadata)
+        else:
+            validation = run_epoch(model, loaders["val"], device)
         scheduler.step()
         result = {"epoch": epoch, "seconds": time.monotonic() - started,
                   "train": train, "val": validation}
         with (args.output / "epochs.jsonl").open("a") as handle:
             handle.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n")
         checkpoint = {"model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
-                      "epoch": epoch, "metadata": metadata, "validation": validation}
-        key = (validation["macro_f1"], -validation["loss"])
-        if key > best_key:
+                      "epoch": epoch, "metadata": metadata, "validation": validation,
+                      "normalization": normalization}
+        key = selection_key(validation, reference) if guarded else (validation["macro_f1"], -validation["loss"])
+        if best_key is None or key > best_key:
             best_key, best_epoch = key, epoch
             save_checkpoint(args.output / "best.pt", checkpoint)
         save_checkpoint(args.output / "last.pt", checkpoint)
         print(json.dumps({"epoch": epoch, "seconds": round(result["seconds"], 2),
                           "train_loss": train["loss"], "val_loss": validation["loss"],
                           "val_accuracy": validation["accuracy"], "val_macro_f1": validation["macro_f1"],
-                          "best_epoch": best_epoch}), flush=True)
+                          "best_epoch": best_epoch, "selection": selection_report(validation, reference) if guarded else None}), flush=True)
         write_json(args.output / "status.json", {"state": "training", "last_epoch": epoch,
                                                   "best_epoch": best_epoch, "last_result": result})
         if epoch - best_epoch >= args.patience:
@@ -216,6 +268,13 @@ def finalize(model, loaders, device, args, metadata, best_epoch: int, last_epoch
     """验证选择部署统计后才做测试；重估失败或退步不能覆盖原始最佳权重。"""
     best = torch.load(args.output / "best.pt", map_location="cpu", weights_only=True)
     model.load_state_dict(best["model"])
+    if metadata.get("selection_protocol") == "source_class_with_legacy_retention":
+        metadata["normalization_selection"] = best["normalization"]
+        metadata["selected_validation"] = selection_report(best["validation"], metadata["retention"]["reference_validation"])
+        best["metadata"] = metadata
+        save_checkpoint(args.output / "best.pt", best)
+        write_json(args.output / "run.json", metadata)
+        return evaluate_selected(model, loaders, device, metadata, best["validation"], best_epoch, last_epoch)
     preprocessing = metadata["preprocessing"]
     train_data = loaders["train"].dataset
     native = ImageDataset(train_data.records, image_transform(tuple(preprocessing["mean"]),
@@ -236,10 +295,15 @@ def finalize(model, loaders, device, args, metadata, best_epoch: int, last_epoch
     best["metadata"] = metadata
     save_checkpoint(args.output / "best.pt", best)
     write_json(args.output / "run.json", metadata)
+    return evaluate_selected(model, loaders, device, metadata, best["validation"], best_epoch, last_epoch)
+
+
+def evaluate_selected(model, loaders, device, metadata, validation, best_epoch: int, last_epoch: int) -> dict:
+    """候选固定后才评估测试来源；结果用于验收，不回流训练或权重排序。"""
     # 测试集只在验证选择结束后评估一次，不用于阈值、轮次或超参数选择。
     test = run_epoch(model, loaders["test"], device)
     result = {"state": "completed", "best_epoch": best_epoch, "last_epoch": last_epoch,
-            "validation": best["validation"], "test": test,
+            "validation": validation, "test": test,
             "evaluation_scope": metadata["evaluation_scope"],
             "test_scope": metadata["evaluation_scope"]}
     if "gesture_test" in loaders:
@@ -268,6 +332,8 @@ def main() -> None:
     parser.add_argument("--gesture-dataset", type=Path)
     parser.add_argument("--native-images", type=Path)
     parser.add_argument("--external-datasets", type=Path, nargs="+")
+    parser.add_argument("--external-native", type=Path)
+    parser.add_argument("--retain-checkpoint", type=Path)
     parser.add_argument("--initialize", type=Path)
     args = parser.parse_args()
     if (args.reviewed_negatives is None) != (args.heldout_review is None):
@@ -276,12 +342,14 @@ def main() -> None:
             or not 0 <= args.seed < 2 ** 32 or not math.isfinite(args.learning_rate)
             or args.learning_rate <= 0):
         parser.error("训练轮数、批量和学习率必须为正，随机种子与进程数须在有效范围")
-    model, loaders, device, metadata = configure(args)
+    if args.external_native and not args.external_datasets:
+        parser.error("外部端侧视图必须同时提供其来源数据包")
+    model, loaders, device, metadata, teacher = configure(args)
     args.output.mkdir(parents=True)
     write_json(args.output / "run.json", metadata)
     write_json(args.output / "status.json", {"state": "training", "last_epoch": 0})
     try:
-        result = fit(model, loaders, device, args, metadata)
+        result = fit(model, loaders, device, args, metadata, teacher)
         write_json(args.output / "metrics.json", result)
         write_json(args.output / "status.json", result)
         print(json.dumps(result, ensure_ascii=False), flush=True)
