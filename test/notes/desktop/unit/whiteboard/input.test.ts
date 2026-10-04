@@ -54,12 +54,12 @@ describe("无工具栏手势状态机", () => {
     expect(board.document.strokes[0]?.points).toEqual(expected);
   });
 
-  it("停笔保持原始轮廓，未圈选内容时不改成几何模板", () => {
+  it("未提供分类能力时停笔保持原始轮廓", async () => {
     const board = new WhiteboardInput(emptyWhiteboard(), () => {});
     const samples = Array.from({ length: 13 }, (_, i) => p(10 + i * 8, 30 + Math.sin(i) * 0.8));
     board.begin(samples[0]!);
     for (const sample of samples.slice(1)) board.update(sample);
-    expect(board.hold()).toBe(false);
+    expect(await board.hold()).toBe(false);
     expect(board.points).toEqual(samples);
     board.finish();
     expect(board.document.strokes[0]?.points).toEqual(samples);
@@ -146,14 +146,17 @@ describe("无工具栏手势状态机", () => {
     board.applyHistory("undo");
     expect(board.document).toEqual(original);
   });
-  it("普通画圈是笔迹，停笔确认圈选才选择且不产生历史", () => {
+  it("普通画圈保持笔迹且停笔不会选中被包围内容，全选后的移动仍可撤销", async () => {
     const board = new WhiteboardInput(initial, () => {});
     board.begin(loop[0]!);
     for (const point of loop.slice(1)) board.update(point);
-    expect(board.hold()).toBe(true);
+    expect(await board.hold()).toBe(false);
+    expect([...board.selection]).toEqual([]);
     board.finish();
-    expect([...board.selection]).toEqual(["a"]);
+    expect(board.document.strokes).toHaveLength(2);
+    board.applyHistory("undo");
     expect(board.canUndo).toBe(false);
+    board.selectAll();
     board.begin(p(40, 40));
     board.update(p(60, 60));
     expect(board.document).toEqual(initial);

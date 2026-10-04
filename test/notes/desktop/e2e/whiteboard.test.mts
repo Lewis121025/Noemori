@@ -78,7 +78,15 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       await page.mouse.down();
       for (const [x, y] of points.slice(1))
         await page.mouse.move(box.x + x, box.y + y, { steps: 4 });
-      if (hold) await page.locator(".whiteboard .selection").waitFor();
+      if (hold) {
+        try {
+          await page.locator(".whiteboard .pending.corrected").waitFor({ timeout: 5000 });
+        } catch (cause) {
+          throw new Error(
+            `停笔没有生成预览：${(await page.locator(".whiteboard .error").allTextContents()).join("；")}；${String(cause)}`,
+          );
+        }
+      }
       await page.mouse.up();
     };
     await draw([
@@ -113,8 +121,12 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       ],
       true,
     );
-    expect(await page.locator(".whiteboard path.selected").count()).toBe(2);
-    expect(await strokes.count()).toBe(3);
+    expect(await page.locator(".whiteboard path.selected").count()).toBe(0);
+    expect(await strokes.count()).toBe(4);
+    await command(app, "undo");
+    await expect.poll(() => strokes.count()).toBe(3);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    expect(await page.locator(".whiteboard path.selected").count()).toBe(3);
     await draw([
       [200, 200],
       [260, 240],
@@ -183,7 +195,7 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
     await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
     await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
-    // 停笔保留自由笔迹，抬笔提交相同轮廓且可整体撤销。
+    // 停笔预览规范直线，抬笔提交修复轮廓且可整体撤销。
     const inputBox = await page
       .getByRole("application", { name: "白板", exact: true })
       .boundingBox();
@@ -194,13 +206,14 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       await page.mouse.move(inputBox.x + 100 + i * 8, inputBox.y + 100 + Math.sin(i));
     const pending = page.locator(".whiteboard .pending");
     const original = await pending.getAttribute("d");
-    await page.waitForTimeout(550);
-    expect(await pending.getAttribute("d")).toBe(original);
+    await page.locator(".whiteboard .pending.corrected").waitFor({ timeout: 5000 });
+    const repaired = await pending.getAttribute("d");
+    expect(repaired).not.toBe(original);
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     await page.mouse.up();
     await expect
       .poll(() => page.locator(".whiteboard [data-stroke-id]").getAttribute("d"))
-      .toBe(original);
+      .toBe(repaired);
     await command(app, "undo");
     await expect.poll(() => page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     // 通过浏览器输入协议发送真实 pen 类型事件，验证压力和未抬笔的离开门禁。

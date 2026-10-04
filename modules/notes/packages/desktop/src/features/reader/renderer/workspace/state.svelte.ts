@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import type { InkPoint } from "../../shared/whiteboard/model";
 import type { VaultOpenProgress } from "../../shared/vault-opening";
 import type {
   ExportFormat,
@@ -199,6 +200,9 @@ export class ReaderWorkspaceController {
   private compositionWaiters: Array<() => void> = [];
   private readonly host: PaneHost;
   private readonly documentSession: SessionWrite;
+
+  /** 当前一笔的后台静态分类；文档、预览和撤销均由白板输入状态机负责。 */
+  recognizeWhiteboard = (points: readonly InkPoint[]) => this.api.whiteboardRecognize(points);
 
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
   constructor(

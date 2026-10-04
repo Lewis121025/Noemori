@@ -67,6 +67,12 @@ export default defineConfig({
           });
         },
       },
+      {
+        name: "bundled-ink",
+        writeBundle() {
+          cpSync(resolve(".cache/ink"), resolve("out/main/ink"), { recursive: true });
+        },
+      },
     ],
     build: {
       rollupOptions: {

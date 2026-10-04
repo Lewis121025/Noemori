@@ -8,7 +8,7 @@ export type InkStroke = {
   readonly points: readonly InkPoint[];
 };
 
-/** 独立白板文件的唯一内容；视口与临时圈选不属于文档历史。 */
+/** 独立白板文件的唯一内容；视口、选择与临时修正预览不属于文档历史。 */
 export type WhiteboardDocument = { readonly version: 1; readonly strokes: readonly InkStroke[] };
 
 /** 世界坐标的有限范围，避免损坏文件或失控输入产生不可绘制的路径。 */

@@ -5,7 +5,7 @@ export type BoardViewport = { readonly x: number; readonly y: number; readonly s
 /** 常规缩放下限；完整适配大画布后由输入状态机保留更小的下限。 */
 export const DEFAULT_MIN_SCALE = 0.1;
 const MAX_SCALE = 8;
-/** 圈选、命中与预览使用同一份世界坐标边界。 */
+/** 选择、命中与预览使用同一份世界坐标边界。 */
 export type InkBounds = { x: number; y: number; width: number; height: number };
 type Point = { readonly x: number; readonly y: number };
 
@@ -101,10 +101,6 @@ export function insideBounds(p: Point, bounds: InkBounds, margin = 0): boolean {
   );
 }
 
-function distance(a: Point, b: Point): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
 function pointSegment(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x,
     dy = b.y - a.y;
@@ -126,62 +122,6 @@ function segmentDistance(a: Point, b: Point, c: Point, d: Point): number {
     pointSegment(c, a, b),
     pointSegment(d, a, b),
   );
-}
-
-function insidePolygon(p: Point, polygon: readonly Point[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i]!,
-      b = polygon[j]!;
-    if (pointSegment(p, a, b) < 0.001) return true;
-    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
-      inside = !inside;
-  }
-  return inside;
-}
-
-function segmentInsidePolygon(a: Point, b: Point, polygon: readonly Point[]): boolean {
-  if (!insidePolygon({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, polygon)) return false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const c = polygon[j]!,
-      d = polygon[i]!;
-    if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return false;
-  }
-  return true;
-}
-
-/**
- * 闭合且达到最小面积的圈选只包含完整包围的笔迹；是否停笔确认由交互层决定。
- * @param points 已校验的世界坐标圈选轨迹，开放或退化轨迹返回空集合。
- * @param strokes 当前文档中已校验的笔迹，不会被修改。
- * @param scale 当前缩放，用于把手势阈值保持为固定屏幕距离。
- * @returns 被完整包围的笔迹身份，不产生内容事务。
- */
-export function lassoSelection(
-  points: readonly InkPoint[],
-  strokes: readonly InkStroke[],
-  scale: number,
-): string[] {
-  if (points.length < 6 || distance(points[0]!, points.at(-1)!) * scale > 14) return [];
-  let area = 0,
-    length = 0;
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!,
-      b = points[i]!;
-    // 以起点为局部原点计算三角扇面积，包含隐式闭合边且不受世界坐标平移影响。
-    area += cross(points[0]!, a, b);
-    length += distance(a, b);
-  }
-  if (Math.abs(area) * scale * scale < 800 || length * scale < 80) return [];
-  return strokes
-    .filter((stroke) =>
-      stroke.points.every(
-        (point, i) =>
-          insidePolygon(point, points) &&
-          (i === 0 || segmentInsidePolygon(stroke.points[i - 1]!, point, points)),
-      ),
-    )
-    .map((stroke) => stroke.id);
 }
 
 /** 提取主轴上有足够距离的折返段，采样密度和手抖不能增加折返次数。 */

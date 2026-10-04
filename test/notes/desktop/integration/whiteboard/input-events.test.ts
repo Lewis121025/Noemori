@@ -4,6 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import WhiteboardEditor from "@reader/renderer/whiteboard/WhiteboardEditor.svelte";
 import type { WhiteboardEditorApi } from "@reader/renderer/editor/editor-api";
 import { emptyWhiteboard, parseWhiteboard } from "@reader/shared/whiteboard/model";
+import type { InkPoint } from "@reader/shared/whiteboard/model";
+import type { ShapePrediction } from "@reader/shared/whiteboard/recognition";
 
 let component: ReturnType<typeof mount> | undefined;
 const registered: { api: WhiteboardEditorApi | null } = { api: null };
@@ -27,7 +29,10 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function start(readOnly = false) {
+async function start(
+  recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>,
+  readOnly = false,
+) {
   component = mount(WhiteboardEditor, {
     target: document.body,
     props: {
@@ -38,6 +43,7 @@ async function start(readOnly = false) {
       register: (api: WhiteboardEditorApi | null) => {
         registered.api = api;
       },
+      ...(recognize ? { recognize } : {}),
     },
   });
   flushSync();
@@ -147,12 +153,86 @@ it("合并事件作为唯一真实采样，父事件的不同坐标不会额外�
 });
 
 it("阅读模式只平移白板，不落笔也不显示编辑工具", async () => {
-  const host = await start(true);
+  vi.useFakeTimers();
+  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize, true);
   expect(host.querySelector('[aria-label="白板编辑工具栏"]')).toBeNull();
   pointer(host, "pointerdown", 10, 20);
   pointer(host, "pointermove", 70, 90);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(recognize).not.toHaveBeenCalled();
   pointer(host, "pointerup", 100, 120);
   expect(saved().strokes).toEqual([]);
   expect(host.querySelector("g")?.getAttribute("transform")).not.toContain("translate(0 0)");
   expect(registered.api?.historyAvailability()).toEqual({ undo: false, redo: false });
+});
+
+it("一笔直线停顿 450ms 后预览修复，抬笔保存修正且撤销恢复空白", async () => {
+  vi.useFakeTimers();
+  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30);
+  for (let i = 1; i <= 20; i++) pointer(host, "pointermove", 10 + i * 5, 30 + Math.sin(i) * 0.6);
+  const original = host.querySelector(".pending")!.getAttribute("d");
+  await vi.advanceTimersByTimeAsync(449);
+  expect(recognize).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  flushSync();
+  expect(recognize).toHaveBeenCalledTimes(1);
+  const preview = host.querySelector(".pending.corrected")!.getAttribute("d");
+  expect(preview).not.toBe(original);
+  expect(saved().strokes).toHaveLength(0);
+  pointer(host, "pointerup", 110, 30 + Math.sin(20) * 0.6, 0);
+  expect(saved().strokes[0]!.points).toHaveLength(2);
+  expect(host.querySelector("[data-stroke-id]")!.getAttribute("d")).toBe(preview);
+  registered.api!.history("undo");
+  expect(saved().strokes).toHaveLength(0);
+});
+
+it("停笔后抬笔不会等待推理，迟到结果与卸载后的错误都不污染文档", async () => {
+  vi.useFakeTimers();
+  let resolve!: (value: ShapePrediction) => void;
+  const task = new Promise<ShapePrediction>((yes) => {
+    resolve = yes;
+  });
+  const host = await start(() => task);
+  pointer(host, "pointerdown", 10, 20);
+  pointer(host, "pointermove", 100, 20);
+  await vi.advanceTimersByTimeAsync(450);
+  pointer(host, "pointerup", 110, 25);
+  const original = saved();
+  resolve({ label: "line", confidence: 0.99 });
+  await Promise.resolve();
+  flushSync();
+  expect(saved()).toEqual(original);
+  expect(host.querySelector(".corrected")).toBeNull();
+});
+
+it("移动会重置停笔计时；平移和取消不触发分类", async () => {
+  vi.useFakeTimers();
+  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 20);
+  pointer(host, "pointermove", 50, 20);
+  await vi.advanceTimersByTimeAsync(400);
+  pointer(host, "pointermove", 100, 20);
+  await vi.advanceTimersByTimeAsync(400);
+  expect(recognize).not.toHaveBeenCalled();
+  pointer(host, "pointercancel", 100, 20);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(recognize).not.toHaveBeenCalled();
+  host.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", bubbles: true }));
+  pointer(host, "pointerdown", 10, 20);
+  pointer(host, "pointermove", 100, 20);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(recognize).not.toHaveBeenCalled();
 });

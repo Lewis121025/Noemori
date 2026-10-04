@@ -50,6 +50,7 @@
           epoch={doc.epoch}
           register={navigation.registerWhiteboard}
           onDirty={pane.markDirty}
+          recognize={workspace.recognizeWhiteboard}
         />
       {:else if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor

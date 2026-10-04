@@ -98,6 +98,13 @@ export interface JsGraph {
   /** 边，按起止升序。 */
   edges: Array<JsGraphEdge>
 }
+/** 已验证类别和归一化概率。 */
+export interface JsShapePrediction {
+  /** 固定模型类别名。 */
+  label: string
+  /** 有限的 [0, 1] 置信度。 */
+  confidence: number
+}
 /** 链接解析结果：路径、锚点与歧义候选分开返回。 */
 export interface JsLinkTarget {
   /** `resolved`、`ambiguous` 或 `dead`。 */
@@ -297,6 +304,13 @@ export interface JsVaultEvent {
   healthy: boolean
   /** 失败时保留原因。 */
   message?: string
+}
+/** 轻量图形识别句柄；后台首次推理才加载固定权重，实例释放后会话随之释放。 */
+export declare class NativeInk {
+  /** 路径由主进程提供，页面不能指定任意权重或文件。 */
+  constructor(modelPath: string)
+  /** 一笔的交错 x/y 世界坐标；非法输入、加载或推理失败通过 Promise 拒绝。 */
+  classify(coordinates: Array<number>): Promise<JsShapePrediction>
 }
 /** 一个宿主的 Rust 运行时；显式 shutdown 负责等待磁盘任务与监听退出。 */
 export declare class NativeRuntime {

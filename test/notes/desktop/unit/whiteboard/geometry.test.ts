@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  erasedStrokes,
-  lassoSelection,
-  toWorld,
-  zoomAt,
-} from "@reader/shared/whiteboard/geometry";
+import { erasedStrokes, toWorld, zoomAt } from "@reader/shared/whiteboard/geometry";
 import type { InkPoint, InkStroke } from "@reader/shared/whiteboard/model";
 
 const p = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.5 });
@@ -23,30 +18,6 @@ const loop = [
 ];
 
 describe("白板几何与手势", () => {
-  it("近闭合圈选在平移后的世界坐标中保持相同选择", () => {
-    const almostClosed = [...loop.slice(0, -1), p(0, 10)];
-    const shift = (point: InkPoint) => ({ ...point, x: point.x - 2000, y: point.y + 2000 });
-    expect(lassoSelection(almostClosed, [line], 1)).toEqual(["inside"]);
-    expect(
-      lassoSelection(almostClosed.map(shift), [{ ...line, points: line.points.map(shift) }], 1),
-    ).toEqual(["inside"]);
-  });
-  it("凹形圈选不能选中端点在内、线段却跨出范围的笔迹", () => {
-    const concave = [
-      p(0, 0),
-      p(40, 0),
-      p(40, 70),
-      p(60, 70),
-      p(60, 0),
-      p(100, 0),
-      p(100, 100),
-      p(0, 100),
-      p(0, 0),
-    ];
-    const crossing = { ...line, points: [p(20, 30), p(80, 30)] };
-    expect(lassoSelection(concave, [crossing], 1)).toEqual([]);
-  });
-
   it("折返轨迹绕过内容时不能用端点连线制造删除命中", () => {
     const curved = [
       p(10, 50),
@@ -64,13 +35,6 @@ describe("白板几何与手势", () => {
     const untouched = { ...line, points: [p(40, 45), p(40, 55)] };
     expect(erasedStrokes(curved, [untouched], 1)).toEqual([]);
   });
-  it("圈选只包含完整包围的笔迹，开放曲线不形成圈选", () => {
-    expect(lassoSelection(loop, [line, outside], 1)).toEqual(["inside"]);
-    expect(lassoSelection(loop.slice(0, -2), [line], 1)).toEqual([]);
-    const crossing = { ...line, id: "crossing", points: [p(-10, 50), p(110, 50)] };
-    expect(lassoSelection(loop, [crossing], 1)).toEqual([]);
-  });
-
   it("多次折返跨过笔迹才删除，普通横线、圆和空白涂划都不删除", () => {
     const scratch = [p(10, 25), p(90, 35), p(10, 45), p(90, 55), p(10, 65), p(90, 75)];
     expect(erasedStrokes(scratch, [line, outside], 1)).toEqual(["inside"]);

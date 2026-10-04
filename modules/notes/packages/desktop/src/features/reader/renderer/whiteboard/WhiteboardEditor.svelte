@@ -9,6 +9,7 @@
   } from "../../shared/whiteboard/model";
   import { strokePath } from "../../shared/whiteboard/geometry";
   import { WhiteboardInput } from "./input";
+  import type { ShapePrediction } from "../../shared/whiteboard/recognition";
 
   let {
     board,
@@ -17,6 +18,7 @@
     onDirty,
     readOnly = false,
     registerToolbar,
+    recognize,
   }: {
     board: WhiteboardDocument;
     epoch: number;
@@ -26,6 +28,7 @@
     readOnly?: boolean;
     /** 工具栏占据分栏顶部，画布使用剩余高度，不覆盖笔迹。 */
     registerToolbar?: (toolbar: Snippet | null) => void;
+    recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>;
   } = $props();
   $effect(() => {
     const register = registerToolbar;
@@ -69,6 +72,10 @@
   const pending = $derived.by(() => {
     void frame;
     return strokePath(input?.points ?? []);
+  });
+  const corrected = $derived.by(() => {
+    void frame;
+    return input?.corrected ?? false;
   });
 
   function stopHold(): void {
@@ -125,8 +132,13 @@
     if (holdAt === null || Math.hypot(at.x - holdAt.x, at.y - holdAt.y) > 3) {
       stopHold();
       holdAt = at;
+      const session = input;
       holdTimer = setTimeout(() => {
-        attempt(() => input?.hold());
+        if (!session) return;
+        void session.hold().catch((cause: unknown) => {
+          if (input === session)
+            error = `图形修复失败，保留原笔迹：${cause instanceof Error ? cause.message : String(cause)}`;
+        });
       }, 450);
     }
   }
@@ -175,10 +187,14 @@
     if (!element) return;
     return untrack(() => {
       const changed = onDirty;
-      const session = new WhiteboardInput(initial, (edited) => {
-        frame += 1;
-        if (edited) changed();
-      });
+      const session = new WhiteboardInput(
+        initial,
+        (edited) => {
+          frame += 1;
+          if (edited) changed();
+        },
+        recognize,
+      );
       input = session;
       pointer = null;
       error = "";
@@ -311,7 +327,7 @@
           transform={selected.has(stroke.id) ? `translate(${delta.x} ${delta.y})` : undefined}
         />
       {/each}
-      {#if pending}<path class="pending" d={pending} stroke-width="2" />{/if}
+      {#if pending}<path class="pending" class:corrected d={pending} stroke-width="2" />{/if}
       {#if bounds}<rect
           class="selection"
           x={bounds.x + delta.x - 5 / camera.scale}
@@ -327,7 +343,7 @@
       随手写下，慢慢想清楚。
     </div>{/if}
   <div class="hint" id={hintId}>
-    {#if !readOnly}<span>写画 · 来回涂划删除 · 画圈停笔选择，再拖动</span>{/if}
+    {#if !readOnly}<span>写画 · 停笔修复图形 · 来回涂划删除</span>{/if}
     <span>空格拖动 · ⌘ / Ctrl 滚动缩放 · F 查看全部</span>
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}

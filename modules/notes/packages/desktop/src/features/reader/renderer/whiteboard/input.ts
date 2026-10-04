@@ -9,19 +9,30 @@ import {
   erasedStrokes,
   inkBounds,
   insideBounds,
-  lassoSelection,
   toWorld,
   translateViewport,
   zoomAt,
   type BoardViewport,
   type InkBounds,
 } from "../../shared/whiteboard/geometry";
+import { fitShape } from "../../shared/whiteboard/fitting";
+import {
+  RECOGNITION_POINT_LIMIT,
+  parseShapePrediction,
+  type ShapePrediction,
+} from "../../shared/whiteboard/recognition";
 
+/** 当前指针事务；原始输入与修正预览分离，请求号负责淘汰继续绘制后的结果。 */
 type Gesture =
-  | { kind: "ink"; points: InkPoint[] }
+  | {
+      kind: "ink";
+      points: InkPoint[];
+      preview: InkPoint[] | null;
+      heldAt: InkPoint | null;
+      request: number;
+    }
   | { kind: "move"; start: InkPoint; dx: number; dy: number }
-  | { kind: "pan"; start: InkPoint; view: BoardViewport }
-  | { kind: "selected" };
+  | { kind: "pan"; start: InkPoint; view: BoardViewport };
 
 function validateSample(point: InkPoint): void {
   if (
@@ -47,11 +58,13 @@ export class WhiteboardInput {
   /**
    * @param document 已读取的白板；构造时重新校验并建立不可变快照。
    * @param changed 同步画面通知；true 表示已提交内容事务，需要保存。回调应不抛错。
+   * @param recognize 可选后台静态分类入口；缺失时保留原笔迹，推理失败向上传播。
    * @throws 初始文档违反格式契约时拒绝创建输入会话。
    */
   constructor(
     document: WhiteboardDocument,
     private readonly changed: (contentChanged: boolean) => void,
+    private readonly recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>,
   ) {
     this.history = new WhiteboardHistory(document);
   }
@@ -79,7 +92,11 @@ export class WhiteboardInput {
   }
   /** 临时笔迹，尚未进入文档；取消手势可以直接丢弃。 */
   get points(): readonly InkPoint[] {
-    return this.gesture?.kind === "ink" ? this.gesture.points : [];
+    return this.gesture?.kind === "ink" ? (this.gesture.preview ?? this.gesture.points) : [];
+  }
+  /** 已通过分类与拟合门槛的临时预览，抬笔前仍未进入文档。 */
+  get corrected(): boolean {
+    return this.gesture?.kind === "ink" && this.gesture.preview !== null;
   }
 
   /** 卸载时丢弃未提交的手势并释放空闲等待，不触发文档修改通知。 */
@@ -138,7 +155,7 @@ export class WhiteboardInput {
       this.gesture = { kind: "move", start: world, dx: 0, dy: 0 };
     else {
       this.selected = new Set();
-      this.gesture = { kind: "ink", points: [world] };
+      this.gesture = { kind: "ink", points: [world], preview: null, heldAt: null, request: 0 };
     }
     this.changed(false);
   }
@@ -152,7 +169,7 @@ export class WhiteboardInput {
   update(point: InkPoint, terminal = false): void {
     validateSample(point);
     const active = this.gesture;
-    if (!active || active.kind === "selected") return;
+    if (!active) return;
     if (active.kind === "pan") {
       this.camera = translateViewport(
         active.view,
@@ -164,14 +181,26 @@ export class WhiteboardInput {
     }
     const world = this.world(point);
     if (active.kind === "ink") {
+      let previewCancelled = false;
+      if (
+        active.heldAt &&
+        Math.hypot(world.x - active.heldAt.x, world.y - active.heldAt.y) * this.camera.scale > 3
+      ) {
+        previewCancelled = active.preview !== null;
+        active.request++;
+        active.preview = null;
+        active.heldAt = null;
+      }
       const last = active.points.at(-1)!;
       const distance = Math.hypot(world.x - last.x, world.y - last.y);
       if (
         terminal
           ? distance === 0 && world.pressure === last.pressure
           : distance * this.camera.scale < 0.35
-      )
+      ) {
+        if (previewCancelled) this.changed(false);
         return;
+      }
       active.points.push(world);
     } else {
       active.dx = world.x - active.start.x;
@@ -180,23 +209,47 @@ export class WhiteboardInput {
     this.changed(false);
   }
 
-  /** 闭合圈选且停笔确认才选择已有内容；其他轮廓保持原始笔迹。 */
-  hold(): boolean {
-    if (this.gesture?.kind !== "ink") return false;
-    const ids = lassoSelection(
-      this.gesture.points,
-      this.history.document.strokes,
-      this.camera.scale,
-    );
-    if (ids.length === 0) return false;
-    this.selected = new Set(ids);
-    this.gesture = { kind: "selected" };
-    this.changed(false);
-    return true;
+  /**
+   * 停笔时分类当前这一笔，拟合通过才更新预览；不要求圈住已有内容。
+   * @returns 是否展示了修正；抬笔、移动、取消或换文档后的迟到结果返回 false。
+   * @throws 当前有效请求的推理或协议错误向上传播，原始采样始终保留。
+   */
+  async hold(): Promise<boolean> {
+    const active = this.gesture;
+    if (
+      active?.kind !== "ink" ||
+      !this.recognize ||
+      active.heldAt ||
+      active.points.length < 2 ||
+      active.points.length > RECOGNITION_POINT_LIMIT
+    )
+      return false;
+    const xs = active.points.map((p) => p.x),
+      ys = active.points.map((p) => p.y);
+    if (
+      Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) *
+        this.camera.scale <
+      16
+    )
+      return false;
+    const snapshot = active.points.map((p) => ({ ...p }));
+    active.heldAt = snapshot.at(-1)!;
+    const request = ++active.request;
+    try {
+      const prediction = parseShapePrediction(await this.recognize(snapshot));
+      if (this.gesture !== active || active.request !== request) return false;
+      active.preview = fitShape(snapshot, prediction, this.camera.scale);
+      if (!active.preview) return false;
+      this.changed(false);
+      return true;
+    } catch (cause) {
+      if (this.gesture !== active || active.request !== request) return false;
+      throw cause;
+    }
   }
 
   /**
-   * 抬笔或离开文档时结束事务；一次涂划删除、圈选移动或落笔只占一次撤销。
+   * 抬笔或离开文档时结束事务；一次涂划删除、选择移动或落笔只占一次撤销。
    * @param terminal 真实抬笔事件的屏幕采样；失焦或保存门禁不提供虚构坐标。
    * @throws 原始输入超出文件契约时不提交，调用方应展示错误。
    */
@@ -206,11 +259,17 @@ export class WhiteboardInput {
     if (!active) return;
     let edited = false;
     if (active.kind === "ink") {
-      const erased = erasedStrokes(active.points, this.history.document.strokes, this.camera.scale);
+      const erased = active.preview
+        ? []
+        : erasedStrokes(active.points, this.history.document.strokes, this.camera.scale);
       edited =
         erased.length > 0
           ? this.history.remove(new Set(erased))
-          : this.history.add({ id: crypto.randomUUID(), width: 2, points: active.points });
+          : this.history.add({
+              id: crypto.randomUUID(),
+              width: 2,
+              points: active.preview ?? active.points,
+            });
     } else if (active.kind === "move")
       edited = this.history.move(this.selected, active.dx, active.dy);
     // 只有成功提交后才能清除临时输入；失败后重试仍应检查同一个事务。

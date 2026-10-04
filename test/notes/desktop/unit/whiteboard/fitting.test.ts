@@ -1,0 +1,163 @@
+import { describe, expect, it } from "vitest";
+import { fitShape } from "@reader/shared/whiteboard/fitting";
+import { BOARD_COORDINATE_LIMIT, type InkPoint } from "@reader/shared/whiteboard/model";
+import {
+  parseRecognitionPoints,
+  parseShapePrediction,
+  type ShapeLabel,
+} from "@reader/shared/whiteboard/recognition";
+
+const p = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.6 });
+const fit = (points: InkPoint[], label: ShapeLabel, scale = 1) =>
+  fitShape(points, { label, confidence: 0.99 }, scale);
+const contour = (rx: number, ry: number, sweep = Math.PI * 2, rotation = 0) =>
+  Array.from({ length: 129 }, (_, i) => {
+    const angle = (i * sweep) / 128;
+    const jitter = i === 0 || i === 128 ? 0 : Math.sin(i * 3) * 0.5;
+    const x = rx * Math.cos(angle) + jitter,
+      y = ry * Math.sin(angle) + jitter;
+    return p(
+      700 + x * Math.cos(rotation) - y * Math.sin(rotation),
+      -350 + x * Math.sin(rotation) + y * Math.cos(rotation),
+    );
+  });
+function polygon(vertices: InkPoint[]): InkPoint[] {
+  return vertices
+    .slice(1)
+    .flatMap((end, i) =>
+      Array.from({ length: 32 }, (_, j) => {
+        const t = j / 32,
+          start = vertices[i]!;
+        const noise = Math.sin(j * 2) * 0.5;
+        return p(start.x + (end.x - start.x) * t + noise, start.y + (end.y - start.y) * t + noise);
+      }),
+    )
+    .concat(vertices.at(-1)!);
+}
+
+describe("分类后的几何拟合与拒绝条件", () => {
+  it("直线用向量拟合保留位置、方向与长度，拒绝折线和来回涂划", () => {
+    const points = Array.from({ length: 100 }, (_, i) =>
+      p(50 + i, 200 + i * 0.7 + Math.sin(i) * 0.6),
+    );
+    const result = fit(points, "line")!;
+    expect(result).toHaveLength(2);
+    expect(result[0]!.x).toBeCloseTo(50, 0);
+    expect(result[1]!.x).toBeCloseTo(149, 0);
+    expect((result[1]!.y - result[0]!.y) / (result[1]!.x - result[0]!.x)).toBeCloseTo(0.7, 2);
+    expect(fit([p(0, 0), p(80, 50), p(160, 0)], "line")).toBeNull();
+    expect(fit([p(0, 0), p(100, 0), p(0, 0), p(100, 0)], "line")).toBeNull();
+  });
+  it("密集横向推进的笔尖抖动仍可修直，横向折返保持原笔迹", () => {
+    const dense = Array.from({ length: 501 }, (_, i) => p(i * 0.2, Math.sin(i * 1.7) * 0.6));
+    expect(fit(dense, "line")).toHaveLength(2);
+    expect(fit([p(0, 0), p(100, 0.1), p(0, -0.1), p(100, 0)], "line")).toBeNull();
+  });
+  it("抖动圆恢复恒定半径，不把椭圆、半圆或重复描圈强行修成圆", () => {
+    const result = fit(contour(80, 80), "circle")!;
+    expect(result).toHaveLength(129);
+    expect(result.at(-1)).toEqual(result[0]);
+    const radii = result.map((point) => Math.hypot(point.x - 700, point.y + 350));
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.1);
+    expect(fit(contour(100, 50), "circle")).toBeNull();
+    expect(fit(contour(80, 80, Math.PI), "circle")).toBeNull();
+    expect(fit(contour(80, 80, Math.PI * 4), "circle")).toBeNull();
+  });
+  it.each([0, 0.63, 1.5])("椭圆保留长短轴和旋转方向 %s", (rotation) => {
+    const result = fit(contour(100, 45, Math.PI * 2, rotation), "ellipse")!;
+    expect(result).toHaveLength(129);
+    const radii = result.map((point) => Math.hypot(point.x - 700, point.y + 350));
+    expect(Math.max(...radii)).toBeCloseTo(100, 0);
+    expect(Math.min(...radii)).toBeCloseTo(45, 0);
+  });
+  it("圆弧保留开口和扫过方向，不自动封口", () => {
+    const result = fit(contour(80, 80, Math.PI * 1.4), "arc")!;
+    expect(result).toHaveLength(129);
+    expect(
+      Math.hypot(result[0]!.x - result.at(-1)!.x, result[0]!.y - result.at(-1)!.y),
+    ).toBeGreaterThan(100);
+    expect(fit(contour(80, 80), "arc")).toBeNull();
+  });
+  it.each([0, 0.37, 1.1])("矩形和正方形恢复直角，支持旋转 %s", (angle) => {
+    for (const height of [50, 100]) {
+      const points = polygon([p(0, 0), p(100, 0), p(100, height), p(0, height), p(0, 0)]).map(
+        (point) =>
+          p(
+            point.x * Math.cos(angle) - point.y * Math.sin(angle),
+            point.x * Math.sin(angle) + point.y * Math.cos(angle),
+          ),
+      );
+      const result = fit(points, "rectangle")!;
+      expect(result).toHaveLength(5);
+      const [a, b, c] = result;
+      expect((b!.x - a!.x) * (c!.x - b!.x) + (b!.y - a!.y) * (c!.y - b!.y)).toBeCloseTo(0, 8);
+    }
+    expect(fit(polygon([p(0, 0), p(100, 0), p(100, 100), p(0, 100)]), "rectangle")).toBeNull();
+  });
+  it("三角形从边中间起笔仍只产生三条直边，不把矩形解释为三角形", () => {
+    const points = polygon([p(50, 0), p(100, 0), p(50, 100), p(0, 0), p(50, 0)]);
+    const result = fit(points, "triangle")!;
+    expect(result).toHaveLength(4);
+    expect(result[0]).toEqual(result.at(-1));
+    expect(
+      fit(polygon([p(0, 0), p(100, 0), p(100, 100), p(0, 100), p(0, 0)]), "triangle"),
+    ).toBeNull();
+  });
+  it("连续箭头恢复对称箭翼，拒绝缺少一翼的形状", () => {
+    const points = polygon([p(0, 0), p(100, 0), p(75, 20), p(100, 0), p(74, -18)]);
+    const result = fit(points, "arrow")!;
+    expect(result).toHaveLength(5);
+    expect(fit([...points].reverse(), "arrow")).toHaveLength(5);
+    expect(
+      fit(polygon([p(75, 20), p(100, 0), p(0, 0), p(100, 0), p(74, -18)]), "arrow"),
+    ).toHaveLength(5);
+    const [start, tip, left, , right] = result;
+    const dx = tip!.x - start!.x,
+      dy = tip!.y - start!.y;
+    const along = (point: InkPoint) => (point.x - tip!.x) * dx + (point.y - tip!.y) * dy;
+    const across = (point: InkPoint) => (point.x - tip!.x) * dy - (point.y - tip!.y) * dx;
+    expect(along(left!)).toBeCloseTo(along(right!), 8);
+    expect(across(left!)).toBeCloseTo(-across(right!), 8);
+    expect(fit(points.slice(0, 70), "arrow")).toBeNull();
+  });
+  it("缩放只影响最小屏幕尺寸，世界坐标平移和大坐标不会破坏拟合", () => {
+    const points = [p(0, 0), p(10, 0.1), p(20, 0)];
+    expect(fit(points, "line", 0.5)).toBeNull();
+    expect(fit(points, "line", 2)).toHaveLength(2);
+    expect(
+      fit(
+        points.map((point) => p(point.x + 9_000_000, point.y - 8_000_000)),
+        "line",
+      ),
+    ).toHaveLength(2);
+    const edge = contour(80, 80).map((point) =>
+      p(point.x - 700 + BOARD_COORDINATE_LIMIT - 79.9, point.y),
+    );
+    expect(fit(edge, "circle")).toBeNull();
+  });
+  it("低置信度和 other 保留原笔迹，严格拒绝跨进程非法采样或分类结果", () => {
+    const points = [p(0, 0), p(100, 0)];
+    expect(fitShape(points, { label: "line", confidence: 0.49 }, 1)).toBeNull();
+    expect(fit(points, "other")).toBeNull();
+    for (const value of [
+      null,
+      {},
+      { label: "square", confidence: 1 },
+      { label: "line", confidence: NaN },
+    ])
+      expect(() => parseShapePrediction(value)).toThrow();
+    expect(() => parseRecognitionPoints([p(0, 0), p(Infinity, 1)])).toThrow();
+    expect(() => parseRecognitionPoints(Array.from({ length: 8193 }, () => p(1, 2)))).toThrow();
+    expect(parseShapePrediction({ label: "line", confidence: 0.99 })).toEqual({
+      label: "line",
+      confidence: 0.99,
+    });
+  });
+
+  it("模型多数候选还需匹配几何，规则近方形不依赖模型分数达到0.95", () => {
+    const points = polygon([p(0, 0), p(250, 0), p(250, 240), p(0, 240), p(0, 0)]);
+    expect(fitShape(points, { label: "rectangle", confidence: 0.55 }, 1)).toHaveLength(5);
+    expect(fitShape(points, { label: "line", confidence: 0.55 }, 1)).toBeNull();
+    expect(fitShape(points, { label: "rectangle", confidence: 0.49 }, 1)).toBeNull();
+  });
+});
