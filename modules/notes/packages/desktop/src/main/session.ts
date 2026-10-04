@@ -5,6 +5,11 @@
  */
 import { parseAppearance, type Appearance } from "../shared/api";
 import {
+  DEFAULT_READING_FONT,
+  parseReadingFont,
+  type ReadingFont,
+} from "../features/reader/shared/reading-font";
+import {
   emptyReaderSession,
   parseReaderSession,
   type ReaderSession,
@@ -23,6 +28,8 @@ export type WindowSession = {
 export type Session = {
   /** 独立于笔记库的应用外观偏好；旧会话默认跟随系统。 */
   appearance: Appearance;
+  /** 独立于笔记库的阅读字体搭配。 */
+  readingFont: ReadingFont;
   /** 各功能独立持有恢复状态，应用会话只负责组合。 */
   reader: ReaderSession;
   /** 上次窗口几何。 */
@@ -32,6 +39,7 @@ export type Session = {
 /** 没有任何记忆时显示文件栏，辅助内容由用户按需展开。 */
 export const emptySession: Session = {
   appearance: "system",
+  readingFont: DEFAULT_READING_FONT,
   reader: emptyReaderSession,
   window: null,
 };
@@ -85,6 +93,7 @@ export function parseSession(raw: string): Session | null {
     // 兼容旧版平铺状态；新写入只保留 reader 命名空间。
     reader: parseReaderSession("reader" in record ? record.reader : record),
     appearance: parseAppearance(record.appearance) ?? "system",
+    readingFont: parseReadingFont(record.readingFont) ?? DEFAULT_READING_FONT,
     window: "window" in record ? parseWindow(record.window) : null,
   };
 }

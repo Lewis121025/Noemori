@@ -10,6 +10,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/support/electron-lifecycle.ts",
     ],
     include: [
+      "../../../../test/notes/desktop/e2e/reading-font.test.mts",
       "../../../../test/notes/desktop/e2e/export.test.mts",
       "../../../../test/notes/desktop/e2e/vault-opening.test.mts",
       "../../../../test/notes/desktop/e2e/spaces.test.mts",

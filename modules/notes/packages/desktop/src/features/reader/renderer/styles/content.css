@@ -30,7 +30,7 @@
 }
 
 .markdown-content :is(h1, h2, h3, h4, h5, h6) {
-  font-family: var(--font-interface, var(--font-document));
+  font-family: var(--font-document);
   line-height: 1.45;
   font-weight: 500;
   letter-spacing: 0;

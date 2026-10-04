@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { createReaderApi } from "../features/reader/preload/api";
 import type { Appearance, AppApi, NoemoriApi } from "../shared/api";
 import { parseAppCommand } from "../shared/api";
+import type { ReadingFont } from "../features/reader/shared/reading-font";
 
 const app: AppApi = {
   historyChanged: (availability) => ipcRenderer.send("app.historyChanged", availability),
@@ -15,6 +16,8 @@ const app: AppApi = {
   },
   appearanceGet: () => ipcRenderer.invoke("appearance.get") as Promise<Appearance>,
   appearanceSet: (appearance) => ipcRenderer.invoke("appearance.set", appearance) as Promise<void>,
+  readingFontGet: () => ipcRenderer.invoke("readingFont.get") as Promise<ReadingFont>,
+  readingFontSet: (font) => ipcRenderer.invoke("readingFont.set", font) as Promise<void>,
   subscribeFlushBeforeClose: (callback: () => void) => {
     const listener = (): void => {
       callback();

@@ -29,6 +29,7 @@
   } from "../shared/commands";
   import { isCompositionKey } from "./editor/composition";
   import { createSessionWrite } from "./session-write";
+  import { READING_FONTS, type ReadingFont } from "../shared/reading-font";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
   let { api, applicationMenu }: { api: ReaderApi; applicationMenu: Snippet } = $props();
@@ -71,6 +72,27 @@
   /** 本次运行用过的命令，最新在前；只服务命令面板排序，不持久化。 */
   let recentCommands = $state<ReaderCommand[]>([]);
   const mac = navigator.userAgent.includes("Mac");
+
+  /**
+   * 应用阅读字体并保留各栏锚点；不改选区、源码或编辑历史。
+   * @param font 宿主已加载并保存的精选字体标识。
+   * @returns 当前各栏完成重排与定位后兑现；已切换的文档不恢复旧锚点。
+   * @throws 编辑器定位异常保留原始原因，交由字体选择入口提示。
+   */
+  export async function applyReadingFont(font: ReadingFont): Promise<void> {
+    // 在改字体与等待布局之前登记恢复，沿用导航自身的代次与用户取消机制。
+    const layout = tick().then(() => document.fonts.ready);
+    const restoring = workspace.panes
+      .filter((pane) => pane.viewMode !== "source" && pane.document.content?.kind === "markdown")
+      .map((pane) => {
+        const position = pane.navigation.capturePosition();
+        return position === null
+          ? Promise.resolve()
+          : pane.navigation.restorePosition({ reading: position.reading, selection: null }, layout);
+      });
+    document.documentElement.style.setProperty("--font-document", READING_FONTS[font].family);
+    await Promise.all([layout, ...restoring]);
+  }
 
   /** 命令可用性快照；执行门禁与命令面板共用。 */
   function commandContext(): CommandContext {

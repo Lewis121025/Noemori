@@ -23,6 +23,7 @@ describe("应用与阅读器会话", () => {
       ),
     ).toEqual({
       appearance: "dark",
+      readingFont: "lora",
       window,
       reader: {
         vaultRoot: "/notes",
@@ -65,5 +66,13 @@ describe("应用与阅读器会话", () => {
   });
   it("拒绝无效 JSON 和非对象根值", () => {
     for (const value of ["{", "[]", "null"]) expect(parseSession(value)).toBeNull();
+  });
+  it("阅读字体跨库保存，缺失或非法偏好回退 Lora", () => {
+    for (const font of ["lora", "newsreader", "sans"]) {
+      expect(parseSession(JSON.stringify({ readingFont: font }))?.readingFont).toBe(font);
+    }
+    for (const font of [undefined, null, "unknown", "__proto__", {}, []]) {
+      expect(parseSession(JSON.stringify({ readingFont: font }))?.readingFont).toBe("lora");
+    }
   });
 });

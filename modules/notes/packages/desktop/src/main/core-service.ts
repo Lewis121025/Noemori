@@ -31,8 +31,9 @@ export function createCoreService(userData: string, onChanged: (event: VaultEven
       if (session === null) throw new Error("内核会话响应无效");
       return session;
     },
-    sessionPatch: (patch: Partial<Pick<Session, "appearance" | "window">>): Promise<void> =>
-      native.sessionPatch(patch),
+    sessionPatch: (
+      patch: Partial<Pick<Session, "appearance" | "readingFont" | "window">>,
+    ): Promise<void> => native.sessionPatch(patch),
     shutdown: (): Promise<void> => native.shutdown(),
   };
 }

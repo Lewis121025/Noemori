@@ -93,6 +93,40 @@ describe("阅读位置的归属与恢复时机", () => {
     await restoring;
   });
 
+  it.each(["navigate", "scroll", "edit", "replace"])(
+    "字体尚未就绪时的 %s 使已登记的旧锚点失效",
+    async (action) => {
+      const { document, navigation: nav } = navigation();
+      const surface = editor(position(0));
+      nav.registerCode(surface);
+      const layout = Promise.withResolvers<void>();
+      const restoring = nav.restorePosition(position(400), layout.promise);
+      await tick();
+      expect(surface.restorePosition).not.toHaveBeenCalled();
+      if (action === "navigate") nav.jumpOutline(1);
+      else if (action === "scroll") nav.cancelPositionRestore();
+      else if (action === "edit") document.markDirty();
+      else document.load("另一篇.md", { disk: bytes, draft: null });
+      layout.resolve();
+      await restoring;
+      expect(surface.restorePosition).not.toHaveBeenCalled();
+    },
+  );
+
+  it("字体准备与表面挂载无论先后，都只在两个条件满足后恢复一次", async () => {
+    const { navigation: nav } = navigation();
+    const layout = Promise.withResolvers<void>();
+    await nav.restorePosition(position(400), layout.promise);
+    const surface = editor(position(0));
+    nav.registerCode(surface);
+    await tick();
+    expect(surface.restorePosition).not.toHaveBeenCalled();
+    layout.resolve();
+    await vi.waitFor(() => expect(surface.restorePosition).toHaveBeenCalledTimes(1));
+    nav.registerCode(surface);
+    expect(surface.restorePosition).toHaveBeenCalledTimes(1);
+  });
+
   it("用户开始输入后取消布局校正，不把旧锚点套在已变化的源码上", async () => {
     const { document, navigation: nav } = navigation();
     const surface = editor(position(0));

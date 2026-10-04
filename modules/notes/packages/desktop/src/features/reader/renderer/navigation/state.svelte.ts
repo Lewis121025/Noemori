@@ -29,6 +29,7 @@ type PositionRestore = {
   revision: number;
   generation: number;
   position: EditorPosition;
+  layout: Promise<unknown>;
   task: Promise<void> | null;
 };
 
@@ -279,18 +280,30 @@ export class ReaderNavigation {
   /**
    * 交接阅读锚点与可选选区；先等 Svelte 换面，再等编辑器布局，显式导航会取消旧恢复。
    * 编辑器尚未挂载时保留请求，由注册入口兑现；内容与正文历史均不改动。
+   * @param position 重排前捕获的锚点与可选选区。
+   * @param layout 本次字体或布局准备完成的信号；请求先登记，等待期间的新意图可取消它。
+   * @returns 当前恢复完成或失效后兑现；布局与编辑器异常原样传播。
    */
-  async restorePosition(position: EditorPosition): Promise<void> {
+  async restorePosition(
+    position: EditorPosition,
+    layout: Promise<unknown> = Promise.resolve(),
+  ): Promise<void> {
     const restoring: PositionRestore = {
       epoch: this.document.epoch,
       revision: this.document.editRevision,
       generation: ++this.jumpGeneration,
       position,
+      layout,
       task: null,
     };
     this.restoring = restoring;
     await tick();
     await (restoring.task ?? this.applyPosition());
+  }
+
+  /** 用户主动滚动、按键或定位光标时撤销待完成的布局校正；不取消显式导航，不抛异常。 */
+  cancelPositionRestore(): void {
+    this.restoring = null;
   }
 
   private positionIsCurrent(restoring: PositionRestore): boolean {
@@ -308,11 +321,11 @@ export class ReaderNavigation {
     if (restoring.task !== null) return restoring.task;
     const editor = this.currentEditor();
     if (editor === null) return null;
-    restoring.task = editor
-      .restorePosition(
-        restoring.position,
-        () => this.positionIsCurrent(restoring) && editor === this.currentEditor(),
-      )
+    const current = () => this.positionIsCurrent(restoring) && editor === this.currentEditor();
+    restoring.task = restoring.layout
+      .then(async () => {
+        if (current()) await editor.restorePosition(restoring.position, current);
+      })
       .finally(() => {
         if (this.restoring === restoring) this.restoring = null;
       });

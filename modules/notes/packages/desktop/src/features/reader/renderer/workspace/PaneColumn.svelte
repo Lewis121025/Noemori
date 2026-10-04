@@ -37,6 +37,7 @@
   } = $props();
 
   let scrollElement: HTMLElement | undefined = $state();
+  let paneElement: HTMLElement;
   let toolbar = $state<Snippet | null>(null);
 
   // 工具内容仍归所属编辑器；分栏只负责为它分配独立于正文滚动区的空间。
@@ -51,6 +52,13 @@
       (pane.navigation.outlineTree.length > 1 ||
         pane.navigation.outlineTree.some((node) => node.children.length > 0)),
   );
+
+  onMount(() => {
+    // 观察子控件的键盘意图而非给容器增加键盘动作；子控件阻止冒泡也应取消旧定位。
+    const cancelRestore = () => pane.navigation.cancelPositionRestore();
+    paneElement.addEventListener("keydown", cancelRestore, true);
+    return () => paneElement.removeEventListener("keydown", cancelRestore, true);
+  });
 
   onMount(() => {
     // 阅读栈的滚动捕获/恢复绑定到本栏滚动区；恢复等待新文档渲染完成，
@@ -70,6 +78,7 @@
 </script>
 
 <section
+  bind:this={paneElement}
   class="pane-column"
   class:active={workspace.activePane.id === pane.id}
   role="group"
@@ -77,7 +86,10 @@
   aria-label={workspace.split ? `编辑分栏 ${pane.id + 1}` : "编辑区"}
   inert={narrowInert || pane.switching}
   data-pane={pane.id}
-  onpointerdown={() => workspace.activatePane(pane.id)}
+  onpointerdown={() => {
+    pane.navigation.cancelPositionRestore();
+    workspace.activatePane(pane.id);
+  }}
   onfocusin={() => workspace.activatePane(pane.id)}
 >
   <div class="pane-content">
@@ -101,6 +113,7 @@
       class="main"
       class:whiteboard-pane={doc.content?.kind === "whiteboard"}
       bind:this={scrollElement}
+      onwheel={() => pane.navigation.cancelPositionRestore()}
       onscrollend={pane.rememberReadingPosition}
     >
       <div

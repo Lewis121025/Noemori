@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import ReaderWorkspace from "../features/reader/renderer/ReaderWorkspace.svelte";
   import AppearanceOptions from "./AppearanceOptions.svelte";
+  import ReadingFontOptions from "./ReadingFontOptions.svelte";
   import type { HistoryAction, HistoryAvailability } from "../features/reader/shared/api";
   import { InputHistory } from "./input-history";
 
@@ -64,5 +65,13 @@
 />
 
 <ReaderWorkspace api={readerApi} bind:this={reader}>
-  {#snippet applicationMenu()}<AppearanceOptions api={app} />{/snippet}
+  {#snippet applicationMenu()}
+    <AppearanceOptions api={app} />
+    <ReadingFontOptions
+      api={app}
+      onApply={async (font) => {
+        await reader?.applyReadingFont(font);
+      }}
+    />
+  {/snippet}
 </ReaderWorkspace>

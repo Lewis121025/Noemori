@@ -2,6 +2,27 @@
 use super::*;
 
 #[test]
+fn reading_font_survives_reader_and_appearance_updates() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    assert_eq!(store.load()["readingFont"], "lora");
+    for font in ["lora", "newsreader", "sans"] {
+        store.patch(&json!({"readingFont": font})).unwrap();
+        store
+            .patch_reader(&json!({"vaultRoot": "/other", "documents": {}}))
+            .unwrap();
+        store.patch(&json!({"appearance": "dark"})).unwrap();
+        assert_eq!(SessionStore::new(data.path()).load()["readingFont"], font);
+    }
+    for invalid in [Value::Null, json!("unknown"), json!({}), json!(12)] {
+        assert_eq!(
+            normalize(&json!({"readingFont": invalid}))["readingFont"],
+            "lora"
+        );
+    }
+}
+
+#[test]
 fn overflowing_numbers_do_not_discard_or_overwrite_valid_session_fields() {
     for number in ["1e400", "-1e400", &"9".repeat(400)] {
         let data = tempfile::tempdir().unwrap();

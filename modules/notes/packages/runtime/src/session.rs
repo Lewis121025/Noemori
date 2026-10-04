@@ -389,7 +389,11 @@ pub fn normalize(value: &Value) -> Value {
         .as_str()
         .filter(|s| matches!(*s, "light" | "dark" | "system"))
         .unwrap_or("system");
-    json!({"appearance": appearance, "reader": r, "window": window})
+    let reading_font = value["readingFont"]
+        .as_str()
+        .filter(|s| matches!(*s, "lora" | "newsreader" | "sans"))
+        .unwrap_or("lora");
+    json!({"appearance": appearance, "readingFont": reading_font, "reader": r, "window": window})
 }
 
 // 旧会话数字采用 JavaScript 双精度语义；超出安全整数的值也必须保持 number，而非跨语言恢复成 bigint。

@@ -38,6 +38,11 @@ let api: ReaderApi;
 let appApi: AppApi;
 
 beforeEach(() => {
+  // 字体文件与几何重排由 Electron 验证，这里只模拟浏览器加载完成。
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { load: vi.fn(async () => []), ready: Promise.resolve() },
+  });
   // jsdom 不执行布局，目录的真实测量与滚动由 Electron 用例覆盖。
   vi.stubGlobal(
     "ResizeObserver",
@@ -123,6 +128,8 @@ beforeEach(() => {
     },
     appearanceGet: vi.fn(async () => "system"),
     appearanceSet: vi.fn(async () => {}),
+    readingFontGet: vi.fn(async () => "lora"),
+    readingFontSet: vi.fn(async () => {}),
     subscribeFlushBeforeClose: (callback) => {
       onClose = callback;
       return () => {};
@@ -137,6 +144,8 @@ afterEach(async () => {
   vi.useRealTimers();
   await unmount(app);
   target.remove();
+  Reflect.deleteProperty(document, "fonts");
+  document.documentElement.style.removeProperty("--font-document");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

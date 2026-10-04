@@ -1,3 +1,12 @@
+@import "@fontsource-variable/lora/wght.css";
+@import "@fontsource-variable/lora/wght-italic.css";
+@import "@fontsource-variable/newsreader/standard.css";
+@import "@fontsource-variable/newsreader/standard-italic.css";
+@import "@fontsource-variable/inter/standard.css";
+@import "@fontsource-variable/inter/standard-italic.css";
+@import "@fontsource-variable/noto-serif-sc/wght.css";
+@import "@fontsource-variable/noto-sans-sc/wght.css";
+
 :root {
   color-scheme: light dark;
   --bg: light-dark(#fcfbf8, #202122);

@@ -114,10 +114,18 @@ export default defineConfig({
       mathjaxWoffPlugin(),
       // PDF 的 CJK 字形映射、标准字体和解码器在开发与离线构建中使用同一目录。
       viteStaticCopy({
-        targets: ["cmaps", "standard_fonts", "wasm", "iccs"].map((directory) => ({
-          src: resolve(`node_modules/pdfjs-dist/${directory}`),
-          dest: "pdfjs",
-        })),
+        targets: [
+          ...["cmaps", "standard_fonts", "wasm", "iccs"].map((directory) => ({
+            src: resolve(`node_modules/pdfjs-dist/${directory}`),
+            dest: "pdfjs",
+          })),
+          // 离线字体的版权与许可随构建一起分发。
+          ...["lora", "newsreader", "inter", "noto-serif-sc", "noto-sans-sc"].map((font) => ({
+            src: resolve(`node_modules/@fontsource-variable/${font}/LICENSE`),
+            dest: "font-licenses",
+            rename: `${font}-OFL.txt`,
+          })),
+        ],
       }),
     ],
   },

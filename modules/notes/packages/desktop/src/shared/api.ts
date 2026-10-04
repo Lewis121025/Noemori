@@ -6,6 +6,7 @@ import type {
   ReaderCommand,
 } from "../features/reader/shared/api";
 import { parseReaderCommand } from "../features/reader/shared/commands";
+import type { ReadingFont } from "../features/reader/shared/reading-font";
 
 /** 应用外观；system 随操作系统切换，显式选择同时作用于窗口与正文。 */
 export type Appearance = "system" | "light" | "dark";
@@ -47,6 +48,10 @@ export type AppApi = {
   appearanceGet: () => Promise<Appearance>;
   /** 保存并应用外观偏好；持久化失败时保留原外观并拒绝请求。 */
   appearanceSet: (appearance: Appearance) => Promise<void>;
+  /** 读取应用级阅读字体；旧会话返回默认搭配。 */
+  readingFontGet: () => Promise<ReadingFont>;
+  /** 保存阅读字体；磁盘写入失败时拒绝请求并保留原偏好。 */
+  readingFontSet: (font: ReadingFont) => Promise<void>;
   /**
    * 关窗口前主进程会发冲刷请求；渲染进程应先保存再决定是否放行。
    *
