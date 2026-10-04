@@ -1,5 +1,6 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 import { RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
+import { fitArrow } from "./fitting-arrow";
 import {
   distance,
   angleAdvance,
@@ -8,7 +9,6 @@ import {
   leastSquares,
   principalLine,
   perimeterAdvance,
-  polylineCorners,
   resample,
   traceAdvance,
   type FitPoint,
@@ -160,45 +160,6 @@ function triangle(points: readonly FitPoint[]): FitPoint[] | null {
   return advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI) ? null : result;
 }
 
-function arrow(points: readonly FitPoint[]): FitPoint[] | null {
-  const corners = polylineCorners(points, 5);
-  if (corners.length !== 5) return null;
-  const vertices = corners.map((index) => points[index]!);
-  // 箭头本来会沿第一翼返回箭尖；每段按自身方向计推进，额外折返才消耗回描预算。
-  const deltas = corners.slice(1).flatMap((end, i) => {
-    const start = corners[i]!,
-      a = points[start]!,
-      b = points[end]!;
-    const length = distance(a, b);
-    return points.slice(start + 1, end + 1).map((point, offset) => {
-      const previous = points[start + offset]!;
-      return ((point.x - previous.x) * (b.x - a.x) + (point.y - previous.y) * (b.y - a.y)) / length;
-    });
-  });
-  if (traceAdvance(deltas) === null) return null;
-  const [first, tip, middle, returned, last] = vertices;
-  if (distance(tip!, returned!) > 0.07) return null;
-  const ends = [first!, middle!, last!].sort((a, b) => distance(b, tip!) - distance(a, tip!));
-  const [start, left, right] = ends;
-  const length = distance(start!, tip!);
-  if (length < 0.5) return null;
-  const dx = (tip!.x - start!.x) / length,
-    dy = (tip!.y - start!.y) / length;
-  const wings = [left!, right!].map((p) => ({
-    x: (p.x - tip!.x) * dx + (p.y - tip!.y) * dy,
-    y: -(p.x - tip!.x) * dy + (p.y - tip!.y) * dx,
-  }));
-  if (wings[0]!.y * wings[1]!.y >= 0 || wings.some((p) => p.x > -0.06)) return null;
-  const head = -(wings[0]!.x + wings[1]!.x) / 2;
-  const width = (Math.abs(wings[0]!.y) + Math.abs(wings[1]!.y)) / 2;
-  if (head > length * 0.45 || width < 0.04 || width > length * 0.4) return null;
-  const wing = (side: number) => ({
-    x: tip!.x - head * dx - side * width * dy,
-    y: tip!.y - head * dy + side * width * dx,
-  });
-  return [start!, tip!, wing(Math.sign(wings[0]!.y)), tip!, wing(Math.sign(wings[1]!.y))];
-}
-
 /**
  * 分类只决定拟合族，拟合使用原始向量；低置信度、退化或轮廓不符返回 null。
  * @param points 一个连续笔迹的已校验世界坐标，不修改原始采样。
@@ -242,7 +203,7 @@ export function fitShape(
     arc: (p: readonly FitPoint[]) => circle(p, true),
     rectangle,
     triangle,
-    arrow,
+    arrow: fitArrow,
   };
   const fitted = fitters[prediction.label](sampled);
   if (!fitted || !fitAgrees(normalized, fitted)) return null;

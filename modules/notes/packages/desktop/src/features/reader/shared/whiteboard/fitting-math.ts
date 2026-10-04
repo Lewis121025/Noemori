@@ -182,37 +182,6 @@ export function principalLine(
   return xx + yy < 1e-10 ? null : { center, angle: Math.atan2(2 * xy, xx - yy) / 2 };
 }
 
-/**
- * 按拟合族指定的角点数拆分最大偏离段；局部波纹不能自行增加候选拓扑。
- * @param points 已归一化开放轨迹，首尾作为固定端点，不修改原始采样。
- * @param count 拟合族的目标角点数；实际几何偏差和回描仍由调用方验证。
- * @returns 按轨迹顺序排列的角点索引；非法数量返回空数组，退化段可能不足 count，不抛异常。
- */
-export function polylineCorners(points: readonly FitPoint[], count: number): number[] {
-  if (!Number.isInteger(count) || count < 2 || points.length < count) return [];
-  const indices = [0, points.length - 1];
-  while (indices.length < count) {
-    let maximum = 1e-8,
-      split = -1,
-      position = -1;
-    for (let segment = 1; segment < indices.length; segment++) {
-      const start = indices[segment - 1]!,
-        end = indices[segment]!;
-      for (let i = start + 1; i < end; i++) {
-        const deviation = segmentDistance(points[i]!, points[start]!, points[end]!);
-        if (deviation > maximum) {
-          maximum = deviation;
-          split = i;
-          position = segment;
-        }
-      }
-    }
-    if (split < 0) break;
-    indices.splice(position, 0, split);
-  }
-  return indices;
-}
-
 /** 拟合与原始路径双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
 export function fitAgrees(source: readonly FitPoint[], fitted: readonly FitPoint[]): boolean {
   if (fitted.length < 2) return false;
