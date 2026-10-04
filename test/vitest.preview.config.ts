@@ -39,6 +39,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/e2e/mention-linkify.test.mts",
       "../../../../test/notes/desktop/e2e/embeds.test.mts",
       "../../../../test/notes/desktop/e2e/whiteboard.test.mts",
+      "../../../../test/notes/desktop/e2e/development-reload.test.mts",
       "../../../../test/notes/desktop/e2e/properties.test.mts",
       "../../../../test/notes/desktop/e2e/bookmarks.test.mts",
       "../../../../test/notes/desktop/e2e/graph.test.mts",
