@@ -28,7 +28,9 @@ type Gesture =
       kind: "ink";
       points: InkPoint[];
       preview: InkPoint[] | null;
-      heldAt: InkPoint | null;
+      /** 计时与结果失效共用的静止区域基准，不能由界面另取最后采样。 */
+      pauseAt: InkPoint;
+      held: boolean;
       request: number;
     }
   | { kind: "move"; start: InkPoint; dx: number; dy: number }
@@ -155,7 +157,14 @@ export class WhiteboardInput {
       this.gesture = { kind: "move", start: world, dx: 0, dy: 0 };
     else {
       this.selected = new Set();
-      this.gesture = { kind: "ink", points: [world], preview: null, heldAt: null, request: 0 };
+      this.gesture = {
+        kind: "ink",
+        points: [world],
+        preview: null,
+        pauseAt: world,
+        held: false,
+        request: 0,
+      };
     }
     this.changed(false);
   }
@@ -164,12 +173,13 @@ export class WhiteboardInput {
    * 追加屏幕采样或更新拖动；无活动手势时不修改内容。
    * @param point 有限屏幕坐标与 [0, 1] 压力。
    * @param terminal 保留抬笔末点，不受移动采样阈值影响。
+   * @returns 写画越过静止区域时为 true，界面据此重启停笔计时；平移、拖动或微抖返回 false。
    * @throws 非法采样或坐标越界时拒绝本次更新，保留此前有效输入。
    */
-  update(point: InkPoint, terminal = false): void {
+  update(point: InkPoint, terminal = false): boolean {
     validateSample(point);
     const active = this.gesture;
-    if (!active) return;
+    if (!active) return false;
     if (active.kind === "pan") {
       this.camera = translateViewport(
         active.view,
@@ -177,19 +187,22 @@ export class WhiteboardInput {
         point.y - active.start.y,
       );
       this.changed(false);
-      return;
+      return false;
     }
     const world = this.world(point);
+    let restartHold = false;
     if (active.kind === "ink") {
       let previewCancelled = false;
       if (
-        active.heldAt &&
-        Math.hypot(world.x - active.heldAt.x, world.y - active.heldAt.y) * this.camera.scale > 3
+        Math.hypot(world.x - active.pauseAt.x, world.y - active.pauseAt.y) * this.camera.scale >
+        3
       ) {
         previewCancelled = active.preview !== null;
         active.request++;
         active.preview = null;
-        active.heldAt = null;
+        active.pauseAt = world;
+        active.held = false;
+        restartHold = true;
       }
       const last = active.points.at(-1)!;
       const distance = Math.hypot(world.x - last.x, world.y - last.y);
@@ -199,7 +212,7 @@ export class WhiteboardInput {
           : distance * this.camera.scale < 0.35
       ) {
         if (previewCancelled) this.changed(false);
-        return;
+        return restartHold;
       }
       active.points.push(world);
     } else {
@@ -207,6 +220,7 @@ export class WhiteboardInput {
       active.dy = world.y - active.start.y;
     }
     this.changed(false);
+    return restartHold;
   }
 
   /**
@@ -219,7 +233,7 @@ export class WhiteboardInput {
     if (
       active?.kind !== "ink" ||
       !this.recognize ||
-      active.heldAt ||
+      active.held ||
       active.points.length < 2 ||
       active.points.length > RECOGNITION_POINT_LIMIT
     )
@@ -233,7 +247,7 @@ export class WhiteboardInput {
     )
       return false;
     const snapshot = active.points.map((p) => ({ ...p }));
-    active.heldAt = snapshot.at(-1)!;
+    active.held = true;
     const request = ++active.request;
     try {
       const prediction = parseShapePrediction(await this.recognize(snapshot));

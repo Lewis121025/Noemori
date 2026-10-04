@@ -206,9 +206,16 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       await page.mouse.move(inputBox.x + 100 + i * 8, inputBox.y + 100 + Math.sin(i));
     const pending = page.locator(".whiteboard .pending");
     const original = await pending.getAttribute("d");
+    const endX = inputBox.x + 228;
+    const endY = inputBox.y + 100 + Math.sin(16);
+    await page.mouse.move(endX + 2.5, endY);
     await page.locator(".whiteboard .pending.corrected").waitFor({ timeout: 5000 });
     const repaired = await pending.getAttribute("d");
     expect(repaired).not.toBe(original);
+    // 小抖动仍在原静止区域内，不能因相对推理采样超过 3px 而静默丢掉预览。
+    await page.mouse.move(endX - 0.9, endY);
+    expect(await page.locator(".whiteboard .pending.corrected").count()).toBe(1);
+    expect(await pending.getAttribute("d")).toBe(repaired);
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     await page.mouse.up();
     await expect

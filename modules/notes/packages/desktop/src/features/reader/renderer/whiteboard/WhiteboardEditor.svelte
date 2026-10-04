@@ -40,10 +40,11 @@
   let input = $state.raw<WhiteboardInput | null>(null);
   let frame = $state(0);
   let error = $state("");
+  // 推理错误属于这次落笔，不能被成功的微抖采样或抬笔提交清空。
+  let recognitionError = $state("");
   let pointer: number | null = null;
   let space = $state(false);
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
-  let holdAt: InkPoint | null = null;
   const hintId = $props.id();
   const history = $derived.by(() => {
     void frame;
@@ -81,7 +82,6 @@
   function stopHold(): void {
     clearTimeout(holdTimer);
     holdTimer = undefined;
-    holdAt = null;
   }
   function attempt(action: () => void): boolean {
     try {
@@ -112,6 +112,7 @@
       ),
     );
     if (started) {
+      recognitionError = "";
       pointer = event.pointerId;
       host.setPointerCapture(event.pointerId);
     }
@@ -121,23 +122,24 @@
     const samples = event.getCoalescedEvents?.() ?? [];
     // 合并事件与父事件择一处理，不能把父事件重复作为额外观测。
     const observed = samples.length > 0 ? samples : [event];
+    let restartHold = false;
     const accepted = attempt(() => {
-      for (const sample of observed) input?.update(point(sample));
+      for (const sample of observed)
+        restartHold = (input?.update(point(sample)) ?? false) || restartHold;
     });
     if (!accepted) {
       stopHold();
       return;
     }
-    const at = point(observed.at(-1)!);
-    if (holdAt === null || Math.hypot(at.x - holdAt.x, at.y - holdAt.y) > 3) {
+    if (restartHold) {
       stopHold();
-      holdAt = at;
       const session = input;
       holdTimer = setTimeout(() => {
         if (!session) return;
+        recognitionError = "";
         void session.hold().catch((cause: unknown) => {
           if (input === session)
-            error = `图形修复失败，保留原笔迹：${cause instanceof Error ? cause.message : String(cause)}`;
+            recognitionError = `图形修复失败，保留原笔迹：${cause instanceof Error ? cause.message : String(cause)}`;
         });
       }, 450);
     }
@@ -198,6 +200,7 @@
       input = session;
       pointer = null;
       error = "";
+      recognitionError = "";
       // 空白板直接使用原始坐标，不能因首个 ResizeObserver 回调迟到而居中新画的笔迹。
       let fitted = initial.strokes.length === 0;
       const resize = new ResizeObserver(() => {
@@ -346,7 +349,7 @@
     {#if !readOnly}<span>写画 · 停笔修复图形 · 来回涂划删除</span>{/if}
     <span>空格拖动 · ⌘ / Ctrl 滚动缩放 · F 查看全部</span>
   </div>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if error || recognitionError}<p class="error" role="alert">{error || recognitionError}</p>{/if}
 </div>
 
 <style>

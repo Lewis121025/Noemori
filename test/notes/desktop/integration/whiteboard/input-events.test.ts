@@ -214,6 +214,88 @@ it("停笔后抬笔不会等待推理，迟到结果与卸载后的错误都不�
   expect(host.querySelector(".corrected")).toBeNull();
 });
 
+it.each([
+  [2.5, -0.9],
+  [-2.5, 0.9],
+])("停笔范围内从 %s 抖到 %s 不会丢弃推理结果后停止重试", async (before, after) => {
+  vi.useFakeTimers();
+  let resolve!: (value: ShapePrediction) => void;
+  const task = new Promise<ShapePrediction>((yes) => {
+    resolve = yes;
+  });
+  const recognize = vi.fn(() => task);
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30);
+  for (let i = 1; i <= 20; i++) pointer(host, "pointermove", 10 + i * 5, 30);
+  pointer(host, "pointermove", 110 + before, 30);
+  await vi.advanceTimersByTimeAsync(450);
+  expect(recognize).toHaveBeenCalledTimes(1);
+  // 两个采样都在同一个停笔区域内，相对最后采样的距离却超过 3px。
+  pointer(host, "pointermove", 110 + after, 30);
+  resolve({ label: "line", confidence: 0.99 });
+  await Promise.resolve();
+  flushSync();
+  expect(host.querySelector(".pending.corrected")).not.toBeNull();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(recognize).toHaveBeenCalledTimes(1);
+  pointer(host, "pointerup", 110 + after, 30, 0);
+  expect(saved().strokes[0]!.points).toHaveLength(2);
+});
+
+it("离开静止区域后丢弃旧推理，即使相对最后采样不到 3px，也会重新计时", async () => {
+  vi.useFakeTimers();
+  let first!: (value: ShapePrediction) => void;
+  let second!: (value: ShapePrediction) => void;
+  const initial = new Promise<ShapePrediction>((yes) => {
+    first = yes;
+  });
+  const next = new Promise<ShapePrediction>((yes) => {
+    second = yes;
+  });
+  const recognize = vi
+    .fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>()
+    .mockReturnValueOnce(initial)
+    .mockReturnValueOnce(next);
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30);
+  for (let i = 1; i <= 20; i++) pointer(host, "pointermove", 10 + i * 5, 30);
+  pointer(host, "pointermove", 112.5, 30);
+  await vi.advanceTimersByTimeAsync(450);
+  expect(recognize).toHaveBeenCalledTimes(1);
+  pointer(host, "pointermove", 114, 30);
+  first({ label: "line", confidence: 0.99 });
+  await Promise.resolve();
+  flushSync();
+  expect(host.querySelector(".pending.corrected")).toBeNull();
+  await vi.advanceTimersByTimeAsync(449);
+  expect(recognize).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(recognize).toHaveBeenCalledTimes(2);
+  second({ label: "line", confidence: 0.99 });
+  await Promise.resolve();
+  flushSync();
+  expect(host.querySelector(".pending.corrected")).not.toBeNull();
+});
+
+it("推理失败提示不会被微抖或抬笔清空，下一次落笔才清除旧错误", async () => {
+  vi.useFakeTimers();
+  const host = await start(async () => {
+    throw new Error("权重未加载");
+  });
+  pointer(host, "pointerdown", 10, 30);
+  pointer(host, "pointermove", 110, 30);
+  await vi.advanceTimersByTimeAsync(450);
+  flushSync();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  pointer(host, "pointermove", 110.1, 30);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  pointer(host, "pointerup", 110.1, 30, 0);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  expect(saved().strokes).toHaveLength(1);
+  pointer(host, "pointerdown", 200, 30);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
 it("移动会重置停笔计时；平移和取消不触发分类", async () => {
   vi.useFakeTimers();
   const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
