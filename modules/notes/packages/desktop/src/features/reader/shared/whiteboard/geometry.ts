@@ -200,9 +200,9 @@ export function erasedStrokes(
 }
 
 /**
- * 生成与命中几何一致的原始轨迹；圆形线帽和接头交给 SVG 渲染。
+ * 生成与命中几何一致的显示轨迹；圆形线帽和接头交给 SVG 渲染。
  * 不用跨采样点的拟合曲线改写拐角，单点也保留为可见圆端点。
- * @param points 已校验的世界坐标采样。
+ * @param points 已校验的世界坐标显示采样；压力变化的重复位置不额外生成零长度线段。
  * @returns SVG 路径数据；空采样返回空串。
  */
 export function strokePath(points: readonly InkPoint[]): string {
@@ -210,6 +210,11 @@ export function strokePath(points: readonly InkPoint[]): string {
   if (!first) return "";
   if (points.length === 1) return `M${first.x} ${first.y}l0.001 0`;
   let path = `M${first.x} ${first.y}`;
-  for (const point of points.slice(1)) path += `L${point.x} ${point.y}`;
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i]!,
+      previous = points[i - 1]!;
+    if (point.x !== previous.x || point.y !== previous.y) path += `L${point.x} ${point.y}`;
+  }
+  if (!path.includes("L")) path += "l0.001 0";
   return path;
 }

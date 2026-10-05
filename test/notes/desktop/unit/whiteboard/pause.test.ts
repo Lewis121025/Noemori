@@ -148,6 +148,18 @@ it("慢速单向收笔和真实角点不归并，即使最后几项没有越过�
   expect(preparePause(corner, observe(corner), 3).points).toEqual(corner);
 });
 
+it("稳定运动已确认停笔时，瞬时大幅末点观测不会否定归并；数量违约拒绝", () => {
+  const motion = Array.from({ length: 121 }, (_, i) =>
+    p(Math.min(i, 100), i <= 100 ? 0 : Math.sin(i)),
+  );
+  const pause = observe(motion);
+  const geometry = motion.map((point, i) => (i === motion.length - 1 ? p(104, -4) : point));
+  const prepared = preparePause(geometry, pause, 3, motion);
+  expect(prepared.points.length).toBeLessThan(geometry.length);
+  expect(Math.hypot(prepared.points.at(-1)!.x - 100, prepared.points.at(-1)!.y)).toBeLessThan(1);
+  expect(() => preparePause(geometry, pause, 3, motion.slice(1))).toThrow(RangeError);
+});
+
 it.each([0.01, 1, 64])("按屏幕半径处理缩放 %s，大世界坐标不破坏局部稳定末点", (scale) => {
   const points = Array.from({ length: 49 }, (_, i) => p(1e8 + (40 * i) / (48 * scale), -1e8));
   for (let i = 1; i <= 100; i++)

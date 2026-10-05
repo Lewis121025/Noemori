@@ -32,11 +32,12 @@ afterEach(async () => {
 async function start(
   recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>,
   readOnly = false,
+  board = emptyWhiteboard(),
 ) {
   component = mount(WhiteboardEditor, {
     target: document.body,
     props: {
-      board: emptyWhiteboard(),
+      board,
       epoch: 0,
       readOnly,
       onDirty: () => {},
@@ -59,13 +60,21 @@ async function start(
   return host;
 }
 
-function pointer(host: HTMLElement, type: string, x: number, y: number, pressure = 0.5) {
+function pointer(
+  host: HTMLElement,
+  type: string,
+  x: number,
+  y: number,
+  pressure = 0.5,
+  time?: number,
+) {
   const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
   Object.defineProperties(event, {
     pointerId: { value: 1 },
     pointerType: { value: "pen" },
     pressure: { value: pressure },
   });
+  if (time !== undefined) Object.defineProperty(event, "timeStamp", { value: time });
   host.dispatchEvent(event);
   flushSync();
 }
@@ -86,6 +95,38 @@ it("非法笔压不会被界面截断后写入，也不会占用下一次落笔"
   pointer(host, "pointerdown", 10, 20, 0.5);
   pointer(host, "pointerup", 20, 30, 0);
   expect(saved().strokes).toHaveLength(1);
+});
+
+it("实时强抖动的自由笔迹减少锯齿，抬笔与重开保持同一条线，并保留原始观测", async () => {
+  const host = await start();
+  const samples = Array.from({ length: 241 }, (_, i) => ({
+    x: 10 + (100 * i) / 120,
+    y: 30 + 6 * Math.sin((2 * Math.PI * 12 * i) / 120),
+    pressure: 0.5,
+  }));
+  pointer(host, "pointerdown", 10, 30, 0.5, 0);
+  for (let i = 1; i < samples.length; i++)
+    pointer(host, "pointermove", samples[i]!.x, samples[i]!.y, 0.5, (1000 * i) / 120);
+  const before = host.querySelector(".pending")!.getAttribute("d")!;
+  const displayed = [...before.matchAll(/[ML]([-+\d.e]+)\s([-+\d.e]+)/g)].map((match) => ({
+    x: Number(match[1]),
+    y: Number(match[2]),
+  }));
+  const rms = (points: readonly { y: number }[]) =>
+    Math.sqrt(points.reduce((sum, point) => sum + (point.y - 30) ** 2, 0) / points.length);
+  expect(rms(displayed.slice(40, -1))).toBeLessThan(rms(samples.slice(40, -1)) * 0.55);
+  const last = samples.at(-1)!;
+  pointer(host, "pointerup", last.x, last.y, 0, 2000);
+  expect(host.querySelector("[data-stroke-id]")!.getAttribute("d")).toBe(before);
+  const board = saved();
+  expect(board.strokes[0]!.source).toEqual([...samples, { ...last, pressure: 0 }]);
+  expect(board.strokes[0]!.points[0]).toEqual(samples[0]);
+  expect(board.strokes[0]!.points.at(-1)).toEqual({ ...last, pressure: 0 });
+  await unmount(component!);
+  component = undefined;
+  document.body.replaceChildren();
+  const reopened = await start(undefined, false, board);
+  expect(reopened.querySelector("[data-stroke-id]")!.getAttribute("d")).toBe(before);
 });
 
 it.each([
@@ -130,7 +171,7 @@ it("自由笔迹停笔时保持轮廓，抬笔后保存相同的真实采样", a
 
 it("合并事件作为唯一真实采样，父事件的不同坐标不会额外写入", async () => {
   const host = await start();
-  pointer(host, "pointerdown", 0, 0);
+  pointer(host, "pointerdown", 0, 0, 0.5, 0);
   const move = new MouseEvent("pointermove", { bubbles: true, clientX: 999, clientY: 999 });
   Object.defineProperties(move, {
     pointerId: { value: 1 },
@@ -148,7 +189,8 @@ it("合并事件作为唯一真实采样，父事件的不同坐标不会额外�
   host.dispatchEvent(move);
   flushSync();
   registered.api!.finishInput();
-  const points = saved().strokes[0]!.points;
+  const stroke = saved().strokes[0]!;
+  const points = stroke.source ?? stroke.points;
   expect(points).toEqual([0, 10, 20, 30].map((x) => ({ x, y: 0, pressure: 0.5 })));
 });
 
@@ -343,6 +385,37 @@ it("持续停笔微抖不应因静止区域中心偏在边缘而永远重置计�
   const observed = recognize.mock.calls[0]![0];
   expect(observed.length).toBeLessThan(105);
   expect(Math.hypot(observed.at(-1)!.x - 50, observed.at(-1)!.y - 30)).toBeLessThan(0.8);
+});
+
+it("真实时间下的大幅停笔抖动不应反复取消推理，继续绘制仍会取消预览", async () => {
+  vi.useFakeTimers();
+  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30, 0.5, 0);
+  for (let i = 1; i <= 120; i++) {
+    pointer(host, "pointermove", 10 + (100 * i) / 120, 30, 0.5, (1000 * i) / 120);
+    await vi.advanceTimersByTimeAsync(1000 / 120);
+  }
+  for (let i = 1; i <= 180; i++) {
+    pointer(
+      host,
+      "pointermove",
+      110 + (6 * Math.sin((2 * Math.PI * 12 * i) / 120)) / Math.SQRT2,
+      30 + (6 * Math.sin((2 * Math.PI * 9 * i) / 120)) / Math.SQRT2,
+      0.5,
+      1000 + (1000 * i) / 120,
+    );
+    await vi.advanceTimersByTimeAsync(1000 / 120);
+  }
+  flushSync();
+  expect(recognize).toHaveBeenCalledTimes(1);
+  expect(host.querySelector(".pending.corrected")).not.toBeNull();
+  for (let i = 1; i <= 4; i++)
+    pointer(host, "pointermove", 110 + 5 * i, 30 + 3 * i, 0.5, 2500 + 16 * i);
+  expect(host.querySelector(".pending.corrected")).toBeNull();
 });
 
 it("连续缓慢绘制超过停笔时间仍不推理，真正停下后才触发", async () => {

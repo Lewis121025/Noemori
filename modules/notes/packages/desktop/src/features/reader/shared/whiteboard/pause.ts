@@ -144,24 +144,27 @@ export function advancePause(
 
 /**
  * 停笔时把区域内重复位置观测归并为一个末点，避免把传感器抖动按行走弧长加权。
- * @param points 完整原始采样；原数组和压力均不修改，失败回退仍可保存真实笔迹。
+ * @param points 完整静态几何快照；原数组和压力均不修改，原始观测由输入会话保留。
  * @param pause 同一笔的静止区域；最近重启计时后没有新增观测时保持原几何。
  * @param radius 同一笔的世界坐标停笔半径；只有超过直径的重复往返量才属于可归并观测。
+ * @param motion 与快照索引一致的稳定运动观测，判断停笔与覆盖；默认与几何快照相同。
  * @returns 独立静态快照与稳定计时区域；原始观测仍须检查最大偏差，不产生文档事务。
- * @throws 不抛异常；点、索引与非空前置条件由输入状态机保证。
+ * @throws 运动与几何采样数量不一致时抛 RangeError；点、索引与非空由输入状态机保证。
  */
 export function preparePause(
   points: readonly InkPoint[],
   pause: PauseRegion,
   radius: number,
+  motion: readonly InkPoint[] = points,
 ): PauseSnapshot {
+  if (motion.length !== points.length) throw new RangeError("停笔运动与几何采样数量不一致");
   const original = { points: points.map((point) => ({ ...point })), pause };
   if (pause.reset === points.length - 1) return original;
-  const origin = points[pause.start]!;
+  const origin = motion[pause.start]!;
   let travel = 0;
   for (let i = pause.start + 1; i < points.length; i++)
-    travel += Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y);
-  const last = points.at(-1)!;
+    travel += Math.hypot(motion[i]!.x - motion[i - 1]!.x, motion[i]!.y - motion[i - 1]!.y);
+  const last = motion.at(-1)!;
   // 慢速收笔与角点也会留在小区域内；空间有界不等于重复观测，不能把它们平均成短尾。
   if (travel - Math.hypot(last.x - origin.x, last.y - origin.y) <= 2 * radius) return original;
   let start = pause.start;
@@ -182,9 +185,10 @@ export function preparePause(
       pressure: pressure / count,
     };
     let next = start;
-    // 覆盖圆允许包含距重心较远的移动末段；这些点必须留在几何前缀，不能被一起平均。
+    // 以已确认的稳定运动排除移动末段；静态末点可能含瞬时传感器抖动，不能用它否定停笔。
+    // 归并前的全部真实观测仍由拟合最大误差约束检查，运动滤波不能绕过几何证据。
     for (let i = points.length - 1; i >= start; i--)
-      if (Math.hypot(points[i]!.x - endpoint.x, points[i]!.y - endpoint.y) > radius) {
+      if (Math.hypot(motion[i]!.x - endpoint.x, motion[i]!.y - endpoint.y) > radius) {
         next = i + 1;
         break;
       }
