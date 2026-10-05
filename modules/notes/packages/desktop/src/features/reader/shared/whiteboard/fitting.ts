@@ -7,6 +7,7 @@ import {
   angleAdvance,
   contourHull,
   fitAgrees,
+  observationsAgree,
   leastSquares,
   principalLine,
   perimeterAdvance,
@@ -166,20 +167,24 @@ function triangle(points: readonly FitPoint[], trace: readonly FitPoint[]): FitP
 }
 
 /**
- * 分类只决定拟合族，拟合使用原始向量；低置信度、退化或轮廓不符返回 null。
- * @param points 一个连续笔迹的已校验世界坐标，不修改原始采样。
+ * 分类只决定拟合族，拟合使用静态向量；低置信度、退化或轮廓不符返回 null。
+ * @param points 一个连续笔迹的已校验世界坐标，可归并已确认静止的末点观测。
  * @param prediction 静态模型候选；分数仅作入口门槛，不能代替几何证据。
- * @param scale 屏幕缩放，仅用于拒绝不到 16 CSS 像素的细小图形。
+ * @param scale 屏幕缩放，用于最小尺寸与有界顺序去抖半径。
+ * @param observations 归并前的全部原始观测；逐点验证既有最大偏差，防止隐藏额外笔画。
  * @returns 可存入原有笔迹格式的规范轮廓；拟合还需通过双向距离和覆盖检查。
  */
 export function fitShape(
   points: readonly InkPoint[],
   prediction: ShapePrediction,
   scale: number,
+  observations?: readonly InkPoint[],
 ): InkPoint[] | null {
   if (
     points.length < 2 ||
     points.length > RECOGNITION_POINT_LIMIT ||
+    (observations !== undefined &&
+      (observations.length < 2 || observations.length > RECOGNITION_POINT_LIMIT)) ||
     prediction.label === "other" ||
     !Number.isFinite(prediction.confidence) ||
     prediction.confidence < MIN_SHAPE_SCORE ||
@@ -199,8 +204,8 @@ export function fitShape(
   const cx = (left + right) / 2,
     cy = (top + bottom) / 2;
   const normalized = points.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
-  // 参数估计保留原始观测，避免去抖只剩端点后失去统计精度；顺序校验使用有界去抖轨迹。
-  // 停笔区域按屏幕像素换算并限制为尺寸的2.5%；先限制工作量，最终误差仍以全部原始采样计算。
+  // 参数估计保留移动轨迹的统计信息；仅顺序校验使用有界去抖，最终验证仍覆盖完整几何。
+  // 顺序去抖限制为3 CSS像素和尺寸的2.5%，停笔观测归并由输入状态机独立负责。
   const radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
   const sampled = resample(normalized, 192);
   const trace = resample(stabilizeTrace(sampled, radius), 192);
@@ -216,6 +221,14 @@ export function fitShape(
   };
   const fitted = fitters[prediction.label](sampled, trace);
   if (!fitted || !fitAgrees(normalized, fitted)) return null;
+  if (
+    observations &&
+    !observationsAgree(
+      observations.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size })),
+      fitted,
+    )
+  )
+    return null;
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
   const result = fitted.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
   return result.every(

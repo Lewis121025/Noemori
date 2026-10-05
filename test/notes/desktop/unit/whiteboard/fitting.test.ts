@@ -58,6 +58,18 @@ function noisyPolygon(vertices: InkPoint[], phase: number, rotation: number): In
 }
 
 describe("分类后的几何拟合与拒绝条件", () => {
+  it("停笔归并不能隐藏超出最大偏差的观测，原始抖动不再按往返弧长重复加权", () => {
+    const staticLine = [p(0, 0), p(40, 0)];
+    const prediction = { label: "line", confidence: 0.99 } as const;
+    const observations = [
+      ...staticLine,
+      ...Array.from({ length: 200 }, (_, i) => p(40, 2.9 * Math.sin(i * 1.7))),
+    ];
+    expect(fitShape(staticLine, prediction, 1, observations)).toHaveLength(2);
+    expect(fitShape(staticLine, prediction, 1, [...observations, p(40, 3.1)])).toBeNull();
+    expect(fitShape(staticLine, prediction, 1, [...observations, p(1000, 0)])).toBeNull();
+    expect(fitShape(staticLine, prediction, 1, [...observations, p(NaN, 0)])).toBeNull();
+  });
   it("局部回描预算按净推进计算，方向翻转和圆周跨接缝不改变判据", () => {
     expect(traceAdvance([0.6, -0.125, 0.525])).toBeCloseTo(1);
     expect(traceAdvance([-0.6, 0.125, -0.525])).toBeCloseTo(-1);

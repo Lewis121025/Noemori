@@ -318,3 +318,99 @@ it("移动会重置停笔计时；平移和取消不触发分类", async () => {
   await vi.advanceTimersByTimeAsync(500);
   expect(recognize).not.toHaveBeenCalled();
 });
+
+it("持续停笔微抖不应因静止区域中心偏在边缘而永远重置计时", async () => {
+  vi.useFakeTimers();
+  const recognize = vi.fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>(async () => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30);
+  for (let i = 1; i <= 96; i++) pointer(host, "pointermove", 10 + (40 * i) / 96, 30);
+  for (let i = 1; i <= 120; i++) {
+    pointer(
+      host,
+      "pointermove",
+      50 + (2.5 * Math.sin(i * 0.37)) / Math.SQRT2,
+      30 + (2.5 * Math.sin(i * 0.53)) / Math.SQRT2,
+    );
+    await vi.advanceTimersByTimeAsync(8);
+  }
+  flushSync();
+  expect(recognize).toHaveBeenCalledTimes(1);
+  expect(host.querySelector(".pending.corrected")).not.toBeNull();
+  const observed = recognize.mock.calls[0]![0];
+  expect(observed.length).toBeLessThan(105);
+  expect(Math.hypot(observed.at(-1)!.x - 50, observed.at(-1)!.y - 30)).toBeLessThan(0.8);
+});
+
+it("连续缓慢绘制超过停笔时间仍不推理，真正停下后才触发", async () => {
+  vi.useFakeTimers();
+  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
+    label: "line",
+    confidence: 0.99,
+  }));
+  const host = await start(recognize);
+  pointer(host, "pointerdown", 10, 30);
+  for (let i = 1; i <= 240; i++) {
+    pointer(host, "pointermove", 10 + 0.4 * i, 30);
+    await vi.advanceTimersByTimeAsync(8);
+    expect(recognize).not.toHaveBeenCalled();
+  }
+  await vi.advanceTimersByTimeAsync(450);
+  flushSync();
+  expect(recognize).toHaveBeenCalledTimes(1);
+  expect(host.querySelector(".pending.corrected")).not.toBeNull();
+});
+
+it.each(["circle", "ellipse", "rectangle"] as const)(
+  "%s 在持续二维停笔抖动中只修复一次，预览保持稳定",
+  async (label) => {
+    vi.useFakeTimers();
+    const recognize = vi.fn(async (): Promise<ShapePrediction> => ({ label, confidence: 0.99 }));
+    const host = await start(recognize);
+    const points =
+      label === "rectangle"
+        ? [
+            [30, 30],
+            [70, 30],
+            [70, 60],
+            [30, 60],
+            [30, 30],
+          ]
+            .slice(1)
+            .flatMap((end, i) => {
+              const start = [
+                [30, 30],
+                [70, 30],
+                [70, 60],
+                [30, 60],
+              ][i]!;
+              return Array.from({ length: 64 }, (_, j) => ({
+                x: start[0]! + ((end[0]! - start[0]!) * j) / 64,
+                y: start[1]! + ((end[1]! - start[1]!) * j) / 64,
+              }));
+            })
+            .concat({ x: 30, y: 30 })
+        : Array.from({ length: 257 }, (_, i) => ({
+            x: 50 + 20 * Math.cos((i * Math.PI) / 128),
+            y: 50 + (label === "ellipse" ? 12 : 20) * Math.sin((i * Math.PI) / 128),
+          }));
+    pointer(host, "pointerdown", points[0]!.x, points[0]!.y);
+    for (const point of points.slice(1)) pointer(host, "pointermove", point.x, point.y);
+    const last = points.at(-1)!;
+    for (let i = 1; i <= 180; i++) {
+      pointer(
+        host,
+        "pointermove",
+        last.x + (2.5 * Math.sin(i * 0.37)) / Math.SQRT2,
+        last.y + (2.5 * Math.sin(i * 0.53)) / Math.SQRT2,
+      );
+      await vi.advanceTimersByTimeAsync(8);
+    }
+    flushSync();
+    expect(recognize).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".pending.corrected")).not.toBeNull();
+  },
+);

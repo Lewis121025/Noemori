@@ -182,20 +182,40 @@ export function principalLine(
   return xx + yy < 1e-10 ? null : { center, angle: Math.atan2(2 * xy, xx - yy) / 2 };
 }
 
-/** 拟合与原始路径双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
+const MAX_CONTOUR_DEVIATION = 0.075;
+
+function contourDistance(point: FitPoint, contour: readonly FitPoint[]): number {
+  let best = Infinity;
+  for (let i = 1; i < contour.length; i++)
+    best = Math.min(best, segmentDistance(point, contour[i - 1]!, contour[i]!));
+  return best;
+}
+
+/**
+ * 原始位置观测逐点检查最大误差，不把停笔时的微抖来回按几何弧长重复加权。
+ * @param source 全部原始观测，使用静态轨迹的同一中心和尺寸归一化。
+ * @param fitted 已通过完整覆盖与 RMS 检查的候选轮廓。
+ * @returns 所有观测都在既有最大偏差内时为 true；非法坐标或退化轮廓返回 false。
+ */
+export function observationsAgree(
+  source: readonly FitPoint[],
+  fitted: readonly FitPoint[],
+): boolean {
+  return (
+    source.length > 0 &&
+    source.every((point) => contourDistance(point, fitted) <= MAX_CONTOUR_DEVIATION)
+  );
+}
+
+/** 拟合与静态几何轨迹双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
 export function fitAgrees(source: readonly FitPoint[], fitted: readonly FitPoint[]): boolean {
   if (fitted.length < 2) return false;
   const directed = (from: readonly FitPoint[], to: readonly FitPoint[]) =>
-    resample(from, 192).map((point) => {
-      let best = Infinity;
-      for (let i = 1; i < to.length; i++)
-        best = Math.min(best, segmentDistance(point, to[i - 1]!, to[i]!));
-      return best;
-    });
+    resample(from, 192).map((point) => contourDistance(point, to));
   const deviations = [...directed(source, fitted), ...directed(fitted, source)];
   return (
     deviations.length > 0 &&
-    Math.max(...deviations) <= 0.075 &&
+    Math.max(...deviations) <= MAX_CONTOUR_DEVIATION &&
     Math.sqrt(deviations.reduce((sum, d) => sum + d * d, 0) / deviations.length) <= 0.028
   );
 }

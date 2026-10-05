@@ -16,6 +16,7 @@ import {
   type InkBounds,
 } from "../../shared/whiteboard/geometry";
 import { fitShape } from "../../shared/whiteboard/fitting";
+import { advancePause, preparePause, type PauseRegion } from "../../shared/whiteboard/pause";
 import {
   RECOGNITION_POINT_LIMIT,
   HOLD_RADIUS_CSS_PX,
@@ -29,8 +30,8 @@ type Gesture =
       kind: "ink";
       points: InkPoint[];
       preview: InkPoint[] | null;
-      /** 计时与结果失效共用的静止区域基准，不能由界面另取最后采样。 */
-      pauseAt: InkPoint;
+      /** 计时、观测归并与结果失效共用同一个静止区域。 */
+      pause: PauseRegion;
       held: boolean;
       request: number;
     }
@@ -162,7 +163,7 @@ export class WhiteboardInput {
         kind: "ink",
         points: [world],
         preview: null,
-        pauseAt: world,
+        pause: { center: world, enclosing: world, start: 0, reset: 0 },
         held: false,
         request: 0,
       };
@@ -193,29 +194,27 @@ export class WhiteboardInput {
     const world = this.world(point);
     let restartHold = false;
     if (active.kind === "ink") {
-      let previewCancelled = false;
-      if (
-        Math.hypot(world.x - active.pauseAt.x, world.y - active.pauseAt.y) * this.camera.scale >
-        HOLD_RADIUS_CSS_PX
-      ) {
-        previewCancelled = active.preview !== null;
-        active.request++;
-        active.preview = null;
-        active.pauseAt = world;
-        active.held = false;
-        restartHold = true;
-      }
+      const radius = HOLD_RADIUS_CSS_PX / this.camera.scale;
+      const outside =
+        Math.hypot(world.x - active.pause.center.x, world.y - active.pause.center.y) > radius;
       const last = active.points.at(-1)!;
       const distance = Math.hypot(world.x - last.x, world.y - last.y);
       if (
         terminal
           ? distance === 0 && world.pressure === last.pressure
-          : distance * this.camera.scale < 0.35
-      ) {
-        if (previewCancelled) this.changed(false);
-        return restartHold;
-      }
+          : distance * this.camera.scale < 0.35 && !outside
+      )
+        return false;
+      // 越界观测即使间距很小也必须保留，静止区域索引和原始笔迹才能共享真实采样。
       active.points.push(world);
+      const pause = advancePause(active.points, active.pause, radius);
+      if (pause.reset !== active.pause.reset) {
+        active.request++;
+        active.preview = null;
+        active.held = false;
+        restartHold = true;
+      }
+      active.pause = pause;
     } else {
       active.dx = world.x - active.start.x;
       active.dy = world.y - active.start.y;
@@ -247,13 +246,20 @@ export class WhiteboardInput {
       16
     )
       return false;
-    const snapshot = active.points.map((p) => ({ ...p }));
+    const observations = active.points.map((p) => ({ ...p }));
+    const prepared = preparePause(
+      observations,
+      active.pause,
+      HOLD_RADIUS_CSS_PX / this.camera.scale,
+    );
+    const snapshot = prepared.points;
+    active.pause = prepared.pause;
     active.held = true;
     const request = ++active.request;
     try {
       const prediction = parseShapePrediction(await this.recognize(snapshot));
       if (this.gesture !== active || active.request !== request) return false;
-      active.preview = fitShape(snapshot, prediction, this.camera.scale);
+      active.preview = fitShape(snapshot, prediction, this.camera.scale, observations);
       if (!active.preview) return false;
       this.changed(false);
       return true;
