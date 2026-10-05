@@ -129,10 +129,14 @@ function candidate(start: FitPoint, tip: FitPoint, ends: readonly FitPoint[]): F
 /**
  * 按静态三分支轮廓拟合单笔开放箭头，起笔顺序和最后是否回到连接点不改变结构。
  * @param points 已校验的有限归一化轨迹，调用方限制为192个弧长采样点。
+ * @param trace 顺序检查的有界去抖轨迹，默认使用原始观测；角点估计始终使用points。
  * @returns 规范主干和对称两翼；退化、方向不符或过量重描返回 null，不抛异常。
  * 调用方还必须用原始采样验证双向轮廓误差，不能仅凭四个角点接受图形。
  */
-export function fitArrow(points: readonly FitPoint[]): FitPoint[] | null {
+export function fitArrow(
+  points: readonly FitPoint[],
+  trace: readonly FitPoint[] = points,
+): FitPoint[] | null {
   const vertices = corners(points);
   if (!vertices) return null;
   let first = 0,
@@ -153,7 +157,7 @@ export function fitArrow(points: readonly FitPoint[]): FitPoint[] | null {
     [second, first],
   ]) {
     const fitted = candidate(vertices[start!]!, vertices[tip!]!, wings);
-    if (fitted && followsBranches(points, fitted)) return fitted;
+    if (fitted && followsBranches(trace, fitted)) return fitted;
   }
   return null;
 }

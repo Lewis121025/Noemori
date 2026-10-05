@@ -18,6 +18,7 @@ import {
 import { fitShape } from "../../shared/whiteboard/fitting";
 import {
   RECOGNITION_POINT_LIMIT,
+  HOLD_RADIUS_CSS_PX,
   parseShapePrediction,
   type ShapePrediction,
 } from "../../shared/whiteboard/recognition";
@@ -195,7 +196,7 @@ export class WhiteboardInput {
       let previewCancelled = false;
       if (
         Math.hypot(world.x - active.pauseAt.x, world.y - active.pauseAt.y) * this.camera.scale >
-        3
+        HOLD_RADIUS_CSS_PX
       ) {
         previewCancelled = active.preview !== null;
         active.request++;

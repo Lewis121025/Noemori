@@ -1,0 +1,539 @@
+{
+  "state": "qualified_for_hold_repair_jitter_reduction_with_limits",
+  "baseline_commit": "5a04986362116a8e087af3bfb2d5d7197f48ae3b",
+  "scope": "停笔后的图形修复抗抖；实时自由笔迹仍按真实采样绘制。",
+  "model": {
+    "bytes": 17135980,
+    "sha256": "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c"
+  },
+  "implementation": {
+    "fitting.ts": {
+      "bytes": 9198,
+      "sha256": "9382e59907315d810f13b3277aafb2a6251c5fbf9d611e4b85bac9a8fb6a5ce7"
+    },
+    "fitting-arrow.ts": {
+      "bytes": 7091,
+      "sha256": "b846843231ac0db74f0e30d36d6ea17ff935a5f9908797dbe9df97793397a1f4"
+    },
+    "stabilization.ts": {
+      "bytes": 2280,
+      "sha256": "fc51015af72d702e871a5fa40e4cbe56994222f3de995df849848b0fec667a9d"
+    },
+    "recognition.ts": {
+      "bytes": 2522,
+      "sha256": "9d35647e338ad766bd76cff9c3adc3f1537f692aed0b37e0b70e806cea8c77df"
+    }
+  },
+  "input_implementation": {
+    "bytes": 13094,
+    "sha256": "a41d6cfdd3af9765e0aa173b9f7eb34ff3377080d09e60275c4708495fa032c6"
+  },
+  "change": "在有界候选轨迹上检查推进、扫角、周长和分支遍历，避免停笔微抖重复消耗重描预算；几何参数估计与最终误差仍使用原始观测。",
+  "radius": {
+    "hold_screen_css_px": 3,
+    "max_relative_shape_size": 0.025,
+    "rule": "min(3/(size*scale),0.025)",
+    "shared_constant": "HOLD_RADIUS_CSS_PX"
+  },
+  "order_contract": "简化同时检查位置误差和沿候选线段的反向访问；超出两个半径的共线折返必须保留，不能用普通位置简化删除重描。",
+  "final_geometry_contract": "原始完整采样的双向最大距离0.075、RMS0.028与入口分数0.5沿用原判据。",
+  "retained_test_groups": {
+    "detail/clean": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/jitter/0.005": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/jitter/0.015": {
+      "samples": 112,
+      "correctBefore": 109,
+      "correctAfter": 109,
+      "acceptedBefore": 109,
+      "acceptedAfter": 109,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/jitter/0.03": {
+      "samples": 112,
+      "correctBefore": 102,
+      "correctAfter": 102,
+      "acceptedBefore": 102,
+      "acceptedAfter": 102,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/retrace/0": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/retrace/0.002": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/tail/0.02": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/tail/0.05": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/gap/0.01": {
+      "samples": 64,
+      "correctBefore": 64,
+      "correctAfter": 64,
+      "acceptedBefore": 64,
+      "acceptedAfter": 64,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "detail/gap/0.02": {
+      "samples": 64,
+      "correctBefore": 64,
+      "correctAfter": 64,
+      "acceptedBefore": 64,
+      "acceptedAfter": 64,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/line": {
+      "samples": 45,
+      "correctBefore": 45,
+      "correctAfter": 45,
+      "acceptedBefore": 45,
+      "acceptedAfter": 45,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/circle": {
+      "samples": 48,
+      "correctBefore": 48,
+      "correctAfter": 48,
+      "acceptedBefore": 48,
+      "acceptedAfter": 48,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/ellipse": {
+      "samples": 48,
+      "correctBefore": 48,
+      "correctAfter": 48,
+      "acceptedBefore": 48,
+      "acceptedAfter": 48,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/arc": {
+      "samples": 51,
+      "correctBefore": 51,
+      "correctAfter": 51,
+      "acceptedBefore": 51,
+      "acceptedAfter": 51,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/triangle": {
+      "samples": 42,
+      "correctBefore": 42,
+      "correctAfter": 42,
+      "acceptedBefore": 42,
+      "acceptedAfter": 42,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/other": {
+      "samples": 33,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "acceptedBefore": 0,
+      "acceptedAfter": 0,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/other": {
+      "samples": 120,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "acceptedBefore": 0,
+      "acceptedAfter": 0,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/line": {
+      "samples": 119,
+      "correctBefore": 117,
+      "correctAfter": 117,
+      "acceptedBefore": 117,
+      "acceptedAfter": 117,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/arrow": {
+      "samples": 5,
+      "correctBefore": 4,
+      "correctAfter": 4,
+      "acceptedBefore": 4,
+      "acceptedAfter": 4,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "source_character_negative/pendigits": {
+      "samples": 2033,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "acceptedBefore": 1,
+      "acceptedAfter": 1,
+      "wrongClassBefore": 1,
+      "wrongClassAfter": 1,
+      "gained": 0,
+      "lost": 0
+    },
+    "fresh_native/leaf_finish": {
+      "samples": 24,
+      "correctBefore": 24,
+      "correctAfter": 24,
+      "acceptedBefore": 24,
+      "acceptedAfter": 24,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "fresh_native/tip_finish": {
+      "samples": 24,
+      "correctBefore": 24,
+      "correctAfter": 24,
+      "acceptedBefore": 24,
+      "acceptedAfter": 24,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "fresh_native/shaft_in_middle": {
+      "samples": 24,
+      "correctBefore": 24,
+      "correctAfter": 24,
+      "acceptedBefore": 24,
+      "acceptedAfter": 24,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "fresh_native/tip_start_finish": {
+      "samples": 24,
+      "correctBefore": 24,
+      "correctAfter": 24,
+      "acceptedBefore": 24,
+      "acceptedAfter": 24,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "fresh_native/closed_tree_walk": {
+      "samples": 24,
+      "correctBefore": 24,
+      "correctAfter": 24,
+      "acceptedBefore": 24,
+      "acceptedAfter": 24,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "pause_native/size=40/jitter=1": {
+      "samples": 112,
+      "correctBefore": 106,
+      "correctAfter": 112,
+      "acceptedBefore": 106,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 6,
+      "lost": 0
+    },
+    "pause_native/size=100/jitter=2.5": {
+      "samples": 112,
+      "correctBefore": 106,
+      "correctAfter": 112,
+      "acceptedBefore": 106,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 6,
+      "lost": 0
+    },
+    "pause_native/size=240/jitter=2.5": {
+      "samples": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=40/jitter=0": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=40/jitter=1": {
+      "samples": 7,
+      "correctBefore": 4,
+      "correctAfter": 7,
+      "acceptedBefore": 4,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 3,
+      "lost": 0
+    },
+    "val_pause/size=40/jitter=2.5": {
+      "samples": 7,
+      "correctBefore": 1,
+      "correctAfter": 1,
+      "acceptedBefore": 1,
+      "acceptedAfter": 1,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=100/jitter=0": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=100/jitter=1": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=100/jitter=2.5": {
+      "samples": 7,
+      "correctBefore": 4,
+      "correctAfter": 7,
+      "acceptedBefore": 4,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 3,
+      "lost": 0
+    },
+    "val_pause/size=240/jitter=0": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=240/jitter=1": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "val_pause/size=240/jitter=2.5": {
+      "samples": 7,
+      "correctBefore": 7,
+      "correctAfter": 7,
+      "acceptedBefore": 7,
+      "acceptedAfter": 7,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    }
+  },
+  "fresh_pause": {
+    "analytic_parents": 112,
+    "views": 336,
+    "annotation_kind": "synthetic_geometry",
+    "native_inference": true
+  },
+  "performance": {
+    "line": {
+      "before": {
+        "count": 100,
+        "p50_ms": 0.915512999999919,
+        "p95_ms": 3.3822280000022147
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 0.9393189999973401,
+        "p95_ms": 3.4338260000076843
+      }
+    },
+    "circle": {
+      "before": {
+        "count": 100,
+        "p50_ms": 3.8721959999966202,
+        "p95_ms": 6.66208199999528
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 3.918923999997787,
+        "p95_ms": 6.509556999997585
+      }
+    },
+    "triangle": {
+      "before": {
+        "count": 100,
+        "p50_ms": 2.634414000000106,
+        "p95_ms": 5.155996999994386
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 2.6865839999954915,
+        "p95_ms": 5.420553000003565
+      }
+    },
+    "arrow": {
+      "before": {
+        "count": 100,
+        "p50_ms": 1.941876000011689,
+        "p95_ms": 4.469811999995727
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 2.008518999995431,
+        "p95_ms": 4.908836999995401
+      }
+    }
+  },
+  "tests": {
+    "whiteboard_typescript": 88,
+    "test_files": 12,
+    "desktop_typecheck": "0 errors,0 warnings",
+    "eslint": "passed",
+    "renderer_production_build": "passed; 23.57 seconds",
+    "full_desktop_build": "既有Pandoc准备脚本只支持macOS arm64，当前Linux环境未完成完整发行构建。"
+  },
+  "reports": {
+    "summary.json": {
+      "bytes": 12533,
+      "sha256": "deb5667cbe968a8f9721a3c8cc179c1c16961499f2fe36657ac27d881573c89a"
+    },
+    "records.jsonl": {
+      "bytes": 1083742,
+      "sha256": "d4811258f49eacb3bc835a489adc70b69333fc35588d28a49f30ea0b2a328427"
+    },
+    "fresh-pause.jsonl": {
+      "bytes": 3885830,
+      "sha256": "9c5f6a39adb51b214def5ad304c4e48cf34a0fe8e0e2b1628fdfbaccd9c6f37e"
+    }
+  },
+  "limits": [
+    "开发使用val与解析回归用例，保留test在实现冻结后评价；未据test调整模型或误差门槛。",
+    "新停笔扰动来自112个既有保留解析母图，336个合成视图；不代表新真实设备或用户采集。",
+    "参数估计和最终双向误差使用原始观测，候选去抖只用于推进/覆盖顺序检查。",
+    "去抖工作量限制到192个点，半径不超过停笔区域3 CSS像素和图形尺寸2.5%。",
+    "MMG单笔箭头只有5例，数字来源标签不是逐图几何用户意图金标。",
+    "性能为本机服务器的JS拟合测量，不含模型、IPC或UI渲染。",
+    "40 CSS像素图形叠加2.5像素高频停笔扰动的七例val探针仍只修复1/7；去抖不保证任意强噪声均可修复。",
+    "端点和角点参数保留原始统计估计，不能把降噪后的候选当作独立几何真值。",
+    "全程抖动合成组保持102/112，真实MMG单笔箭头保持4/5；本轮主要改善停笔微抖。",
+    "停笔持按450ms交互与原始文档存储契约沿用原行为。"
+  ]
+}

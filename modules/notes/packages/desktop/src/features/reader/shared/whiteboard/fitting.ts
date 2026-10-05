@@ -1,6 +1,7 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
-import { RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
+import { HOLD_RADIUS_CSS_PX, RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
 import { fitArrow } from "./fitting-arrow";
+import { stabilizeTrace } from "./stabilization";
 import {
   distance,
   angleAdvance,
@@ -17,7 +18,7 @@ import {
 /** 单路径验证集上的联合门槛；多数模型候选还必须通过完整几何约束与双向轮廓检查。 */
 export const MIN_SHAPE_SCORE = 0.5;
 
-function line(points: readonly FitPoint[]): FitPoint[] | null {
+function line(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   const fit = principalLine(points);
   if (!fit) return null;
   const dx = Math.cos(fit.angle),
@@ -29,7 +30,7 @@ function line(points: readonly FitPoint[]): FitPoint[] | null {
   };
   const result = [project(points[0]!), project(points.at(-1)!)];
   // 横向于主轴的手抖不能当成涂划；只有主轴上的往返才消耗净推进比例。
-  const advance = traceAdvance(points.slice(1).map((p, i) => along(p) - along(points[i]!)));
+  const advance = traceAdvance(trace.slice(1).map((p, i) => along(p) - along(trace[i]!)));
   return advance === null ? null : result;
 }
 
@@ -37,7 +38,11 @@ function closed(points: readonly FitPoint[]): boolean {
   return distance(points[0]!, points.at(-1)!) <= 0.12;
 }
 
-function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
+function circle(
+  points: readonly FitPoint[],
+  arc: boolean,
+  trace: readonly FitPoint[],
+): FitPoint[] | null {
   if (!arc && !closed(points)) return null;
   const solution = leastSquares(
     points.map((p) => [2 * p.x, 2 * p.y, 1]),
@@ -47,7 +52,7 @@ function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
   const [cx, cy, constant] = solution;
   const radius = Math.sqrt(constant! + cx! * cx! + cy! * cy!);
   if (!Number.isFinite(radius) || radius < 0.08 || radius > 3) return null;
-  const angles = points.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
+  const angles = trace.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
   let sweep = angleAdvance(angles);
   if (sweep === null) return null;
   if (
@@ -65,7 +70,7 @@ function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
   return result;
 }
 
-function ellipse(points: readonly FitPoint[]): FitPoint[] | null {
+function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
   const fit = leastSquares(
     points.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y]),
@@ -91,7 +96,7 @@ function ellipse(points: readonly FitPoint[]): FitPoint[] | null {
       ((p.x - cx) * dx + (p.y - cy) * dy) / major,
     );
   const start = angleAt(points[0]!);
-  const sweep = angleAdvance(points.map(angleAt));
+  const sweep = angleAdvance(trace.map(angleAt));
   if (sweep === null || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
   const result = Array.from({ length: 129 }, (_, i) => {
     const angle = start + (Math.sign(sweep) * 2 * Math.PI * i) / 128;
@@ -131,7 +136,7 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
   return result;
 }
 
-function triangle(points: readonly FitPoint[]): FitPoint[] | null {
+function triangle(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
   // 顶点属于可见边界，不属于访问顺序；回描不能制造额外的几何角点。
   const hull = contourHull(points);
@@ -156,7 +161,7 @@ function triangle(points: readonly FitPoint[]): FitPoint[] | null {
   }
   if (area < 0.08) return null;
   const result = [...vertices, vertices[0]!];
-  const advance = perimeterAdvance(points, result);
+  const advance = perimeterAdvance(trace, result);
   return advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI) ? null : result;
 }
 
@@ -194,18 +199,22 @@ export function fitShape(
   const cx = (left + right) / 2,
     cy = (top + bottom) / 2;
   const normalized = points.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
+  // 参数估计保留原始观测，避免去抖只剩端点后失去统计精度；顺序校验使用有界去抖轨迹。
+  // 停笔区域按屏幕像素换算并限制为尺寸的2.5%；先限制工作量，最终误差仍以全部原始采样计算。
+  const radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
   const sampled = resample(normalized, 192);
+  const trace = resample(stabilizeTrace(sampled, radius), 192);
   if (sampled.length === 0) return null;
   const fitters = {
     line,
-    circle: (p: readonly FitPoint[]) => circle(p, false),
+    circle: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, false, t),
     ellipse,
-    arc: (p: readonly FitPoint[]) => circle(p, true),
+    arc: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, true, t),
     rectangle,
     triangle,
     arrow: fitArrow,
   };
-  const fitted = fitters[prediction.label](sampled);
+  const fitted = fitters[prediction.label](sampled, trace);
   if (!fitted || !fitAgrees(normalized, fitted)) return null;
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
   const result = fitted.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
