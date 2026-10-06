@@ -207,15 +207,25 @@ export function observationsAgree(
   );
 }
 
-/** 拟合与静态几何轨迹双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
-export function fitAgrees(source: readonly FitPoint[], fitted: readonly FitPoint[]): boolean {
-  if (fitted.length < 2) return false;
+/** 双向轮廓的最大和RMS误差；统一用于候选比较与覆盖门槛，退化轮廓返回 null。 */
+export function contourDeviation(
+  source: readonly FitPoint[],
+  fitted: readonly FitPoint[],
+): { maximum: number; rms: number } | null {
+  if (fitted.length < 2) return null;
   const directed = (from: readonly FitPoint[], to: readonly FitPoint[]) =>
     resample(from, 192).map((point) => contourDistance(point, to));
   const deviations = [...directed(source, fitted), ...directed(fitted, source)];
-  return (
-    deviations.length > 0 &&
-    Math.max(...deviations) <= MAX_CONTOUR_DEVIATION &&
-    Math.sqrt(deviations.reduce((sum, d) => sum + d * d, 0) / deviations.length) <= 0.028
-  );
+  return deviations.length
+    ? {
+        maximum: Math.max(...deviations),
+        rms: Math.sqrt(deviations.reduce((sum, d) => sum + d * d, 0) / deviations.length),
+      }
+    : null;
+}
+
+/** 拟合与静态几何轨迹双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
+export function fitAgrees(source: readonly FitPoint[], fitted: readonly FitPoint[]): boolean {
+  const error = contourDeviation(source, fitted);
+  return error !== null && error.maximum <= MAX_CONTOUR_DEVIATION && error.rms <= 0.028;
 }

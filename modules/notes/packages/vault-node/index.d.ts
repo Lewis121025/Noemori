@@ -77,6 +77,26 @@ export interface JsShapePrediction {
   label: string
   /** 有限的 [0, 1] 置信度。 */
   confidence: number
+  /** 只有圆/椭圆候选携带两个真实概率；几何判断不能把全部剩余概率当成另一子类型。 */
+  oval?: JsOvalEvidence
+  /** 同一推理的改进分类；渲染端仅在原候选无法修复时验证此候选。 */
+  refinement?: JsShapeCandidate
+}
+/** 一个独立八类分类头的候选；不能用一个头的置信度混配另一个头的概率。 */
+export interface JsShapeCandidate {
+  /** 固定类别名。 */
+  label: string
+  /** 此头的有限[0,1]置信度。 */
+  confidence: number
+  /** 此头在完整八类中的圆椭圆真实概率。 */
+  oval?: JsOvalEvidence
+}
+/** 闭合曲线子类型的模型先验；来源于同一次八类 softmax，不重新推理。 */
+export interface JsOvalEvidence {
+  /** 圆在完整八类中的概率。 */
+  circle: number
+  /** 椭圆在完整八类中的概率。 */
+  ellipse: number
 }
 /** 链接解析结果：路径、锚点与歧义候选分开返回。 */
 export interface JsLinkTarget {

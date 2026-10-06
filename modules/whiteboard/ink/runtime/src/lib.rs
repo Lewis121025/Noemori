@@ -18,12 +18,27 @@ pub const LABELS: [&str; 8] = [
     "other",
 ];
 /// 固定候选的权重散列；切换模型须重新验证分类顺序、预处理与质量。
-pub const MODEL_SHA256: &str = "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a";
+pub const MODEL_SHA256: &str = "b79aa43a3b66ae45280023c4fe3f85abef6b624111d4c2bf54aa40b527a69094";
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// 一个 CPU 分类会话；调用方负责串行运行与生命周期，不阻塞 UI 线程。
 pub struct ShapeClassifier {
     session: Session,
+}
+
+/// 同一CNN前向的原分类与改进分类；原分类头的语义用于保护已有几何修复。
+pub struct ClassificationEvidence {
+    /// 固定类别顺序的原始八类概率。
+    pub primary: [f64; 8],
+    /// 新分类头的八类概率；单头模型不携带改进候选。
+    pub refinement: Option<[f64; 8]>,
+}
+
+fn probabilities(logits: &[f32]) -> [f64; 8] {
+    let maximum = logits.iter().copied().max_by(f32::total_cmp).unwrap();
+    let weights: [f64; 8] = std::array::from_fn(|i| f64::from(logits[i] - maximum).exp());
+    let denominator: f64 = weights.iter().sum();
+    weights.map(|value| value / denominator)
 }
 
 impl ShapeClassifier {
@@ -47,21 +62,40 @@ impl ShapeClassifier {
 
     /// 分类 224×224 灰度图，用于跨语言的像素与模型一致性验证；尺寸无效返回错误。
     pub fn classify_image(&mut self, image: &GrayImage) -> Result<(usize, f64)> {
-        let logits = self.logits(image)?;
-        let (index, maximum) = logits
+        let probabilities = self.image_probabilities(image)?;
+        let (index, confidence) = probabilities
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.total_cmp(b.1))
             .ok_or("图形分类没有输出")?;
-        let denominator: f64 = logits
-            .iter()
-            .map(|value| f64::from(value - maximum).exp())
-            .sum();
-        Ok((index, 1.0 / denominator))
+        Ok((index, *confidence))
+    }
+
+    /// 返回一笔的完整八类概率供形状先验使用；只推理一次，非法采样或输出返回错误。
+    pub fn probabilities(&mut self, points: &[[f64; 2]]) -> Result<[f64; 8]> {
+        self.image_probabilities(&rasterize(points)?)
+    }
+
+    /// 一次栅格化及一次推理返回两头证据；非法采样或任一输出异常返回错误。
+    pub fn evidence(&mut self, points: &[[f64; 2]]) -> Result<ClassificationEvidence> {
+        let (primary, refinement) = self.image_logits(&rasterize(points)?)?;
+        Ok(ClassificationEvidence {
+            primary: probabilities(&primary),
+            refinement: refinement.map(|values| probabilities(&values)),
+        })
+    }
+
+    fn image_probabilities(&mut self, image: &GrayImage) -> Result<[f64; 8]> {
+        let logits = self.logits(image)?;
+        Ok(probabilities(&logits))
     }
 
     /// 返回固定类别顺序的 FP32 logits；仅接受训练约定的 224 方图，输出异常时返回错误。
     pub fn logits(&mut self, image: &GrayImage) -> Result<Vec<f32>> {
+        Ok(self.image_logits(image)?.0)
+    }
+
+    fn image_logits(&mut self, image: &GrayImage) -> Result<(Vec<f32>, Option<Vec<f32>>)> {
         if image.dimensions() != (224, 224) {
             return Err("图形分类图像尺寸无效".into());
         }
@@ -82,7 +116,18 @@ impl ShapeClassifier {
         if shape.as_ref() != [1, 8] || values.iter().any(|v| !v.is_finite()) {
             return Err("图形分类输出无效".into());
         }
-        Ok(values.to_vec())
+        let primary = values.to_vec();
+        let refinement = output
+            .get("refinement_logits")
+            .map(|value| -> Result<Vec<f32>> {
+                let (shape, values) = value.try_extract_tensor::<f32>()?;
+                if shape.as_ref() != [1, 8] || values.iter().any(|v| !v.is_finite()) {
+                    return Err("图形改进分类输出无效".into());
+                }
+                Ok(values.to_vec())
+            })
+            .transpose()?;
+        Ok((primary, refinement))
     }
 }
 

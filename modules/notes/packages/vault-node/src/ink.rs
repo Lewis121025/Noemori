@@ -1,6 +1,6 @@
 //! 独立图形分类会话的薄绑定；加载与推理都在线程池执行，不进入资料库磁盘队列。
 
-use napi::{bindgen_prelude::*, Task};
+use napi::{Task, bindgen_prelude::*};
 use napi_derive::napi;
 use noemori_ink::ShapeClassifier;
 use std::{
@@ -57,6 +57,46 @@ pub struct JsShapePrediction {
     pub label: String,
     /// 有限的 [0, 1] 置信度。
     pub confidence: f64,
+    /// 只有圆/椭圆候选携带两个真实概率；几何判断不能把全部剩余概率当成另一子类型。
+    pub oval: Option<JsOvalEvidence>,
+    /// 同一推理的改进分类；渲染端仅在原候选无法修复时验证此候选。
+    pub refinement: Option<JsShapeCandidate>,
+}
+
+/// 一个独立八类分类头的候选；不能用一个头的置信度混配另一个头的概率。
+#[napi(object)]
+pub struct JsShapeCandidate {
+    /// 固定类别名。
+    pub label: String,
+    /// 此头的有限[0,1]置信度。
+    pub confidence: f64,
+    /// 此头在完整八类中的圆椭圆真实概率。
+    pub oval: Option<JsOvalEvidence>,
+}
+
+fn candidate(probabilities: [f64; 8]) -> JsShapeCandidate {
+    let (index, confidence) = probabilities
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .unwrap();
+    JsShapeCandidate {
+        label: noemori_ink::LABELS[index].into(),
+        confidence: *confidence,
+        oval: matches!(index, 1 | 2).then_some(JsOvalEvidence {
+            circle: probabilities[1],
+            ellipse: probabilities[2],
+        }),
+    }
+}
+
+/// 闭合曲线子类型的模型先验；来源于同一次八类 softmax，不重新推理。
+#[napi(object)]
+pub struct JsOvalEvidence {
+    /// 圆在完整八类中的概率。
+    pub circle: f64,
+    /// 椭圆在完整八类中的概率。
+    pub ellipse: f64,
 }
 
 impl Task for InkTask {
@@ -80,14 +120,17 @@ impl Task for InkTask {
             .iter()
             .map(|p| [p[0], p[1]])
             .collect();
-        let (index, confidence) = state
+        let evidence = state
             .as_mut()
             .ok_or_else(|| Error::from_reason("缺少图形识别会话"))?
-            .classify(&points)
+            .evidence(&points)
             .map_err(|e| Error::from_reason(e.to_string()))?;
+        let primary = candidate(evidence.primary);
         Ok(JsShapePrediction {
-            label: noemori_ink::LABELS[index].into(),
-            confidence,
+            label: primary.label,
+            confidence: primary.confidence,
+            oval: primary.oval,
+            refinement: evidence.refinement.map(candidate),
         })
     }
 

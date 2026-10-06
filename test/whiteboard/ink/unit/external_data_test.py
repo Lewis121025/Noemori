@@ -81,3 +81,24 @@ class ExternalDataTests(unittest.TestCase):
             loaders = build_loaders(Path("unused"), (0,) * 3, (1,) * 3, 2, 0, 1, False, external=external)
         self.assertEqual(len(loaders["train"].dataset), 9)
         self.assertEqual(loaders["source_test/new"].dataset.records, new)
+
+    def test_static_views_inherit_native_and_merged_origin_isolation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            origins = [str((root / f"origin-{i}.png").resolve()) for i in range(3)]
+            rows = [{"original": origin, "image": f"native-{i}.png",
+                     "exclude_native": i == 0, "exclude_original": False}
+                    for i, origin in enumerate(origins)]
+            (root / "records.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+            original = ImageDataset([(root / f"existing-{i}.png", i) for i in range(8)], None)
+            external = {"origins": {origin: ("train", 2, "verified/annotation") for origin in origins},
+                        "sources": {split: [] for split in ("train", "val", "test")},
+                        "native": {"directory": str(root), "removed": [{"path": origins[2]}]}}
+            removed = {"removed": [{"path": str(root / "native-1.png")}]}
+            with patch("modules.whiteboard.ink.training.train.ShapeDataset", return_value=original), \
+                    patch("modules.whiteboard.ink.training.external.merge_external", side_effect=lambda data, *_: (data, removed)), \
+                    patch("modules.whiteboard.ink.training.static_images.append_static_views", side_effect=lambda data, *_: (data, {})) as append:
+                build_loaders(Path("unused"), (0,) * 3, (1,) * 3, 2, 0, 1, False,
+                              external=external, static_images=root)
+            self.assertEqual(append.call_args.args[3], set(origins))
+            self.assertEqual(append.call_args.args[2][origins[0]], ("train", 2, "verified/annotation"))

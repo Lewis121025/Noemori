@@ -43,7 +43,7 @@ def load_external_packages(directories: list[Path]) -> dict:
     """完整核验固定格式真实包；只返回accepted的监督划分，候选/review包不得混入。"""
     records = {split: [] for split in ("train", "val", "test")}
     sources = {split: [] for split in records}
-    metadata, seen, groups, pixels, vectors, references, native_sources = [], set(), {}, {}, {}, {}, {}
+    metadata, seen, groups, pixels, vectors, references, native_sources, origins = [], set(), {}, {}, {}, {}, {}, {}
     roots = [directory.resolve() for directory in directories]
     if len(set(roots)) != len(roots):
         raise ValueError("外部数据包目录重复")
@@ -85,6 +85,7 @@ def load_external_packages(directories: list[Path]) -> dict:
                     sampling_source = f"{source}/{row['annotation_kind']}"
                     records[split].append((path, LABELS.index(row["label"])))
                     sources[split].append(sampling_source)
+                    origins[str(path)] = (split, LABELS.index(row["label"]), sampling_source)
                     pixels[str(path)] = row["pixel_sha256"]
                     if row.get("paths"):
                         vectors[str(path)] = row["paths"]
@@ -101,7 +102,7 @@ def load_external_packages(directories: list[Path]) -> dict:
                                       for (split, label, source), count in sorted(counts.items())],
                          "limitations": manifest.get("limitations", [])})
     return {"records": records, "sources": sources, "metadata": metadata, "pixels": pixels, "vectors": vectors,
-            "references": references, "native_sources": native_sources}
+            "references": references, "native_sources": native_sources, "origins": origins}
 
 
 def load_external_native(directory: Path, external: dict) -> dict:

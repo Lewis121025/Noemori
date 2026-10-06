@@ -58,14 +58,21 @@ class SourceMetrics:
 def run_epoch(model: nn.Module, loader, device: torch.device,
               optimizer: torch.optim.Optimizer | None = None, *,
               teacher: nn.Module | None = None, report_sources: bool = False, contour: bool = False,
-              contour_weight: float = 1.) -> dict:
+              contour_weight: float = 1., fixed_features: bool = False,
+              retain_all_correct: bool = False, original_head: bool = False) -> dict:
     """遍历一个划分并返回损失与混淆矩阵；非有限损失或空数据集立即报错。"""
     training = optimizer is not None
+    if original_head and training:
+        raise ValueError("原分类头仅用于验证部署分类，不能作为训练输出")
     if not math.isfinite(contour_weight) or contour_weight < 0:
         raise ValueError("轮廓训练权重必须为非负有限数")
     if (teacher is not None and not training) or (report_sources and training) or (contour and not training):
         raise ValueError("旧模型约束仅训练使用，来源位置统计仅顺序评价使用")
     model.train(training)
+    if fixed_features:
+        # 骨干统计、Dropout和原头固定；只有残差头参与训练，避免仅冻结梯度却仍改变部署特征。
+        model.eval()
+        model.get_classifier().refine.train(training)
     if contour:
         # 三视图不能把部署统计改成粗图/原图混合分布；仿射参数仍参与梯度更新。
         for module in model.modules():
@@ -97,16 +104,29 @@ def run_epoch(model: nn.Module, loader, device: torch.device,
             if contour:
                 from .contour import contour_forward
                 logits, auxiliary = contour_forward(model, images, batch["reference"].to(device),
-                                                     batch["coarse"].to(device), targets)
+                                                     batch["coarse"].to(device), targets,
+                                                     feature_agreement=not fixed_features)
             else:
-                logits = model(images)
+                if original_head:
+                    features = model.forward_head(model.forward_features(images), pre_logits=True)
+                    logits = model.get_classifier().base(features)
+                else:
+                    logits = model(images)
             if logits.shape != (len(targets), size):
                 raise ValueError("模型输出与固定类别契约不符")
             losses = nn.functional.cross_entropy(logits, targets, reduction="none")
             loss = losses.mean()
             if auxiliary is not None:
                 loss = loss + contour_weight * auxiliary
-            if retained is not None and retained.any():
+            if teacher is not None and retain_all_correct:
+                with torch.no_grad():
+                    old_logits = teacher(images)
+                    old_probabilities = old_logits.softmax(dim=1)
+                    confident, predicted = old_probabilities.max(dim=1)
+                    protected = (predicted == targets) & (confident >= .5)
+                if protected.any():
+                    loss = loss + .15 * retention_loss(logits[protected], old_logits[protected])
+            elif retained is not None and retained.any():
                 with torch.no_grad():
                     old_logits = teacher(images[retained])
                 loss = loss + .15 * retention_loss(logits[retained], old_logits)

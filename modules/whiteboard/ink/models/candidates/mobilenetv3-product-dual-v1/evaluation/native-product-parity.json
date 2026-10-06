@@ -1,0 +1,329 @@
+{
+  "samples": 46,
+  "mismatches": 0,
+  "scope": "实际产品输入状态机、Rust绑定及默认两头模型回放；包括全部本轮新增正确修复和四个历史拒绝反例。",
+  "records": [
+    {
+      "split": "val",
+      "sample_id": "7f1db0441cdedb70e11e69cf43054f03",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "abaa9ad0f2c1d2525fcd3b3e707ad305f6d73617d324e63de8799d6a689aa317"
+    },
+    {
+      "split": "val",
+      "sample_id": "44719441043e996f09b7e3c3d9719968",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "768073262cb2d36bac78df7173e590b4bafa0ec2f5310eb6b4ce07c2ca27c479"
+    },
+    {
+      "split": "val",
+      "sample_id": "b399dff8e409b447967c7018e58e2eef",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "513ad06578bc114e217ba2f0f2275273079ce04d8aa88162c3b46bcfb414981f"
+    },
+    {
+      "split": "val",
+      "sample_id": "bdd432485319e3753d85d91a09a970eb",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "e93844434b2d400d85e8ecfc4e1b945a067ce97d856a5f4620c308d3b9a9efab"
+    },
+    {
+      "split": "val",
+      "sample_id": "2ac186e1df95c2b0fb3cf00f331f0a35",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "968852dcae1ff4a58b7d6a71a85f9c94a270b7f261cee0860d2e1a2baffbdb4d"
+    },
+    {
+      "split": "val",
+      "sample_id": "f1a0127eba2b88868fd2abeb560c36ae",
+      "truth": "line",
+      "label": "line",
+      "snapshot_sha256": "4d7c04fe2008408d9a2e8d813ac7ea4d94f15ad24875142752557b192fe60dd5"
+    },
+    {
+      "split": "val",
+      "sample_id": "bc98981525c1423995dd29d7dfcd81e7",
+      "truth": "circle",
+      "label": "circle",
+      "snapshot_sha256": "e7aaac105e9a4aafa4f00e11ebd23c6c2bf063d8707ca4e0a2727b4ae70792b5"
+    },
+    {
+      "split": "val",
+      "sample_id": "3ffc55387a8918c481001c36ad7e7811",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "644c2132576decadb47a281d491dd00cbc6b23a611caddf6e335e3d73255e3fa"
+    },
+    {
+      "split": "val",
+      "sample_id": "28897ff4a056d19a3729c9baf71451a9",
+      "truth": "arc",
+      "label": "arc",
+      "snapshot_sha256": "68210b10e5f08fdf006d1f03a9deb3b179cec90e049bbb81e5c44cfa73cfd09e"
+    },
+    {
+      "split": "val",
+      "sample_id": "3859eed1fe66290c75428f492c83fa34",
+      "truth": "rectangle",
+      "label": "rectangle",
+      "snapshot_sha256": "83ae00880c274854cd52644be5e62c7a5156ad9e84c044d24e440fad70aec3a6"
+    },
+    {
+      "split": "val",
+      "sample_id": "5f5f7c2d3e53e13ebf328094a6a8e6d4",
+      "truth": "triangle",
+      "label": "triangle",
+      "snapshot_sha256": "ca512a6f7bb85143ad66676ad3d022107e148a2fc1476b23db534116f02731a1"
+    },
+    {
+      "split": "val",
+      "sample_id": "36afd548f2abade63e2262bf35fa9c30",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "a675eac7c03885875993d7b4a8443ed81d10c457e7994e7b64567f89f151fb49"
+    },
+    {
+      "split": "val",
+      "sample_id": "ce4b0322d73d82767597832fd40347a9",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "2ef12cdfc7294ecf06ba3fb5a0e8f25c7d1e9e39499f14bcaa72279c0ff8a773"
+    },
+    {
+      "split": "test",
+      "sample_id": "0a74b2654673ecf1cd90a0297cd3db83",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "596f811850207b6f04130d385d747965fdf88e992d9d3e3d9b0fe58fb4108155"
+    },
+    {
+      "split": "test",
+      "sample_id": "0af5690fb5eef4c0f3736894ad1c8f70",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "9d7bef3b8d08d67ec16573546ae96fdd297d050f354fec99b0bd7bdc1a8ef54a"
+    },
+    {
+      "split": "test",
+      "sample_id": "3c4115bd771644eeeb208dfe4aacb50e",
+      "truth": "circle",
+      "label": null,
+      "snapshot_sha256": "86bdb15de51006c09aed804f36e83040f95fcb4031d1fe2640fe9ac256def866"
+    },
+    {
+      "split": "test",
+      "sample_id": "cc4f6fed3a9cc4cc79ba1806e4985395",
+      "truth": "circle",
+      "label": null,
+      "snapshot_sha256": "a14238a19ebcc2eba1ccb97229d0bde83318de4c36a325bfac4caeec45c17a63"
+    },
+    {
+      "split": "test",
+      "sample_id": "bc99251de57281cfbaec4819459dca25",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "b662902bb55bfec1d54d5e4b3bc93e021a0ca2384b2a0bcd3dad7fe679ad0fe3"
+    },
+    {
+      "split": "test",
+      "sample_id": "e4c6fe49bb252e30bd583c0a7b7f556c",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "40390cb2e89977b38aabd04afc4d19a11c915c6444c4398b036873ab702fffe1"
+    },
+    {
+      "split": "test",
+      "sample_id": "34f73427dc2e7f03c16970fba4a8dd9a",
+      "truth": "line",
+      "label": "line",
+      "snapshot_sha256": "c0dec6c9200ce7d98778195dc214668df900713b686555cda3594b88a538f3a7"
+    },
+    {
+      "split": "test",
+      "sample_id": "dcd8b4546b391c155bd1a1e6b23e4280",
+      "truth": "circle",
+      "label": "circle",
+      "snapshot_sha256": "76b610edb74acbd46cf8e36784c8625801d3e1e7044b118830f19c5a932fa46c"
+    },
+    {
+      "split": "test",
+      "sample_id": "1b208f2b6aced2b413e094faa9579f1f",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "809bbced290d96fec9d3203ff4714c2acda00b5d2c7ac8e6a645e846982800be"
+    },
+    {
+      "split": "test",
+      "sample_id": "bbe13414ec2f284d0c91f1449b4eef8e",
+      "truth": "arc",
+      "label": "arc",
+      "snapshot_sha256": "0ef466436014f7655157e2e6b3df995c67924a4075e339d5cc231a3799ae6414"
+    },
+    {
+      "split": "test",
+      "sample_id": "11113bc08b350acefbf016399bdbe8a9",
+      "truth": "rectangle",
+      "label": "rectangle",
+      "snapshot_sha256": "4cec6b9825ba37e53bebf1dc53b57d5adbf41c8f7184637fdf099afc1b74031a"
+    },
+    {
+      "split": "test",
+      "sample_id": "08ae8f006011c8a53d4f9a1efbeeb110",
+      "truth": "triangle",
+      "label": "triangle",
+      "snapshot_sha256": "c511313698af54bc3a3c162357320850723c47dfe2078e5e2f2a3a61164ea3a7"
+    },
+    {
+      "split": "test",
+      "sample_id": "a86e86029cf69b8408e1edec2a06a318",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "9bdee80f4fe3f0f9054abf722aac8ea1cd605dc05b78253afa903be760579172"
+    },
+    {
+      "split": "test",
+      "sample_id": "b63ea02e2c6f1d52a09960c3c562bf72",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "b1c0ddfe9e687dfe4430c88876e4586e4948390f679f0f0944fd71783ffaeb0b"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "fe654effb15fec253f4333951e9a3092",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "34ab98a9c1728fa2f6e0062bf725c3f33e6b6552fe6e3bff104dbab126ea91ec"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "c612a71ce56846a791d59af1bb2dc545",
+      "truth": "line",
+      "label": "line",
+      "snapshot_sha256": "ee3f33f116d36c08b995cdb1bc1057a8dc9ab28da721d98e0ae40589dfa63a1c"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "e6136cf0a74cb58ea9bfb1cc62195941",
+      "truth": "circle",
+      "label": "circle",
+      "snapshot_sha256": "9420901c7903953924eee23b9d8b18a4b56d1249a49fde76d6e5e036d3ae8da6"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "5e482775fb96e584ea59922531f91128",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "8d0cd90a18f952515581690d3d26eaebee096897d66140448f4befbca0270de3"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "ea317071bc7dc7615c981d1237a6411f",
+      "truth": "arc",
+      "label": "arc",
+      "snapshot_sha256": "d4908eca2278e6c77cf08658260a7c3957946952b202515e0c6413f50ed63641"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "08a10763364ad39b7c534797d32a9412",
+      "truth": "rectangle",
+      "label": "rectangle",
+      "snapshot_sha256": "1c21b94d9659883e11a8220462d403f51aa003b2358a5e9af3506e38611dfa81"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "ca722052fe11bbe8c89a1df263de042a",
+      "truth": "triangle",
+      "label": "triangle",
+      "snapshot_sha256": "94c763b61109e18d9e20c8de3d47d4b271a8511705f9dc6224e6d9aad914e899"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "45cb1da589500dbe39ab3f623cf1fcc1",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "05bef1f22d9e8efea66428030c0835e24e88d1e64648439765a04384e3901b70"
+    },
+    {
+      "split": "fresh",
+      "sample_id": "943d415b118421ceef8bd6ec150eb8a9",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "73005339e00fd09ce9dd746177f76347f6278092281c42bcfda7edb84c3faff3"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "a4c9c4e8da5e536044fb307456e43687",
+      "truth": "line",
+      "label": "line",
+      "snapshot_sha256": "aaaf8d52b5cc75e1a160b9e80d9fbd3b856335277d86db6171f25c3e17265034"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "e8240aac4c975485915edd7ad2c4a8ed",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "878262072d45402c584e4f49be618581f35563dde841267b11634880d72f86ab"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "579fa44ef3a67d9322b96d6fdceda03a",
+      "truth": "line",
+      "label": "line",
+      "snapshot_sha256": "624dddc21d9394bd2ce0676400ca1a268d2ac3bdf0c3a1bfbc7cc74be7c95c01"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "f5b86812d31b108b2999f3ee84e3f087",
+      "truth": "circle",
+      "label": "circle",
+      "snapshot_sha256": "cab2545b086aeaa0ab5308d82250cfaced822e749caf1af7dde6b42e8e1fa02e"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "2b5324f4f98f8b9ecdf7f5dfa342f9d9",
+      "truth": "ellipse",
+      "label": "ellipse",
+      "snapshot_sha256": "e946d3af4ac49de99d6bf491b62d4c625b356e5573010786a09b35bf978e551d"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "df7807bd564bea72aaf244c2da4c6aed",
+      "truth": "arc",
+      "label": "arc",
+      "snapshot_sha256": "c299e954ac39f125e808d081c837fae66804f0478056f0574f5094d4f041968a"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "205fa97f75ce9179bbbb9de0a2efbddb",
+      "truth": "rectangle",
+      "label": "rectangle",
+      "snapshot_sha256": "fac1a0cb95f07c7afde4466a2368e2e0a5b58e6d2a95920911bf7c5cf3c3c0dd"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "55db7452a71524767a4eca297662502a",
+      "truth": "triangle",
+      "label": "triangle",
+      "snapshot_sha256": "efe8edb1042f0848006d4dffd5925ef2a320d9dea1dc10393c0770a233ff9eab"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "9d9472dd1444953aee2c2e2a7c940831",
+      "truth": "arrow",
+      "label": "arrow",
+      "snapshot_sha256": "ba7d61ede71b471f2defddcb07d90c37bf0a941b73b5df84a82121821aa70953"
+    },
+    {
+      "split": "fresh2",
+      "sample_id": "6f280fc6dfbe09fcdf728eb282e69890",
+      "truth": "other",
+      "label": null,
+      "snapshot_sha256": "81212a95526c4743af566085a976b401b4843c40ab58edf225e581b0255cb997"
+    }
+  ]
+}

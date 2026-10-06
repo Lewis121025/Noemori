@@ -20,6 +20,47 @@ function deferred() {
 }
 const prediction = { label: "line", confidence: 0.99 } satisfies ShapePrediction;
 
+it.each([
+  { ratio: 0.72, predicted: "circle", expected: "ellipse" },
+  { ratio: 1, predicted: "ellipse", expected: "circle" },
+] as const)("停笔保存最终几何轮廓，模型标签$predicted与最终类型$expected分离", async (test) => {
+  const recognize = vi.fn(async () => ({
+    label: test.predicted,
+    confidence: 0.8,
+    oval: {
+      circle: test.predicted === "circle" ? 0.8 : 0.2,
+      ellipse: test.predicted === "ellipse" ? 0.8 : 0.2,
+    },
+    refinement: {
+      label: test.expected,
+      confidence: 0.8,
+      oval: {
+        circle: test.expected === "circle" ? 0.8 : 0.2,
+        ellipse: test.expected === "ellipse" ? 0.8 : 0.2,
+      },
+    },
+  }));
+  const board = new WhiteboardInput(emptyWhiteboard(), vi.fn(), recognize);
+  const points = Array.from({ length: 193 }, (_, i) =>
+    p(
+      500 + 100 * Math.cos((2 * Math.PI * i) / 192),
+      300 + 100 * test.ratio * Math.sin((2 * Math.PI * i) / 192),
+    ),
+  );
+  board.begin(points[0]!);
+  for (const point of points.slice(1)) board.update(point);
+  expect(await board.hold()).toBe(true);
+  expect(board.correctedLabel).toBe(test.expected);
+  const preview = [...board.points];
+  board.finish();
+  expect(board.correctedLabel).toBeNull();
+  expect(board.document.strokes[0]!.points).toEqual(preview);
+  board.applyHistory("undo");
+  expect(board.document.strokes).toHaveLength(0);
+  board.applyHistory("redo");
+  expect(board.document.strokes[0]!.points).toEqual(preview);
+});
+
 it("停笔识别直线无需画圈，预览不占历史，抬笔一次提交并一次撤销重做", async () => {
   const changed = vi.fn();
   const recognize = vi.fn(async () => prediction);

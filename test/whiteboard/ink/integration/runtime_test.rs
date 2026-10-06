@@ -70,6 +70,14 @@ fn verified_candidate_runs_in_rust_on_native_vectors() {
     ];
     for (expected, points) in samples {
         let (index, probability) = classifier.classify(&points).unwrap();
+        let probabilities = classifier.probabilities(&points).unwrap();
+        let evidence = classifier.evidence(&points).unwrap();
+        assert_eq!(evidence.primary, probabilities);
+        if let Some(refinement) = evidence.refinement {
+            assert!((refinement.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        }
+        assert!((probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert_eq!(probability, probabilities[index]);
         assert_eq!(LABELS[index], expected);
         assert!(probability > 0.95, "{expected}: {probability}");
     }

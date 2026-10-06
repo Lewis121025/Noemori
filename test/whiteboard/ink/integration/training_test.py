@@ -1,6 +1,7 @@
 """训练执行器的参数更新、独立评测与权重发布验证；不下载预训练模型。"""
 
 from pathlib import Path
+import copy
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -16,6 +17,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from modules.whiteboard.ink.training.engine import reestimate_batch_norm, run_epoch, save_checkpoint
 from modules.whiteboard.ink.training.data import ImageDataset
 from modules.whiteboard.ink.training.train import finalize
+from modules.whiteboard.ink.training.train import fit
+from modules.whiteboard.ink.training.adapter import enable_adapter
+
+
+class FixedFeatureClassifier(nn.Module):
+    """可解析的固定特征分类器，验证两头训练的真实选模和基线数据流。"""
+
+    def __init__(self):
+        super().__init__()
+        self.classifier = nn.Linear(8, 8, bias=False)
+        with torch.no_grad():
+            self.classifier.weight.copy_(torch.eye(8) * 5)
+
+    def get_classifier(self):
+        return self.classifier
+
+    def forward_features(self, inputs):
+        return inputs
+
+    def forward_head(self, features, pre_logits=False):
+        return features if pre_logits else self.classifier(features)
+
+    def forward(self, inputs):
+        return self.classifier(inputs)
 
 
 class TrainingExecutionTests(unittest.TestCase):
@@ -54,6 +79,39 @@ class TrainingExecutionTests(unittest.TestCase):
         after = run_epoch(model, loader, torch.device("cpu"))
         self.assertLess(after["loss"], before["loss"])
         self.assertFalse(torch.equal(initial, model.weight))
+
+    def test_product_retention_uses_single_head_teacher_even_when_zero_adapter_is_unsafe(self):
+        teacher = FixedFeatureClassifier().eval()
+        model = copy.deepcopy(teacher)
+        enable_adapter(model)
+        inputs, labels = torch.eye(8), torch.arange(8)
+        validation = TensorDataset(inputs, labels)
+        validation.sources = ["fixture"] * 8
+        val = DataLoader(validation, batch_size=4)
+        train = DataLoader(TensorDataset(inputs, labels, torch.ones(8, dtype=torch.bool)), batch_size=4)
+        reference = run_epoch(teacher, val, torch.device("cpu"), report_sources=True)
+        baseline = {"correct": 8, "passes_product_retention": True}
+        unsafe = {"correct": 7, "passes_product_retention": False}
+        metadata = {"classifier_head": "residual_64", "selection_protocol": "source_family_with_class_retention",
+                    "retention": {"reference_validation": reference}, "preprocessing": {},
+                    "static_images": {"excluded_originals": [], "excluded_pixel_conflicts": []},
+                    "evaluation_scope": "fixture"}
+        validation.records = [(Path(f"fixture-{i}"), i) for i in range(8)]
+        with tempfile.TemporaryDirectory() as temporary:
+            args = SimpleNamespace(output=Path(temporary), learning_rate=.001, epochs=1, patience=1,
+                                   product_validation=Path("unused-product-fixture"))
+            with patch("modules.whiteboard.ink.training.product_validation.ProductValidation") as product:
+                product.return_value.metadata = {"scope": "fixture"}
+                product.return_value.evaluate.side_effect = [baseline, unsafe, unsafe]
+                fit(model, {"train": train, "val": val, "test": val}, torch.device("cpu"), args, metadata, teacher)
+            calls = product.return_value.evaluate.call_args_list
+            self.assertIs(calls[0].args[0], teacher)
+            self.assertIs(calls[1].args[0], model)
+            self.assertIs(calls[1].args[2], baseline)
+            self.assertIs(calls[2].args[2], baseline)
+            saved = torch.load(args.output / "best.pt", weights_only=True)
+            self.assertFalse(saved["product_validation"]["passes_product_retention"])
+            self.assertEqual(saved["metadata"]["product_reference"], baseline)
 
     @unittest.skipUnless(torch.cuda.is_available(), "需要 CUDA 比较部署精度与混合精度")
     def test_gpu_evaluation_matches_fp32_deployment_for_sensitive_logits(self):

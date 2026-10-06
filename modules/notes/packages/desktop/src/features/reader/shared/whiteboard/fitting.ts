@@ -1,5 +1,12 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
-import { HOLD_RADIUS_CSS_PX, RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
+import {
+  HOLD_RADIUS_CSS_PX,
+  RECOGNITION_POINT_LIMIT,
+  type ShapeLabel,
+  type ShapePrediction,
+  type ShapeCandidate,
+  type OvalEvidence,
+} from "./recognition";
 import { fitArrow } from "./fitting-arrow";
 import { stabilizeTrace } from "./stabilization";
 import {
@@ -7,6 +14,7 @@ import {
   angleAdvance,
   contourHull,
   fitAgrees,
+  contourDeviation,
   observationsAgree,
   leastSquares,
   principalLine,
@@ -18,6 +26,12 @@ import {
 
 /** 单路径验证集上的联合门槛；多数模型候选还必须通过完整几何约束与双向轮廓检查。 */
 const MIN_SHAPE_SCORE = 0.5;
+
+/** 已验证的规范轮廓及最终几何类型；模型标签只选择拟合族，不能替代轮廓证据。 */
+export type ShapeFit = { label: Exclude<ShapeLabel, "other">; points: InkPoint[] };
+
+/** 拟合候选仍使用无量纲坐标，全部候选共用同一覆盖与原始观测校验。 */
+type NormalizedShapeFit = { label: ShapeFit["label"]; points: FitPoint[] };
 
 function line(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   const fit = principalLine(points);
@@ -71,7 +85,10 @@ function circle(
   return result;
 }
 
-function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
+function ellipse(
+  points: readonly FitPoint[],
+  trace: readonly FitPoint[],
+): { points: FitPoint[]; axisDifference: number } | null {
   if (!closed(points)) return null;
   const fit = leastSquares(
     points.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y]),
@@ -106,7 +123,58 @@ function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPo
     return { x: cx + x * dx - y * dy, y: cy + x * dy + y * dx };
   });
   result[result.length - 1] = result[0]!;
-  return result;
+  return { points: result, axisDifference: major - minor };
+}
+
+function oval(
+  points: readonly FitPoint[],
+  trace: readonly FitPoint[],
+  radius: number,
+  preferred: "circle" | "ellipse",
+  evidence?: OvalEvidence,
+  source: readonly FitPoint[] = points,
+  observations?: readonly FitPoint[],
+): NormalizedShapeFit[] {
+  const round = circle(points, false, trace);
+  const elongated = ellipse(points, trace);
+  const candidates: NormalizedShapeFit[] = [];
+  if (round) candidates.push({ label: "circle", points: round });
+  if (elongated) candidates.push({ label: "ellipse", points: elongated.points });
+  const agrees = (fitted: readonly FitPoint[]) =>
+    fitAgrees(source, fitted) && (!observations || observationsAgree(observations, fitted));
+  const roundAgrees = round !== null && agrees(round);
+  if (preferred === "circle" && roundAgrees)
+    return candidates.filter((candidate) => candidate.label === "circle");
+  if (!evidence) return candidates.filter((candidate) => candidate.label === preferred);
+  // 模型与有效椭圆一致时，未通过完整校验的圆不能阻断原来正确的修复。
+  if (preferred === "ellipse" && elongated && agrees(elongated.points) && !roundAgrees)
+    return candidates.filter((candidate) => candidate.label === "ellipse");
+  // 长短轴差落在两轴的位置不确定性内时，圆是同一几何的更简单表示。
+  if (elongated && elongated.axisDifference <= 2 * radius && roundAgrees)
+    return candidates.filter((candidate) => candidate.label === "circle");
+  // 以8个有效整体观测的启发式惩罚比较3参数圆与5参数椭圆，不把192个相关点当独立观测。
+  // 误差以既有位置不确定性为底噪；更多自由度或仅略小的残差不足以推翻强模型先验。
+  const score = (candidate: NormalizedShapeFit) => {
+    const error = contourDeviation(source, candidate.points);
+    if (!error) return Infinity;
+    const label = candidate.label === "circle" ? "circle" : "ellipse";
+    const parameters = label === "circle" ? 3 : 5;
+    return (
+      8 * Math.log(error.rms ** 2 + radius ** 2) +
+      parameters * Math.log(8) -
+      2 * Math.log(Math.max(evidence[label], 1e-12))
+    );
+  };
+  // 备选子类型须占圆/椭圆合计概率至少20%，不让几何推翻模型几乎排除的类型。
+  const mass = evidence.circle + evidence.ellipse;
+  const credible = candidates.filter(
+    (candidate) =>
+      candidate.label === preferred ||
+      evidence[candidate.label === "circle" ? "circle" : "ellipse"] / mass >= 0.2,
+  );
+  const ordered = credible.sort((a, b) => score(a) - score(b));
+  // 几何校验失败时保留笔迹；不能靠逐个尝试把拒绝的强圆先验悄悄变成椭圆。
+  return ordered.slice(0, 1);
 }
 
 function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
@@ -167,19 +235,68 @@ function triangle(points: readonly FitPoint[], trace: readonly FitPoint[]): FitP
 }
 
 /**
- * 分类只决定拟合族，拟合使用静态向量；低置信度、退化或轮廓不符返回 null。
+ * 分类提供拟合族和形状先验；圆与椭圆共享闭合曲线族，最终类型须符合静态整体轮廓。
  * @param points 一个连续笔迹的已校验世界坐标，可归并已确认静止的末点观测。
  * @param prediction 静态模型候选；分数仅作入口门槛，不能代替几何证据。
  * @param scale 屏幕缩放，用于最小尺寸与有界顺序去抖半径。
  * @param observations 归并前的全部原始观测；逐点验证既有最大偏差，防止隐藏额外笔画。
- * @returns 可存入原有笔迹格式的规范轮廓；拟合还需通过双向距离和覆盖检查。
+ * @returns 最终几何类型和可存入原有笔迹格式的规范轮廓；低置信度、退化或校验失败返回 null。
  */
 export function fitShape(
   points: readonly InkPoint[],
   prediction: ShapePrediction,
   scale: number,
   observations?: readonly InkPoint[],
-): InkPoint[] | null {
+): ShapeFit | null {
+  const refinement = prediction.refinement;
+  // 单头模型缺少第二份子类型证据，保留直接标签；合计概率只解决族内分票。
+  const original = fitCandidate(points, prediction, scale, observations, !refinement);
+  if (!refinement) return original;
+  const supported = (candidate: ShapeCandidate, label: ShapeLabel) =>
+    candidate.label === label ||
+    ((label === "circle" || label === "ellipse") &&
+      candidate.oval &&
+      candidate.oval[label] / (candidate.oval.circle + candidate.oval.ellipse) >= 0.2);
+  if (original) {
+    // 合计概率只能证明拟合族；原单类未准入时，新增子类型须由至少一个头明确选中。
+    if (original.label === prediction.label) return original;
+    if (
+      supported(refinement, original.label) &&
+      (prediction.confidence >= MIN_SHAPE_SCORE || refinement.label === original.label)
+    )
+      return original;
+    // 跨子类型修复须同时符合两头证据；原模型直接类型的有效拟合始终保留。
+    return fitCandidate(points, prediction, scale, observations, true);
+  }
+  // 原模型明确拒绝未知输入时，较弱的改进候选不足以推翻该拒绝。
+  if (
+    prediction.label === "other" &&
+    prediction.confidence >= MIN_SHAPE_SCORE &&
+    refinement.confidence <= prediction.confidence
+  )
+    return null;
+  const family = (label: ShapeLabel) =>
+    label === "circle" || label === "ellipse" ? "oval" : label;
+  // 原候选已完成族概率准入与全部几何判定；相关的新头不能靠加分重试同族拒绝。
+  if (family(prediction.label) === family(refinement.label)) return null;
+  const refined = fitCandidate(points, refinement, scale, observations);
+  // 新修复的最终类型须至少被一个头选中；两个头均未确认的子类型应保留自由笔迹。
+  return refined && (refined.label === prediction.label || refined.label === refinement.label)
+    ? refined
+    : null;
+}
+
+/** 每个候选独立通过原有入口、覆盖和完整观测校验；改进头不能绕过任何几何门槛。 */
+function fitCandidate(
+  points: readonly InkPoint[],
+  prediction: ShapeCandidate,
+  scale: number,
+  observations?: readonly InkPoint[],
+  predictedSubtypeOnly = false,
+): ShapeFit | null {
+  const familyConfidence = prediction.oval
+    ? prediction.oval.circle + prediction.oval.ellipse
+    : prediction.confidence;
   if (
     points.length < 2 ||
     points.length > RECOGNITION_POINT_LIMIT ||
@@ -187,7 +304,8 @@ export function fitShape(
       (observations.length < 2 || observations.length > RECOGNITION_POINT_LIMIT)) ||
     prediction.label === "other" ||
     !Number.isFinite(prediction.confidence) ||
-    prediction.confidence < MIN_SHAPE_SCORE ||
+    !Number.isFinite(familyConfidence) ||
+    familyConfidence < MIN_SHAPE_SCORE ||
     prediction.confidence > 1 ||
     !Number.isFinite(scale) ||
     scale <= 0
@@ -212,25 +330,29 @@ export function fitShape(
   if (sampled.length === 0) return null;
   const fitters = {
     line,
-    circle: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, false, t),
-    ellipse,
     arc: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, true, t),
     rectangle,
     triangle,
     arrow: fitArrow,
   };
-  const fitted = fitters[prediction.label](sampled, trace);
-  if (!fitted || !fitAgrees(normalized, fitted)) return null;
-  if (
-    observations &&
-    !observationsAgree(
-      observations.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size })),
-      fitted,
-    )
-  )
-    return null;
+  const observed = observations?.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
+  let candidates: NormalizedShapeFit[];
+  if (prediction.label === "circle" || prediction.label === "ellipse") {
+    candidates = predictedSubtypeOnly
+      ? oval(sampled, trace, radius, prediction.label, undefined, normalized, observed)
+      : oval(sampled, trace, radius, prediction.label, prediction.oval, normalized, observed);
+  } else {
+    const points = fitters[prediction.label](sampled, trace);
+    candidates = points ? [{ label: prediction.label, points }] : [];
+  }
+  const fitted = candidates.find(
+    (candidate) =>
+      fitAgrees(normalized, candidate.points) &&
+      (!observed || observationsAgree(observed, candidate.points)),
+  );
+  if (!fitted) return null;
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
-  const result = fitted.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
+  const result = fitted.points.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
   return result.every(
     (p) =>
       Number.isFinite(p.x) &&
@@ -238,6 +360,6 @@ export function fitShape(
       Math.abs(p.x) <= BOARD_COORDINATE_LIMIT &&
       Math.abs(p.y) <= BOARD_COORDINATE_LIMIT,
   )
-    ? result
+    ? { label: fitted.label, points: result }
     : null;
 }

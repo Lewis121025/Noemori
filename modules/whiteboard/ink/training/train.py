@@ -36,7 +36,8 @@ def write_json(path: Path, value: dict) -> None:
 def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
                   workers: int, seed: int, pin_memory: bool, supplement: dict | None = None,
                   gestures: dict | None = None, native_images: Path | None = None,
-                  external: dict | None = None, retention: bool = False, contour: bool = False) -> dict:
+                  external: dict | None = None, retention: bool = False, contour: bool = False,
+                  static_images: Path | None = None) -> dict:
     """建立三个独立加载器；仅训练启用增强，真实补充必须由复核入口提供。"""
     loaders, datasets = {}, {}
     for split in ("train", "val", "test"):
@@ -46,9 +47,25 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
             data = ImageDataset(data.records + gestures[split], data.transform,
                                 data.sources + ["mmg"] * len(gestures[split]))
         datasets[split] = data
+    accepted = {str(path.resolve()): (split, label, source)
+                for split, data in datasets.items() for (path, label), source in zip(data.records, data.sources)}
+    isolated_origins, native_origins = set(), {}
+    if external and static_images:
+        accepted.update(external["origins"])
+    if static_images:
+        caches = [native_images] if native_images else []
+        if external and external.get("native"):
+            caches.append(Path(external["native"]["directory"]))
+        for cache in caches:
+            for row in map(json.loads, (cache / "records.jsonl").read_text().splitlines()):
+                origin = str(Path(row["original"]).resolve())
+                native_origins[str((cache / row["image"]).resolve())] = origin
+                if row["exclude_native"] or row["exclude_original"]:
+                    isolated_origins.add(origin)
     if native_images:
         from .native_images import load_native_images
         native, details = load_native_images(native_images, datasets)
+        isolated_origins.update(path for paths in details["exclude_original"].values() for path in paths)
         combined = {}
         for split, data in datasets.items():
             excluded = set(details["exclude_original"][split])
@@ -62,6 +79,14 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
         reserved = set(json.loads((native_images / "manifest.json").read_text()).get("reserved_pixel_sha256", [])) if native_images else set()
         datasets, exclusions = merge_external(datasets, external, reserved)
         external["exclusions"] = exclusions
+        isolated_origins.update(native_origins.get(str(Path(row["path"]).resolve()), str(Path(row["path"]).resolve()))
+                                for row in exclusions["removed"])
+        isolated_origins.update(row["path"] for row in external.get("native", {}).get("removed", []))
+    if static_images:
+        from .static_images import append_static_views
+        datasets, static_metadata = append_static_views(datasets, static_images, accepted, isolated_origins)
+        if external is not None:
+            external["static_images"] = static_metadata
     for split, data in datasets.items():
         if split == "train" and contour:
             from .contour import ContourDataset
@@ -124,6 +149,15 @@ def configure(args) -> tuple:
     else:
         model = timm.create_model(MODEL, pretrained=True, num_classes=len(LABELS))
     cfg = model.pretrained_cfg
+    from .adapter import ClassifierAdapter
+    adapter = bool(getattr(args, "classifier_adapter", False)) or isinstance(model.get_classifier(), ClassifierAdapter)
+    if adapter:
+        from .adapter import enable_adapter
+        if not getattr(args, "retain_checkpoint", None):
+            raise ValueError("残差分类头训练必须提供已验证的保留基线")
+        if not getattr(args, "static_images", None) or not getattr(args, "product_validation", None):
+            raise ValueError("两头训练必须提供已隔离的静态视图和产品验证")
+        enable_adapter(model)
     mean, std = tuple(cfg["mean"]), tuple(cfg["std"])
     fingerprint = hashlib.sha256()
     for name, tensor in model.state_dict().items():
@@ -146,17 +180,20 @@ def configure(args) -> tuple:
             external = load_external_native(args.external_native, external)
     loaders = build_loaders(args.dataset, mean, std, args.batch_size, args.workers,
                             args.seed, device.type == "cuda", supplement, gestures, args.native_images, external,
-                            bool(getattr(args, "retain_checkpoint", None)), bool(getattr(args, "contour_training", False)))
+                            bool(getattr(args, "retain_checkpoint", None)), bool(getattr(args, "contour_training", False)),
+                            getattr(args, "static_images", None))
     teacher, retention_metadata = None, None
     if getattr(args, "retain_checkpoint", None):
         from .inference import load_classifier
         from ..dataset.classification.acquire import file_record
         teacher, _, parent = load_classifier(args.retain_checkpoint, device)
         teacher.requires_grad_(False)
-        reference = run_epoch(teacher, loaders["val"], device, report_sources=True)
+        reference = run_epoch(teacher, loaders["val"], device, report_sources=True,
+                              original_head=isinstance(teacher.get_classifier(), ClassifierAdapter))
         retention_metadata = {"checkpoint": str(args.retain_checkpoint.resolve()),
                               "file": file_record(args.retain_checkpoint), "reference_validation": reference,
-                              "temperature": 2., "strength": .15, "scope": "legacy_training_sources_only"}
+                              "temperature": 2., "strength": .15,
+                              "scope": "verified_teacher_correct_training_labels" if adapter else "legacy_training_sources_only"}
     from .external import source_counts
     metadata = {
         "model": MODEL, "labels": list(LABELS), "dataset": str(args.dataset.resolve()),
@@ -164,6 +201,9 @@ def configure(args) -> tuple:
         "initial_state_sha256": fingerprint.hexdigest(), "pretrained_reference": cfg.get("hf_hub_id"),
         "initialization": initialization,
         "parameters": sum(p.numel() for p in model.parameters()),
+        "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "classifier_head": "residual_64" if adapter else None,
+        "deployment_heads": "original_and_refinement" if adapter else "single",
         "training_sources": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                              for p in sorted(Path(__file__).parent.glob("*.py"))},
         "preprocessing": {"input_shape": [1, 3, 224, 224], "mean": mean, "std": std,
@@ -179,8 +219,9 @@ def configure(args) -> tuple:
         "external_datasets": external["metadata"] if external else [],
         "external_exclusions": external.get("exclusions") if external else None,
         "external_native": external.get("native") if external else None,
+        "static_images": external.get("static_images") if external else None,
         "retention": retention_metadata,
-        "selection_protocol": "source_class_with_legacy_retention" if teacher is not None else "pooled_macro_f1",
+        "selection_protocol": "source_family_with_class_retention" if teacher is not None else "pooled_macro_f1",
         "evaluation_scope": ("synthetic_and_source_separated_real_packages" if external else
                              "synthetic_and_writer_isolated_mmg" if gestures else
                              "synthetic_with_ai_reviewed_negative_validation" if supplement else "synthetic_only"),
@@ -191,9 +232,9 @@ def configure(args) -> tuple:
                           if args.native_images else None),
         "sampling": "class_then_source_balanced_with_replacement",
         "contour_training": ({"views": ["original", "same_parent_reference", "coarse_64"],
-                              "auxiliary_classification_weight": .25, "feature_agreement_weight": .05,
+                              "auxiliary_classification_weight": .25, "feature_agreement_weight": 0. if adapter else .05,
                               "weight": args.contour_weight,
-                              "batch_norm": "frozen_statistics_trainable_affine", "deployment_views": 1}
+                              "batch_norm": "frozen_statistics_and_affine" if adapter else "frozen_statistics_trainable_affine", "deployment_views": 1}
                              if getattr(args, "contour_training", False) else None),
         "drop_last_training": True, "drop_last_evaluation": False,
         "augmentation": "expanded_canvas_rotation_then_proportional_resize_and_affine",
@@ -205,6 +246,9 @@ def configure(args) -> tuple:
 
 def calibrated_validation(model, loaders, device, args, metadata) -> tuple[dict, dict]:
     """以未增强训练图估计当前候选的部署统计；只用验证集选择统计，不接触测试集。"""
+    if metadata.get("classifier_head"):
+        validation = run_epoch(model, loaders["val"], device, report_sources=True, fixed_features=True)
+        return validation, {"selected_reestimation": False, "reason": "固定特征提取器的部署统计不可重估"}
     train = loaders["train"].dataset
     preprocessing = metadata["preprocessing"]
     native = ImageDataset(train.records, image_transform(tuple(preprocessing["mean"]),
@@ -230,35 +274,69 @@ def calibrated_validation(model, loaders, device, args, metadata) -> tuple[dict,
 
 def fit(model, loaders, device, args, metadata, teacher=None) -> dict:
     """按验证集宏 F1 选择最佳权重；早停不查看测试集，失败保留已保存的完整权重。"""
-    head_ids = {id(p) for p in model.get_classifier().parameters()}
-    backbone = [p for p in model.parameters() if id(p) not in head_ids]
+    head_ids = {id(p) for p in model.get_classifier().parameters() if p.requires_grad}
+    backbone = [p for p in model.parameters() if p.requires_grad and id(p) not in head_ids]
     optimizer = torch.optim.AdamW([
         {"params": backbone, "lr": args.learning_rate},
-        {"params": model.get_classifier().parameters(), "lr": args.learning_rate * 10}], weight_decay=1e-4)
+        {"params": [p for p in model.get_classifier().parameters() if p.requires_grad], "lr": args.learning_rate * 10}], weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    guarded = metadata.get("selection_protocol") == "source_class_with_legacy_retention"
+    guarded = metadata.get("selection_protocol") == "source_family_with_class_retention"
     reference = metadata["retention"]["reference_validation"] if guarded else None
-    best_key = None
+    initial = reference
+    if guarded and (metadata.get("classifier_head") or
+                    (metadata.get("initialization") or {}).get("file") != metadata["retention"]["file"]):
+        initial = run_epoch(model, loaders["val"], device, report_sources=True)
+    product = None
+    product_reference = None
+    initial_product = None
+    if getattr(args, "product_validation", None):
+        from .product_validation import ProductValidation
+        from .adapter import verify_original
+        verify_original(model, teacher)
+        product = ProductValidation(args.product_validation, metadata["preprocessing"],
+                                    {str(path.resolve()) for path, _ in loaders["val"].dataset.records},
+                                    set(metadata["static_images"]["excluded_originals"]
+                                        + metadata["static_images"]["excluded_pixel_conflicts"]))
+        # 保留基线使用已验证教师的完整部署输出；不能丢掉其改进头，也不能让零残差扩大准入。
+        product_reference = product.evaluate(teacher, device)
+        initial_product = product.evaluate(model, device, product_reference)
+        metadata["product_validation"] = product.metadata
+        metadata["product_reference"] = product_reference
+        write_json(args.output / "run.json", metadata)
+    best_key = selection_key(reference if metadata.get("classifier_head") else initial, reference, initial_product) if guarded else None
     best_epoch = 0
+    if guarded:
+        save_checkpoint(args.output / "best.pt", {"model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+                         "epoch": 0, "metadata": metadata, "validation": initial,
+                         "product_validation": initial_product,
+                         "normalization": {"selected_reestimation": False, "reason": "已验证初始权重保留基线"}})
     for epoch in range(1, args.epochs + 1):
         started = time.monotonic()
         train = run_epoch(model, loaders["train"], device, optimizer, teacher=teacher,
                           contour=metadata.get("contour_training") is not None,
-                          contour_weight=metadata["contour_training"]["weight"] if metadata.get("contour_training") else 1.)
+                          contour_weight=metadata["contour_training"]["weight"] if metadata.get("contour_training") else 1.,
+                          fixed_features=bool(metadata.get("classifier_head")),
+                          retain_all_correct=bool(metadata.get("classifier_head")))
         normalization = None
         if guarded:
             validation, normalization = calibrated_validation(model, loaders, device, args, metadata)
         else:
             validation = run_epoch(model, loaders["val"], device)
         scheduler.step()
+        product_result = product.evaluate(model, device, product_reference) if product else None
+        if metadata.get("classifier_head"):
+            from .adapter import verify_original
+            verify_original(model, teacher)
+        protected_validation = reference if metadata.get("classifier_head") else validation
         result = {"epoch": epoch, "seconds": time.monotonic() - started,
-                  "train": train, "val": validation}
+                  "train": train, "val": validation, "product_validation": product_result}
         with (args.output / "epochs.jsonl").open("a") as handle:
             handle.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n")
         checkpoint = {"model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
                       "epoch": epoch, "metadata": metadata, "validation": validation,
-                      "normalization": normalization}
-        key = selection_key(validation, reference) if guarded else (validation["macro_f1"], -validation["loss"])
+                      "protected_validation": protected_validation,
+                      "normalization": normalization, "product_validation": product_result}
+        key = selection_key(protected_validation, reference, product_result) if guarded else (validation["macro_f1"], -validation["loss"])
         if best_key is None or key > best_key:
             best_key, best_epoch = key, epoch
             save_checkpoint(args.output / "best.pt", checkpoint)
@@ -266,7 +344,9 @@ def fit(model, loaders, device, args, metadata, teacher=None) -> dict:
         print(json.dumps({"epoch": epoch, "seconds": round(result["seconds"], 2),
                           "train_loss": train["loss"], "val_loss": validation["loss"],
                           "val_accuracy": validation["accuracy"], "val_macro_f1": validation["macro_f1"],
-                          "best_epoch": best_epoch, "selection": selection_report(validation, reference) if guarded else None}), flush=True)
+                          "best_epoch": best_epoch, "selection": selection_report(protected_validation, reference) if guarded else None,
+                          "product_validation": ({k: v for k, v in product_result.items() if k != "records"}
+                                                 if product_result else None)}), flush=True)
         write_json(args.output / "status.json", {"state": "training", "last_epoch": epoch,
                                                   "best_epoch": best_epoch, "last_result": result})
         if epoch - best_epoch >= args.patience:
@@ -278,9 +358,12 @@ def finalize(model, loaders, device, args, metadata, best_epoch: int, last_epoch
     """验证选择部署统计后才做测试；重估失败或退步不能覆盖原始最佳权重。"""
     best = torch.load(args.output / "best.pt", map_location="cpu", weights_only=True)
     model.load_state_dict(best["model"])
-    if metadata.get("selection_protocol") == "source_class_with_legacy_retention":
+    if metadata.get("selection_protocol") == "source_family_with_class_retention":
         metadata["normalization_selection"] = best["normalization"]
-        metadata["selected_validation"] = selection_report(best["validation"], metadata["retention"]["reference_validation"])
+        reference = metadata["retention"]["reference_validation"]
+        metadata["selected_validation"] = selection_report(reference if metadata.get("classifier_head") else best["validation"], reference)
+        if best.get("product_validation"):
+            metadata["selected_product_validation"] = best["product_validation"]
         best["metadata"] = metadata
         save_checkpoint(args.output / "best.pt", best)
         write_json(args.output / "run.json", metadata)
@@ -311,17 +394,20 @@ def finalize(model, loaders, device, args, metadata, best_epoch: int, last_epoch
 def evaluate_selected(model, loaders, device, metadata, validation, best_epoch: int, last_epoch: int) -> dict:
     """候选固定后才评估测试来源；结果用于验收，不回流训练或权重排序。"""
     # 测试集只在验证选择结束后评估一次，不用于阈值、轮次或超参数选择。
-    test = run_epoch(model, loaders["test"], device)
+    original = bool(metadata.get("classifier_head"))
+    test = run_epoch(model, loaders["test"], device, original_head=True) if original else run_epoch(model, loaders["test"], device)
     result = {"state": "completed", "best_epoch": best_epoch, "last_epoch": last_epoch,
             "validation": validation, "test": test,
             "evaluation_scope": metadata["evaluation_scope"],
             "test_scope": metadata["evaluation_scope"]}
     if "gesture_test" in loaders:
-        result["gesture_test"] = run_epoch(model, loaders["gesture_test"], device)
-    source_tests = {name.removeprefix("source_test/"): run_epoch(model, loader, device)
+        result["gesture_test"] = run_epoch(model, loaders["gesture_test"], device, original_head=True) if original else run_epoch(model, loaders["gesture_test"], device)
+    source_tests = {name.removeprefix("source_test/"): (run_epoch(model, loader, device, original_head=True) if original else run_epoch(model, loader, device))
                     for name, loader in loaders.items() if name.startswith("source_test/")}
     if source_tests:
         result["source_tests"] = source_tests
+    if original:
+        result["refinement_test"] = run_epoch(model, loaders["test"], device)
     return result
 
 
@@ -346,6 +432,9 @@ def main() -> None:
     parser.add_argument("--retain-checkpoint", type=Path)
     parser.add_argument("--initialize", type=Path)
     parser.add_argument("--contour-training", action="store_true")
+    parser.add_argument("--classifier-adapter", action="store_true")
+    parser.add_argument("--static-images", type=Path)
+    parser.add_argument("--product-validation", type=Path)
     parser.add_argument("--contour-weight", type=float, default=1.)
     args = parser.parse_args()
     if (args.reviewed_negatives is None) != (args.heldout_review is None):
@@ -356,6 +445,18 @@ def main() -> None:
         parser.error("训练轮数、批量和学习率必须为正，随机种子与进程数须在有效范围")
     if args.external_native and not args.external_datasets:
         parser.error("外部端侧视图必须同时提供其来源数据包")
+    if args.classifier_adapter and (args.initialize is None or args.retain_checkpoint is None):
+        parser.error("固定特征的残差训练必须提供已验证初始权重及同一保留基线")
+    if args.classifier_adapter and (not args.static_images or not args.product_validation):
+        parser.error("两头残差训练必须同时提供已隔离的静态视图及最终修复验证")
+    if args.static_images and not args.external_datasets:
+        parser.error("停笔静态视图必须同时提供全部外部监督来源")
+    if args.product_validation and not args.classifier_adapter:
+        parser.error("逐样本产品保留验证必须与固定特征残差训练同时启用")
+    if args.product_validation and not args.static_images:
+        parser.error("产品回放必须使用已隔离的停笔静态视图")
+    if args.classifier_adapter and args.initialize.resolve() != args.retain_checkpoint.resolve():
+        parser.error("零残差的初始权重与保留基线必须一致")
     if not math.isfinite(args.contour_weight) or args.contour_weight < 0:
         parser.error("轮廓一致性权重必须为非负有限数")
     model, loaders, device, metadata, teacher = configure(args)

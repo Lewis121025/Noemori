@@ -15,7 +15,7 @@ import {
   type BoardViewport,
   type InkBounds,
 } from "../../shared/whiteboard/geometry";
-import { fitShape } from "../../shared/whiteboard/fitting";
+import { fitShape, type ShapeFit } from "../../shared/whiteboard/fitting";
 import { advancePause, preparePause, type PauseRegion } from "../../shared/whiteboard/pause";
 import { InkSmoother } from "../../shared/whiteboard/smoothing";
 import {
@@ -30,7 +30,7 @@ type Gesture =
   | {
       kind: "ink";
       points: InkPoint[];
-      preview: InkPoint[] | null;
+      preview: ShapeFit | null;
       smoother: InkSmoother;
       /** 计时、观测归并与结果失效共用同一个静止区域。 */
       pause: PauseRegion;
@@ -98,17 +98,24 @@ export class WhiteboardInput {
   }
   /** 临时笔迹，尚未进入文档；取消手势可以直接丢弃。 */
   get points(): readonly InkPoint[] {
-    return this.gesture?.kind === "ink" ? (this.gesture.preview ?? this.gesture.points) : [];
+    return this.gesture?.kind === "ink"
+      ? (this.gesture.preview?.points ?? this.gesture.points)
+      : [];
   }
   /** 当前实际显示的轨迹；自由笔迹保留真实笔尖，停笔修复预览优先显示。 */
   get displayPoints(): readonly InkPoint[] {
     return this.gesture?.kind === "ink"
-      ? (this.gesture.preview ?? this.gesture.smoother.points)
+      ? (this.gesture.preview?.points ?? this.gesture.smoother.points)
       : [];
   }
   /** 已通过分类与拟合门槛的临时预览，抬笔前仍未进入文档。 */
   get corrected(): boolean {
     return this.gesture?.kind === "ink" && this.gesture.preview !== null;
+  }
+
+  /** 规范预览的最终几何类型；模型只选择拟合族，未修复时返回 null。 */
+  get correctedLabel(): ShapeFit["label"] | null {
+    return this.gesture?.kind === "ink" ? (this.gesture.preview?.label ?? null) : null;
   }
 
   /** 卸载时丢弃未提交的手势并释放空闲等待，不触发文档修改通知。 */
@@ -299,7 +306,7 @@ export class WhiteboardInput {
       const erased = active.preview
         ? []
         : erasedStrokes(active.points, this.history.document.strokes, this.camera.scale);
-      const points = active.preview ?? active.smoother.points;
+      const points = active.preview?.points ?? active.smoother.points;
       const changedGeometry =
         points.length !== active.points.length ||
         points.some(

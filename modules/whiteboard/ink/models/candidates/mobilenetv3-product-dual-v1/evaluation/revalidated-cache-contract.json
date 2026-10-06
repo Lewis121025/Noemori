@@ -1,0 +1,26 @@
+{
+  "metadata": {
+    "directory": "/data/pxy/Nous/.artifacts/whiteboard/product-validation-revalidated-v2",
+    "manifest": {
+      "bytes": 6793,
+      "sha256": "c3df5d77683514e59dd0c80fcf597d2545fa47b31e398dbf731478f8a771ded1"
+    },
+    "split": "val",
+    "samples": 5210,
+    "snapshots": 5039,
+    "eligible_samples": {
+      "bytes": 69013819,
+      "sha256": "23c3b166ec5c64c309f026fbd4213f459cc1c49e91576429c460055bcb67e362"
+    },
+    "isolated_samples": [
+      "classification-v3-final/ca634be2492247612364a2a6bc7dc6d2",
+      "classification-v3-final/f34193e9ee722cf455398ca2efc14210",
+      "classification-v3-final/48eabdd42947d124d5657ddd1e5ffe43",
+      "classification-v3-final/6b95e709c86094e83872b6f8368d1053",
+      "classification-v3-final/d93acebc2f48580c77b01de20ef19298",
+      "classification-v3-final/8847ea96a0f392eae20358d569dcff87"
+    ]
+  },
+  "static_manifest": "/data/pxy/Nous/.artifacts/whiteboard/product-static-images-revalidated-v2/manifest.json",
+  "scope": "最终源码重捕获全部原划分快照完全一致；验证包依赖、监督、PNG SHA及有效样本过滤通过。"
+}

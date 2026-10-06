@@ -26,7 +26,7 @@ describe("停笔微抖与拟合候选", () => {
     );
     const points = pauseJitter(source);
     const original = structuredClone(points);
-    const result = fitShape(points, { label: "line", confidence: 0.99 }, 1)!;
+    const result = fitShape(points, { label: "line", confidence: 0.99 }, 1)!.points;
     expect(result).toHaveLength(2);
     expect(Math.hypot(result[0]!.x, result[0]!.y)).toBeLessThan(1);
     expect(
@@ -53,7 +53,7 @@ describe("停笔微抖与拟合候选", () => {
       pauseJitter(source, 1 / scale),
       { label: "line", confidence: 0.99 },
       scale,
-    )!;
+    )!.points;
     expect(result).toHaveLength(2);
     expect(Math.hypot(result[1]!.x * scale - 40, result[1]!.y * scale)).toBeLessThan(1.5);
   });
@@ -61,7 +61,7 @@ describe("停笔微抖与拟合候选", () => {
   it.each([48, 192])("停笔采样增至%s个时，有界微抖仍不能当作大范围往返", (count) => {
     const source = Array.from({ length: 97 }, (_, i) => p((40 * i) / 96, 0));
     expect(
-      fitShape(pauseJitter(source, 1, count), { label: "line", confidence: 0.99 }, 1),
+      fitShape(pauseJitter(source, 1, count), { label: "line", confidence: 0.99 }, 1)?.points,
     ).toHaveLength(2);
   });
 

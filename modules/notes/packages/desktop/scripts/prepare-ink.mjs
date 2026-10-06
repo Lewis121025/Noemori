@@ -7,7 +7,7 @@ const target = new URL("../.cache/ink/", import.meta.url);
 const bytes = await readFile(source);
 if (
   createHash("sha256").update(bytes).digest("hex") !==
-  "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a"
+  "b79aa43a3b66ae45280023c4fe3f85abef6b624111d4c2bf54aa40b527a69094"
 )
   throw new Error("图形识别权重与已验证候选不一致");
 await mkdir(target, { recursive: true });

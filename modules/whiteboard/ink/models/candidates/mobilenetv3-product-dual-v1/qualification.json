@@ -1,0 +1,660 @@
+{
+  "schema_version": 1,
+  "decision": {
+    "promoted_default": true,
+    "status": "qualified_on_recorded_cohorts",
+    "reason": "冻结最终策略后的独立合成验收和历史回归均保留每个旧正确样本且不新增误修，实际原生两头推理通过。",
+    "all_classes_strictly_improved": false
+  },
+  "model": {
+    "architecture": "mobilenetv3_large_100.ra_in1k",
+    "parameters": 4294784,
+    "added_trainable_parameters": 82504,
+    "precision": "fp32",
+    "onnx": {
+      "bytes": 17475771,
+      "sha256": "b79aa43a3b66ae45280023c4fe3f85abef6b624111d4c2bf54aa40b527a69094"
+    },
+    "base_model": {
+      "bytes": 17135980,
+      "sha256": "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a"
+    },
+    "deployment_heads": "original_and_refinement",
+    "cnn_forwards_per_snapshot": 1,
+    "parity": {
+      "samples": 555,
+      "top1_mismatches": 0,
+      "probability_atol": 0.001,
+      "max_logit_abs_error": 0.0001506805419921875,
+      "max_probability_abs_error": 2.9861927032470703e-05
+    },
+    "refinement_parity": {
+      "samples": 555,
+      "top1_mismatches": 0,
+      "probability_atol": 0.001,
+      "max_logit_abs_error": 0.00012111663818359375,
+      "max_probability_abs_error": 2.276897430419922e-05
+    },
+    "original_head_exact_probability_matches": {
+      "validation_and_existing_test_rasters": 11219,
+      "independent_rasters": 2880
+    },
+    "native_raster_and_inference_ms": {
+      "p50": 25.79065700000001,
+      "p95": 27.632384999999886,
+      "max": 166.79372899999998
+    }
+  },
+  "policy": {
+    "circle_ellipse_admission": "真实八类softmax中的圆椭圆合计概率使用原0.5族门槛；不把剩余概率伪造为另一子类型。",
+    "subtype": "已有有效圆优先保留；双头支持的候选经过双向轮廓误差及原始观测约束，近等轴在已存在位置不确定性内可规范成圆。单头保守使用直接子类型。",
+    "new_subtype": "原最高单类未达0.5时，新增最终子类型须至少被一个头明确选中。",
+    "refinement": "仅原候选不能修复时考虑；不能提高分数重试同族拒绝，不能用较弱候选覆盖原other拒绝。",
+    "pause_ms": 450,
+    "confidence_or_family_threshold": 0.5,
+    "normalized_max_distance": 0.075,
+    "normalized_rms": 0.028,
+    "minimum_extent_css_px": 16,
+    "max_points": 8192
+  },
+  "repair_evaluation": {
+    "val": {
+      "samples": 5216,
+      "correct_before": 3902,
+      "correct_after": 3907,
+      "wrong_before": 9,
+      "wrong_after": 9,
+      "lost_old_correct": [],
+      "new_wrong": [],
+      "classes": {
+        "line": {
+          "samples": 611,
+          "before": 595,
+          "algorithm": 595,
+          "candidate": 595,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "circle": {
+          "samples": 591,
+          "before": 563,
+          "algorithm": 563,
+          "candidate": 563,
+          "wrongBefore": 3,
+          "wrongAlgorithm": 3,
+          "wrongCandidate": 3,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "ellipse": {
+          "samples": 639,
+          "before": 568,
+          "algorithm": 570,
+          "candidate": 571,
+          "wrongBefore": 5,
+          "wrongAlgorithm": 5,
+          "wrongCandidate": 5,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arc": {
+          "samples": 622,
+          "before": 582,
+          "algorithm": 582,
+          "candidate": 582,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "triangle": {
+          "samples": 508,
+          "before": 507,
+          "algorithm": 507,
+          "candidate": 507,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "other": {
+          "samples": 1147,
+          "before": 0,
+          "algorithm": 0,
+          "candidate": 0,
+          "wrongBefore": 1,
+          "wrongAlgorithm": 1,
+          "wrongCandidate": 1,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "rectangle": {
+          "samples": 658,
+          "before": 655,
+          "algorithm": 655,
+          "candidate": 655,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arrow": {
+          "samples": 440,
+          "before": 432,
+          "algorithm": 432,
+          "candidate": 434,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        }
+      },
+      "scope": "历史回归证据；曾用于一般契约问题的诊断，非未触碰盲测"
+    },
+    "test": {
+      "samples": 6279,
+      "correct_before": 3716,
+      "correct_after": 3719,
+      "wrong_before": 15,
+      "wrong_after": 15,
+      "lost_old_correct": [],
+      "new_wrong": [],
+      "classes": {
+        "line": {
+          "samples": 609,
+          "before": 592,
+          "algorithm": 592,
+          "candidate": 592,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "circle": {
+          "samples": 589,
+          "before": 559,
+          "algorithm": 559,
+          "candidate": 559,
+          "wrongBefore": 6,
+          "wrongAlgorithm": 6,
+          "wrongCandidate": 6,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "ellipse": {
+          "samples": 622,
+          "before": 554,
+          "algorithm": 556,
+          "candidate": 557,
+          "wrongBefore": 6,
+          "wrongAlgorithm": 6,
+          "wrongCandidate": 6,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arc": {
+          "samples": 626,
+          "before": 600,
+          "algorithm": 600,
+          "candidate": 600,
+          "wrongBefore": 1,
+          "wrongAlgorithm": 1,
+          "wrongCandidate": 1,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "triangle": {
+          "samples": 514,
+          "before": 513,
+          "algorithm": 513,
+          "candidate": 513,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "other": {
+          "samples": 2402,
+          "before": 0,
+          "algorithm": 0,
+          "candidate": 0,
+          "wrongBefore": 2,
+          "wrongAlgorithm": 2,
+          "wrongCandidate": 2,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arrow": {
+          "samples": 445,
+          "before": 433,
+          "algorithm": 433,
+          "candidate": 433,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "rectangle": {
+          "samples": 472,
+          "before": 465,
+          "algorithm": 465,
+          "candidate": 465,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        }
+      },
+      "scope": "历史回归证据；曾用于一般契约问题的诊断，非未触碰盲测"
+    },
+    "fresh": {
+      "samples": 2880,
+      "correct_before": 2488,
+      "correct_after": 2488,
+      "wrong_before": 2,
+      "wrong_after": 2,
+      "lost_old_correct": [],
+      "new_wrong": [],
+      "classes": {
+        "line": {
+          "samples": 360,
+          "before": 358,
+          "algorithm": 358,
+          "candidate": 358,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "circle": {
+          "samples": 360,
+          "before": 360,
+          "algorithm": 360,
+          "candidate": 360,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "ellipse": {
+          "samples": 360,
+          "before": 340,
+          "algorithm": 340,
+          "candidate": 340,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arc": {
+          "samples": 360,
+          "before": 356,
+          "algorithm": 356,
+          "candidate": 356,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "rectangle": {
+          "samples": 360,
+          "before": 356,
+          "algorithm": 356,
+          "candidate": 356,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "triangle": {
+          "samples": 360,
+          "before": 360,
+          "algorithm": 360,
+          "candidate": 360,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arrow": {
+          "samples": 360,
+          "before": 358,
+          "algorithm": 358,
+          "candidate": 358,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "other": {
+          "samples": 360,
+          "before": 0,
+          "algorithm": 0,
+          "candidate": 0,
+          "wrongBefore": 2,
+          "wrongAlgorithm": 2,
+          "wrongCandidate": 2,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        }
+      },
+      "scope": "历史回归证据；曾用于一般契约问题的诊断，非未触碰盲测"
+    },
+    "fresh2": {
+      "samples": 2880,
+      "correct_before": 2491,
+      "correct_after": 2493,
+      "wrong_before": 0,
+      "wrong_after": 0,
+      "lost_old_correct": [],
+      "new_wrong": [],
+      "classes": {
+        "line": {
+          "samples": 360,
+          "before": 357,
+          "algorithm": 357,
+          "candidate": 358,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "circle": {
+          "samples": 360,
+          "before": 360,
+          "algorithm": 360,
+          "candidate": 360,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "ellipse": {
+          "samples": 360,
+          "before": 348,
+          "algorithm": 348,
+          "candidate": 348,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arc": {
+          "samples": 360,
+          "before": 354,
+          "algorithm": 354,
+          "candidate": 354,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "rectangle": {
+          "samples": 360,
+          "before": 358,
+          "algorithm": 358,
+          "candidate": 358,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "triangle": {
+          "samples": 360,
+          "before": 358,
+          "algorithm": 358,
+          "candidate": 358,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "arrow": {
+          "samples": 360,
+          "before": 356,
+          "algorithm": 356,
+          "candidate": 357,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        },
+        "other": {
+          "samples": 360,
+          "before": 0,
+          "algorithm": 0,
+          "candidate": 0,
+          "wrongBefore": 0,
+          "wrongAlgorithm": 0,
+          "wrongCandidate": 0,
+          "lostAlgorithm": 0,
+          "lostCandidate": 0
+        }
+      },
+      "scope": "新增独立解析母图的合成验收，不代表真人金标"
+    }
+  },
+  "independent_isolation": {
+    "scope": "规则冻结后新增320个解析母图、2880个视图，只做验收不回流选模；旧fresh样本已转为回归证据；不代表真人金标。",
+    "files": {
+      "cases.jsonl": {
+        "bytes": 64124444,
+        "sha256": "1d3a1e2c0270c7d9fdfecf1ea170ea15175e78cd776940dfcc2753b725a6fb81"
+      }
+    },
+    "generator": {
+      "/data/pxy/Nous/modules/whiteboard/ink/dataset/motion/geometry.py": {
+        "bytes": 4850,
+        "sha256": "efe7d2c9003d3bf947eba30f70293281ad480b58d1d296d1face30810267e636"
+      },
+      "/data/pxy/Nous/modules/whiteboard/ink/dataset/motion/variants.py": {
+        "bytes": 7278,
+        "sha256": "4edcc8a54fb064791ec28b2e45889a24bf57c8626f24911681acc740ca93c5e1"
+      },
+      "/data/pxy/Nous/modules/whiteboard/ink/dataset/detail/geometry.py": {
+        "bytes": 5026,
+        "sha256": "768261af667aca949db502932f444945ac3112fbf49083ec85afe248f663d221"
+      }
+    },
+    "cross_split_exact_vector_overlap": 0,
+    "parents": 320,
+    "views": 2880,
+    "frozen_policy_files": {
+      "/data/pxy/Nous/modules/notes/packages/desktop/src/features/reader/shared/whiteboard/fitting.ts": {
+        "bytes": 15787,
+        "sha256": "2ab362773464dc0c14cc0abb7c6413a167f48b41befb5308a345c55689b80879"
+      },
+      "/data/pxy/Nous/modules/notes/packages/desktop/src/features/reader/shared/whiteboard/recognition.ts": {
+        "bytes": 4541,
+        "sha256": "14f02b4d78b3556fb2a95c93d8622f408b8136681dbb7d7434756a135a64d6c9"
+      },
+      "/data/pxy/Nous/modules/notes/packages/desktop/src/features/reader/renderer/whiteboard/input.ts": {
+        "bytes": 15231,
+        "sha256": "4246668201d4a2483141e3dae36069943996e925052b412b79495b604617f55e"
+      }
+    },
+    "candidate_model": {
+      "bytes": 17475771,
+      "sha256": "b79aa43a3b66ae45280023c4fe3f85abef6b624111d4c2bf54aa40b527a69094"
+    },
+    "cross_split_exact_product_pixel_overlap": 0,
+    "overlap_digests": [],
+    "reserved_pixel_comparisons": 224119,
+    "original_head_exact_probability_matches": 2880
+  },
+  "verification": {
+    "whiteboard": {
+      "passed": 155,
+      "files": 15
+    },
+    "python_unit": {
+      "passed": 164
+    },
+    "python_integration": {
+      "passed": 73
+    },
+    "rust_runtime": {
+      "passed": 4,
+      "default_dual_model": true
+    },
+    "native_probability_parity": {
+      "samples": 96,
+      "max_probability_abs_error": 1.5009763432161094e-07
+    },
+    "native_product_replay": {
+      "samples": 46,
+      "mismatches": 0
+    },
+    "typescript_svelte": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "eslint_and_prettier": "通过改动范围检查",
+    "pinned_rasterizer": {
+      "bytes": 28994728,
+      "sha256": "e536c5b051adb13810aacc0fcfc2309cffa02398e8bab35f81e5a86191e1f6d2"
+    },
+    "desktop_full_regression": {
+      "passed": 1568,
+      "failed": 69,
+      "same_failed_suites_and_counts_as_previous_run": true,
+      "reason": "Linux环境缺少macOS导出后端和Pandoc，8个导出套件失败；白板测试全部通过。"
+    }
+  },
+  "rejected_attempts": [
+    {
+      "candidate": "val标定单输出残差",
+      "reason": "来源测试中丢失一个旧正确拟合族，未上线。"
+    },
+    {
+      "candidate": "初版两头准入策略",
+      "reason": "第一批独立合成样本新增一次other误修；该批现仅作回归。通过族概率准入与禁止同族加分重试修复契约，最终策略另用fresh2独立验收。"
+    }
+  ],
+  "reports": {
+    "val-repair-summary.json": {
+      "bytes": 10182,
+      "sha256": "7ca3ebdba7bebeb2f5bbbca8034df549a06e5549c771d6b1e8fe500cdc3584e4"
+    },
+    "test-repair-summary.json": {
+      "bytes": 10174,
+      "sha256": "a3fee66e583ee015de05b32d84e8cc5a1ec2d701faff13360629ea314cbf6202"
+    },
+    "fresh-repair-summary.json": {
+      "bytes": 2189,
+      "sha256": "427ded69593fb9ca7c1d536366973fe561760cecb18672756b6813e3b85d2523"
+    },
+    "fresh2-repair-summary.json": {
+      "bytes": 2190,
+      "sha256": "ef0fbf45e40e6925b1b42651feb86d74f1bf5dd7ad655db0caf309fa3b11267b"
+    },
+    "native-dual-parity.json": {
+      "bytes": 770,
+      "sha256": "e303b49ba91d5366bce1906eff418e404c5b89b23b835ad2a1e1afb449852c63"
+    },
+    "native-product-parity.json": {
+      "bytes": 10907,
+      "sha256": "1f1b32bc8e365f300a599ca817984cab84671d455c96dff58f5f697c78e16391"
+    },
+    "revalidated-cache-contract.json": {
+      "bytes": 1124,
+      "sha256": "a9acfb16f31031675f42b4285e2ebffa03eb1d8b6571bb80efa3e402ba1020ed"
+    },
+    "rejected-single-head-test.json": {
+      "bytes": 6550,
+      "sha256": "9dbd42f95a43445fa4ac35f59de75ef04bb506ab7237877e088d95094086cceb"
+    },
+    "training-lineage.json": {
+      "bytes": 46646,
+      "sha256": "646018eb72ce8b39202a25afb9b020ce284feb659bf5748491ec580b796c0c12"
+    },
+    "desktop-regression-comparison.json": {
+      "bytes": 818,
+      "sha256": "13e3018d92035ee06fdc6536955dc9304468d85646fa52488aaf92bf26d1d2cb"
+    }
+  },
+  "local_evidence": {
+    "val/records.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/val/records.jsonl",
+      "bytes": 5269536,
+      "sha256": "29a47dc35d695865fb1582a0d720bec12a0af4dd8dd908d33767e950a8606208"
+    },
+    "val/predictions.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/val/predictions.jsonl",
+      "bytes": 1687215,
+      "sha256": "3903a8a45654c5071a1144ddb575f061b6db924003e9d5702894d30bcf38a9ca"
+    },
+    "test/records.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/test/records.jsonl",
+      "bytes": 6271131,
+      "sha256": "61d5e274f5bb7efec25ab30e97bccb3979f51930f09e8030534e7633466af12f"
+    },
+    "test/predictions.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/test/predictions.jsonl",
+      "bytes": 2033578,
+      "sha256": "0eee1233af4a4c69e858b8e638679ea3c832de02cacd3b07b7a5375c3d6813bf"
+    },
+    "fresh/records.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh/records.jsonl",
+      "bytes": 2572242,
+      "sha256": "e1d6ce633cc67cdbc8471d7ebc526218abc49522083a61229244f23d126bea38"
+    },
+    "fresh/predictions.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh/predictions.jsonl",
+      "bytes": 972138,
+      "sha256": "8a039505fe83e15bcbe59d2f5b653c75931aac710b72bb8d4053837a6b52c4ef"
+    },
+    "fresh2/records.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh2/records.jsonl",
+      "bytes": 2574516,
+      "sha256": "9185dba314e8ade421af8374fd644c911e2418761e150b79a93ff2f04ed93fa9"
+    },
+    "fresh2/predictions.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh2/predictions.jsonl",
+      "bytes": 971823,
+      "sha256": "d0dc7bca961a369ed526902e316bd9db6b83f99bd87e5a88390348581b537be0"
+    },
+    "independent/manifest.json": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh2/manifest.json",
+      "bytes": 1951,
+      "sha256": "a7b9de256f2d48df3c6a16aad63a620978b3d06585a54d0a83ebfd2921222db9"
+    },
+    "independent/cases.jsonl": {
+      "path": "/data/pxy/Nous/.artifacts/whiteboard/diagnostics/oval-v8/fresh2/cases.jsonl",
+      "bytes": 64124444,
+      "sha256": "1d3a1e2c0270c7d9fdfecf1ea170ea15175e78cd776940dfcc2753b725a6fb81"
+    }
+  },
+  "limits": [
+    "这轮并未实现每类严格提升：椭圆在val/历史test改善；直线和箭头在fresh2改善，圆、圆弧、矩形、三角形保持原测得水平。",
+    "fresh2的2880视图来自320个解析母图，不是2880位真人或真人意图gold。",
+    "公开手绘监督包含AI视觉复核；历史测试曾用于一般契约问题定位，不能宣称全是盲测。",
+    "Linux服务器上的原生性能不代表Apple设备端测量，最大耗时包括冷启动。",
+    "other样本覆盖不构成任意未知图案的拒绝保证；只接受有完整几何证据的单笔。"
+  ]
+}

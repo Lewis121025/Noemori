@@ -42,7 +42,11 @@ describe("单笔箭头的轮廓与分支遍历", () => {
     ];
     for (const indices of routes)
       for (const order of [indices, [...indices].reverse()]) {
-        const fitted = fitShape(route(order, rotation), { label: "arrow", confidence: 0.99 }, 1)!;
+        const fitted = fitShape(
+          route(order, rotation),
+          { label: "arrow", confidence: 0.99 },
+          1,
+        )!.points;
         expect(fitted, order.join("→")).toHaveLength(5);
         for (const node of nodes) {
           const x = node.x * Math.cos(rotation) - node.y * Math.sin(rotation),

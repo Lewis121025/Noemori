@@ -60,7 +60,8 @@ class ContourDataset(ImageDataset):
 
 
 def contour_forward(model: nn.Module, images: torch.Tensor, references: torch.Tensor,
-                    coarse: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+                    coarse: torch.Tensor, targets: torch.Tensor, *,
+                    feature_agreement: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
     """共享骨干计算三视图分类及特征约束；形状或非有限输出违约时抛ValueError。"""
     count = len(targets)
     if not count or images.shape != references.shape or images.shape != coarse.shape:
@@ -77,4 +78,4 @@ def contour_forward(model: nn.Module, images: torch.Tensor, references: torch.Te
                       + nn.functional.cross_entropy(coarse_logits, targets)) * .25
     agreement = ((1 - nn.functional.cosine_similarity(original_features, clean_features)).mean()
                  + (1 - nn.functional.cosine_similarity(original_features, coarse_features)).mean()) * .05
-    return original_logits, classification + agreement.clamp_min(0)
+    return original_logits, classification + (agreement.clamp_min(0) if feature_agreement else 0)

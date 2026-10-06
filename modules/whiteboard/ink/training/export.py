@@ -40,6 +40,10 @@ def export_model(checkpoint: Path, dataset: Path, output: Path) -> dict:
     validate_dataset(dataset)
     torch.set_num_threads(4)
     model, transform, metadata = load_classifier(checkpoint, torch.device("cpu"))
+    dual = metadata.get("deployment_heads") == "original_and_refinement"
+    if dual:
+        from .adapter import DeploymentHeads
+        model.classifier = DeploymentHeads(model.get_classifier())
     image_paths, input_counts = [], {}
     for split in ("val", "review"):
         items = [json.loads(line) for line in (dataset / f"{split}.jsonl").read_text().splitlines()]
@@ -75,7 +79,8 @@ def export_model(checkpoint: Path, dataset: Path, output: Path) -> dict:
         raise ValueError("导出验收输入不能为空")
     with publication(output) as staging:
         path = staging / "model.onnx"
-        torch.onnx.export(model, (inputs[0],), str(path), input_names=["images"], output_names=["logits"],
+        names = ["logits", "refinement_logits"] if dual else ["logits"]
+        torch.onnx.export(model, (inputs[0],), str(path), input_names=["images"], output_names=names,
                           opset_version=18, dynamo=True, external_data=False)
         graph = onnx.load(path)
         onnx.helper.set_model_props(graph, {"labels": json.dumps(metadata["labels"]),
@@ -85,11 +90,16 @@ def export_model(checkpoint: Path, dataset: Path, output: Path) -> dict:
         options = ort.SessionOptions()
         options.intra_op_num_threads = 4
         session = ort.InferenceSession(str(path), sess_options=options, providers=["CPUExecutionProvider"])
-        reference, deployed = [], []
+        reference, deployed, refinement_reference, refinement_deployed = [], [], [], []
         with torch.inference_mode():
             for tensor in inputs:
-                reference.append(model(tensor).numpy())
-                deployed.append(session.run(None, {"images": tensor.numpy()})[0])
+                outputs = model(tensor)
+                native = session.run(None, {"images": tensor.numpy()})
+                reference.append((outputs[0] if dual else outputs).numpy())
+                deployed.append(native[0])
+                if dual:
+                    refinement_reference.append(outputs[1].numpy())
+                    refinement_deployed.append(native[1])
         parity = check_outputs(np.concatenate(reference), np.concatenate(deployed))
         manifest = {"schema_version": 1, "model": metadata["model"], "labels": metadata["labels"],
                     "preprocessing": metadata["preprocessing"], "precision": "fp32", "opset": 18,
@@ -99,6 +109,10 @@ def export_model(checkpoint: Path, dataset: Path, output: Path) -> dict:
                     "dataset_manifest": file_record(dataset / "manifest.json"), "parity": parity,
                     "parity_input_counts": input_counts,
                     "qualification": "仅验证导出一致性，不代表真实手写识别质量或自动修复可上线。"}
+        if dual:
+            manifest["refinement_output"] = {"name": "refinement_logits", "shape": [1, len(metadata["labels"])], "dtype": "float32"}
+            manifest["refinement_parity"] = check_outputs(np.concatenate(refinement_reference), np.concatenate(refinement_deployed))
+            manifest["deployment_heads"] = metadata["deployment_heads"]
         write_json(staging / "manifest.json", manifest)
     return manifest
 
