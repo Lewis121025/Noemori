@@ -4,11 +4,17 @@
   import ReaderWorkspace from "../features/reader/renderer/ReaderWorkspace.svelte";
   import AppearanceOptions from "./AppearanceOptions.svelte";
   import ReadingFontOptions from "./ReadingFontOptions.svelte";
+  import ReadingPaletteOptions from "./ReadingPaletteOptions.svelte";
+  import {
+    DEFAULT_READING_PALETTE,
+    type ReadingPalette,
+  } from "../features/reader/shared/reading-palette";
   import type { HistoryAction, HistoryAvailability } from "../features/reader/shared/api";
   import { InputHistory } from "./input-history";
 
   const { app, reader: readerApi } = window.noemori;
   let reader: ReaderWorkspace | undefined = $state();
+  let readingPalette = $state<ReadingPalette>(DEFAULT_READING_PALETTE);
   let historyContext = $state(0);
   let publishedHistory: HistoryAvailability | null = null;
   const inputHistory = new InputHistory(
@@ -64,9 +70,10 @@
   onselectionchange={refreshHistoryContext}
 />
 
-<ReaderWorkspace api={readerApi} bind:this={reader}>
+<ReaderWorkspace api={readerApi} palette={readingPalette} bind:this={reader}>
   {#snippet applicationMenu()}
     <AppearanceOptions api={app} />
+    <ReadingPaletteOptions api={app} onApply={(palette) => (readingPalette = palette)} />
     <ReadingFontOptions
       api={app}
       onApply={async (font) => {

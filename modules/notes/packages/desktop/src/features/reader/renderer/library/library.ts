@@ -3,6 +3,18 @@ import { markdownProcessor } from "../../shared/markdown/markdown-processor";
 import { mimeFromPath } from "../preview/media";
 import type { VaultEntry } from "../../shared/api";
 import { isWhiteboardPath } from "../../shared/whiteboard/model";
+import { parentDirectory } from "./file-tree";
+
+/**
+ * 所有新建入口共用目标规则，跨目录搜索后也不能因入口不同而写入不同文件夹。
+ * @param entry 唯一选中的条目；多选或没有选择时为 null。
+ * @param directory 当前浏览目录，空字符串表示库根。
+ * @returns 选中文件夹本身、选中文件的父目录或当前浏览目录；不读写磁盘、不抛出异常。
+ */
+export function libraryCreationDirectory(entry: VaultEntry | null, directory: string): string {
+  if (entry === null) return directory;
+  return entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
+}
 
 /**
  * 为直接落笔选取未占用的本地路径，不创建或覆盖文件。

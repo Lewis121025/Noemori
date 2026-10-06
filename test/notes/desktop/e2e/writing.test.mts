@@ -1,4 +1,4 @@
-import { noteAction } from "../support/workspace-actions";
+import { documentTools, noteAction, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,8 +61,9 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     const editor = page.locator(".ProseMirror");
     await ready("写作.md");
     await editor.waitFor();
+    await documentTools(page);
     const formatting = page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true });
 
     expect(await formatting.isVisible()).toBe(true);
@@ -93,10 +94,14 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.keyboard.press("Enter");
 
     await page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true })
       .waitFor();
-    await formatting.getByRole("button", { name: "链接…", exact: true }).click();
+    await formatting.getByRole("button", { name: "插入", exact: true }).click();
+    await page
+      .locator(".topbar-document:not([hidden])")
+      .getByRole("button", { name: "链接…", exact: true })
+      .click();
     const link = page.getByRole("dialog", { name: "插入链接" });
     await link.getByLabel("链接目标").fill("参考.md");
     await link.getByLabel("显示文字").fill("延伸阅读");
@@ -133,10 +138,11 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.keyboard.press("ControlOrMeta+z");
     expect(await editor.locator("strong").innerText()).toBe("重点");
     await page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true })
       .waitFor();
-    await formatting.getByRole("button", { name: "重做", exact: true }).click();
+    await formatting.getByRole("button", { name: "更多编辑操作", exact: true }).click();
+    await page.getByRole("button", { name: "重做", exact: true }).click();
     expect(await editor.locator("strong").innerText()).toBe("关键");
     await page.keyboard.press("ControlOrMeta+s");
     await page.waitForFunction(
@@ -151,6 +157,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await editor.locator(".wiki-link").click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("heading", { name: "参考资料" }).waitFor();
     await ready("参考.md");
+    await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
       .getByRole("treeitem", { name: "文本.txt", exact: true })
@@ -168,6 +175,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       () => document.querySelector(".save-status")?.textContent === "已保存",
     );
     expect(await readFile(join(vault, "文本.txt"), "utf8")).toBe("已替换 已替换\n");
+    await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
       .getByRole("treeitem", { name: "写作.md", exact: true })
@@ -180,6 +188,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     expect(await task.getAttribute("aria-checked")).toBe("false");
     await page.keyboard.press("Space");
     expect(await task.getAttribute("aria-checked")).toBe("true");
+    await documentTools(page);
     // 用浏览器选区选中完整词，同步 selectionchange 后验证面板保留选区。
     await editor.locator("strong").evaluate((element) => {
       element.closest<HTMLElement>(".ProseMirror")?.focus();
@@ -191,14 +200,14 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       document.dispatchEvent(new Event("selectionchange"));
     });
     await page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true })
       .waitFor();
     await formatting.getByRole("button", { name: "斜体", exact: true }).click();
     expect(await editor.locator("em").innerText()).toBe("关键");
     expect(await formatting.isVisible()).toBe(true);
     await page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true })
       .waitFor();
     expect(
@@ -223,7 +232,8 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (process.env.NOEMORI_WRITING_SCREENSHOT)
       await page.screenshot({ path: process.env.NOEMORI_WRITING_SCREENSHOT });
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-narrow.png") });
-    // 常驻工具栏可直接进入段落选择；不需要先打开笔记菜单。
+    // 窄窗口也通过同一个组件入口操作格式，正文保持无工具栏。
+    await documentTools(page);
     await formatting.getByLabel("段落格式").focus();
     expect(
       await formatting
@@ -233,10 +243,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-formatting.png") });
     await page.keyboard.press("Escape");
     expect(await formatting.isVisible()).toBe(true);
-    await page
-      .locator(".pane-column.active")
-      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
-      .waitFor();
+    await documentTools(page);
     expect(await formatting.isVisible()).toBe(true);
     await page.keyboard.press("ControlOrMeta+f");
     await search.waitFor();
@@ -256,11 +263,12 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await search.getByRole("button", { name: "替换选项" }).focus();
     await page.keyboard.press("Escape");
     expect(await search.isVisible()).toBe(false);
+    await editor.click();
     expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
     await page.keyboard.press("ControlOrMeta+k");
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-link-dark.png") });
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
+    await sidebarComponent(page, "文件");
     const files = page.getByRole("navigation", { name: "文件列表" });
     await files.getByRole("treeitem", { name: "长文.md", exact: true }).click();
     await ready("长文.md");
@@ -284,10 +292,19 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     const searchBounds = await search.boundingBox();
     expect(resultBounds).not.toBeNull();
     expect(searchBounds).not.toBeNull();
-    expect(resultBounds!.y).toBeGreaterThanOrEqual(searchBounds!.y + searchBounds!.height);
-    expect(resultBounds!.y + resultBounds!.height).toBeLessThanOrEqual(800);
+    const windowBar = await page.locator(".window-toolbar").boundingBox();
+    await expect
+      .poll(async () => {
+        const match = await editor.locator(".ProseMirror-active-search-match").boundingBox();
+        return (
+          match !== null &&
+          match.y >= windowBar!.y + windowBar!.height &&
+          match.y + match.height <= 800
+        );
+      })
+      .toBe(true);
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-long-search.png") });
-    await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
+    await sidebarComponent(page, "文件");
     await files.getByRole("treeitem", { name: "写作.md", exact: true }).click();
     await ready("写作.md");
     expect(errors).toEqual([]);

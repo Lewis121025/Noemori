@@ -8,7 +8,6 @@
     | "trash"
     | "reveal"
     | "export"
-    | "collapse"
     | "locate"
     | "bookmark";
 </script>
@@ -102,7 +101,7 @@
   onkeydown={keydown}
   tabindex="-1"
 >
-  {#if !multiple}
+  {#if target !== null && !multiple}
     <button role="menuitem" onclick={() => choose("file")}>新建笔记</button>
     <button role="menuitem" onclick={() => choose("directory")}>新建文件夹</button>
   {/if}
@@ -118,9 +117,7 @@
     <div class="separator" role="separator"></div>
     <button role="menuitem" class="danger" onclick={() => choose("trash")}>移到废纸篓…</button>
   {:else}
-    <div class="separator" role="separator"></div>
     <button role="menuitem" onclick={() => choose("locate")}>定位当前文件</button>
-    <button role="menuitem" onclick={() => choose("collapse")}>收起所有文件夹</button>
   {/if}
 </div>
 

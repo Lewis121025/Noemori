@@ -7,6 +7,7 @@
    */
   import { onMount, tick, type Snippet } from "svelte";
   import { createCompositionGuard } from "../editor/composition";
+  import { dialogEnter, dialogExit, finishOnReducedMotion } from "../transition-lifecycle";
 
   let {
     label,
@@ -56,7 +57,15 @@
   // 查询变化后候选整体替换，选中项回到第一条。
   $effect(() => {
     void items;
+    let current = true;
     selected = 0;
+    void tick().then(() => {
+      // 第一项与滚动位置一起重置；迟到的查询布局不能覆盖后续方向键选择。
+      if (current && selected === 0 && list?.isConnected) list.scrollTop = 0;
+    });
+    return () => {
+      current = false;
+    };
   });
 
   onMount(() => {
@@ -93,6 +102,9 @@
 </script>
 
 <dialog
+  in:dialogEnter|global
+  out:dialogExit|global
+  use:finishOnReducedMotion
   class="picker"
   bind:this={dialog}
   use:composition.bind

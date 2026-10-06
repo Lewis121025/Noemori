@@ -43,6 +43,7 @@ export default defineConfig({
     },
   },
   test: {
+    setupFiles: ["../../../../test/notes/desktop/support/dom-layout.ts"],
     include: ["../../../../test/**/*.test.ts"],
     environment: "node",
   },

@@ -1,5 +1,6 @@
 <script lang="ts">
   /** 只读的选择预览；磁盘读取错误留在本面板，过期结果不能覆盖后来的选择。 */
+  import { revealOnChange } from "../motion";
   import type { VaultEntry } from "../../shared/api";
   import { readFileContent, type FileContent } from "../document/file-content";
   import { libraryEntryKind, libraryExcerpt } from "./library";
@@ -65,7 +66,14 @@
   });
 </script>
 
-<section class="library-preview" aria-label="资料预览">
+<section
+  class="library-preview"
+  aria-label="资料预览"
+  use:revealOnChange={{
+    key: JSON.stringify([entry?.path, selectionCount, loading]),
+    kind: "preview",
+  }}
+>
   {#if entry === null}
     <div class="preview-empty">
       {#if selectionCount > 1}

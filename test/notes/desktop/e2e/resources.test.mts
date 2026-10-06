@@ -20,7 +20,7 @@ declare global {
 }
 
 test(
-  "资源契约：反复挂载图片、PDF、图谱后释放资源，空闲不改写业务文件",
+  "资源契约：反复挂载图片、PDF 后释放资源，空闲不改写业务文件",
   async (t) => {
     const root = await mkdtemp(join(tmpdir(), "noemori-resource-contract-"));
     t.onTestFinished(() => rm(root, { recursive: true, force: true }));
@@ -127,11 +127,6 @@ test(
       );
       await expect.poll(resources).toEqual({ blobs: 1, workers: 1 });
       await open("plain.md");
-      await expect.poll(resources).toEqual({ blobs: 0, workers: 0 });
-      await page.keyboard.press("ControlOrMeta+g");
-      await page.getByRole("region", { name: "关联空间" }).locator("canvas").waitFor();
-      await expect.poll(async () => (await resources()).workers).toBe(1);
-      await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
       await expect.poll(resources).toEqual({ blobs: 0, workers: 0 });
     };
     const sample = async () => {

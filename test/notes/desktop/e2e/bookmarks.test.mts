@@ -53,6 +53,9 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
     const stored = async () =>
       JSON.parse(await readFile(join(vault, ".noemori/bookmarks.json"), "utf8").catch(() => "{}"));
     const runCommand = async (label: string) => {
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll(".pane-column")].every((pane) => !pane.hasAttribute("inert")),
+      );
       await page.keyboard.press("ControlOrMeta+p");
       await palette.fill(label);
       await palette.press("Enter");
@@ -66,9 +69,12 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
 
     await openLibrary(page);
     // 文件夹经右键菜单收藏。
-    await page.getByRole("treeitem", { name: "项目" }).click({ button: "right" });
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "项目" })
+      .click({ button: "right" });
     await page.getByRole("menuitem", { name: "加入书签" }).click();
-    await page.getByRole("button", { name: "阅读与写作", exact: true }).click();
+    await page.getByRole("button", { name: "← 返回文档", exact: true }).click();
     // 当前文件与光标所在章节经命令面板收藏。
     await runCommand("收藏或取消收藏当前文件");
     // 经目录跳到章节：选区由编辑器事务同步落进标题。
@@ -84,18 +90,35 @@ test("书签：收藏文件夹、文件与标题，侧栏打开、键盘重排�
       ]);
 
     // 书签是库内点目录里的用户数据，不进文件树。
-    expect(await page.getByRole("treeitem", { name: ".noemori" }).count()).toBe(0);
+    expect(
+      await page
+        .getByRole("region", { name: "文件系统", exact: true })
+        .getByRole("button", { name: ".noemori" })
+        .count(),
+    ).toBe(0);
 
     await openLibrary(page);
-    await page.getByRole("button", { name: "书签", exact: true }).click();
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "书签", exact: true })
+      .click();
     const rows = page.getByRole("list", { name: "书签" }).locator("button.open .name");
     await expect.poll(() => rows.allTextContents()).toEqual(["项目", "首页", "首页 › 第二节"]);
 
     // 从另一篇笔记经标题书签回来。
     await openLibrary(page);
-    await page.getByRole("button", { name: "书签", exact: true }).click();
-    await page.getByRole("treeitem", { name: "项目" }).click();
-    await page.getByRole("treeitem", { name: "计划.md" }).dblclick();
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "书签", exact: true })
+      .click();
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "项目", exact:true })
+      .dblclick();
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "计划.md" })
+      .dblclick();
     await expect.poll(documentName).toBe("计划.md");
     await runCommand("显示书签");
     await rows.nth(2).click();

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { previewKindFromReference, vaultMediaUrl } from "@reader/renderer/preview/media";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
+import { vaultMediaUrl } from "@reader/renderer/preview/media";
+import { previewKindFromReference } from "@reader/shared/media-kind";
 import { playerSource } from "@reader/renderer/markdown/views/media-view";
 
 function inlineTypes(source: string): string[] {

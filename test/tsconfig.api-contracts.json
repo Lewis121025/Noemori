@@ -1,0 +1,22 @@
+{
+  "extends": "../modules/notes/packages/desktop/tsconfig.web.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "svelte"],
+    "paths": {
+      "@reader/*": ["../modules/notes/packages/desktop/src/features/reader/*"],
+      "@app/*": ["../modules/notes/packages/desktop/src/renderer/*"],
+      "electron": ["../modules/notes/packages/desktop/node_modules/electron"],
+      "@cantoo/pdf-lib": ["../modules/notes/packages/desktop/node_modules/@cantoo/pdf-lib"]
+    }
+  },
+  "include": [
+    "notes/desktop/fixtures/**/*.ts",
+    "notes/desktop/support/dom-layout.ts",
+    "notes/desktop/integration/document/save-workflow.test.ts",
+    "notes/desktop/integration/navigation/quick-switcher.test.ts",
+    "notes/desktop/integration/workspace/split-panes.test.ts",
+    "notes/desktop/integration/workspace/workspace-spaces.test.ts",
+    "../modules/notes/packages/desktop/src/renderer/env.d.ts"
+  ]
+}

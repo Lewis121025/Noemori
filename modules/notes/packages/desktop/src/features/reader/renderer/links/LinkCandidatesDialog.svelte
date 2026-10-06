@@ -4,6 +4,7 @@
    * Esc 或取消关闭时不打开任何目标；选择后由工作区继续锚点定位。
    */
   import { onMount } from "svelte";
+  import { dialogEnter, dialogExit, finishOnReducedMotion } from "../transition-lifecycle";
 
   let {
     paths,
@@ -34,11 +35,14 @@
 </script>
 
 <dialog
+  in:dialogEnter|global
+  out:dialogExit|global
+  use:finishOnReducedMotion
   class="candidate-dialog"
   bind:this={dialog}
   aria-labelledby="link-candidates-title"
   oncancel={(event) => {
-    // cancel 触发原生关闭；工作区状态负责卸载本组件，无需再 close。
+    // 工作区撤销选择后，退出过渡先原生关闭，再保留不可交互的尾帧。
     event.preventDefault();
     onDismiss();
   }}

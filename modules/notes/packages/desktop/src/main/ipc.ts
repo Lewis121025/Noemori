@@ -1,6 +1,7 @@
 import { app, ipcMain, nativeTheme, type BrowserWindow } from "electron";
 import { parseAppearance, parseHistoryAvailability } from "../shared/api";
 import { parseReadingFont } from "../features/reader/shared/reading-font";
+import { parseReadingPalette } from "../features/reader/shared/reading-palette";
 import { registerReaderIpc } from "../features/reader/main/ipc";
 import { onFlushResult, type CloseGate } from "./close-gate";
 import type { CoreClient } from "./core-client";
@@ -38,6 +39,12 @@ export function registerIpc(
     const readingFont = parseReadingFont(value);
     if (readingFont === null) throw new Error("无效的阅读字体");
     await core.call("sessionPatch", { readingFont });
+  });
+  ipcMain.handle("readingPalette.get", async () => (await core.call("sessionLoad")).readingPalette);
+  ipcMain.handle("readingPalette.set", async (_event, value: unknown) => {
+    const readingPalette = parseReadingPalette(value);
+    if (readingPalette === null) throw new Error("无效的阅读配色");
+    await core.call("sessionPatch", { readingPalette });
   });
   ipcMain.handle("appearance.set", async (_event, value: unknown) => {
     const appearance = parseAppearance(value);

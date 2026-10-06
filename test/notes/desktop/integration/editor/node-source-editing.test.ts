@@ -4,8 +4,11 @@ import { EditorState, NodeSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { createHtmlNodeViews } from "@reader/renderer/markdown/views/html-view";
 import { mathNodeViews } from "@reader/renderer/markdown/views/math-view";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
-import { editSelectedSource, sourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
+import { editSelectedSource, createSourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+
+const sourceEditingPlugin = createSourceEditingPlugin();
 
 vi.mock("@reader/renderer/markdown/views/viewport", () => ({
   observeViewport: () => () => {},

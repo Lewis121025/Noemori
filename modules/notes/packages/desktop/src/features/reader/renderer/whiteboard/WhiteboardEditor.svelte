@@ -356,6 +356,7 @@
   .board-toolbar {
     display: flex;
     flex-wrap: wrap;
+    flex-wrap: wrap;
     gap: 0.3rem;
     padding: 0.5rem;
     background: var(--bg);

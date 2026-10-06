@@ -107,7 +107,7 @@ describe("导出的全栏保存与任务门禁", () => {
 
   it("另一栏保存失败必须阻止活动栏导出，修复后可重新执行", async (t) => {
     const { api, workspace } = await setup(t);
-    await workspace.toggleSplit();
+    await workspace.openInOtherPane("b.md");
     const first = workspace.panes[0];
     if (!first) throw new Error("缺少原分栏");
     vi.spyOn(first.navigation, "snapshot").mockImplementation(() => {

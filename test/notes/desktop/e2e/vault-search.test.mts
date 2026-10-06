@@ -91,7 +91,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const files = page.locator(".library").getByRole("navigation", { name: "文件列表" });
+    const files = page.locator(".search-content");
     const search = files.getByRole("searchbox");
     const status = files.locator(".status");
     const hitPaths = async () =>
@@ -104,7 +104,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
         !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
     );
 
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("quantumTken");
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
@@ -113,7 +113,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     expect(await hitPaths()).toContain("设计笔记.md");
 
     // 长词走 trigram 索引；结果替换文件树，摘要圈出命中词。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"量子检索"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
@@ -134,7 +134,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     });
 
     // 围栏代码里的命中同样可定位（全文索引覆盖代码块）。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"quantumToken"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
@@ -145,12 +145,12 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     });
 
     // 跨格式的完整词按真实范围选中；第二处不能回到第一处同名文本。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"预算审批"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 2 处命中");
     await files.getByRole("button", { name: "展开 设计笔记 的 2 处命中" }).click();
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await files.locator(".occurrence").first().click();
     await expect
       .poll(() => page.evaluate(() => document.getSelection()?.toString()))
@@ -162,7 +162,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
             ?.textContent,
       ),
     ).toBe("审批");
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await files.locator(".occurrence").nth(1).click();
     await expect
       .poll(() =>
@@ -183,7 +183,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     // 源码视图使用同一字节范围，保持选中的仍是第二处完整词。
     await noteAction(page, "切换源码视图");
     await page.locator(".cm-content").waitFor();
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await files.locator(".occurrence").nth(1).click();
     await expect
       .poll(() => page.evaluate(() => document.getSelection()?.toString()))
@@ -191,7 +191,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await noteAction(page, "切换排版视图");
 
     // 同一行查询只展示满足完整条件的行，不用文档里更早的同名词制造摘要。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("line:(预算 审批)");
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
@@ -203,27 +203,27 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
       .toBe("预算与审批都已完成");
 
     // 中文两字短词走短词索引：结果仍然完整。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"量子"');
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
 
     // OR 的短词分支独立召回，不能因为另一个分支使用长词索引而漏掉它。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("quantumToken OR 量子");
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 2 篇");
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
 
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("量子检索 OR path:其它");
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 2 篇");
     expect((await hitPaths()).sort()).toEqual(["其它笔记.md", "设计笔记.md"]);
 
     // 标签谓词：frontmatter 与行内标签同表可查。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("tag:project");
     await search.press("Enter");
     await files.locator(".hit").first().waitFor();
@@ -231,7 +231,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
 
     // 无结果与退出：第一次 Escape 回到文件树并保留查询词（树仍按其过滤），
     // 第二次 Escape 清空过滤词，恢复完整文件树。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"绝对不存在的词"');
     await search.press("Enter");
     await expect
@@ -240,23 +240,24 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await search.press("Escape");
     expect(await search.inputValue()).toBe('"绝对不存在的词"');
     expect(await files.getByRole("treeitem").count()).toBe(0);
-    await search.press("Escape");
+    await files.getByRole("button", { name: "清除搜索", exact: true }).click();
     expect(await search.inputValue()).toBe("");
-    expect(await files.getByRole("treeitem").first().isVisible()).toBe(true);
 
     // 标签面板：组树展示计数（frontmatter 与行内标签同表汇总），点击进入 tag: 检索。
-    await files.getByRole("button", { name: "浏览标签" }).click();
+    await openLibrary(page);
+    const manager = page.getByRole("region", { name: "文件系统", exact: true });
+    await manager.getByRole("button", { name: "浏览标签", exact: true }).click();
     await expect
-      .poll(async () => files.locator(".tag .name").allTextContents())
+      .poll(async () => manager.locator(".tag .name").allTextContents())
       .toEqual(["#project"]);
-    await expect.poll(async () => files.locator(".tag .count").allTextContents()).toEqual(["2"]);
-    await files.locator(".tag", { hasText: "project" }).click();
+    await expect.poll(async () => manager.locator(".tag .count").allTextContents()).toEqual(["2"]);
+    await manager.locator(".tag", { hasText: "project" }).click();
     await files.locator(".hit").first().waitFor();
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
     expect(await search.inputValue()).toBe("tag:project");
 
     // 单篇首批五处，继续展开才读取下一批；计数不随加载变化，最后一处仍可精确定位。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"denseneedle"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 46 处命中");
@@ -277,7 +278,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     expect(await lastOccurrence!.evaluate((node) => node === document.activeElement)).toBe(true);
     await rm(trigger);
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 46 处命中");
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await files.locator(".occurrence").last().click();
     await expect
       .poll(() =>
@@ -296,7 +297,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
       .toBe("第 46 处 denseneedle");
 
     // 超过首屏仍能逐页浏览；已加载数量不能冒充全库总数。
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("pageproof OR absentprobe");
     await search.press("Enter");
     await expect.poll(() => files.locator(".hit").count()).toBe(100);

@@ -7,7 +7,7 @@ export function distance(a: FitPoint, b: FitPoint): number {
 }
 
 /** 点到有限线段距离；零长度线段按端点处理。 */
-export function segmentDistance(p: FitPoint, a: FitPoint, b: FitPoint): number {
+function segmentDistance(p: FitPoint, a: FitPoint, b: FitPoint): number {
   const dx = b.x - a.x,
     dy = b.y - a.y;
   const length = dx * dx + dy * dy;

@@ -95,18 +95,17 @@ describe("文件树原位重命名", () => {
     expect(document.activeElement).toBe(row("项目/新笔记.md"));
   });
 
-  it("目录名称全部选中，改名后保留展开状态和子文档", async () => {
-    row("项目/笔记.md").focus();
-    row("项目/笔记.md").dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
-    );
-    await settle();
+  it("目录改名保留子文档，根目录中的选择跟随新名称", async () => {
+    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "全部文件")!.click();
+    flushSync();
+    row("项目").click();
+    flushSync();
     await begin("项目");
     expect(input().selectionEnd).toBe(2);
     type("计划");
     key("Enter");
     await settle();
-    expect(row("计划").getAttribute("aria-expanded")).toBe("true");
+    expect(workspace.fileTree.state.browse?.directory).toBe("");
     expect(workspace.document.path).toBe("计划/笔记.md");
     expect(document.activeElement).toBe(row("计划"));
   });

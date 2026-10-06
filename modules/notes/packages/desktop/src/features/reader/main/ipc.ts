@@ -9,6 +9,7 @@ import { parseFileTreeMessage } from "../shared/file-browser";
 import { registerEntryBatchIpc } from "./entry-batch-ipc";
 import { registerVaultOpenIpc } from "./vault-open-ipc";
 import { registerWhiteboardIpc } from "./whiteboard-ipc";
+import { registerWebPageIpc } from "./webpage-ipc";
 import { registerExportIpc } from "./export/ipc";
 import type { ReaderService } from "./service";
 import {
@@ -45,6 +46,7 @@ export type ReaderClient = {
  */
 export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: ReaderClient): void {
   registerWhiteboardIpc(getWindow);
+  registerWebPageIpc(getWindow);
   registerExportIpc(getWindow, {
     createControl: () => core.createControl(),
     recover: () => core.call("exportRecover"),
@@ -77,8 +79,10 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
     return {
       filesCollapsed: session.filesCollapsed,
       leftWidth: session.leftWidth,
+      ...(session.destination === undefined ? {} : { destination: session.destination }),
+      ...(session.sidebarView === undefined ? {} : { sidebarView: session.sidebarView }),
+      ...(session.searchQuery === undefined ? {} : { searchQuery: session.searchQuery }),
       ...(session.space === undefined ? {} : { space: session.space }),
-      ...(session.mode === undefined ? {} : { mode: session.mode }),
     };
   });
 
@@ -258,10 +262,6 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   );
   ipcMain.handle("reader.index.tags", () => core.call("indexTags"));
   ipcMain.handle("reader.index.noteKeys", () => core.call("indexNoteKeys"));
-  ipcMain.handle("reader.index.graph", (_event, includeDead: unknown) => {
-    if (typeof includeDead !== "boolean") throw new Error("图谱请求无效");
-    return core.call("indexGraph", includeDead);
-  });
   ipcMain.handle("reader.bookmarks.list", () => core.call("bookmarksList"));
   ipcMain.handle("reader.bookmarks.set", (_event, items: unknown) =>
     core.call("bookmarksSet", parseBookmarks(items)),

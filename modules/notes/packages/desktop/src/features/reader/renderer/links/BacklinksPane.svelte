@@ -1,7 +1,12 @@
 <script lang="ts">
-  /** 正文末尾的引用：默认收起，按来源笔记计数，候选提及独立展示。 */
+  /** 双链面板的引用列表：按来源笔记分组，折叠与类别切换由底部面板统一负责。 */
   import type { MentionRecord, Mentions } from "../../shared/api";
-  import { displaySnippet, presentMentions, type MentionGroup } from "./backlinks";
+  import {
+    displaySnippet,
+    groupMentionContexts,
+    presentMentions,
+    type MentionGroup,
+  } from "./backlinks";
 
   type Props = {
     /** 仅包含当前笔记的查询结果；由外壳保证异步归属。 */
@@ -44,16 +49,14 @@
 {#if linkedGroups.length > 0 || unlinkedGroups.length > 0}
   <section class="references" aria-label="笔记引用">
     {#if linkedGroups.length > 0}
-      <details>
-        <summary>被 {linkedGroups.length} 篇笔记引用</summary>
+      <div class="linked-references" role="group" aria-label="入链">
         {@render groups(linkedGroups)}
-      </details>
+      </div>
     {/if}
     {#if unlinkedGroups.length > 0}
-      <details class="suggestions">
-        <summary>可能相关的提及（{unlinkedGroups.length} 篇）</summary>
+      <div class="suggestions" role="group" aria-label="未链接提及">
         {@render groups(unlinkedGroups, true)}
-      </details>
+      </div>
     {/if}
   </section>
 {/if}
@@ -62,27 +65,58 @@
   <div class="groups">
     {#each items as group (group.fromPath)}
       <div class="group">
-        <h3>{group.fromTitle}</h3>
+        <div class="group-heading">
+          <h3 title={group.fromPath}>
+            {group.fromTitle === group.fromPath
+              ? group.fromPath.split("/").at(-1)
+              : group.fromTitle}
+          </h3>
+          {#if group.items.length > 1}<span
+              class="occurrence-count"
+              title={`${group.items.length} 处引用`}>×{group.items.length}</span
+            >{/if}
+        </div>
+        {#if group.fromPath.includes("/")}<p class="source-path" title={group.fromPath}>
+            {group.fromPath.slice(0, group.fromPath.lastIndexOf("/"))}
+          </p>{/if}
         <ul>
-          {#each group.items as item, index (`${item.startByte}:${index}`)}
-            {@const shown = displaySnippet(item.snippet, false, 180, item.toRaw)}
+          {#each groupMentionContexts(group.items) as context (context.key)}
+            {@const item = context.items[0]}
+            {@const shown = displaySnippet(item.snippet, false, 110, item.toRaw)}
             <li>
-              <button
-                type="button"
-                class="hit"
-                data-preview-path={item.fromPath}
-                onclick={() => onOpen(item)}
-              >
-                {#each pieces(shown, item.toRaw) as part, partIndex (`${partIndex}`)}
-                  {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
-                {/each}
-              </button>
+              {#if context.items.length === 1}
+                <button
+                  type="button"
+                  class="hit"
+                  data-preview-path={item.fromPath}
+                  onclick={() => onOpen(item)}>{@render contextText(shown, item.toRaw)}</button
+                >
+              {:else}
+                <div class="hit">{@render contextText(shown, item.toRaw)}</div>
+              {/if}
+              {#if context.items.length > 1}<div class="occurrences" aria-label="引用位置">
+                  {#each context.items as occurrence, index (`${occurrence.startByte}:${index}`)}
+                    <button
+                      type="button"
+                      class="occurrence"
+                      aria-label={`第 ${index + 1} 处引用`}
+                      title={`跳转到第 ${index + 1} 处引用`}
+                      onclick={() => onOpen(occurrence)}>{index + 1}</button
+                    >
+                  {/each}
+                </div>{/if}
               {#if linkifyable && onLinkify}
                 <button
                   type="button"
                   class="linkify"
+                  aria-label="转为链接"
                   title="把来源文件里的这段文字就地替换为指向本笔记的链接"
-                  onclick={() => onLinkify?.(item)}>转为链接</button
+                  onclick={() => onLinkify?.(item)}
+                  ><svg viewBox="0 0 24 24" aria-hidden="true"
+                    ><path
+                      d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
+                    /></svg
+                  ></button
                 >
               {/if}
             </li>
@@ -93,37 +127,54 @@
   </div>
 {/snippet}
 
+{#snippet contextText(snippet: string, match: string)}
+  {#each pieces(snippet, match) as part, partIndex (`${partIndex}`)}
+    {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
+  {/each}
+{/snippet}
+
 <style>
   .references {
-    margin-top: 3rem;
-    padding: 1rem 0 0.5rem;
-    border-top: 1px solid var(--border);
+    padding: 0.5rem 0;
     font-size: 0.875rem;
   }
-  details + details {
-    margin-top: 0.65rem;
+  .group {
+    padding: 0.65rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
   }
-  summary {
+  .source-path {
+    margin: 0 0 0.5rem;
+    font-size: 0.7rem;
     color: var(--muted);
-    cursor: pointer;
-    padding: 0.25rem 0;
-    width: fit-content;
-  }
-  summary:hover,
-  details[open] > summary {
-    color: var(--fg);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .groups {
-    padding-top: 0.8rem;
+    padding-top: 0;
   }
   .group + .group {
-    margin-top: 1rem;
+    margin-top: 0.6rem;
   }
   h3 {
+    flex: 1;
+    min-width: 0;
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     margin: 0 0 0.3rem;
     overflow-wrap: anywhere;
+  }
+  .group-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .occurrence-count {
+    color: var(--muted);
+    font-size: 0.7rem;
+    flex-shrink: 0;
   }
   ul {
     margin: 0;
@@ -132,31 +183,39 @@
   }
   .hit {
     display: block;
+    box-sizing: border-box;
     width: 100%;
     padding: 0.35rem 0.5rem;
     margin-left: -0.5rem;
     border: 0;
     border-radius: 0.35rem;
     background: transparent;
-    color: var(--muted);
+    color: var(--fg);
     font: inherit;
+    font-size: 0.8rem;
     line-height: 1.7;
     text-align: left;
-    cursor: pointer;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .hit:hover {
+  button.hit {
+    cursor: pointer;
+  }
+  button.hit:hover {
     color: var(--fg);
     background: var(--selected);
   }
   mark {
     color: var(--fg);
-    background: transparent;
-    font-weight: 500;
+    background: var(--selected);
+    font-weight: 600;
   }
   .linkify {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
     margin: 0.1rem 0 0.35rem 0.5rem;
     padding: 0.15rem 0.4rem;
     border: 1px solid var(--border);
@@ -167,8 +226,36 @@
     font-size: 0.72rem;
     cursor: pointer;
   }
+  .linkify svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+  }
   .linkify:hover {
     color: var(--accent);
     border-color: var(--accent);
+  }
+  .occurrences {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0.1rem 0 0.35rem;
+  }
+  .occurrence {
+    min-width: 24px;
+    min-height: 24px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
+  .occurrence:hover {
+    color: var(--fg);
+    background: var(--selected);
   }
 </style>

@@ -32,7 +32,7 @@ export function createCoreService(userData: string, onChanged: (event: VaultEven
       return session;
     },
     sessionPatch: (
-      patch: Partial<Pick<Session, "appearance" | "readingFont" | "window">>,
+      patch: Partial<Pick<Session, "appearance" | "readingFont" | "readingPalette" | "window">>,
     ): Promise<void> => native.sessionPatch(patch),
     shutdown: (): Promise<void> => native.shutdown(),
   };

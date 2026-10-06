@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Node as PmNode } from "prosemirror-model";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { documentSchema } from "@reader/shared/markdown/schema";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
 

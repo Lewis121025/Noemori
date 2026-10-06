@@ -1,5 +1,6 @@
 import type { VaultEntry } from "../../shared/api";
 import { createSessionWrite, type SessionWrite } from "../session-write";
+import { ancestorDirectories } from "./file-tree";
 import {
   emptyFileTreeState,
   mapFileTreeState,
@@ -80,9 +81,12 @@ export class ReaderFileTree {
     if (
       next.browse?.query === this.value.browse?.query &&
       next.browse?.section === this.value.browse?.section &&
+      next.browse?.directory === this.value.browse?.directory &&
       next.focused === this.value.focused &&
       next.scroll?.path === this.value.scroll?.path &&
       next.scroll?.offset === this.value.scroll?.offset &&
+      next.navigationScroll?.path === this.value.navigationScroll?.path &&
+      next.navigationScroll?.offset === this.value.navigationScroll?.offset &&
       samePaths(next.expanded, this.value.expanded) &&
       samePaths(next.selected, this.value.selected)
     )
@@ -90,6 +94,26 @@ export class ReaderFileTree {
     this.value = next;
     if (!this.initialized || this.root() === null) return;
     this.writing.request();
+  }
+
+  /**
+   * 侧栏、网格与面包屑共用的目录切换；原子清除旧目录的选择、查询和网格锚点。
+   * @param path 当前库中已存在的相对目录，空字符串表示库根。
+   * @returns 不返回值；未恢复的会话不操作，持久化失败经既有错误通道报告。
+   */
+  enterDirectory(path: string): void {
+    if (!this.initialized) return;
+    const ancestors = path === "" ? [] : [...ancestorDirectories(path), path];
+    this.update({
+      browse: { query: "", section: "files", directory: path },
+      expanded: [
+        ...this.value.expanded,
+        ...ancestors.filter((ancestor) => !this.value.expanded.includes(ancestor)),
+      ],
+      selected: [],
+      focused: null,
+      scroll: null,
+    });
   }
 
   /** 文件变化按同一映射迁移全部现场，提交后、清单刷新前调用。 */

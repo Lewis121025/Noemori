@@ -16,6 +16,7 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
     historyAvailability: () => null,
     openAttachments: () => {},
     insertWhiteboard: () => {},
+    insertWebPage: () => {},
     settleAttachments: () => Promise.resolve(true),
     focus: () => {},
     openSearch: () => {},
@@ -25,6 +26,7 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
     jumpToSearch: () => {},
     jumpToHeading: () => false,
     currentHeading: () => null,
+    visibleHeading: () => null,
   };
 }
 

@@ -1,3 +1,4 @@
+import { openSettings, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +50,7 @@ test.each(["目录跳转", "滚轮阅读"])("字体布局等待不能覆盖用�
   });
   try {
     const page = await app.firstWindow();
+    await page.locator(".ProseMirror").waitFor();
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]!.setContentSize(1280, 900),
     );
@@ -59,6 +61,7 @@ test.each(["目录跳转", "滚轮阅读"])("字体布局等待不能覆盖用�
           .isEnabled(),
       )
       .toBe(true);
+    await sidebarComponent(page, "目录");
     await page.getByRole("button", { name: "第 20 节", exact: true }).click();
     // 控制异步边界，确保新的用户意图发生在字体已应用、布局尚未交接完成时。
     const release = await page.evaluateHandle(() => {
@@ -72,7 +75,7 @@ test.each(["目录跳转", "滚轮阅读"])("字体布局等待不能覆盖用�
         release();
       };
     });
-    await page.getByRole("button", { name: "切换笔记库", exact: true }).click();
+    await openSettings(page);
     await page.getByRole("button", { name: "清晰现代", exact: true }).click();
     await expect
       .poll(() => page.locator(".ProseMirror").evaluate((el) => getComputedStyle(el).fontFamily))
@@ -80,6 +83,7 @@ test.each(["目录跳转", "滚轮阅读"])("字体布局等待不能覆盖用�
     await page.keyboard.press("Escape");
     const scroller = page.locator(".main");
     if (action === "目录跳转") {
+      await sidebarComponent(page, "目录");
       await page.getByRole("button", { name: "第 50 节", exact: true }).click();
       await expect
         .poll(async () => (await page.locator(".ProseMirror h2").nth(50).boundingBox())!.y)
@@ -177,7 +181,12 @@ test("精选字体离线加载，切换保留双栏阅读位置、图文边界�
           .evaluate((el) => getComputedStyle(el).fontFamily),
       )
       .toContain("Lora Variable");
-    await page.getByRole("button", { name: "切换笔记库", exact: true }).click();
+    await openSettings(page);
+    // 建立阅读坐标基准前，先等侧栏宽度过渡与启动字体恢复完成。
+    await page.waitForFunction(() =>
+      document.querySelector('[aria-label="阅读字体"]')?.getAttribute("aria-busy") === "false" &&
+      document.querySelector(".file-sidebar")?.getAnimations().every((animation) => animation.playState === "finished"),
+    );
     expect(
       await page.getByRole("group", { name: "阅读字体", exact: true }).getByRole("button").count(),
     ).toBe(3);
@@ -264,7 +273,7 @@ test("精选字体离线加载，切换保留双栏阅读位置、图文边界�
     const screenshots = process.env.NOEMORI_FONT_SCREENSHOTS;
     if (screenshots) {
       await mkdir(screenshots, { recursive: true });
-      await page.getByRole("button", { name: "切换笔记库", exact: true }).click();
+      await openSettings(page);
       await page.screenshot({ path: join(screenshots, "reading-fonts.png") });
     }
   } finally {

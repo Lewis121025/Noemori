@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection, type Transaction } from "prosemirror-state";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { writingCommands } from "@reader/renderer/editor/writing";
 import { insertLink } from "@reader/renderer/editor/links/link-editing";
 

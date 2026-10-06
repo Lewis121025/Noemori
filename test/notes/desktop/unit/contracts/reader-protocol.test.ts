@@ -118,7 +118,7 @@ it("库与目录快照要求完整结构，不能把错误响应显示为空库�
     documents: {
       panes: [{ history: { back: [{ path: "a.md", anchor: "小节" }], forward: [] } }],
     },
-    viewModes: { "b.md": "reading", "c.md": "source" },
+    viewModes: { "c.md": "source" },
     recentFiles: ["c.md", "d.md"],
   });
   expect(parseVaultRestore(null)).toBeNull();
@@ -368,12 +368,26 @@ it("链接解析响应按状态判别，损坏响应不退化成死链", () => {
     expect(() => parseLinkTarget(invalid)).toThrow("链接解析响应无效");
 });
 
-it("应用模式经 IPC 严格校验，缺省保留旧版会话迁移能力", () => {
+it("布局 IPC 丢弃已废弃的交互模式字段", () => {
   const layout = { filesCollapsed: false, leftWidth: 232 };
-  for (const mode of ["reading", "editing"])
-    expect(parsePaneLayoutMessage({ ...layout, mode })).toEqual({ ...layout, mode });
+  for (const mode of ["reading", "editing", "unknown"])
+    expect(parsePaneLayoutMessage({ ...layout, mode })).toEqual(layout);
+});
+
+it("工作台布局 IPC 保留合法偏好并拒绝非法状态", () => {
+  const layout = {
+    filesCollapsed: false,
+    leftWidth: 232,
+    destination: "library",
+    sidebarView: "search",
+    searchQuery: "笔记",
+  };
   expect(parsePaneLayoutMessage(layout)).toEqual(layout);
-  expect(() => parsePaneLayoutMessage({ ...layout, mode: "unknown" })).toThrow(
-    "文件栏布局参数无效",
-  );
+  for (const field of [
+    { destination: "canvas" },
+    { destination: "graph" },
+    { sidebarView: "tags" },
+    { searchQuery: 5 },
+  ])
+    expect(() => parsePaneLayoutMessage({ ...layout, ...field })).toThrow("文件栏布局参数无效");
 });

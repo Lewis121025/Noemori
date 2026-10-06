@@ -6,7 +6,7 @@ import {
   removeEntry,
   setEntryValue,
 } from "@reader/renderer/editor/properties/frontmatter-edit";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 
 const sample = [
   "---",

@@ -46,6 +46,21 @@ type PendingJump =
 
 /** 阅读上下文：目录折叠、引用查询及等待编辑器挂载后的定位，不参与文件写入。 */
 export class ReaderNavigation {
+  /** 当前视口顶部章节，更新不移动焦点或滚动目录。 */
+  activeOutlineKey = $state<string | null>(null);
+  /** 根据编辑器提供的视口位置更新目录高亮。 */
+  updateOutlinePosition = (): void => {
+    const heading = this.markdown?.visibleHeading() ?? null;
+    const find = (nodes: ReturnType<typeof buildOutlineTree>): string | null => {
+      for (const node of nodes) {
+        if (node.item.pos === heading) return node.key;
+        const nested = find(node.children);
+        if (nested !== null) return nested;
+      }
+      return null;
+    };
+    this.activeOutlineKey = find(this.tree);
+  };
   private headings = $state<OutlineItem[]>([]);
   private tree = $derived(buildOutlineTree(this.headings));
   private collapsed = $state<Record<string, string[]>>({});
@@ -94,6 +109,11 @@ export class ReaderNavigation {
   /** 在 Markdown 当前选区创建白板；其他表面不执行插入。 */
   insertWhiteboard(): void {
     this.markdown?.insertWhiteboard();
+  }
+
+  /** 打开所属 Markdown 表面的网页插入对话框，不创建新的文档会话。 */
+  insertWebPage(): void {
+    this.markdown?.insertWebPage();
   }
 
   /** 离开时提交未完成笔迹；后台刷新等待真实事务结束，不能由文件通知替用户抬笔。 */
@@ -256,6 +276,7 @@ export class ReaderNavigation {
     this.markdownEpoch = this.document.epoch;
     if (api !== null) {
       this.applyPendingJump();
+      this.updateOutlinePosition();
       void this.applyPosition();
     }
   };

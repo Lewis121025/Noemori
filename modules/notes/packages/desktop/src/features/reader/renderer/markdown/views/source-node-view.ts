@@ -7,7 +7,7 @@ import { NodeSelection } from "prosemirror-state";
 import { sourceEditingKey } from "../../editor/source/source-editing";
 
 /** 源码节点种类；决定现有 schema 属性、样式类与剪贴板数据属性。 */
-export type SourceKind = "math" | "html" | "comment";
+type SourceKind = "math" | "html" | "comment";
 
 /** 各类源码节点的渲染差异；预览只改 DOM，不得提交文档事务。 */
 export type SourcePreview = {

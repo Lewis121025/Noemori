@@ -247,7 +247,7 @@
               onclick={() => (expanded[hit.path] = !expanded[hit.path])}
               onkeydown={keydown}
             >
-              <span aria-hidden="true">{expanded[hit.path] ? "⌄" : "›"}</span>
+              <span aria-hidden="true">›</span>
               {hit.matchCount} 处命中
             </button>
             {#if expanded[hit.path]}

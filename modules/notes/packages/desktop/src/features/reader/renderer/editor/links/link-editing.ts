@@ -15,10 +15,8 @@ export const linkSelectionKey = new PluginKey<SelectionBookmark | null>("linkSel
 /**
  * 书签属于编辑会话，随事务映射而不进入撤销历史；关闭弹窗后释放。
  * 在编辑器创建时注册，避免动态重配插件销毁正在工作的附件与预览会话。
+ * 外部重载时接收已映射的弹窗书签；普通首次挂载以 null 开始。
  */
-export const linkSelectionPlugin = createLinkSelectionPlugin();
-
-/** 外部重载时接收已映射的弹窗书签；普通首次挂载以 null 开始。 */
 export function createLinkSelectionPlugin(initial: SelectionBookmark | null = null) {
   return new Plugin<SelectionBookmark | null>({
     key: linkSelectionKey,

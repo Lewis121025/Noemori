@@ -1,4 +1,4 @@
-import { noteAction, openLibrary } from "../support/workspace-actions";
+import { noteAction, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +58,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
       });
     const commit = (text: string) => cdp.send("Input.insertText", { text });
 
-    await openLibrary(page);
+    await page.keyboard.press("ControlOrMeta+Shift+f");
     const fileSearch = page.getByRole("searchbox", { name: "搜索文件和全文" });
     await fileSearch.fill("");
     await compose("输入");
@@ -67,11 +67,15 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     expect(await fileSearch.inputValue()).toBe("输入");
     expect(await fileSearch.evaluate((element) => element === document.activeElement)).toBe(true);
     await commit("输入");
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "清除搜索", exact: true }).click();
     expect(await fileSearch.inputValue()).toBe("");
 
+    // 新建入口属于文件面板；组词结束后返回文件，才能继续验证正文输入。
+    await sidebarComponent(page, "文件");
     await page.getByRole("button", { name: "新建笔记", exact: true }).click();
-    const entry = page.getByRole("dialog", { name: "新建笔记", exact: true });
+    await expect.poll(() => page.locator(".document-name").textContent()).toBe("未命名.md");
+    await noteAction(page, "重命名…");
+    const entry = page.getByRole("dialog", { name: "重命名", exact: true });
     await entry.getByLabel("文件名", { exact: true }).fill("");
     await compose("中文新笔记");
     for (const key of ["Enter", "Escape"]) {
@@ -80,6 +84,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
       expect(await entry.getByRole("alert").count()).toBe(0);
     }
     await commit("中文新笔记");
+    await page.keyboard.insertText(".md");
     await page.keyboard.press("Enter");
     await entry.waitFor({ state: "hidden" });
     await expect.poll(() => page.locator(".document-name").textContent()).toBe("中文新笔记.md");
@@ -100,6 +105,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     await link.waitFor({ state: "hidden" });
     expect(await editor.locator(".wiki-link").innerText()).toBe("中文链接");
     expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
+    await page.getByRole("button", { name: "文件", exact: true }).click();
     await page.getByRole("treeitem", { name: "输入.md", exact: true }).click();
     await page.getByRole("heading", { name: "输入验收" }).waitFor();
 

@@ -2,25 +2,41 @@
   import ExportDialog from "./export/ExportDialog.svelte";
   import VaultOpening from "./workspace/VaultOpening.svelte";
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
-  import ReaderToolbar from "./workspace/ReaderToolbar.svelte";
+  import { SvelteMap } from "svelte/reactivity";
+  import WindowToolbar from "./workspace/WindowToolbar.svelte";
+  import SettingsWindow from "./workspace/SettingsWindow.svelte";
+  import LinksDock from "./links/LinksDock.svelte";
   import LibraryBrowser from "./library/LibraryBrowser.svelte";
   import QuickNavigation from "./navigation/QuickNavigation.svelte";
+  import {
+    SIDEBAR_COMPONENTS,
+    type SidebarEntry,
+    type SidebarPanel,
+  } from "./navigation/sidebar-components";
   import PaneColumn from "./workspace/PaneColumn.svelte";
   import FileEntryDialog from "./library/FileEntryDialog.svelte";
   import LinkCandidatesDialog from "./links/LinkCandidatesDialog.svelte";
   import DeadLinkDialog from "./links/DeadLinkDialog.svelte";
   import QuickSwitcher from "./navigation/QuickSwitcher.svelte";
   import CommandPalette from "./workspace/CommandPalette.svelte";
-  import ConnectionsSpace from "./graph/ConnectionsSpace.svelte";
+  import type { PaneControls } from "./workspace/pane-controls";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
-  import { untitledNotePath, untitledWhiteboardPath } from "./library/library";
+  import {
+    libraryCreationDirectory,
+    untitledNotePath,
+    untitledWhiteboardPath,
+  } from "./library/library";
   import { emptyWhiteboard, serializeWhiteboard } from "../shared/whiteboard/model";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
   import { WorkspaceSpaces } from "./workspace/spaces.svelte";
   import { createBrowserMediaIo } from "./preview/media";
-  import { SIDEBAR_LAYOUT, type ReaderApi, type ReaderSpace } from "../shared/api";
+  import { SIDEBAR_LAYOUT, type ReaderApi, type PaneLayout } from "../shared/api";
   import "./styles/controls.css";
-  import type { GraphNode, HistoryAction, HistoryAvailability } from "../shared/api";
+  import "./styles/motion.css";
+  import { interactionFeedback } from "./motion";
+  import { sidebarMotion } from "./sidebar-motion";
+  import { paletteMotion } from "./palette-motion";
+  import type { HistoryAction, HistoryAvailability } from "../shared/api";
   import {
     commandAvailable,
     commandForKey,
@@ -30,17 +46,34 @@
   import { isCompositionKey } from "./editor/composition";
   import { createSessionWrite } from "./session-write";
   import { READING_FONTS, type ReadingFont } from "../shared/reading-font";
+  import { DEFAULT_READING_PALETTE, type ReadingPalette } from "../shared/reading-palette";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
-  let { api, applicationMenu }: { api: ReaderApi; applicationMenu: Snippet } = $props();
+  let {
+    api,
+    applicationMenu,
+    palette = DEFAULT_READING_PALETTE,
+  }: {
+    api: ReaderApi;
+    applicationMenu: Snippet;
+    /** 配色只影响样式变量，不重建文档或修改阅读位置。 */
+    palette?: ReadingPalette;
+  } = $props();
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
-  const workspace = new ReaderWorkspaceController(readerApi, persistPanes);
+  const workspace = new ReaderWorkspaceController(readerApi, () => layoutWrites.request());
   const spaces = new WorkspaceSpaces(workspace, prepareSpaceInput, persistPanes);
   const mediaIo = createBrowserMediaIo(readerApi);
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
   const doc = $derived(workspace.document);
   let filesCollapsed = $state(false);
+  let selectedComponent = $state<SidebarEntry["id"]>("outline");
+  const selectedEntry = $derived(
+    SIDEBAR_COMPONENTS.find((entry) => entry.id === selectedComponent),
+  );
+  const sidebarPanel = $derived(
+    selectedEntry?.kind === "panel" ? selectedEntry.id : "outline",
+  );
   const space = $derived(spaces.space);
   let readingSpace: HTMLDivElement | undefined = $state();
   const changingSpace = $derived(spaces.changing);
@@ -51,24 +84,40 @@
     delayMs: 300,
     write: async (isCurrent) => {
       if (isCurrent())
-        await readerApi.sessionSetPanes({ filesCollapsed, leftWidth, space, mode: workspace.mode });
+        await readerApi.sessionSetPanes({
+          filesCollapsed,
+          leftWidth,
+          destination: space,
+          sidebarView: workspace.sidebarView,
+          searchQuery: workspace.search.input,
+        });
     },
     report: reportLayoutFailure,
   });
   let entryDialog: FileEntryDialog | undefined = $state();
   let fileList: LibraryBrowser | undefined = $state();
   let fileNavigation: QuickNavigation | undefined = $state();
-  let toolbar: ReaderToolbar | undefined = $state();
-  /** 当前打开的选择弹层；同一时间至多一个。 */
-  let picker = $state<"switcher" | "palette" | null>(null);
-  const connectionView = $derived(spaces.connectionView);
-  const whiteboard = $derived(doc.content?.kind === "whiteboard");
-  const documentVisible = $derived(spaces.documentVisible);
+  let windowToolbar: WindowToolbar | undefined = $state();
+  let settingsWindow: SettingsWindow | undefined = $state();
+  const paneControls = new SvelteMap<number, PaneControls>();
 
-  // 文内链接、阅读历史和分栏激活也可能改变文档种类，页面归属跟随真实文档。
-  $effect(() => {
-    if (spaces.followDocument()) untrack(focusDocument);
-  });
+  /** 分栏保有工具的编辑器归属，工作区只决定顶栏操作与侧栏目录的展示位置。 */
+  function registerControls(id: number, controls: PaneControls | null): void {
+    if (controls === null) paneControls.delete(id);
+    else paneControls.set(id, controls);
+  }
+  /** 当前打开的选择弹层；同一时间至多一个。 */
+  let picker = $state<"switcher" | "palette" | "split" | null>(null);
+  let pickerOpening = $state(0);
+  function openPicker(kind: NonNullable<typeof picker>): void {
+    // 同类型弹窗快速重开也属于新会话，不能复用尚在退出的查询和异步请求。
+    pickerOpening += 1;
+    picker = kind;
+  }
+  const documentVisible = $derived(spaces.documentVisible);
+  let contentWidth = $state(0);
+  let contentElement: HTMLDivElement;
+  const compactSplit = $derived(workspace.split && contentWidth < 640);
   /** 本次运行用过的命令，最新在前；只服务命令面板排序，不持久化。 */
   let recentCommands = $state<ReaderCommand[]>([]);
   const mac = navigator.userAgent.includes("Mac");
@@ -100,7 +149,6 @@
       vaultOpen: workspace.vaultRoot !== null,
       hasDocument: documentVisible && doc.path !== null,
       canEdit: documentVisible && doc.canEdit,
-      reading: workspace.mode === "reading",
       markdown: doc.content?.kind === "markdown",
       source: workspace.viewMode === "source",
       whiteboard: doc.content?.kind === "whiteboard",
@@ -139,10 +187,13 @@
       return;
     switch (command) {
       case "quick-switcher":
-        picker = "switcher";
+        openPicker("switcher");
+        break;
+      case "open-settings":
+        settingsWindow?.open();
         break;
       case "command-palette":
-        picker = "palette";
+        openPicker("palette");
         break;
       case "open-vault":
         void openVault();
@@ -151,8 +202,7 @@
         void showLibrary();
         break;
       case "new-note":
-        if (space === "library") fileList?.beginCreate("file");
-        else void startDocument("note");
+        void startDocument("note");
         break;
       case "new-whiteboard":
         void startDocument("whiteboard");
@@ -161,10 +211,16 @@
         prepareDocumentAction();
         workspace.navigation.insertWhiteboard();
         break;
+      case "insert-webpage":
+        prepareDocumentAction();
+        workspace.navigation.insertWebPage();
+        break;
       case "new-folder":
-        void showLibrary().then(() => {
-          if (space === "library") fileList?.beginCreate("directory");
-        });
+        void entryDialog?.open(
+          "directory",
+          null,
+          creationDirectory(),
+        );
         break;
       case "save":
         workspace.requestSave();
@@ -176,7 +232,7 @@
         workspace.requestExport({ kind: "vault" });
         break;
       case "find":
-        prepareDocumentAction();
+        showDocumentTools();
         workspace.navigation.openSearch();
         break;
       case "find-files":
@@ -187,8 +243,7 @@
         workspace.navigation.openAttachments();
         break;
       case "toggle-files":
-        if (space !== "writing") void resumeWriting();
-        else toggleFilesPane();
+        toggleFilesPane();
         break;
       case "go-back":
         void workspace.navigateBack();
@@ -199,11 +254,8 @@
       case "toggle-source":
         void workspace.toggleViewMode();
         break;
-      case "toggle-reading":
-        void workspace.toggleReadingMode();
-        break;
       case "toggle-split":
-        void workspace.toggleSplit();
+        void toggleSplit();
         break;
       case "rename-file":
         beginRename();
@@ -217,18 +269,6 @@
       case "show-bookmarks":
         void showBookmarks();
         break;
-      case "open-graph":
-        void spaces.showConnections("graph");
-        break;
-    }
-  }
-
-  /** 图谱节点在活动栏打开；未创建的笔记走死链创建确认。 */
-  async function openGraphNode(node: GraphNode): Promise<void> {
-    await tick();
-    if (node.dead) await workspace.openLink("wiki", node.path);
-    else {
-      await openFile(node.path);
     }
   }
 
@@ -241,36 +281,45 @@
 
   onMount(() => {
     updateViewport();
+    const observer = new ResizeObserver(() => {
+      contentWidth = contentElement.clientWidth;
+    });
+    observer.observe(contentElement);
+    contentWidth = contentElement.clientWidth;
     const dispose = workspace.start();
     let mounted = true;
     void (async () => {
       const restoredSpace = await restorePanes();
       if (!mounted) return;
-      spaces.restore(restoredSpace);
       await workspace.restore();
-      if (mounted) spaces.restore(restoredSpace);
+      if (mounted) {
+        spaces.restore(restoredSpace);
+        workspace.sidebarView = restoredSpace.sidebarView ?? "outline";
+        selectedComponent = spaces.space === "library" ? "open-library" : workspace.sidebarView;
+        workspace.search.setInput(restoredSpace.searchQuery ?? "");
+      }
     })();
     return () => {
       mounted = false;
+      observer.disconnect();
       layoutWrites.dispose();
       spaces.dispose();
       dispose();
     };
   });
 
-  async function restorePanes(): Promise<ReaderSpace> {
+  async function restorePanes(): Promise<PaneLayout> {
     try {
       const panes = await readerApi.sessionGetPanes();
       filesCollapsed = panes.filesCollapsed;
       leftWidth = panes.leftWidth;
-      workspace.restoreMode(panes.mode);
-      return panes.space ?? "writing";
+      return panes;
     } catch (error) {
       workspace.report(
         "文件栏布局未能恢复，已使用默认布局。可重新调整布局；若问题持续，请查看详细原因。",
         error,
       );
-      return "writing";
+      return { filesCollapsed: false, leftWidth: SIDEBAR_LAYOUT.leftWidth };
     }
   }
 
@@ -296,28 +345,50 @@
 
   async function showLibrary(): Promise<void> {
     if (!(await spaces.showLibrary())) return;
+    selectedComponent = "open-library";
+    prepareDocumentAction();
     await tick();
     if (space === "library") fileList?.focusSearch();
   }
 
   async function resumeWriting(): Promise<void> {
-    if (await spaces.resumeWriting()) focusDocument();
+    if (await spaces.resumeWriting()) {
+      if (selectedEntry?.kind === "command") selectedComponent = workspace.sidebarView;
+      focusDocument();
+    }
   }
 
   async function openVault(): Promise<void> {
     const before = workspace.vaultRoot;
     await workspace.openVault();
-    if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) await showLibrary();
+    if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) {
+      await resumeWriting();
+      persistPanes();
+    }
+  }
+
+  /** 新建动作以当前浏览位置为准；返回文档后才使用文档所在目录。 */
+  function creationDirectory(): string {
+    if (space !== "library") return doc.path === null ? "" : parentDirectory(doc.path);
+    const { selected, browse } = workspace.fileTree.state;
+    const entry =
+      selected.length === 1
+        ? workspace.entries.find((entry) => entry.path === selected[0])
+        : undefined;
+    return libraryCreationDirectory(entry ?? null, browse?.directory ?? "");
   }
 
   /** 笔记与白板共用创建门禁、路径冲突规则和焦点交接，只在初始内容上分流。 */
-  async function startDocument(kind: "note" | "whiteboard"): Promise<void> {
+  async function startDocument(
+    kind: "note" | "whiteboard",
+    parentOverride?: string,
+  ): Promise<void> {
     if (creatingDocument || changingSpace || workspace.isComposing) return;
     creatingDocument = true;
     try {
       if (workspace.vaultRoot === null) await workspace.openVault("default");
       if (workspace.vaultRoot === null) return;
-      const parent = doc.path === null ? "" : parentDirectory(doc.path);
+      const parent = parentOverride ?? creationDirectory();
       const path =
         kind === "note"
           ? untitledNotePath(workspace.entries, parent)
@@ -343,7 +414,7 @@
   function closeFilesPane(): void {
     filesCollapsed = true;
     persistPanes();
-    void tick().then(() => toolbar?.focusFilesToggle());
+    void tick().then(() => windowToolbar?.focusSidebarToggle());
   }
 
   function toggleFilesPane(): void {
@@ -354,8 +425,33 @@
     }
   }
 
+  /** 双栏开关关闭非活动栏，保留当前文档；关闭前仍通过该栏的保存门禁。 */
+  async function toggleSplit(): Promise<void> {
+    if (changingSpace || workspace.switching || workspace.copying || workspace.isComposing) return;
+    if (workspace.split) {
+      const other = workspace.panes.find((pane) => pane !== workspace.activePane);
+      if (other) await workspace.closePane(other.id);
+    } else openPicker("split");
+  }
+
+  function showDocumentTools(): void {
+    workspace.navigation.cancelPositionRestore();
+    prepareDocumentAction();
+  }
+
+  /** 组件切换保留挂载；返回文档工具时先通过已有页面门禁，不重新加载正文。 */
+  async function selectSidebarPanel(panel: SidebarPanel): Promise<void> {
+    if (workspace.isComposing || changingSpace) return;
+    if (panel !== "search" && !documentVisible) {
+      if (!(await spaces.resumeWriting())) return;
+    }
+    selectedComponent = panel;
+    workspace.setSidebarView(panel);
+    if (panel === "search") await fileNavigation?.focusSearch();
+  }
+
   function prepareDocumentAction(): boolean {
-    if (space !== "writing" || filesCollapsed || !narrow) return false;
+    if (filesCollapsed || !narrow) return false;
     // 原生弹层会在点击事件结束时分配焦点，需要先解除正文的 inert。
     flushSync(() => {
       filesCollapsed = true;
@@ -370,9 +466,11 @@
   }
 
   async function searchFiles(): Promise<void> {
-    await showLibrary();
-    if (space !== "library") return;
-    fileList?.focusSearch();
+    workspace.setSidebarView("search");
+    selectedComponent = "search";
+    filesCollapsed = false;
+    persistPanes();
+    await fileNavigation?.focusSearch();
   }
 
   async function showBookmarks(): Promise<void> {
@@ -383,6 +481,7 @@
 
   function finishFileNavigation(): void {
     spaces.showDocument();
+    if (selectedEntry?.kind === "command") selectedComponent = workspace.sidebarView;
     focusDocument();
   }
 
@@ -421,7 +520,6 @@
       change.action === "create" && change.entry.kind === "file" && doc.path === change.entry.path;
     await fileList?.reflectChange(change, space === "library" && !writing);
     if (writing) finishFileNavigation();
-    else if (space === "writing" && change.action === "trash") await fileNavigation?.focusFiles();
   }
 
   function onWorkspaceShortcut(event: KeyboardEvent): void {
@@ -429,7 +527,6 @@
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     if (
       event.key === "Escape" &&
-      space === "writing" &&
       narrow &&
       !filesCollapsed &&
       !(event.target instanceof Element && event.target.closest("[popover]"))
@@ -465,96 +562,169 @@
   oncompositionstart={() => workspace.setComposing(true)}
   oncompositionend={() => workspace.setComposing(false)}
 />
-<div class="app">
-  <ReaderToolbar
-    bind:this={toolbar}
-    {workspace}
-    {space}
-    {changingSpace}
-    {filesCollapsed}
-    onLibrary={() => void showLibrary()}
-    onResume={() => void resumeWriting()}
-    onConnections={() => void spaces.showConnections()}
-    {documentVisible}
-    onSearch={() => {
-      picker = "switcher";
-    }}
-    onNewNote={() => void startDocument("note")}
-    onNewWhiteboard={() => void startDocument("whiteboard")}
-    onOpenVault={() => void openVault()}
-    onToggleFiles={toggleFilesPane}
-    onRename={beginRename}
-    onDocumentAction={prepareDocumentAction}
-    {applicationMenu}
-  />
+<div class="app" data-reading-palette={palette} use:interactionFeedback use:paletteMotion={palette}>
   <VaultOpening {workspace} />
-  <div class="panes">
-    {#if space === "connections"}
-      <ConnectionsSpace
-        {workspace}
-        view={connectionView}
-        busy={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
-        onView={(view) => void spaces.showConnections(view)}
-        onOpen={(path) => void openFile(path)}
-        onGraphNode={(node) => void openGraphNode(node)}
-        onNew={() => void startDocument("whiteboard")}
-      />
-    {/if}
-    {#if space === "writing" && whiteboard}
-      <section class="writing-empty" aria-label="开始写作">
-        <h1>留一点空间，给新的想法。</h1>
-        <button
-          class="reader-button primary"
-          type="button"
-          onclick={() => void startDocument("note")}>新建笔记</button
-        >
-      </section>
-    {/if}
-    <div
-      class="reading-space"
-      bind:this={readingSpace}
-      inert={!documentVisible}
-      aria-hidden={!documentVisible}
-    >
-      {#if !filesCollapsed && space === "writing"}
-        <button class="files-scrim" type="button" aria-label="收起文件栏" onclick={closeFilesPane}
-        ></button>
-      {/if}
-      <QuickNavigation
-        bind:this={fileNavigation}
-        {workspace}
-        hidden={filesCollapsed || space !== "writing"}
-        width={leftWidth}
-        onOpen={(path) => void openFile(path)}
-        onTrash={(entry) => void entryDialog?.open("trash", entry, parentDirectory(entry.path))}
-        onWidth={(width) => {
-          leftWidth = width;
-          layoutWrites.request();
-        }}
-      />
+  <WindowToolbar
+    bind:this={windowToolbar}
+    {workspace}
+    {filesCollapsed}
+    {documentVisible}
+    busy={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
+    onToggleFiles={toggleFilesPane}
+    onToggleSplit={() => void toggleSplit()}
+    onPrepareDocumentAction={showDocumentTools}
+  >
+    {#snippet documentTools()}
       {#each workspace.panes as pane (pane.id)}
-        <PaneColumn
-          {workspace}
-          {pane}
-          {mediaIo}
-          narrowInert={space === "writing" && narrow && !filesCollapsed}
-          {filesCollapsed}
-          onToggleFiles={toggleFilesPane}
-          onNewNote={() => void startDocument("note")}
-          onOpenVault={() => void openVault()}
-        />
+        {@const controls = paneControls.get(pane.id)}
+        <div
+          class="topbar-document"
+          data-pane-tools={pane.id}
+          hidden={!documentVisible || workspace.activePane !== pane}
+        >
+          {#if controls}{@render controls.toolbar()}{/if}
+        </div>
       {/each}
-    </div>
-    <LibraryBrowser
-      bind:this={fileList}
-      onOpen={finishFileNavigation}
+    {/snippet}
+  </WindowToolbar>
+  <SettingsWindow
+    bind:this={settingsWindow}
+    {workspace}
+    preferences={applicationMenu}
+    onOpenVault={openVault}
+  />
+  <div class="panes">
+    <button
+      class="files-scrim"
+      hidden={filesCollapsed || !narrow}
+      inert={filesCollapsed || !narrow}
+      type="button"
+      aria-label="收起文件栏"
+      onclick={closeFilesPane}
+    ></button>
+    <QuickNavigation
+      bind:this={fileNavigation}
       {workspace}
-      hidden={space !== "library"}
-      readFile={readerApi.fileRead}
-      onEdit={(action, entry, parent) => void entryDialog?.open(action, entry, parent)}
-    />
+      panel={sidebarPanel}
+      activeEntry={selectedComponent}
+      libraryShown={space === "library"}
+      onNavigateDirectory={(path) => {
+        fileList?.enterDirectory(path);
+        if (narrow) closeFilesPane();
+      }}
+      onSelectPanel={(panel) => void selectSidebarPanel(panel)}
+      hidden={filesCollapsed}
+      width={leftWidth}
+      onOpen={(path) => void openFile(path)}
+      onCommand={executeCommand}
+      canRun={(command) => commandAvailable(command, commandContext())}
+      onSearchHit={(hit, match) => {
+        const pane = workspace.activePane;
+        void pane.navigation
+          .openSearchMatch(hit, match ?? hit.matches[0], pane.openFile, (message) =>
+            workspace.report(message),
+          )
+          .then(() => {
+            if (pane.document.path === hit.path && workspace.activePane === pane)
+              finishFileNavigation();
+          });
+      }}
+      onWidth={(width) => {
+        leftWidth = width;
+        layoutWrites.request();
+      }}
+    >
+      {#snippet header()}
+        {#if !documentVisible}
+          <button class="reader-button" type="button" onclick={() => void resumeWriting()}
+            >← 返回文档</button
+          >
+        {/if}
+      {/snippet}
+      {#snippet documentTools()}
+        {#each workspace.panes as pane (pane.id)}
+          {@const controls = paneControls.get(pane.id)}
+          <div
+            class="sidebar-document"
+            data-pane-tools={pane.id}
+            hidden={!documentVisible || workspace.activePane !== pane}
+          >
+            {#if controls}{@render controls.outline()}{/if}
+          </div>
+        {/each}
+      {/snippet}
+      {#snippet footer()}
+        <LinksDock
+          {workspace}
+          enabled={documentVisible}
+          onOpenSettings={() => settingsWindow?.open()}
+          onLink={(link) => {
+            prepareDocumentAction();
+            void workspace.openLink(link.kind, link.toRaw);
+          }}
+          onMention={(mention) => {
+            prepareDocumentAction();
+            const pane = workspace.activePane;
+            void pane.navigation.openMention(mention, pane.openFile);
+          }}
+        />
+      {/snippet}
+    </QuickNavigation>
+    <div
+      class="content-space"
+      use:sidebarMotion={{ collapsed: filesCollapsed, narrow }}
+      bind:this={contentElement}
+      tabindex="-1"
+      inert={narrow && !filesCollapsed}
+    >
+      <div
+        class="reading-space"
+        data-motion="document"
+        bind:this={readingSpace}
+        hidden={!documentVisible}
+        inert={!documentVisible}
+        aria-hidden={!documentVisible}
+        class:compact-split={compactSplit}
+      >
+        <div class="document-panes">
+          {#each workspace.panes as pane (pane.id)}
+            <PaneColumn
+              {workspace}
+              {pane}
+              {registerControls}
+              onShowTools={showDocumentTools}
+              {mediaIo}
+              hidden={compactSplit && workspace.activePane !== pane}
+              narrowInert={narrow && !filesCollapsed}
+              onRename={() => {
+                workspace.activatePane(pane.id);
+                beginRename();
+              }}
+            />
+          {/each}
+        </div>
+      </div>
+      <LibraryBrowser
+        bind:this={fileList}
+        onOpen={finishFileNavigation}
+        {workspace}
+        hidden={space !== "library"}
+        onSearch={(query) => {
+          workspace.setSearchInput(query);
+          void searchFiles();
+        }}
+        readFile={readerApi.fileRead}
+        onEdit={(action, entry, parent) => {
+          if (action === "file") void startDocument("note", parent);
+          else void entryDialog?.open(action, entry, parent);
+        }}
+        onNewWhiteboard={(parent) => void startDocument("whiteboard", parent)}
+      />
+    </div>
   </div>
-  {#if workspace.exportScope !== null}<ExportDialog {workspace} />{/if}
+  {#key workspace.exportScope}{#if workspace.exportScope !== null}<ExportDialog
+        {workspace}
+      />{/if}{/key}
   {#if workspace.deadLinkOffer !== null}
     <DeadLinkDialog
       path={workspace.deadLinkOffer.path}
@@ -573,28 +743,30 @@
     {workspace}
     onComplete={(change) => void finishEntryOperation(change)}
   />
-  {#if picker === "switcher"}
-    <QuickSwitcher
-      {workspace}
-      {mac}
-      onClose={() => {
-        picker = null;
-      }}
-      onOpened={() => finishFileNavigation()}
-      onCreated={(path) =>
-        void finishEntryOperation({ action: "create", entry: { path, kind: "file" } })}
-    />
-  {:else if picker === "palette"}
-    <CommandPalette
-      available={(id) => commandAvailable(id, commandContext())}
-      recent={recentCommands}
-      {mac}
-      onRun={(id) => void runFromPalette(id)}
-      onClose={() => {
-        picker = null;
-      }}
-    />
-  {/if}
+  {#key pickerOpening}{#if picker === "switcher" || picker === "split"}
+      <QuickSwitcher
+        otherPane={picker === "split"}
+        {workspace}
+        {mac}
+        onClose={() => {
+          picker = null;
+        }}
+        onOpened={() => finishFileNavigation()}
+        onCreated={(path) =>
+          void finishEntryOperation({ action: "create", entry: { path, kind: "file" } })}
+      />
+    {:else if picker === "palette"}
+      <CommandPalette
+        available={(id) => commandAvailable(id, commandContext())}
+        recent={recentCommands}
+        {mac}
+        onRun={(id) => void runFromPalette(id)}
+        onClose={() => {
+          picker = null;
+        }}
+      />
+    {/if}
+  {/key}
   {#if workspace.linkCandidates !== null}
     <LinkCandidatesDialog
       paths={workspace.linkCandidates.paths}
@@ -610,60 +782,70 @@
 
 <style>
   .app {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
   }
   .panes {
-    flex: 1 1 auto;
-    min-height: 0;
     display: flex;
-    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
     position: relative;
+    overflow: clip;
+  }
+  .content-space {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
   }
   .reading-space {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .reading-space[hidden] {
+    display: none;
+  }
+  .document-panes {
     display: flex;
     flex: 1;
     min-width: 0;
     min-height: 0;
   }
-  .reading-space[inert] {
-    /* 保持滚动容器尺寸，资料管理期间保存的阅读锚点不能来自零尺寸布局。 */
-    position: absolute;
-    inset: 0;
-    visibility: hidden;
-    pointer-events: none;
+  .document-panes :global(.pane-column + .pane-column) {
+    border-left: 1px solid var(--border);
   }
-  .writing-empty {
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 1.5rem;
-    flex: 1;
-  }
-  .writing-empty h1 {
-    font-size: 1.5rem;
-    font-weight: 500;
+  .sidebar-document[hidden] {
+    display: none;
   }
   .files-scrim {
     display: none;
   }
-  /* 分栏之间的视觉分隔；相邻选择器跨组件实例，需要全局作用域。 */
-  .panes :global(.pane-column + .pane-column) {
-    border-left: 1px solid var(--border);
-  }
   @media (max-width: 640px) {
-    .panes {
-      position: relative;
-    }
     .files-scrim {
       display: block;
       position: absolute;
       inset: 0;
-      z-index: 1;
-      background: var(--scrim);
       border: 0;
-      padding: 0;
+      background: rgb(0 0 0 / 20%);
+      z-index: 19;
+    }
+    .files-scrim[hidden] {
+      display: none;
+    }
+    .panes :global(.file-sidebar) {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      z-index: 20;
+      max-width: calc(100% - 3rem);
     }
   }
 </style>

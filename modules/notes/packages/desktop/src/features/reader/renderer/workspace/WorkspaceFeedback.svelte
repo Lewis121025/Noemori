@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { revealOnChange } from "../motion";
   import type { ReaderWorkspaceController } from "./state.svelte";
   import type { ReaderPane } from "./pane.svelte";
   import SaveNotice from "./SaveNotice.svelte";
@@ -123,7 +124,7 @@
     <p class="health-notice">{workspace.healthMessage}</p>
   {/if}
   {#if workspace.message}
-    <div class="message">
+    <div class="message" use:revealOnChange={{ key: workspace.message, kind: "panel" }}>
       <p>{workspace.message}</p>
       {#if workspace.messageDetail}
         <details class="message-details">

@@ -3,7 +3,7 @@
    * 快速切换器：按文件名、路径、标题与别名打开文件，空查询列出最近打开。
    *
    * Enter 在活动栏打开；Cmd/Ctrl+Enter 在另一栏打开（单栏时先拆栏）；
-   * Shift+Enter 或无命中时 Enter 按输入新建笔记，创建失败时保留弹层显示原因。
+   * Shift+Enter 或选择明确的新建候选后创建笔记；打开与创建失败均保留弹层。
    */
   import { onMount } from "svelte";
   import PickerDialog from "../workspace/PickerDialog.svelte";
@@ -17,7 +17,9 @@
     onClose,
     onOpened,
     onCreated,
+    otherPane = false,
   }: {
+    otherPane?: boolean;
     workspace: ReaderWorkspaceController;
     /** 按键提示是否使用 macOS 符号。 */
     mac: boolean;
@@ -35,6 +37,14 @@
   let busy = $state(false);
   const entries = $derived(switcherEntries(workspace.files, keys));
   const hits = $derived(rankSwitcher(query, entries, workspace.recentFiles));
+  type Candidate = { kind: "file"; hit: SwitcherHit } | { kind: "create"; path: string };
+  const candidates = $derived.by((): Candidate[] => {
+    const result: Candidate[] = hits.map((hit) => ({ kind: "file", hit }));
+    const path = createNotePath(query);
+    if (!otherPane && path !== null && !workspace.files.includes(path))
+      result.push({ kind: "create", path });
+    return result;
+  });
   const mod = $derived(mac ? "⌘" : "Ctrl+");
   const hints = $derived([
     { keys: "↑↓", label: "选择" },
@@ -52,18 +62,30 @@
   });
 
   async function choose(
-    hit: SwitcherHit | null,
+    item: Candidate | null,
     modifiers: { mod: boolean; shift: boolean },
   ): Promise<void> {
-    if (busy) return;
-    if (hit === null || modifiers.shift) {
+    if (busy || item === null) return;
+    if (item.kind === "create" || (modifiers.shift && !otherPane)) {
       await create();
       return;
     }
-    onClose();
-    if (modifiers.mod) await workspace.openInOtherPane(hit.entry.path);
-    else await workspace.openFile(hit.entry.path);
-    onOpened();
+    busy = true;
+    const path = item.hit.entry.path;
+    try {
+      const opened =
+        otherPane || modifiers.mod
+          ? await workspace.openInOtherPane(path)
+          : await workspace.openFile(path).then(() => workspace.document.path === path);
+      if (!opened) {
+        notice = workspace.message || "未能打开文件，请重试。";
+        return;
+      }
+      onClose();
+      onOpened();
+    } finally {
+      busy = false;
+    }
   }
 
   async function create(): Promise<void> {
@@ -85,27 +107,28 @@
 </script>
 
 <PickerDialog
-  label="快速切换"
+  label={otherPane ? "在另一栏打开" : "快速打开"}
   placeholder="输入文件名、标题或别名…"
-  items={hits}
-  itemKey={(hit) => hit.entry.path}
+  items={candidates}
+  itemKey={(item) => (item.kind === "create" ? `create:${item.path}` : item.hit.entry.path)}
   bind:query
   {hints}
   {notice}
-  empty={query.trim() === ""
-    ? "笔记库中还没有文件"
-    : `没有匹配的文件，按 Enter 新建「${query.trim()}」`}
+  empty={query.trim() === "" ? "笔记库中还没有文件" : "没有匹配的文件"}
   onChoose={(hit, modifiers) => void choose(hit, modifiers)}
   onDismiss={onClose}
 >
-  {#snippet row(hit: SwitcherHit)}
-    <span class="name">{hit.entry.label}</span>
-    {#if hit.alias !== null}
-      <span class="alias">别名：{hit.alias}</span>
-    {:else if hit.entry.title !== null && hit.entry.title !== hit.entry.label}
-      <span class="alias">{hit.entry.title}</span>
+  {#snippet row(item: Candidate)}
+    {#if item.kind === "create"}<span class="name">＋ 新建笔记「{query.trim()}」</span>
+    {:else}{@const hit = item.hit}
+      <span class="name">{hit.entry.label}</span>
+      {#if hit.alias !== null}
+        <span class="alias">别名：{hit.alias}</span>
+      {:else if hit.entry.title !== null && hit.entry.title !== hit.entry.label}
+        <span class="alias">{hit.entry.title}</span>
+      {/if}
+      {#if hit.entry.directory !== ""}<span class="path">{hit.entry.directory}</span>{/if}
     {/if}
-    {#if hit.entry.directory !== ""}<span class="path">{hit.entry.directory}</span>{/if}
   {/snippet}
 </PickerDialog>
 

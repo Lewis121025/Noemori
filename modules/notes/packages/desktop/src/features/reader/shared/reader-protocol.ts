@@ -1,7 +1,5 @@
 import type {
   Bookmark,
-  GraphEdge,
-  GraphNode,
   HeadingRecord,
   LinkKind,
   LinkRecord,
@@ -24,12 +22,11 @@ import type {
   HybridEvidence,
   TagCount,
   VaultEntry,
-  VaultGraph,
   VaultRestore,
   VaultOpenSnapshot,
   WriteResult,
 } from "./api";
-import { isReaderMode, isReaderSpace, SIDEBAR_LAYOUT } from "./api";
+import { isReaderSpace, isWorkspaceDestination, SIDEBAR_LAYOUT } from "./api";
 import { parseFileTreeState } from "./file-browser";
 import {
   parseRecentFiles,
@@ -242,14 +239,20 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     value.leftWidth < SIDEBAR_LAYOUT.minWidth ||
     value.leftWidth > SIDEBAR_LAYOUT.maxWidth ||
     (value.space !== undefined && !isReaderSpace(value.space)) ||
-    (value.mode !== undefined && !isReaderMode(value.mode))
+    (value.destination !== undefined && !isWorkspaceDestination(value.destination)) ||
+    (value.sidebarView !== undefined &&
+      value.sidebarView !== "outline" &&
+      value.sidebarView !== "search") ||
+    (value.searchQuery !== undefined && typeof value.searchQuery !== "string")
   )
     throw new Error("文件栏布局参数无效");
   return {
     filesCollapsed: value.filesCollapsed,
     leftWidth: Math.round(value.leftWidth),
     ...(value.space === undefined ? {} : { space: value.space }),
-    ...(value.mode === undefined ? {} : { mode: value.mode }),
+    ...(value.destination === undefined ? {} : { destination: value.destination }),
+    ...(value.sidebarView === undefined ? {} : { sidebarView: value.sidebarView }),
+    ...(value.searchQuery === undefined ? {} : { searchQuery: value.searchQuery }),
   };
 }
 
@@ -630,50 +633,8 @@ export function parseTagCounts(value: unknown): TagCount[] {
   });
 }
 
-/**
- * 图谱逐项校验。
- *
- * 笔记节点必须是规范库内相对路径（点击会直接打开）；死链节点只要求非空文本。
- * 边必须引用已列出的节点且计数为正整数，界面据此建立邻接表而不再做存在性检查。
- */
-export function parseGraph(value: unknown): VaultGraph {
-  if (!record(value) || !Array.isArray(value.nodes) || !Array.isArray(value.edges))
-    throw new Error("图谱无效");
-  const paths = new Set<string>();
-  const nodes = value.nodes.map((node: unknown): GraphNode => {
-    if (
-      !record(node) ||
-      typeof node.dead !== "boolean" ||
-      typeof node.path !== "string" ||
-      (node.dead ? node.path === "" : !relativePath(node.path)) ||
-      typeof node.title !== "string" ||
-      !Array.isArray(node.tags) ||
-      !node.tags.every((tag) => typeof tag === "string") ||
-      paths.has(node.path)
-    )
-      throw new Error("图谱节点无效");
-    paths.add(node.path);
-    return { path: node.path, title: node.title, tags: [...node.tags], dead: node.dead };
-  });
-  const edges = value.edges.map((edge: unknown): GraphEdge => {
-    if (
-      !record(edge) ||
-      typeof edge.from !== "string" ||
-      typeof edge.to !== "string" ||
-      !paths.has(edge.from) ||
-      !paths.has(edge.to) ||
-      typeof edge.count !== "number" ||
-      !Number.isSafeInteger(edge.count) ||
-      edge.count < 1
-    )
-      throw new Error("图谱边无效");
-    return { from: edge.from, to: edge.to, count: edge.count };
-  });
-  return { nodes, edges };
-}
-
 /** 书签清单上限；只防病态输入，手工整理远达不到。 */
-export const BOOKMARK_LIMIT = 1000;
+const BOOKMARK_LIMIT = 1000;
 
 /**
  * 书签逐项校验；请求与响应共用。

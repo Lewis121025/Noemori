@@ -127,7 +127,7 @@
     stroke-width: 1.6;
     stroke-linecap: round;
     stroke-linejoin: round;
-    transition: transform 0.12s;
+    transition: transform var(--motion-enter) var(--motion-ease);
   }
   .chevron.expanded svg {
     transform: rotate(90deg);

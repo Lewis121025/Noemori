@@ -21,7 +21,6 @@ import type {
   VaultOpenSnapshot,
   WriteResult,
   VaultEntry,
-  VaultGraph,
 } from "../shared/api";
 import {
   parseEntryBatchRequest,
@@ -34,7 +33,6 @@ import { parseDraftRequest } from "../shared/editor-recovery";
 import { parseReaderSession, type ReaderSession } from "../shared/session";
 import {
   parseBookmarks,
-  parseGraph,
   parseEntryOutcome,
   parseFileBytes,
   parseHeadingRecords,
@@ -375,9 +373,6 @@ export function createReaderService(
     },
     async indexNoteKeys(): Promise<NoteKeys[]> {
       return parseNoteKeys(await native.indexNoteKeys());
-    },
-    async indexGraph(includeDead: boolean): Promise<VaultGraph> {
-      return parseGraph(await native.indexGraph(includeDead));
     },
     async bookmarksList(): Promise<Bookmark[]> {
       return parseBookmarks(

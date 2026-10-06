@@ -1,3 +1,4 @@
+import { documentTools, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -169,6 +170,9 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
     await expect.poll(() => page.locator(".whiteboard [data-stroke-id]").count()).toBe(3);
     expect(await readFile(boardPath, "utf8")).toBe(saved);
+    if (!(await page.locator(".file-sidebar").isVisible()))
+      await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
+    await documentTools(page);
     await page.getByRole("button", { name: "笔记操作", exact: true }).click();
     await page.getByRole("button", { name: "重命名…", exact: true }).click();
     await page.locator("#entry-name").fill("整理.noemoriboard");
@@ -184,16 +188,13 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       .waitFor();
     expect(await page.locator(".whiteboard-preview path").count()).toBe(3);
     expect(await readFile(join(vault, "Home.md"), "utf8")).toContain("保留后文");
-    await page.getByRole("button", { name: "关联与白板", exact: true }).click();
+    await sidebarComponent(page, "文件系统");
+    await page.locator(".root-label").click();
     await page.getByRole("button", { name: "新建白板", exact: true }).click();
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
+    await documentTools(page);
     await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
-    await page.getByRole("button", { name: "切换阅读模式", exact: true }).click();
-    await expect
-      .poll(() => page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).count())
-      .toBe(0);
-    await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
-    await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
+    expect(await page.locator(".mode-switch").count()).toBe(0);
     expect(await page.locator(".whiteboard [data-stroke-id]").count()).toBe(0);
     // 停笔预览规范直线，抬笔提交修复轮廓且可整体撤销。
     const inputBox = await page

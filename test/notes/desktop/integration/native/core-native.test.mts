@@ -770,31 +770,6 @@ test("原生书签通过 Rust 运行时读写并跟随改名", async (t) => {
   await core.shutdown();
 });
 
-test("原生图谱通过 Rust 运行时返回聚合边与可选失效节点", async (t) => {
-  const {
-    roots: [root],
-    start,
-  } = await fixture(t);
-  const { core } = start();
-  await writeFile(join(root, "a.md"), "# 甲\n\n#主题 [[b]] [[b#节]] [[未写]]\n");
-  await writeFile(join(root, "b.md"), "[[a]]\n");
-  await core.call("vaultOpen", root);
-  assert.deepEqual(await core.call("indexGraph", false), {
-    nodes: [
-      { path: "a.md", title: "甲", tags: ["主题"], dead: false },
-      { path: "b.md", title: "b", tags: [], dead: false },
-    ],
-    edges: [
-      { from: "a.md", to: "b.md", count: 2 },
-      { from: "b.md", to: "a.md", count: 1 },
-    ],
-  });
-  const withDead = await core.call("indexGraph", true);
-  assert.deepEqual(withDead.nodes.at(-1), { path: "未写", title: "未写", tags: [], dead: true });
-  assert.deepEqual(withDead.edges.at(1), { from: "a.md", to: "未写", count: 1 });
-  await core.shutdown();
-});
-
 test("native watcher refreshes the active vault and releases it on close", async (t) => {
   const {
     roots: [root],

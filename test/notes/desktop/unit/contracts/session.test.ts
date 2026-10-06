@@ -11,6 +11,17 @@ import {
 } from "@reader/shared/session";
 
 describe("阅读器会话边界", () => {
+  it("旧阅读模式不再恢复，源码视图与文档身份保留", () => {
+    const restored = parseReaderSession({
+      vaultRoot: "/notes",
+      currentPath: "阅读.md",
+      mode: "reading",
+      viewModes: { "阅读.md": "reading", "源码.md": "source" },
+    });
+    expect(restored).not.toHaveProperty("mode");
+    expect(restored.viewModes).toEqual({ "源码.md": "source" });
+    expect(restored.documents.panes[0]?.currentPath).toBe("阅读.md");
+  });
   it("恢复独立的资料管理空间，旧会话和损坏值保留默认读写入口", () => {
     expect(parsePaneLayout({ space: "library" })?.space).toBe("library");
     expect(parsePaneLayout({ space: "writing" })?.space).toBe("writing");
@@ -74,7 +85,7 @@ describe("阅读器会话边界", () => {
   it("视图记忆只留已知视图并截到上限，旧版源码视图列表迁移过来", () => {
     expect(
       parseReaderSession({ viewModes: { "a.md": "reading", "b.md": "x", "": "source" } }).viewModes,
-    ).toEqual({ "a.md": "reading" });
+    ).toEqual({});
     const many = Object.fromEntries(
       Array.from({ length: 600 }, (_, index) => [`f${index}.md`, "source"]),
     );
@@ -86,14 +97,14 @@ describe("阅读器会话边界", () => {
     });
     expect(
       parseReaderSession({ sourceViews: ["a.md"], viewModes: { "b.md": "reading" } }).viewModes,
-    ).toEqual({ "b.md": "reading" });
+    ).toEqual({});
   });
 
   it("视图记忆跟随改名与删除迁移，无变化返回 null", () => {
-    const modes = { "old/a.md": "source", "keep.md": "reading" } as const;
+    const modes = { "old/a.md": "source", "keep.md": "source" } as const;
     expect(
       mapViewModes(modes, (path) => (path.startsWith("old/") ? `new/${path.slice(4)}` : path)),
-    ).toEqual({ "new/a.md": "source", "keep.md": "reading" });
+    ).toEqual({ "new/a.md": "source", "keep.md": "source" });
     expect(mapViewModes(modes, (path) => (path === "keep.md" ? null : path))).toEqual({
       "old/a.md": "source",
     });
@@ -115,9 +126,55 @@ describe("阅读器会话边界", () => {
   });
 });
 
-it("应用模式属于布局，合法模式跨会话保留，旧会话不伪造选择", () => {
-  expect(parseReaderSession({ mode: "reading" }).mode).toBe("reading");
-  expect(parseReaderSession({ mode: "editing" }).mode).toBe("editing");
-  expect(parseReaderSession({ mode: "unknown" }).mode).toBeUndefined();
-  expect(parseReaderSession({}).mode).toBeUndefined();
+it("旧模式字段在布局恢复时丢弃", () => {
+  for (const mode of ["reading", "editing", "unknown"])
+    expect(parseReaderSession({ mode })).not.toHaveProperty("mode");
+});
+
+it("统一工作台布局和每栏目录偏好跨会话保留，非法字段不传播", () => {
+  const layout = {
+    destination: "library",
+    sidebarView: "search",
+    searchQuery: "设计",
+    filesCollapsed: false,
+    leftWidth: 232,
+  };
+  expect(parsePaneLayout(layout)).toEqual(layout);
+  const session = parseReaderSession({
+    ...layout,
+    documents: {
+      panes: [{ currentPath: "a.md", history: { back: [], forward: [] }, outlineCollapsed: true }],
+      active: 0,
+      split: false,
+    },
+  });
+  expect(session).toMatchObject(layout);
+  expect(session.documents.panes[0]).toMatchObject({ outlineCollapsed: true });
+  expect(parsePaneLayout({ destination: "bad", sidebarView: "bad", searchQuery: 5 })).toEqual({
+    filesCollapsed: false,
+    leftWidth: DEFAULT_LEFT_WIDTH,
+  });
+});
+
+it("旧图谱目的地恢复为正文，并保留文档、搜索和侧栏布局", () => {
+  const session = parseReaderSession({
+    destination: "graph",
+    space: "connections",
+    sidebarView: "search",
+    searchQuery: "设计",
+    filesCollapsed: false,
+    leftWidth: 260,
+    documents: {
+      panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }],
+      active: 0,
+      split: false,
+    },
+  });
+  expect(session).toMatchObject({
+    destination: "document",
+    sidebarView: "search",
+    searchQuery: "设计",
+    leftWidth: 260,
+  });
+  expect(session.documents.panes[0]?.currentPath).toBe("a.md");
 });

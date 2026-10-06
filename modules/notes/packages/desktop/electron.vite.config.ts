@@ -99,6 +99,8 @@ export default defineConfig({
   },
   renderer: {
     build: {
+      // 字体按独立文件加载，避免小分片被内联为现有 font-src 不允许的 data URL。
+      assetsInlineLimit: (path) => (/\.(woff2?|ttf|otf)$/i.test(path) ? false : undefined),
       rollupOptions: {
         input: {
           index: resolve("src/renderer/index.html"),

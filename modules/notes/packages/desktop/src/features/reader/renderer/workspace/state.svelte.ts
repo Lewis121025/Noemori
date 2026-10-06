@@ -13,10 +13,9 @@ import type {
   Bookmark,
   NoteKeys,
   ReaderApi,
-  ReaderMode,
+  SidebarView,
   TagCount,
   VaultEntry,
-  VaultGraph,
   RenameOutcome,
 } from "../../shared/api";
 import type { DeadLinkOffer } from "../links/dead-link";
@@ -151,6 +150,20 @@ export class ReaderWorkspaceController {
   }
   /** 全库搜索；结果属于当前库，切库必须丢弃。 */
   readonly search: ReaderSearch;
+  /** 左栏面板独立于文档焦点，文件选择与浏览位置统一归属 fileTree。 */
+  sidebarView = $state<SidebarView>("outline");
+  private openingOther = false;
+
+  /** 侧栏切换保留查询结果，恢复时可禁止重复写入。 */
+  setSidebarView(view: SidebarView): void {
+    this.sidebarView = view;
+    this.onLayoutChange();
+  }
+  /** 查询输入由唯一检索实例防抖和取消；布局队列保存原文。 */
+  setSearchInput(text: string, composing = false): void {
+    this.search.setInput(text, composing);
+    this.onLayoutChange();
+  }
   /** 当前库的书签；随目录刷新重读，改名后的路径由内核同步改写。 */
   readonly bookmarks: ReaderBookmarks;
   /** 文件树的跨重启现场，文件操作与外部清单刷新均经此迁移。 */
@@ -159,9 +172,7 @@ export class ReaderWorkspaceController {
   private paneList = $state<ReaderPane[]>([]);
   private activeId = $state(0);
   private paneSeq = 1;
-  private interactionMode = $state<ReaderMode>("editing");
-  private modeRestored = false;
-  /** 会话内按文件记住源码或阅读视图，随会话持久化。非响应式记录表。 */
+  /** 会话内按文件记住源码视图，随会话持久化。非响应式记录表。 */
   private readonly viewModes: ViewModes = {};
   /** 最近打开的文件，最新在前；跨栏共享，随会话持久化。 */
   private recent = $state<string[]>([]);
@@ -174,7 +185,7 @@ export class ReaderWorkspaceController {
   private openGeneration = 0;
   private stoppingOpen = $state(false);
   private listed = $state<VaultEntry[]>([]);
-  /** 目录刷新次数；每次库变更后递增，派生视图（图谱）据此重读索引。 */
+  /** 目录刷新次数；每次库变更后递增，资料预览据此重读索引。 */
   private revision = $state(0);
   private filePaths = $derived(
     this.listed.filter((entry) => entry.kind === "file").map((entry) => entry.path),
@@ -208,7 +219,7 @@ export class ReaderWorkspaceController {
   constructor(
     private readonly api: ReaderApi,
     /** 模式提交后由布局宿主串行保存偏好；恢复阶段不触发写入。 */
-    private readonly onModeChange: () => void = () => {},
+    private readonly onLayoutChange: () => void = () => {},
   ) {
     this.documentSession = createSessionWrite({
       delayMs: 300,
@@ -226,12 +237,7 @@ export class ReaderWorkspaceController {
     // 对象字面量的 getter 里 this 指向 host 自身，用闭包读工作区实时状态。
     const vaultRoot = () => this.root;
     const composing = () => this.composing;
-    const mode = () => this.mode;
     this.host = {
-      get mode() {
-        return mode();
-      },
-      toggleReadingMode: () => this.toggleReadingMode(),
       get vaultRoot() {
         return vaultRoot();
       },
@@ -442,85 +448,6 @@ export class ReaderWorkspaceController {
   get toggleViewMode() {
     return this.activePane.toggleViewMode;
   }
-  /** 当前应用模式，文件操作与导航不改变它。 */
-  get mode(): ReaderMode {
-    return this.interactionMode;
-  }
-
-  /** 启动时恢复全局模式；未提供时允许旧活动笔记的阅读视图迁移。 */
-  restoreMode(mode: ReaderMode | undefined): void {
-    this.modeRestored = mode !== undefined;
-    this.interactionMode = mode ?? "editing";
-  }
-
-  /** 全栏结束挂起输入后原子切换模式；未保存编辑随会话保留，源码换面先捕获完整快照。 */
-  toggleReadingMode = async (): Promise<void> => {
-    if (this.composing || this.paneList.some((pane) => !pane.idle)) return;
-    const target = this.mode === "reading" ? "editing" : "reading";
-    let committed = false;
-    try {
-      // inert 会改变浏览器的坐标命中；阅读锚点必须在进入异步门禁前捕获。
-      const before = this.paneList.map((pane) => ({
-        pane,
-        revision: pane.document.editRevision,
-        position: pane.navigation.capturePosition(),
-      }));
-      const positions = await this.withAllPanesGated(async () => {
-        for (const pane of this.paneList) if (!(await pane.settleForModeChange())) return undefined;
-        const sources = this.paneList
-          .filter(
-            (pane) =>
-              pane.view === "source" &&
-              pane.document.content?.kind === "markdown" &&
-              !pane.document.needsSourceRepair,
-          )
-          .map((pane) => ({
-            pane,
-            text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(
-              pane.navigation.snapshot().bytes,
-            ),
-          }));
-        // 全部快照成功后才发布；源码与排版切换时始终携带最新文本。
-        for (const { pane, text } of sources) pane.document.replaceSourceText(text);
-        // 恢复草稿可能只有排版模型能表达；返回编辑必须允许修复，不能被旧源码偏好困在阅读模式。
-        const repairs = this.paneList.filter(
-          (pane) => pane.view === "source" && pane.document.needsSourceRepair,
-        );
-        for (const pane of repairs) {
-          pane.view = "wysiwyg";
-          if (pane.document.path !== null) delete this.viewModes[pane.document.path];
-        }
-        if (repairs.length > 0) this.persistViewModes();
-        this.interactionMode = target;
-        this.modeRestored = true;
-        committed = true;
-        this.onModeChange();
-        await tick();
-        return before.map(({ pane, revision, position }) => ({
-          pane,
-          // 附件结算可能改写内容；阅读锚点可以重定位，旧字节选区不能跨修订盲用。
-          position:
-            position !== null && pane.document.editRevision !== revision
-              ? { ...position, selection: null }
-              : position,
-        }));
-      });
-      if (positions !== undefined) {
-        // 先解除分栏门禁并交接焦点，再恢复阅读锚点，避免浏览器为旧光标滚动覆盖恢复结果。
-        this.navigation.focusEditor();
-        await Promise.all(
-          positions.map(({ pane, position }) =>
-            position === null ? undefined : pane.navigation.restorePosition(position),
-          ),
-        );
-      }
-    } catch (error) {
-      this.report(
-        `${committed ? "模式已切换，但阅读位置恢复失败" : "切换模式失败"}：${errorText(error)}`,
-        error,
-      );
-    }
-  };
   get markDirty() {
     return this.activePane.markDirty;
   }
@@ -663,13 +590,6 @@ export class ReaderWorkspaceController {
       // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
       this.clearViewModes();
       Object.assign(this.viewModes, restored.viewModes);
-      if (!this.modeRestored) {
-        const path = restored.documents.panes[restored.documents.active]?.currentPath;
-        this.interactionMode =
-          path && restored.viewModes[path] === "reading" ? "reading" : "editing";
-        this.modeRestored = true;
-        this.onModeChange();
-      }
       this.recent = restored.recentFiles.filter((path) => this.files.includes(path));
       // 按会话恢复分栏；启动栏复用（保持门禁），第二栏按需补建。
       const sessions = restored.documents.panes;
@@ -688,6 +608,7 @@ export class ReaderWorkspaceController {
           currentPath: null,
           history: { back: [], forward: [] },
         };
+        pane.outlineCollapsed = session.outlineCollapsed ?? false;
         pane.history.restore(session.history, (path) => files.includes(path));
         if (session.currentPath !== null && files.includes(session.currentPath)) {
           await pane.loadFile(session.currentPath, false, session.position);
@@ -732,6 +653,8 @@ export class ReaderWorkspaceController {
           this.paneList = [new ReaderPane(0, this.api, this.host, false)];
           this.activeId = 0;
           this.search.reset();
+          this.search.input = "";
+          this.sidebarView = "outline";
           this.bookmarks.reset();
           this.candidateSelection = null;
           this.deadLink = null;
@@ -749,20 +672,6 @@ export class ReaderWorkspaceController {
     } catch (error) {
       this.report(`打开库失败：${errorText(error)}`);
     }
-  };
-
-  /** 切换分栏：拆出第二栏（空栏），或合回单栏（关闭非活动栏）。 */
-  toggleSplit = async (): Promise<void> => {
-    if (!this.split) {
-      this.paneList = [
-        ...this.paneList,
-        new ReaderPane(this.paneSeq++, this.api, this.host, false),
-      ];
-      this.persistDocumentsSafe();
-      return;
-    }
-    const closing = this.paneList.find((pane) => pane.id !== this.activeId) ?? this.paneList[1];
-    if (closing !== undefined) await this.closePane(closing.id);
   };
 
   /** 关闭指定分栏（仅分栏时）；未保存编辑先冲刷，失败不关。 */
@@ -785,16 +694,33 @@ export class ReaderWorkspaceController {
   };
 
   /**
-   * 在非活动栏打开文件并激活它；单栏时先拆出第二栏。
+   * 在非活动栏打开文件并激活它；单栏只在文件加载成功后发布第二栏。
    *
    * 打开失败或门禁拒绝由该栏自己报告，当前栏的文档保持不动。
    */
-  openInOtherPane = async (path: string): Promise<void> => {
-    if (!this.split) await this.toggleSplit();
-    const other = this.paneList.find((pane) => pane.id !== this.activeId);
-    if (other === undefined) return;
-    this.activatePane(other.id);
-    await other.openFile(path);
+  openInOtherPane = async (path: string): Promise<boolean> => {
+    if (this.openingOther || this.composing || this.switching) return false;
+    this.openingOther = true;
+    const root = this.root;
+    const existing = this.paneList.find((pane) => pane.id !== this.activeId);
+    const other = existing ?? new ReaderPane(this.paneSeq++, this.api, this.host, false);
+    try {
+      await other.openFile(path);
+      if (
+        other.document.path !== path ||
+        root !== this.root ||
+        (existing && !this.paneList.includes(other))
+      ) {
+        if (!existing) other.dispose();
+        return false;
+      }
+      if (!existing) this.paneList = [...this.paneList, other];
+      this.activatePane(other.id);
+      await this.persistDocumentsSafe();
+      return true;
+    } finally {
+      this.openingOther = false;
+    }
   };
 
   /** 激活分栏：命令、侧栏打开与工具栏状态都跟随活动栏。 */
@@ -900,17 +826,6 @@ export class ReaderWorkspaceController {
     if (bookmark.kind === "file") await this.activePane.openFile(bookmark.path);
     else if (bookmark.kind === "heading")
       await this.activePane.openResolved(bookmark.path, bookmark.heading);
-  };
-
-  /** 读出关系图谱；失败时返回原因而不是抛出，图谱面板就地显示。 */
-  loadGraph = async (
-    includeDead: boolean,
-  ): Promise<{ graph: VaultGraph; error: null } | { graph: null; error: string }> => {
-    try {
-      return { graph: await this.api.indexGraph(includeDead), error: null };
-    } catch (error) {
-      return { graph: null, error: `图谱暂不可用：${errorText(error)}` };
-    }
   };
 
   listTags = async (): Promise<{ tags: TagCount[]; error: string | null }> => {
@@ -1281,6 +1196,7 @@ export class ReaderWorkspaceController {
         return {
           currentPath: pane.document.path,
           history: pane.history.snapshot(),
+          outlineCollapsed: pane.outlineCollapsed,
           ...(position == null ? {} : { position }),
         };
       }),

@@ -1,3 +1,4 @@
+import { sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,7 @@ import { _electron as electron } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("自适应书页：图文共用左右边界，目录按栏宽收放并始终归属本栏", async (t) => {
+test("自适应书页：图文共用左右边界，左侧目录跨尺寸保持所属文档", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-adaptive-layout-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -78,7 +79,8 @@ test("自适应书页：图文共用左右边界，目录按栏宽收放并始�
       await input.press(split ? "ControlOrMeta+Enter" : "Enter");
       await page.waitForFunction(
         (name) =>
-          document.querySelector(".document-name")?.textContent === name &&
+          document.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent ===
+            name &&
           [...document.querySelectorAll("section[data-pane]")].every(
             (pane) => !pane.hasAttribute("inert"),
           ),
@@ -86,7 +88,8 @@ test("自适应书页：图文共用左右边界，目录按栏宽收放并始�
       );
     };
     const pane = page.locator('section[data-pane="0"]');
-    const sidebar = pane.locator(".outline-sidebar");
+    const leftControls = page.locator('[data-pane-tools="0"]');
+    const sidebar = leftControls.locator(".outline-sidebar");
     const editor = pane.locator(".ProseMirror");
     const checkImageBounds = async () => {
       const column = await editor
@@ -109,8 +112,23 @@ test("自适应书页：图文共用左右边界，目录按栏宽收放并始�
       }
     };
     await editor.waitFor();
+    await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
     await resize(1440);
+    await sidebarComponent(page, "目录");
     await sidebar.waitFor();
+    const outlineToggle = page
+      .getByRole("toolbar", { name: "组件栏", exact: true })
+      .getByRole("button", { name: "目录", exact: true });
+    await sidebarComponent(page, "文件");
+    await expect.poll(() => sidebar.isVisible()).toBe(false);
+    expect(await outlineToggle.getAttribute("aria-pressed")).toBe("false");
+    await resize(860);
+    expect(await sidebar.isVisible()).toBe(false);
+    await outlineToggle.click();
+    await sidebar.waitFor();
+    await resize(1440);
+    expect(await sidebar.isVisible()).toBe(true);
+    expect(await outlineToggle.getAttribute("aria-pressed")).toBe("true");
     await expect
       .poll(() =>
         editor
@@ -198,9 +216,7 @@ test("自适应书页：图文共用左右边界，目录按栏宽收放并始�
     await page.keyboard.press("ControlOrMeta+z");
     await checkImageBounds();
 
-    await page.getByRole("button", { name: "目录", exact: true }).click();
-    expect(await page.locator("#outline-panel").isVisible()).toBe(false);
-    expect(await sidebar.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+    expect(await pane.locator(".outline-sidebar").count()).toBe(0);
     await sidebar.getByRole("button", { name: "折叠", exact: true }).first().click();
     expect(await sidebar.getByRole("button", { name: "甲第二节", exact: true }).count()).toBe(0);
     await sidebar.getByRole("button", { name: "展开", exact: true }).first().click();
@@ -213,45 +229,49 @@ test("自适应书页：图文共用左右边界，目录按栏宽收放并始�
 
     await resize(860);
     await checkImageBounds();
-    expect(await sidebar.isVisible()).toBe(false);
-    await page.getByRole("button", { name: "目录", exact: true }).click();
-    await page.locator("#outline-panel").waitFor();
-    await page
-      .locator("#outline-panel")
-      .getByRole("button", { name: "甲第一节", exact: true })
-      .click();
-    expect(await page.locator("#outline-panel").isVisible()).toBe(false);
+    expect(await sidebar.isVisible()).toBe(true);
+    await sidebarComponent(page, "文件");
+    await expect.poll(() => sidebar.isVisible()).toBe(false);
+    await resize(1440);
+    expect(await outlineToggle.getAttribute("aria-pressed")).toBe("false");
+    await outlineToggle.click();
     await open("乙.md", true);
     await resize(2400);
     const right = page.locator('section[data-pane="1"]');
-    await right.locator(".outline-sidebar").waitFor();
-    expect(await sidebar.getByRole("button", { name: "乙章节", exact: true }).count()).toBe(0);
-    expect(
-      await right
-        .locator(".outline-sidebar")
-        .getByRole("button", { name: "甲第二节", exact: true })
-        .count(),
-    ).toBe(0);
+    const rightControls = page.locator('[data-pane-tools="1"]');
+    const rightOutline = rightControls.locator(".outline-sidebar");
+    await rightOutline.waitFor();
+    await sidebarComponent(page, "文件");
+    await expect.poll(() => rightOutline.isVisible()).toBe(false);
+    await pane.focus();
+    expect(await sidebar.isVisible()).toBe(false);
+    await sidebarComponent(page, "目录");
+    expect(await sidebar.isVisible()).toBe(true);
+    await right.focus();
+    expect(await sidebar.isVisible()).toBe(false);
+    await rightOutline.waitFor();
+    expect(await rightOutline.getByRole("button", { name: "甲第二节", exact: true }).count()).toBe(
+      0,
+    );
+    await pane.focus();
     await sidebar.getByRole("button", { name: "甲第一节", exact: true }).click();
     expect(await pane.getAttribute("class")).toContain("active");
-    expect(await page.locator(".document-name").textContent()).toBe("甲.md");
+    expect(await page.locator(".topbar-document:not([hidden]) .document-name").textContent()).toBe(
+      "甲.md",
+    );
     expect(await right.locator(".main").evaluate((node) => node.scrollTop)).toBe(0);
-
     await resize(1200);
     await checkImageBounds();
-    expect(await sidebar.isVisible()).toBe(false);
-    expect(await right.locator(".outline-sidebar").isVisible()).toBe(false);
-    expect(
-      await pane
-        .locator(".main")
-        .evaluate((node) => parseFloat(getComputedStyle(node).paddingLeft)),
-    ).toBeLessThan(24);
+    expect(await sidebar.isVisible()).toBe(true);
+    expect(await rightOutline.isVisible()).toBe(false);
     await open("无标题.md");
-    expect(await pane.locator(".outline-sidebar").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "目录", exact: true }).count()).toBe(0);
+    expect(await sidebar.count()).toBe(0);
+    expect(await page.getByText("当前文档没有可导航的标题。", { exact: true }).isVisible()).toBe(
+      true,
+    );
     await open("短笔记.md");
     expect(await pane.locator(".outline-sidebar").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "目录", exact: true }).count()).toBe(1);
+    expect(await outlineToggle.isEnabled()).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );

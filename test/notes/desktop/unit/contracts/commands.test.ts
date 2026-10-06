@@ -20,11 +20,15 @@ const key = (value: string, modifiers: Partial<KeyboardEventInit> = {}) => ({
   ...modifiers,
 });
 
+it("不再接受阅读编辑模式切换命令", () => {
+  expect(parseReaderCommand("toggle-reading")).toBeNull();
+  expect(commandForKey(key("e", { shiftKey: true }))).toBeNull();
+});
+
 const ready: CommandContext = {
   vaultOpen: true,
   hasDocument: true,
   canEdit: true,
-  reading: false,
   markdown: true,
   source: false,
   whiteboard: false,
@@ -71,7 +75,7 @@ describe("按键映射", () => {
     expect(commandForKey(key("n", { shiftKey: true }))).toBe("new-folder");
     expect(commandForKey(key("s", { shiftKey: true }))).toBeNull();
     expect(commandForKey(key("e"))).toBe("toggle-source");
-    expect(commandForKey(key("g"))).toBe("open-graph");
+    expect(commandForKey(key("g"))).toBeNull();
   });
 
   it("缺少修饰键或带 Alt 时不触发", () => {
@@ -81,19 +85,24 @@ describe("按键映射", () => {
   });
 });
 
+it("移除图谱命令后，旧命令输入不能经菜单或命令面板执行", () => {
+  expect(parseReaderCommand("open-graph")).toBeNull();
+  expect(parseAppCommand("open-graph")).toBeNull();
+  expect(READER_COMMANDS.some((command) => command.label.includes("图谱"))).toBe(false);
+});
+
 describe("可用性门禁", () => {
-  it("阅读态保留保存此前编辑的入口，但不提供附件写入命令", () => {
-    const reading = { ...ready, reading: true };
-    expect(commandAvailable("insert-attachment", reading)).toBe(false);
-    expect(commandAvailable("save", reading)).toBe(true);
-    expect(commandAvailable("find", reading)).toBe(true);
+  it("编辑能力只取决于文档权限与类型", () => {
+    expect(commandAvailable("insert-attachment", ready)).toBe(true);
+    expect(commandAvailable("insert-attachment", { ...ready, canEdit: false })).toBe(false);
+    expect(commandAvailable("save", ready)).toBe(true);
+    expect(commandAvailable("find", ready)).toBe(true);
   });
   it("未打开库时只允许与库无关的命令", () => {
     const closed: CommandContext = {
       vaultOpen: false,
       hasDocument: false,
       canEdit: false,
-      reading: false,
       markdown: false,
       source: false,
       whiteboard: false,
@@ -105,11 +114,11 @@ describe("可用性门禁", () => {
     );
     expect(available).toEqual([
       "command-palette",
+      "open-settings",
       "open-vault",
       "open-library",
       "new-note",
       "new-whiteboard",
-      "toggle-reading",
       "toggle-files",
       "toggle-split",
     ]);
@@ -118,7 +127,6 @@ describe("可用性门禁", () => {
   it("文档相关命令随文档状态开关", () => {
     expect(commandAvailable("insert-whiteboard", ready)).toBe(true);
     expect(commandAvailable("insert-whiteboard", { ...ready, source: true })).toBe(false);
-    expect(commandAvailable("insert-whiteboard", { ...ready, reading: true })).toBe(false);
     expect(commandAvailable("find", { ...ready, whiteboard: true })).toBe(false);
     expect(commandAvailable("save", ready)).toBe(true);
     expect(commandAvailable("save", { ...ready, canEdit: false })).toBe(false);

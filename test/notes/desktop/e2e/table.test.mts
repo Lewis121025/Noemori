@@ -56,7 +56,12 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
         .locator(".pane-column.active")
         .getByRole("toolbar", { name: "编辑工具栏", exact: true })
         .waitFor();
-      await panel.getByRole("button", { name, exact: true }).click();
+      const pane = page.locator(".pane-column.active");
+      if (!(await panel.getByRole("button", { name, exact: true }).isVisible()))
+        await panel
+          .getByRole("button", { name: name === "插入表格" ? "插入" : "更多编辑操作", exact: true })
+          .click();
+      await pane.getByRole("button", { name, exact: true }).click();
       expect(await panel.isVisible()).toBe(true);
       expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
     };
@@ -121,7 +126,9 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
           .locator(".pane-column.active")
           .getByRole("toolbar", { name: "编辑工具栏", exact: true })
           .waitFor();
-        expect(await panel.getByRole("button", { name: "插入表格", exact: true }).count()).toBe(0);
+        expect(
+          await panel.getByRole("button", { name: "更多编辑操作", exact: true }).isVisible(),
+        ).toBe(true);
         const bounds = await panel.boundingBox();
         if (bounds === null) throw new Error("表格面板不可见");
         expect(bounds.x).toBeGreaterThanOrEqual(0);

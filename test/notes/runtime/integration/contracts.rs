@@ -412,16 +412,17 @@ async fn resource_switch_releases_the_old_pending_publication() {
     assert!(released.is_ok(), "切库后旧排名请求不能继续持有整个 Vault");
 }
 #[test]
-fn reader_mode_survives_session_patches_and_rejects_unknown_values() {
+fn removed_reader_mode_is_ignored_without_changing_layout() {
     let data = tempfile::tempdir().unwrap();
     let store = noemori_runtime::session::SessionStore::new(data.path());
     store.patch_reader(&json!({"mode": "reading"})).unwrap();
     store
         .patch_reader(&json!({"filesCollapsed": true}))
         .unwrap();
-    assert_eq!(store.load()["reader"]["mode"], "reading");
+    assert!(store.load()["reader"].get("mode").is_none());
+    assert_eq!(store.load()["reader"]["filesCollapsed"], true);
     store.patch_reader(&json!({"mode": "editing"})).unwrap();
-    assert_eq!(store.load()["reader"]["mode"], "editing");
+    assert!(store.load()["reader"].get("mode").is_none());
     store.patch_reader(&json!({"mode": "unknown"})).unwrap();
     assert!(store.load()["reader"].get("mode").is_none());
 }

@@ -6,7 +6,7 @@
 export const AUTOSAVE_DELAY_MS = 2000;
 
 /** 持续输入的最长等待（毫秒）；组词或在途写盘可延后提交，但不能重置编辑期限。 */
-export const AUTOSAVE_MAX_DELAY_MS = 10000;
+const AUTOSAVE_MAX_DELAY_MS = 10000;
 
 /** `createAutosave` 的依赖。 */
 export type AutosaveOptions = {

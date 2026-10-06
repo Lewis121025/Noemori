@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import {
-  emptySession,
-  parseSession,
-} from "../../../../../modules/notes/packages/desktop/src/main/session";
+import { parseSession } from "../../../../../modules/notes/packages/desktop/src/main/session";
 import { emptyReaderSession } from "@reader/shared/session";
+
+const emptySession = {
+  appearance: "system",
+  readingFont: "lora",
+  readingPalette: "monochrome",
+  reader: emptyReaderSession,
+  window: null,
+};
 
 describe("应用与阅读器会话", () => {
   it("迁移旧版平铺字段，保留主题、窗口、笔记库与文件栏，忽略旧分栏配置", () => {
@@ -24,6 +29,7 @@ describe("应用与阅读器会话", () => {
     ).toEqual({
       appearance: "dark",
       readingFont: "lora",
+      readingPalette: "monochrome",
       window,
       reader: {
         vaultRoot: "/notes",

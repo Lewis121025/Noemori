@@ -88,6 +88,7 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
       expect(await panel.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
         true,
       );
+      await panel.getByRole("button", { name: "插入", exact: true }).click();
       const chooser = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "插入附件…", exact: true }).click();
       await (await chooser).setFiles(files);

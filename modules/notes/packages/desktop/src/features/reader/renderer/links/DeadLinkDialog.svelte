@@ -4,6 +4,7 @@
    * 文案与创建共用 `deadLinkSeed` 判定，承诺的种子内容与实际写入一致。
    */
   import { onMount } from "svelte";
+  import { dialogEnter, dialogExit, finishOnReducedMotion } from "../transition-lifecycle";
   import { deadLinkSeed } from "./dead-link";
 
   let {
@@ -32,6 +33,9 @@
 </script>
 
 <dialog
+  in:dialogEnter|global
+  out:dialogExit|global
+  use:finishOnReducedMotion
   class="dead-link-dialog"
   bind:this={dialog}
   aria-labelledby="dead-link-title"

@@ -3,16 +3,19 @@
    * 递归画大纲树。三角折叠，标题文字才跳转。
    */
   import OutlineTree from "./OutlineTree.svelte";
+  import { disclosure } from "../disclosure";
+  import { finishOnReducedMotion } from "../transition-lifecycle";
   import type { OutlineNode } from "../../shared/markdown/outline";
 
   type Props = {
+    activeKey?: string | null;
     nodes: OutlineNode[];
     collapsed: string[];
     onToggle: (key: string) => void;
     onJump: (pos: number) => void;
   };
 
-  let { nodes, collapsed, onToggle, onJump }: Props = $props();
+  let { nodes, collapsed, onToggle, onJump, activeKey = null }: Props = $props();
 
   function folded(key: string): boolean {
     return collapsed.includes(key);
@@ -29,7 +32,7 @@
         aria-label={folded(node.key) ? "展开" : "折叠"}
         onclick={() => onToggle(node.key)}
       >
-        {folded(node.key) ? "▸" : "▾"}
+        <span aria-hidden="true">▸</span>
       </button>
     {:else}
       <span class="twist-space"></span>
@@ -37,6 +40,7 @@
     <button
       type="button"
       class="label"
+      aria-current={activeKey === node.key ? "location" : undefined}
       title={node.item.text}
       onclick={() => onJump(node.item.pos)}
     >
@@ -44,13 +48,18 @@
     </button>
   </div>
   {#if node.children.length > 0 && !folded(node.key)}
-    <div class="kids">
-      <OutlineTree nodes={node.children} {collapsed} {onToggle} {onJump} />
+    <div class="kids" transition:disclosure use:finishOnReducedMotion>
+      <OutlineTree nodes={node.children} {activeKey} {collapsed} {onToggle} {onJump} />
     </div>
   {/if}
 {/each}
 
 <style>
+  .label[aria-current="location"] {
+    color: var(--accent);
+    background: var(--selected);
+    font-weight: 600;
+  }
   .row {
     display: flex;
     align-items: center;
@@ -70,8 +79,20 @@
     line-height: 1;
   }
 
+  .twist > span {
+    display: inline-block;
+  }
   .twist {
+    display: inline-flex;
+    align-self: stretch;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
     cursor: pointer;
+  }
+  .twist:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .label {

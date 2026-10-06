@@ -231,7 +231,7 @@ let mermaidSequence = 0;
 let initializedTheme: string | null = null;
 
 /** 按需加载 mermaid 并以严格安全级别渲染；主题随系统外观切换时重新初始化。 */
-export const renderMermaid: MermaidRenderer = async (id, source, dark) => {
+const renderMermaid: MermaidRenderer = async (id, source, dark) => {
   const mermaid = (await import("mermaid")).default;
   const theme = dark ? "dark" : "default";
   if (initializedTheme !== theme) {

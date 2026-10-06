@@ -36,6 +36,21 @@ function appendMatches(hit: SearchHit, page: SearchMatchesPage): void {
  * 首屏与续页分开表示，加载后续结果时保留已读内容、展开状态和键盘焦点。
  */
 export class ReaderSearch {
+  /** 工作台查询原文；结果和分页都属于此输入的已提交版本。 */
+  input = $state("");
+  private inputTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 输入改变即废弃旧响应，组词结束后才执行查询。 */
+  setInput(text: string, composing = false): void {
+    this.reset();
+    this.input = text;
+    if (text.trim() !== "" && !composing)
+      this.inputTimer = setTimeout(() => {
+        this.inputTimer = null;
+        void this.run(this.input);
+      }, 250);
+  }
+
   // 查询按提交整体替换，保留可跨进程序列化的原始值，不生成深层响应式代理。
   private submitted = $state.raw<SearchRequest | null>(null);
   private results = $state<SearchHit[]>([]);
@@ -303,6 +318,8 @@ export class ReaderSearch {
 
   /** 退出结果模式，立即请求内核取消并丢弃在途响应；取消失败由工作区报告。 */
   reset(): void {
+    if (this.inputTimer !== null) clearTimeout(this.inputTimer);
+    this.inputTimer = null;
     this.cancelReads();
     this.text = "";
     this.submitted = null;

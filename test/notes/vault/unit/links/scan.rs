@@ -1,4 +1,4 @@
-use noemori_vault::{LinkKind, Vault};
+use noemori_vault::{LinkKind, LinkResolution, Vault};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -80,6 +80,45 @@ fn links_to_other_includes_source() {
     let sources: Vec<&str> = incoming.iter().map(|l| l.from_path.as_str()).collect();
     assert!(sources.contains(&"source.md"));
     assert!(sources.contains(&"code_and_wiki.md"));
+}
+
+#[test]
+fn markdown_internal_anchors_are_indexed_without_incoming_edges() {
+    let body = "# 本节\n\n[跳转](#本节) [网站](https://example.com/#本节)\n";
+    let (root, _index, vault) = vault_with(&[("src.md", body)]);
+    let links = vault.links_from("src.md").expect("内部跳转");
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].kind, LinkKind::Markdown);
+    assert_eq!(links[0].to_raw, "#本节");
+    assert_eq!(links[0].resolution, LinkResolution::SelfAnchor);
+    assert_eq!(links[0].to_path, None);
+    assert_eq!(
+        source_slice(
+            root.path(),
+            "src.md",
+            links[0].start_byte,
+            links[0].end_byte
+        ),
+        "[跳转](#本节)"
+    );
+    assert!(vault.links_to("src.md").expect("入链").is_empty());
+}
+
+#[test]
+fn previous_scan_version_rebuilds_internal_anchors_without_file_edits() {
+    let (root, index, vault) = vault_with(&[("src.md", "# 本节\n\n[跳转](#本节)\n")]);
+    drop(vault);
+    let conn = rusqlite::Connection::open(index.path().join("index.sqlite")).expect("旧索引");
+    conn.execute("DELETE FROM links", [])
+        .expect("模拟旧扫描遗漏");
+    conn.pragma_update(None, "user_version", 13)
+        .expect("旧版本");
+    drop(conn);
+    let reopened = Vault::open(root.path(), index.path()).expect("重新打开旧库");
+    let links = reopened.links_from("src.md").expect("内部跳转");
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].resolution, LinkResolution::SelfAnchor);
+    assert_eq!(links[0].to_raw, "#本节");
 }
 
 #[test]

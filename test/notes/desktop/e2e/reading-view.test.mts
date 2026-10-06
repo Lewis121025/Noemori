@@ -1,3 +1,4 @@
+import { sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,7 +101,6 @@ test("跨视图与重启：长文选区和双栏阅读锚点在前文变化、�
           element.closest(".main")!.getBoundingClientRect().top,
       );
     const before = await offset();
-    await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
     await page.keyboard.press("ControlOrMeta+e");
     await left.locator(".cm-content").waitFor();
     await ready();
@@ -116,7 +116,7 @@ test("跨视图与重启：长文选区和双栏阅读锚点在前文变化、�
     await expect
       .poll(() => page.evaluate(() => document.getSelection()?.toString()))
       .toBe("定位文字");
-    await page.keyboard.press("ControlOrMeta+Shift+e");
+    await page.keyboard.press("ControlOrMeta+e");
     await paragraph.waitFor();
     await ready();
     await expect.poll(async () => Math.abs((await offset()) - before)).toBeLessThan(24);
@@ -125,7 +125,7 @@ test("跨视图与重启：长文选区和双栏阅读锚点在前文变化、�
       .toBe("定位文字");
 
     // 同一轮恢复覆盖源码和阅读两种表面；两个分栏停在不同段落。
-    await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
+    await page.keyboard.press("ControlOrMeta+e");
     await left.locator(".cm-content").waitFor();
     await ready();
     const other = right.locator(".ProseMirror > p").filter({ hasText: "第088段" });
@@ -263,7 +263,7 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
     await link.evaluate((element) => element.scrollIntoView({ block: "center" }));
     const departure = await top();
     expect(departure).toBeGreaterThan(500);
-    await link.click();
+    await link.click({ modifiers: ["ControlOrMeta"] });
     await expect.poll(top).toBeGreaterThan(departure + 500);
     await scroller.evaluate((element) => {
       element.scrollTop += 330;
@@ -312,23 +312,13 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
             requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
           ),
       );
-    const switchMode = async (mode: "阅读" | "编辑") => {
-      await page.getByRole("button", { name: `切换${mode}模式`, exact: true }).click();
-      await expect
-        .poll(() =>
-          page
-            .getByRole("button", {
-              name: mode === "阅读" ? "切换编辑模式" : "切换阅读模式",
-              exact: true,
-            })
-            .isEnabled(),
-        )
-        .toBe(true);
+    const switchPanel = async (panel: "目录" | "编辑工具") => {
+      await sidebarComponent(page, panel);
       await settleLayout();
     };
-    await switchMode("编辑");
+    await switchPanel("编辑工具");
     await sameParagraph();
-    await switchMode("阅读");
+    await switchPanel("目录");
     await sameParagraph();
     const calloutParagraph = page.locator(".callout-content p").filter({ hasText: "标注第 12 段" });
     await calloutParagraph.evaluate((element) => element.scrollIntoView({ block: "start" }));
@@ -338,8 +328,8 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
           node.getBoundingClientRect().top - node.closest(".main")!.getBoundingClientRect().top,
       );
     const calloutTop = await calloutOffset();
-    for (const mode of ["编辑", "阅读"] as const) {
-      await switchMode(mode);
+    for (const panel of ["编辑工具", "目录"] as const) {
+      await switchPanel(panel);
       await expect.poll(async () => Math.abs((await calloutOffset()) - calloutTop)).toBeLessThan(1);
     }
 
@@ -359,7 +349,7 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
           const bounds = element.getBoundingClientRect();
           const main = element.closest(".main")!;
           return Math.min(
-            bounds.top - main.querySelector(".search-panel")!.getBoundingClientRect().bottom,
+            bounds.top - main.getBoundingClientRect().top,
             main.getBoundingClientRect().bottom - bounds.bottom,
           );
         }),
@@ -391,7 +381,7 @@ test("长文阅读连续性：文内跳转、后退前进与跨文档返回保�
   }
 });
 
-test("阅读视图：查找与导航可用，正文与待办保持可编辑，切换保留历史，模式随会话记住", async (t) => {
+test("阅读视图：统一文档支持查找替换、待办与导航，源码往返和重启保留内容", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-reading-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -457,11 +447,10 @@ test("阅读视图：查找与导航可用，正文与待办保持可编辑，�
       ).toEqual([{ visible: false, focused: false }]);
     }
 
-    await page.keyboard.press("ControlOrMeta+Shift+e");
     await expect.poll(() => editor.getAttribute("contenteditable")).toBe("true");
-    expect(await editor.locator(".comment-inline").isVisible()).toBe(false);
+    expect(await page.locator(".mode-switch").count()).toBe(0);
 
-    // 阅读态保留查找与简单修改，批量替换入口隐藏。
+    // 正常文档始终可编辑，查找与替换使用同一入口。
     expect(await editor.locator(".task-checkbox").isDisabled()).toBe(false);
     await editor.locator("p").first().click();
     await page.keyboard.type("阅读补充");
@@ -469,7 +458,7 @@ test("阅读视图：查找与导航可用，正文与待办保持可编辑，�
     await page.keyboard.press("ControlOrMeta+f");
     await page.getByRole("searchbox", { name: "查找", exact: true }).fill("正文");
     await page.locator(".ProseMirror-search-match").waitFor();
-    expect(await page.getByRole("button", { name: "替换选项" }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: "替换选项" }).count()).toBe(1);
     await page.keyboard.press("Enter");
     await page.keyboard.press("Escape");
     await expect
@@ -504,7 +493,7 @@ test("阅读视图：查找与导航可用，正文与待办保持可编辑，�
           const bounds = element.getBoundingClientRect();
           const main = element.closest(".main")!;
           return Math.min(
-            bounds.top - main.querySelector(".search-panel")!.getBoundingClientRect().bottom,
+            bounds.top - main.getBoundingClientRect().top,
             main.getBoundingClientRect().bottom - bounds.bottom,
           );
         }),
@@ -528,27 +517,28 @@ test("阅读视图：查找与导航可用，正文与待办保持可编辑，�
       .poll(() => readFile(join(vault, "阅读.md"), "utf8"))
       .toBe(source.replace("- [ ] 待办", "- [x] 待办"));
 
-    // 阅读视图里单击链接即跳转。
-    await editor.locator('.wiki-link[data-wiki-target="目标"]').click();
+    // 普通点击用于编辑，修饰键点击负责导航。
+    await editor
+      .locator('.wiki-link[data-wiki-target="目标"]')
+      .click({ modifiers: ["ControlOrMeta"] });
     await ready("目标.md");
     await page.keyboard.press("ControlOrMeta+[");
     await ready("阅读.md");
     await expect.poll(() => editor.getAttribute("contenteditable")).toBe("true");
 
-    // 进入编辑后才能切到源码，再回到阅读时交接文本。
-    await page.getByRole("button", { name: "切换编辑模式", exact: true }).click();
+    // 排版与源码直接往返，沿用同一文档的快照和保存基准。
     await ready("阅读.md");
     await page.keyboard.press("ControlOrMeta+e");
     await page.locator(".cm-content").waitFor();
     expect(await page.locator(".cm-content").textContent()).toContain("%%私下的注释%%");
-    await page.keyboard.press("ControlOrMeta+Shift+e");
+    await page.keyboard.press("ControlOrMeta+e");
     await expect.poll(() => editor.getAttribute("contenteditable")).toBe("true");
     await expect
       .poll(async () => {
         const session = JSON.parse(await readFile(join(userData, "session.json"), "utf8"));
         return session.reader?.mode;
       })
-      .toBe("reading");
+      .toBeUndefined();
     expect(errors).toEqual([]);
 
     await app.close();
@@ -557,7 +547,7 @@ test("阅读视图：查找与导航可用，正文与待办保持可编辑，�
     await reopened.waitForFunction(
       () =>
         document.querySelector(".ProseMirror")?.getAttribute("contenteditable") === "true" &&
-        document.querySelector(".formatting-panel") === null,
+        document.querySelector(".formatting-panel") !== null,
     );
   } finally {
     await app.close();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { findBlockPmPos, sliceEmbed } from "@reader/shared/markdown/block-anchor";
 
 describe("块引用", () => {

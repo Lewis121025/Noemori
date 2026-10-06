@@ -389,7 +389,7 @@ fn walk(
 
 fn markdown_link(from_path: &str, source: &str, node: &Node, url: &str) -> Option<LinkRecord> {
     let url = url.trim();
-    if url.is_empty() || is_external(url) || url.starts_with('#') {
+    if url.is_empty() || is_external(url) {
         return None;
     }
     let position = node.position()?;

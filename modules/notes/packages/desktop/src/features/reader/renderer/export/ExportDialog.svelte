@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { dialogEnter, dialogExit, finishOnReducedMotion } from "../transition-lifecycle";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import type { ExportFormat, ExportPlan, ExportProgress, ExportResult } from "../../shared/export";
   let { workspace }: { workspace: ReaderWorkspaceController } = $props();
@@ -21,6 +22,14 @@
   let plan = $state<ExportPlan | null>(null);
   let result = $state<ExportResult | null>(null);
   let message = $state("");
+  let released = false;
+  function releaseExport(): void {
+    if (released) return;
+    released = true;
+    // 退出尾帧没有任务所有权；取消必须在关闭时发起，迟到卸载不能取消下一次导出。
+    if (busy)
+      void workspace.cancelExport().catch((error: unknown) => workspace.report(String(error)));
+  }
   const labels: Record<ExportProgress["phase"], string> = {
     saving: "保存当前编辑",
     checking: "检查导出内容",
@@ -32,10 +41,7 @@
   };
   onMount(() => {
     dialog.showModal();
-    return () => {
-      if (busy)
-        void workspace.cancelExport().catch((error: unknown) => workspace.report(String(error)));
-    };
+    return releaseExport;
   });
   async function run(): Promise<void> {
     if (busy) return;
@@ -75,6 +81,12 @@
 </script>
 
 <dialog
+  in:dialogEnter|global
+  out:dialogExit|global
+  use:finishOnReducedMotion
+  onbeforetoggle={(event) => {
+    if (event.newState === "closed") releaseExport();
+  }}
   bind:this={dialog}
   aria-labelledby="export-title"
   oncancel={(event) => {

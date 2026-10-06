@@ -5,6 +5,7 @@ import App from "@app/App.svelte";
 import type { AppApi } from "../../../../../modules/notes/packages/desktop/src/shared/api";
 import type { ReaderApi } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
+import { createAppApiMock } from "../../fixtures/app-api-mock";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -51,6 +52,7 @@ beforeEach(() => {
       },
       viewModes: {},
       recentFiles: ["notes/beta.md"],
+      fileTree: null,
     })),
     vaultEntries: vi.fn(async () => files.map((path) => ({ path, kind: "file" as const }))),
     fileSnapshot: vi.fn(async (path: string) => ({ disk: encode(`# ${path}\n`), draft: null })),
@@ -63,15 +65,7 @@ beforeEach(() => {
       return { warning: null };
     }),
   });
-  const appApi: AppApi = {
-    historyChanged: vi.fn(),
-    subscribeCommand: () => () => {},
-    appearanceGet: vi.fn(async () => "system"),
-    appearanceSet: vi.fn(async () => {}),
-    subscribeFlushBeforeClose: () => () => {},
-    closeAfterFlush: vi.fn(async () => {}),
-    closeBlocked: vi.fn(async () => {}),
-  };
+  const appApi: AppApi = createAppApiMock();
   window.noemori = { app: appApi, reader: api };
 });
 
@@ -179,7 +173,7 @@ describe("快速切换器", () => {
     );
     shortcut("o");
     type("全新的笔记");
-    expect(options()).toEqual([]);
+    expect(options()).toEqual(["＋ 新建笔记「全新的笔记」"]);
     press("Enter");
     await vi.waitFor(() =>
       expect(api.entryCreate).toHaveBeenLastCalledWith("全新的笔记.md", "file", undefined),
@@ -193,16 +187,23 @@ describe("命令面板", () => {
     shortcut("p");
     await vi.waitFor(() => expect(picker()).not.toBeNull());
     const labels = options();
-    expect(labels.some((label) => label.startsWith("切换分栏"))).toBe(true);
+    expect(labels.some((label) => label.startsWith("切换单栏 / 双栏"))).toBe(true);
     expect(labels.some((label) => label.startsWith("命令面板"))).toBe(false);
     // 恢复的文档没有阅读栈，后退不可用。
     expect(labels.some((label) => label.startsWith("后退"))).toBe(false);
-    type("分栏");
+    type("双栏");
+    press("Enter");
+    await vi.waitFor(() =>
+      expect(picker()?.querySelector("input")?.getAttribute("placeholder")).toBe(
+        "输入文件名、标题或别名…",
+      ),
+    );
+    type("beta");
     press("Enter");
     await vi.waitFor(() => expect(target.querySelectorAll(".main")).toHaveLength(2));
     expect(picker()).toBeNull();
     // 用过的命令在下一次空查询时置顶。
     shortcut("p");
-    await vi.waitFor(() => expect(options()[0]).toContain("切换分栏"));
+    await vi.waitFor(() => expect(options()[0]).toContain("切换单栏 / 双栏"));
   });
 });

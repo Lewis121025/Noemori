@@ -14,7 +14,11 @@ const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 /** 构造带默认行为的 ReaderApi mock；overrides 浅覆盖对应字段。 */
 export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderApi {
   const api: ReaderApi = {
-    whiteboardRecognize: vi.fn(async () => ({ label: "other", confidence: 1 })),
+    webPages: { sync: vi.fn(async () => {}), action: vi.fn(async () => {}), subscribe: () => () => {} },
+    whiteboardRecognize: vi.fn<ReaderApi["whiteboardRecognize"]>(async () => ({
+      label: "other",
+      confidence: 1,
+    })),
     exportRun: vi.fn(async () => {
       throw new Error("测试尚未配置导出结果");
     }),
@@ -78,7 +82,6 @@ export function createReaderApiMock(overrides: Partial<ReaderApi> = {}): ReaderA
     indexHeadings: vi.fn(async () => []),
     indexTags: vi.fn(async () => []),
     indexNoteKeys: vi.fn(async () => []),
-    indexGraph: vi.fn(async () => ({ nodes: [], edges: [] })),
     bookmarksList: vi.fn(async () => []),
     bookmarksSet: vi.fn(async () => {}),
     entryRename: vi.fn(async () => ({ warning: null })),

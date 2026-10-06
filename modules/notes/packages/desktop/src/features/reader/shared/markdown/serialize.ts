@@ -101,6 +101,15 @@ function block(node: PmNode): FlowContent {
           children: blocks(item),
         })),
       };
+    case "webpage":
+      return {
+        type: "code",
+        lang: "webpage",
+        value: JSON.stringify({
+          url: String(node.attrs["url"]),
+          height: Number(node.attrs["height"]),
+        }),
+      };
     case "code_block":
       return {
         type: "code",

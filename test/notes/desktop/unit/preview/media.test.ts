@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { VaultEvent } from "@reader/shared/api";
 import {
-  previewKindFromReference,
   isRemoteMediaSrc,
   mimeFromPath,
   resolveMediaUrl,
@@ -10,6 +9,7 @@ import {
   createBrowserMediaIo,
   type MediaIo,
 } from "@reader/renderer/preview/media";
+import { previewKindFromReference } from "@reader/shared/media-kind";
 
 describe("media helpers", () => {
   it("完整刷新通知覆盖所有嵌入，取消订阅后不再刷新", () => {

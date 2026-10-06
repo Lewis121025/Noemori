@@ -148,7 +148,11 @@ describe("会话写入失败与已完成操作的边界", () => {
     expect(await workspace.flushBeforeClose()).toBe(true);
     expect(api.sessionSetDocuments).toHaveBeenLastCalledWith({
       panes: [
-        { currentPath: "b.md", history: { back: [{ path: "a.md", anchor: null }], forward: [] } },
+        {
+          currentPath: "b.md",
+          outlineCollapsed: false,
+          history: { back: [{ path: "a.md", anchor: null }], forward: [] },
+        },
       ],
       active: 0,
       split: false,
@@ -163,6 +167,7 @@ describe("会话写入失败与已完成操作的边界", () => {
     for (const state of snapshots) {
       expect(state.panes[0]).toEqual({
         currentPath: "b.md",
+        outlineCollapsed: false,
         history: { back: [{ path: "a.md", anchor: null }], forward: [] },
       });
     }
@@ -266,4 +271,13 @@ describe("会话写入失败与已完成操作的边界", () => {
       expect(workspace.message).toBe("");
     },
   );
+});
+
+it("在另一栏打开失败不创建空栏，也不改变活动文档", async () => {
+  vi.mocked(api.fileSnapshot).mockRejectedValueOnce(new Error("读取失败"));
+  const original = workspace.activePane;
+  await workspace.openInOtherPane("b.md");
+  expect(workspace.panes).toHaveLength(1);
+  expect(workspace.activePane).toBe(original);
+  expect(workspace.document.path).toBe("a.md");
 });

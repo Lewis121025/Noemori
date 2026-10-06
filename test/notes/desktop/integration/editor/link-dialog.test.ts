@@ -4,12 +4,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import EditorLink from "@reader/renderer/editor/links/EditorLink.svelte";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { createAttachmentEditing } from "@reader/renderer/editor/attachments/attachments";
 import {
   linkSelectionKey,
-  linkSelectionPlugin,
+  createLinkSelectionPlugin,
 } from "@reader/renderer/editor/links/link-editing";
+
+const linkSelectionPlugin = createLinkSelectionPlugin();
 
 let view: EditorView;
 let panel: ReturnType<typeof mount> | undefined;

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { readInlineMarkStates } from "@reader/renderer/editor/formatting/inline-formatting";
 
 it.each([

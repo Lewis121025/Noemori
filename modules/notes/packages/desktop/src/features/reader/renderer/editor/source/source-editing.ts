@@ -21,10 +21,8 @@ export const editSelectedSource: Command = (state, dispatch, view) => {
 /**
  * 统一管理源码节点的选择与编辑状态；移动选区自动退出编辑，内容更新保留输入框。
  * 通过节点装饰通知 NodeView，不建立独立文档或第二套撤销栈。
+ * 重载同一源码节点时可恢复显式编辑状态，不把普通节点选择当成进入编辑。
  */
-export const sourceEditingPlugin = createSourceEditingPlugin();
-
-/** 重载同一源码节点时可恢复显式编辑状态，不把普通节点选择当成进入编辑。 */
 export function createSourceEditingPlugin(initial = false) {
   return new Plugin<boolean>({
     key: sourceEditingKey,

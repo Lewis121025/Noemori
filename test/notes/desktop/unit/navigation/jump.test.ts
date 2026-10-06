@@ -2,10 +2,12 @@
  * @vitest-environment jsdom
  */
 import { flushSync, mount, unmount, type Component } from "svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import DocumentEditor from "@reader/renderer/editor/DocumentEditor.svelte";
 import type { MarkdownEditorApi } from "@reader/renderer/editor/editor-api";
 import type { OutlineItem } from "@reader/shared/markdown/outline";
+import { createBrowserMediaIo } from "@reader/renderer/preview/media";
+import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
 const OriginalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
@@ -32,6 +34,9 @@ describe("outline jump", () => {
       target,
       props: {
         path: "Note.md",
+        mediaIo: createBrowserMediaIo(createReaderApiMock()),
+        importAttachment: async () => ({ path: "attachments/test.png", warning: null }),
+        onAttachmentReport: () => {},
         source: "# Alpha\n\nintro\n\n# Beta\n\nbody\n",
         onDirty: () => {},
         onSave: () => {},
@@ -84,6 +89,9 @@ describe("mention jump", () => {
       target,
       props: {
         path: "Note.md",
+        mediaIo: createBrowserMediaIo(createReaderApiMock()),
+        importAttachment: async () => ({ path: "attachments/test.png", warning: null }),
+        onAttachmentReport: () => {},
         source: "intro\n\nSee [[Target]] here\n",
         onDirty: () => {},
         onSave: () => {},
@@ -116,6 +124,9 @@ describe("mention jump", () => {
       target,
       props: {
         path: "Note.md",
+        mediaIo: createBrowserMediaIo(createReaderApiMock()),
+        importAttachment: async () => ({ path: "attachments/test.png", warning: null }),
+        onAttachmentReport: () => {},
         source: `${"para\n\n".repeat(40)}UniqueHitWord in a paragraph\n`,
         onDirty: () => {},
         onSave: () => {},

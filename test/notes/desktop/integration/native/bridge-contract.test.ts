@@ -88,24 +88,6 @@ it("所有阅读器响应在进入调用方前校验，错误元数据不能冒�
     },
     { read: () => api.bookmarksList(), invalid: [{ kind: "tag", path: "a.md", title: null }] },
     { read: () => api.bookmarksSet([]), invalid: { status: "failed" } },
-    {
-      read: () => api.indexGraph(false),
-      invalid: { nodes: [{ path: "../逃逸.md", title: "", tags: [], dead: false }], edges: [] },
-    },
-    {
-      read: () => api.indexGraph(false),
-      invalid: {
-        nodes: [{ path: "a.md", title: "甲", tags: [], dead: false }],
-        edges: [{ from: "a.md", to: "不存在.md", count: 1 }],
-      },
-    },
-    {
-      read: () => api.indexGraph(false),
-      invalid: {
-        nodes: [{ path: "a.md", title: "甲", tags: [], dead: false }],
-        edges: [{ from: "a.md", to: "a.md", count: 0 }],
-      },
-    },
   ];
   for (const request of requests) {
     vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(request.invalid);

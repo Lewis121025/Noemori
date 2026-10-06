@@ -2,6 +2,24 @@
 use super::*;
 
 #[test]
+fn removed_reading_mode_does_not_survive_session_normalization() {
+    let normalized = normalize(&json!({"reader": {
+        "vaultRoot": "/notes", "currentPath": "note.md", "mode": "reading",
+        "viewModes": {"note.md": "reading", "source.md": "source"}
+    }}));
+    assert!(normalized["reader"].get("mode").is_none());
+    assert_eq!(
+        normalized["reader"]["viewModes"],
+        json!({"source.md": "source"})
+    );
+    assert_eq!(
+        normalized["reader"]["documents"]["panes"][0]["currentPath"],
+        "note.md"
+    );
+}
+
+
+#[test]
 fn reading_font_survives_reader_and_appearance_updates() {
     let data = tempfile::tempdir().unwrap();
     let store = SessionStore::new(data.path());
@@ -18,6 +36,32 @@ fn reading_font_survives_reader_and_appearance_updates() {
         assert_eq!(
             normalize(&json!({"readingFont": invalid}))["readingFont"],
             "lora"
+        );
+    }
+}
+
+#[test]
+fn reading_palette_survives_reader_font_and_appearance_updates() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    assert_eq!(store.load()["readingPalette"], "monochrome");
+    for palette in ["monochrome", "green"] {
+        store.patch(&json!({"readingPalette": palette})).unwrap();
+        store
+            .patch_reader(&json!({"vaultRoot": "/other", "documents": {}}))
+            .unwrap();
+        store
+            .patch(&json!({"readingFont": "newsreader", "appearance": "dark"}))
+            .unwrap();
+        assert_eq!(
+            SessionStore::new(data.path()).load()["readingPalette"],
+            palette
+        );
+    }
+    for invalid in [Value::Null, json!("blue"), json!({}), json!(12), json!(true)] {
+        assert_eq!(
+            normalize(&json!({"readingPalette": invalid}))["readingPalette"],
+            "monochrome"
         );
     }
 }
@@ -166,4 +210,70 @@ fn damaged_fields_and_unicode_limits_match_reader_contract() {
         value["reader"]["fileTree"]["scroll"]["offset"].as_f64(),
         Some(500.0)
     );
+}
+
+#[test]
+fn workbench_preferences_survive_unrelated_patches() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    store.patch_reader(&json!({
+        "destination": "library", "sidebarView": "search", "searchQuery": "设计",
+        "documents": {"panes": [{"currentPath": "a.md", "outlineCollapsed": true}], "active": 0, "split": false}
+    })).unwrap();
+    store.patch(&json!({"appearance": "dark"})).unwrap();
+    let reader = &store.load()["reader"];
+    assert_eq!(reader["destination"], "library");
+    assert_eq!(reader["sidebarView"], "search");
+    assert_eq!(reader["searchQuery"], "设计");
+    assert_eq!(reader["documents"]["panes"][0]["outlineCollapsed"], true);
+}
+
+#[test]
+fn file_views_keep_separate_scroll_anchors_through_remap() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    store
+        .patch_reader(&json!({"fileTree": {
+            "expanded": ["old"], "selected": [], "focused": null,
+            "scroll": {"path": "old/a.md", "offset": 8},
+            "navigationScroll": {"path": "old/b.md", "offset": 3}
+        }}))
+        .unwrap();
+    store.remap("old", Some("new")).unwrap();
+    let loaded = store.load();
+    assert_eq!(
+        loaded["reader"]["fileTree"]["scroll"],
+        json!({"path":"new/a.md","offset":8.0})
+    );
+    assert_eq!(
+        loaded["reader"]["fileTree"]["navigationScroll"],
+        json!({"path":"new/b.md","offset":3.0})
+    );
+}
+
+#[test]
+fn removed_graph_destination_restores_document_and_keeps_navigation() {
+    let normalized = normalize(&json!({"reader": {
+        "destination": "graph", "space": "connections", "sidebarView": "search",
+        "searchQuery": "设计", "leftWidth": 260, "currentPath": "note.md", "vaultRoot": "/notes"
+    }}));
+    let reader = &normalized["reader"];
+    assert_eq!(reader["destination"], "document");
+    assert_eq!(reader["sidebarView"], "search");
+    assert_eq!(reader["searchQuery"], "设计");
+    assert_eq!(reader["leftWidth"].as_f64(), Some(260.0));
+    assert_eq!(reader["documents"]["panes"][0]["currentPath"], "note.md");
+}
+
+#[test]
+fn file_system_folder_and_legacy_boards_destination_survive_normalization() {
+    let normalized = normalize(&json!({"reader": {
+        "destination": "boards", "currentPath": "docs/note.md", "fileTree": {
+            "expanded": [], "selected": ["docs/note.md"], "focused": "docs/note.md", "scroll": null,
+            "browse": {"query": "", "section": "files", "directory": "docs"}
+        }
+    }}));
+    assert_eq!(normalized["reader"]["destination"], "library");
+    assert_eq!(normalized["reader"]["fileTree"]["browse"]["directory"], "docs");
+    assert_eq!(normalized["reader"]["documents"]["panes"][0]["currentPath"], "docs/note.md");
 }

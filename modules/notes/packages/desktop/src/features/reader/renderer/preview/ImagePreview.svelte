@@ -1,9 +1,20 @@
 <script lang="ts">
+  import { revealOnChange } from "../motion";
+  import type { Snippet } from "svelte";
   import { mimeFromPath } from "./media";
   import PreviewZoom from "./PreviewZoom.svelte";
   import "./preview.css";
 
-  let { path, bytes }: { path: string; bytes: Uint8Array } = $props();
+  let {
+    path,
+    bytes,
+    registerToolbar,
+  }: {
+    path: string;
+    bytes: Uint8Array;
+    /** 独立预览保留原工具栏，工作区预览交由左侧栏呈现。 */
+    registerToolbar?: (toolbar: Snippet | null) => void;
+  } = $props();
   let url = $state("");
   let loaded = $state(false);
   let failed = $state(false);
@@ -52,9 +63,15 @@
     viewport.scrollLeft = drag.left + drag.x - event.clientX;
     viewport.scrollTop = drag.top + drag.y - event.clientY;
   }
+  $effect(() => {
+    const register = registerToolbar;
+    if (!register) return;
+    register(previewTools);
+    return () => register(null);
+  });
 </script>
 
-<section class="attachment-preview" aria-label="图片预览">
+{#snippet previewTools()}
   <div class="preview-toolbar">
     <PreviewZoom
       {scale}
@@ -64,6 +81,10 @@
     />
     {#if loaded && !failed}<span>{naturalWidth} × {naturalHeight}</span>{/if}
   </div>
+{/snippet}
+
+<section class="attachment-preview" aria-label="图片预览">
+  {#if registerToolbar === undefined}{@render previewTools()}{/if}
   <div
     class="preview-viewport"
     role="region"
@@ -81,7 +102,7 @@
       <p class="preview-message" role="alert">图片无法显示，文件可能已损坏或格式不受支持。</p>
     {:else}
       {#if !loaded}<p class="preview-message" role="status">正在加载图片…</p>{/if}
-      <div class="preview-stage">
+      <div class="preview-stage" use:revealOnChange={{ key: zoom, kind: "media" }}>
         {#if url !== ""}
           <img
             src={url}

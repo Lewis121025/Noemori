@@ -24,7 +24,8 @@
   import { findMentionPmPos } from "../links/mention-jump";
   import { utf8ByteToJsIndex } from "../document/source-offset";
   import { type MediaIo } from "../preview/media";
-  import { collectOutline, type OutlineItem } from "../../shared/markdown/outline";
+  import type { OutlineItem } from "../../shared/markdown/outline";
+  import { createOutlinePosition } from "./outline-position";
   import { writingPlugins } from "./writing";
   import { createSourceEditingPlugin } from "./source/source-editing";
   import { linkInteraction, type OpenContentLink } from "./links/link-interaction";
@@ -47,10 +48,11 @@
   import { linkSuggestPlugin, type SuggestKeymap } from "./links/suggestions/plugin";
   import { suggestInsertion } from "./links/suggestions/insert";
   import EditorFormatting from "./formatting/EditorFormatting.svelte";
-  import SelectionFormatting from "./formatting/SelectionFormatting.svelte";
   import EditorLink from "./links/EditorLink.svelte";
   import EditorSearch from "./search/EditorSearch.svelte";
   import EditorAttachments from "./attachments/EditorAttachments.svelte";
+  import EditorWebPage from "./webpage/EditorWebPage.svelte";
+  import { canInsertWebPage } from "./webpage/insert";
   import LinkSuggestPopup from "./links/LinkSuggestPopup.svelte";
   import PropertiesPanel from "./properties/PropertiesPanel.svelte";
   import { bodySelection, frontmatterPresentation } from "./properties/frontmatter-presentation";
@@ -102,12 +104,10 @@
     formattingId?: string;
     /** 分栏工具栏入口；未提供时按普通文档流显示，供独立编辑表面使用。 */
     registerToolbar?: (toolbar: Snippet | null) => void;
-    /** 本栏是否为活动栏；选区浮动工具只属于活动编辑器。 */
-    active?: boolean;
+    /** 文内查找从快捷键进入时，先展开承载工具的侧栏。 */
+    onShowTools?: () => void;
     /** 阅读视图：同一编辑器严格只读，链接单击即打开。 */
     readOnly?: boolean;
-    /** 阅读模式保留正文与标注，隐藏完整编辑工具。 */
-    reading?: boolean;
     /** 库内链接候选；仅用于交互，不参与文档挂载依赖。 */
     linkTargets?: string[];
     /**
@@ -146,23 +146,26 @@
     ensureBlockId,
     formattingId = "editor-formatting",
     registerToolbar,
-    active = true,
+    onShowTools,
     readOnly = false,
-    reading = false,
   }: Props = $props();
   let host: HTMLDivElement | undefined = $state();
   let editor = $state.raw<EditorView | null>(null);
   let editorState = $state.raw<EditorState | null>(null);
-  const hasToolbar = $derived(!readOnly && !reading && editor !== null && editorState !== null);
+  const hasToolbar = $derived(!readOnly && editor !== null && editorState !== null);
 
   $effect(() => {
     const register = registerToolbar;
     if (register === undefined) return;
-    register(hasToolbar ? editorToolbar : null);
+    register(editorToolbar);
     return () => register(null);
   });
   let publicApi = $state.raw<MarkdownEditorApi | null>(null);
   let showLink = $state(false);
+  let showWebPage = $state(false);
+  // 退出尾帧仍存活时，再次打开必须创建新的输入会话，不能复用已取消的表单。
+  let linkOpening = $state(0);
+  let webPageOpening = $state(0);
   let showSearch = $state(false);
   let searchPanel: EditorSearch | undefined = $state();
   let attachmentPanel: EditorAttachments | undefined = $state();
@@ -389,22 +392,38 @@
   }
 
   function openAttachments(): void {
-    if (readOnly || reading) return;
+    if (readOnly) return;
+    onShowTools?.();
     attachmentPanel?.pick();
   }
 
+  function openLinkEditor(): void {
+    if (readOnly) return;
+    onShowTools?.();
+    linkOpening += 1;
+    showLink = true;
+  }
+
+  function openWebPage(): void {
+    if (readOnly || !editor || !canInsertWebPage(editor.state)) return;
+    onShowTools?.();
+    webPageOpening += 1;
+    showWebPage = true;
+  }
+
   function openSearch(): void {
+    onShowTools?.();
     showSearch = true;
     searchPanel?.focusQuery();
   }
 
-  // 排版与阅读共用同一视图：只切换可编辑性，不重建编辑器、不丢撤销历史与滚动位置。
+  // 只读预览使用真实权限控制；正常文档始终可编辑，不需要额外模式。
   $effect(() => {
     const locked = readOnly;
     const view = editor;
     if (view === null) return;
-    setDocumentReadOnly(view, locked, reading);
-    if (locked || reading) {
+    setDocumentReadOnly(view, locked);
+    if (locked) {
       showLink = false;
       closeSuggest();
     }
@@ -427,6 +446,7 @@
       const pushOutline = onOutline;
       const session = createMarkdownSession(src, recovered);
       const doc = session.doc;
+      let outlinePosition = createOutlinePosition(doc);
       const reload = previous === null ? null : prepareMarkdownReload(previous, doc);
       previous = null;
       const attachmentEditing = createAttachmentEditing({
@@ -445,7 +465,7 @@
           doc,
           selection: bodySelection(doc, reload?.selection),
           plugins: [
-            documentAccess(locked, reading),
+            documentAccess(locked),
             frontmatterPresentation(),
             // 补全弹层激活时优先接管导航键；未激活时完全透明。
             linkSuggestPlugin(suggestKeys),
@@ -461,7 +481,7 @@
             ...mathInputPlugins(),
             ...writingPlugins({
               link: () => {
-                if (created.editable && !reading) showLink = true;
+                if (created.editable) openLinkEditor();
               },
               search: openSearch,
             }),
@@ -485,7 +505,8 @@
           editorState = next;
           if (transactions.some((transaction) => transaction.docChanged)) {
             dirty();
-            pushOutline(collectOutline(next.doc));
+            outlinePosition = createOutlinePosition(next.doc);
+            pushOutline(outlinePosition.items);
           }
           refreshSuggest(created, next);
         },
@@ -493,7 +514,7 @@
       const stopRestoring = reload?.restore(created);
       editor = created;
       editorState = created.state;
-      pushOutline(collectOutline(created.state.doc));
+      pushOutline(outlinePosition.items);
       publicApi = {
         ...markdownPosition(created, session),
         history: (action) => applyMarkdownHistory(created, action),
@@ -508,6 +529,7 @@
         focus: () => focusDocument(created),
         openSearch,
         openAttachments,
+        insertWebPage: openWebPage,
         insertWhiteboard: () => {
           if (!attachmentEditing.prepare(created)) return;
           const file = new File([serializeWhiteboard(emptyWhiteboard())], "白板.noemoriboard", {
@@ -554,11 +576,10 @@
           jumpEditor(created, pos, "start");
           return true;
         },
+        visibleHeading: () => outlinePosition.visibleHeading(created),
         currentHeading: () => {
           const from = created.state.selection.from;
-          return (
-            collectOutline(created.state.doc).findLast((item) => item.pos < from)?.text ?? null
-          );
+          return outlinePosition.items.findLast((item) => item.pos < from)?.text ?? null;
         },
       };
       return () => {
@@ -567,8 +588,8 @@
         pushOutline([]);
         publicApi = null;
         closeSuggest();
-        editor = null;
-        editorState = null;
+        // 侧栏 snippet 的注销在同一轮更新完成；撤下前保留非空的视图/状态契约，
+        // 避免跨组件工具先读到 null。重载立即发布新实例，卸载则由注册清理释放引用。
         attachments = null;
         attachmentProgress = null;
         created.destroy();
@@ -631,48 +652,46 @@
       id={formattingId}
       view={editor}
       state={editorState}
-      onLink={() => (showLink = true)}
+      {...onShowTools === undefined ? {} : { onShowTools }}
+      onLink={openLinkEditor}
       onAttachment={openAttachments}
+      onWebPage={openWebPage}
     />{/if}
+  {#if editor !== null && editorState !== null}
+    {#if attachments}<EditorAttachments
+        bind:this={attachmentPanel}
+        view={editor}
+        editing={attachments}
+        progress={attachmentProgress}
+      />{/if}
+    {#if showSearch}<EditorSearch
+        bind:this={searchPanel}
+        view={editor}
+        state={editorState}
+        {readOnly}
+        onClose={() => (showSearch = false)}
+      />{/if}
+    {#key linkOpening}{#if showLink}<EditorLink
+          view={editor}
+          targets={linkTargets}
+          onClose={() => (showLink = false)}
+        />{/if}{/key}
+    {#key webPageOpening}{#if showWebPage}<EditorWebPage
+          view={editor}
+          onClose={() => (showWebPage = false)}
+        />{/if}{/key}
+    <div
+      id="properties-{formattingId}"
+      popover="auto"
+      class="reader-popover properties-popover"
+      aria-label="笔记属性"
+    >
+      <PropertiesPanel view={editor} state={editorState} {readOnly} />
+    </div>
+  {/if}
 {/snippet}
-
 {#if registerToolbar === undefined}{@render editorToolbar()}{/if}
-{#if editor !== null && editorState !== null}
-  {#if attachments}<EditorAttachments
-      bind:this={attachmentPanel}
-      view={editor}
-      editing={attachments}
-      progress={attachmentProgress}
-    />{/if}
-  <SelectionFormatting
-    view={editor}
-    state={editorState}
-    blocked={readOnly || !active || showSearch || showLink}
-    {reading}
-    onLink={() => (showLink = true)}
-  />
-  {#if showSearch}<EditorSearch
-      bind:this={searchPanel}
-      view={editor}
-      state={editorState}
-      readOnly={readOnly || reading}
-      onClose={() => (showSearch = false)}
-    />{/if}
-  {#if showLink}<EditorLink
-      view={editor}
-      targets={linkTargets}
-      onClose={() => (showLink = false)}
-    />{/if}
-  <div
-    id="properties-{formattingId}"
-    popover="auto"
-    class="reader-popover properties-popover"
-    aria-label="笔记属性"
-  >
-    <PropertiesPanel view={editor} state={editorState} readOnly={readOnly || reading} />
-  </div>
-{/if}
-<div class="surface" class:reading={readOnly || reading} bind:this={host}></div>
+<div class="surface" class:reading={readOnly} bind:this={host}></div>
 {#if suggest !== null && suggest.items.length > 0}
   <LinkSuggestPopup
     items={suggest.items}

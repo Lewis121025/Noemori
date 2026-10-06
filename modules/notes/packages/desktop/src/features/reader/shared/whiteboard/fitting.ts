@@ -11,7 +11,7 @@ import {
 } from "./fitting-math";
 
 /** 单路径验证集上的联合门槛；多数模型候选还必须通过完整几何约束与双向轮廓检查。 */
-export const MIN_SHAPE_SCORE = 0.5;
+const MIN_SHAPE_SCORE = 0.5;
 
 function line(points: readonly FitPoint[]): FitPoint[] | null {
   const fit = principalLine(points);

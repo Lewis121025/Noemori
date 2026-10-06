@@ -37,7 +37,7 @@ export type ExportNativePort = {
   ) => Promise<unknown>;
 };
 /** 原生快照清单中的一个文件。 */
-export type ExportSource = { path: string; bytes: number; hash: string };
+type ExportSource = { path: string; bytes: number; hash: string };
 /** 暂存路径只存在于宿主中，禁止将该结构转发给页面。 */
 export type ExportSnapshot = {
   id: string;

@@ -7,6 +7,7 @@
   import { insertLink, selectedLink, removeLink, linkSelectionKey } from "./link-editing";
   import { rankFileCandidates, type LinkSuggestion } from "./suggestions/candidates";
   import { createCompositionGuard, isCompositionKey } from "../composition";
+  import { dialogEnter, dialogExit, finishOnReducedMotion } from "../../transition-lifecycle";
 
   let { view, targets, onClose }: { view: EditorView; targets: string[]; onClose: () => void } =
     $props();
@@ -19,6 +20,14 @@
   let input: HTMLInputElement;
   const targetListId = $props.id();
   const composition = createCompositionGuard();
+  let selectionOwner: EditorView | null = null;
+
+  function releaseSelection(): void {
+    const owner = selectionOwner;
+    selectionOwner = null;
+    if (owner && !owner.isDestroyed)
+      owner.dispatch(owner.state.tr.setMeta(linkSelectionKey, false));
+  }
 
   /** 目标输入的补全候选；与编辑器内联补全共用同一排序。 */
   let suggestItems = $state<LinkSuggestion[]>([]);
@@ -71,6 +80,7 @@
   }
 
   onMount(() => {
+    selectionOwner = view;
     view.dispatch(view.state.tr.setMeta(linkSelectionKey, true));
     const { from, to } = view.state.selection;
     label = view.state.doc.textBetween(from, to);
@@ -86,9 +96,7 @@
     }
     dialog.showModal();
     input.focus();
-    return () => {
-      if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(linkSelectionKey, false));
-    };
+    return releaseSelection;
   });
   function close(cancelled = true): void {
     if (composition.active) return;
@@ -116,6 +124,13 @@
 </script>
 
 <dialog
+  in:dialogEnter|global
+  out:dialogExit|global
+  use:finishOnReducedMotion
+  onbeforetoggle={(event) => {
+    // 退出尾帧仍在 DOM 中，选区所有权必须在关闭时交还，不能覆盖下一次弹窗。
+    if (event.newState === "closed") releaseSelection();
+  }}
   bind:this={dialog}
   use:composition.bind
   aria-labelledby={`${targetListId}-title`}

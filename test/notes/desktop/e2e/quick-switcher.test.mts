@@ -53,11 +53,13 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     const picker = page.locator("dialog.picker[open]");
     const input = picker.getByRole("combobox");
     const options = picker.getByRole("option");
-    const documentName = () => page.locator(".document-name").first().textContent();
+    const documentName = () =>
+      page.locator(".topbar-document:not([hidden]) .document-name").textContent();
     const ready = (name: string) =>
       page.waitForFunction(
         (expected) =>
-          document.querySelector(".document-name")?.textContent === expected &&
+          document.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent ===
+            expected &&
           [...document.querySelectorAll("section[data-pane]")].every(
             (pane) => !pane.hasAttribute("inert"),
           ),
@@ -100,15 +102,17 @@ test("快速切换器与命令面板：模糊打开、别名命中、另一栏�
     // 无命中时 Enter 按输入新建笔记。
     await page.keyboard.press("ControlOrMeta+o");
     await input.fill("会议记录");
-    await expect.poll(async () => options.count()).toBe(0);
+    await expect.poll(async () => options.count()).toBe(1);
+    expect(await options.first().textContent()).toContain("新建笔记");
     await input.press("Enter");
     await expect.poll(async () => page.getByRole("treeitem", { name: /会议记录/ }).count()).toBe(1);
     await ready("会议记录.md");
 
-    // 命令面板：执行「切换分栏」合回单栏。
-    await page.keyboard.press("ControlOrMeta+p");
-    await input.fill("切换分栏");
-    await input.press("Enter");
+    // 关闭当前分栏是显式动作，不再让“在另一栏打开”反向关闭另一篇。
+    await page
+      .locator(".pane-column.active")
+      .getByRole("button", { name: "关闭此分栏", exact: true })
+      .click();
     await expect.poll(async () => page.locator("section[data-pane]").count()).toBe(1);
 
     expect(errors).toEqual([]);

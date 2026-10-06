@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 
 function embeds(source: string) {
   const doc = parseMarkdown(source);

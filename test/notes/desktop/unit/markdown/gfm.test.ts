@@ -2,15 +2,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 
 const fixture = join(dirname(fileURLToPath(import.meta.url)), "../../fixtures/markdown/gfm.md");
 
-function collect(
-  doc: ReturnType<typeof parseMarkdown>,
-  type: string,
-  attr: string,
-): string[] {
+function collect(doc: ReturnType<typeof parseMarkdown>, type: string, attr: string): string[] {
   const out: string[] = [];
   doc.descendants((node) => {
     if (node.type.name === type) {
@@ -88,7 +85,7 @@ describe("gfm adapter", () => {
     const first = serializeMarkdown(parsed);
     const second = serializeMarkdown(parseMarkdown(first));
     expect(second).toBe(first);
-    expect(first).toContain("![logo](./pic.png \"t\")");
+    expect(first).toContain('![logo](./pic.png "t")');
     expect(first).toContain("![[shot.jpg|截图]]");
     expect(first).toContain("~~gone~~");
     expect(first).toContain("- [ ] todo");
@@ -99,9 +96,7 @@ describe("gfm adapter", () => {
 
   it("does not convert wiki image embed into markdown image syntax", () => {
     const doc = parseMarkdown("See ![[shot.jpg]].\n");
-    expect(collectImages(doc)).toEqual([
-      { src: "shot.jpg", alt: "", title: null, kind: "wiki" },
-    ]);
+    expect(collectImages(doc)).toEqual([{ src: "shot.jpg", alt: "", title: null, kind: "wiki" }]);
     const out = serializeMarkdown(doc);
     expect(out).toContain("![[shot.jpg]]");
     expect(out).not.toContain("![](");

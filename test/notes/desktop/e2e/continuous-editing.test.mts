@@ -1,3 +1,4 @@
+import { documentTools, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +51,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const editor = page.locator(".ProseMirror");
-    const quickFormat = page.getByRole("toolbar", { name: "选区格式", exact: true });
+    const quickFormat = page.getByRole("toolbar", { name: "编辑工具栏", exact: true });
     await editor.waitFor();
     expect(await quickFormat.isVisible()).toBe(false);
     await page.locator(".math-inline mjx-container").waitFor();
@@ -99,7 +100,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
 
     const math = editor.locator(".math-inline");
     await math.click();
-    await expect.poll(() => quickFormat.isVisible()).toBe(false);
+    await expect.poll(() => quickFormat.isVisible()).toBe(true);
     expect(await editor.locator(".math-source").count()).toBe(0);
     expect(await math.getAttribute("class")).toContain("ProseMirror-selectednode");
     if (screenshots)
@@ -177,6 +178,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     for (let index = 0; index < 5; index++) await page.keyboard.press("Shift+ArrowLeft");
     const selection = await page.evaluate(() => window.getSelection()?.toString());
     expect(selection).toBe("继续写作。");
+    await documentTools(page);
     await quickFormat.waitFor({ timeout: 3000 });
     // 浏览器选区先于 selectionchange 进入编辑器；等待对应格式状态，而非上一选区已可见的工具条。
     await expect
@@ -205,43 +207,40 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await quickFormat.getByRole("button", { name: "斜体", exact: true }).click();
     expect(await paragraph.locator("em").count()).toBe(0);
     await page.keyboard.press("Alt+F10");
-    expect(
-      await quickFormat
-        .getByRole("button", { name: "加粗", exact: true })
-        .evaluate((button) => button === document.activeElement),
-    ).toBe(true);
-    await page.keyboard.press("ArrowRight");
+    expect(await quickFormat.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     expect(await paragraph.locator("em").innerText()).toBe(selection);
-    await page.keyboard.press("Enter");
+    await quickFormat.getByRole("button", { name: "斜体", exact: true }).click();
     expect(await paragraph.locator("em").count()).toBe(0);
+    await page.keyboard.press("Alt+F10");
     await page.keyboard.press("Escape");
-    expect(await quickFormat.isVisible()).toBe(false);
+    expect(await quickFormat.isVisible()).toBe(true);
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selection);
     await page.keyboard.press("Alt+F10");
-    await quickFormat.getByRole("button", { name: "链接…", exact: true }).click();
+    await quickFormat.getByRole("button", { name: "插入", exact: true }).click();
+    await page.getByRole("button", { name: "链接…", exact: true }).click();
     await page.getByRole("dialog", { name: "插入链接" }).waitFor();
-    expect(await quickFormat.isVisible()).toBe(false);
+    expect(await quickFormat.isVisible()).toBe(true);
     await page.keyboard.press("Escape");
     await quickFormat.waitFor();
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selection);
-    await page
-      .locator(".pane-column.active")
-      .getByRole("toolbar", { name: "编辑工具栏", exact: true })
-      .waitFor();
+    await page.getByRole("toolbar", { name: "编辑工具栏", exact: true }).waitFor();
     await page.getByRole("combobox", { name: "段落格式" }).focus();
-    await expect.poll(() => quickFormat.isVisible()).toBe(false);
+    await expect.poll(() => quickFormat.isVisible()).toBe(true);
     await page.keyboard.press("Escape");
     await editor.focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.insertText("后续输入");
     expect(await paragraph.innerText()).toBe("继续写作。后续输入");
-    await expect.poll(() => quickFormat.isVisible()).toBe(false);
+    await expect.poll(() => quickFormat.isVisible()).toBe(true);
     await page.keyboard.press("ControlOrMeta+s");
     await expect.poll(() => readFile(join(vault, "笔记.md"), "utf8")).toContain("$x+y+z$继续");
 
     await wiki.click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("heading", { name: "参考资料" }).waitFor();
+    await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
       .getByRole("treeitem", { name: "笔记.md", exact: true })
@@ -249,6 +248,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await link.click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("heading", { name: "参考资料" }).waitFor();
 
+    await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
       .getByRole("treeitem", { name: "长文.md", exact: true })
@@ -258,27 +258,17 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowRight" : "End");
     for (let index = 0; index < 8; index++) await page.keyboard.press("Shift+ArrowLeft");
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("第一行目标内容。");
+    await documentTools(page);
     await quickFormat.waitFor({ timeout: 3000 });
-    const paragraphBounds = await firstParagraph.boundingBox();
     const mainBounds = await page.locator(".main").boundingBox();
-    if (paragraphBounds === null || mainBounds === null) throw new Error("长文不可见");
+    if (!mainBounds) throw new Error("长文不可见");
+    const toolbarBefore = await quickFormat.boundingBox();
     await page.mouse.move(mainBounds.x + mainBounds.width - 20, mainBounds.y + 100);
-    await page.mouse.wheel(0, paragraphBounds.y - mainBounds.y - 4);
-    await expect
-      .poll(async () => {
-        const bar = await quickFormat.boundingBox();
-        const text = await firstParagraph.boundingBox();
-        return bar !== null && text !== null && bar.y >= text.y + text.height;
-      })
-      .toBe(true);
     await page.mouse.wheel(0, 500);
-    await expect.poll(() => quickFormat.isVisible()).toBe(false);
-    await page.mouse.wheel(0, -500);
-    await quickFormat.waitFor();
+    expect(await quickFormat.isVisible()).toBe(true);
+    expect((await quickFormat.boundingBox())!.y).toBeCloseTo(toolbarBefore!.y, 0);
     await page.setViewportSize({ width: 480, height: 800 });
-    await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
-    await editor.focus();
-    await quickFormat.waitFor();
+    await documentTools(page);
     await page.emulateMedia({ colorScheme: "dark" });
     const narrowBar = await quickFormat.boundingBox();
     expect(narrowBar).not.toBeNull();

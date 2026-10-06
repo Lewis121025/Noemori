@@ -82,17 +82,6 @@ export function findFileTreeNode(nodes: FileTreeNode[], path: string | null): Fi
   return null;
 }
 
-/** 搜索保留匹配项及其祖先，匹配目录时显示其全部子项；空查询返回原树。 */
-export function filterFileTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
-  const text = query.trim().toLocaleLowerCase();
-  if (text === "") return nodes;
-  return nodes.flatMap((node) => {
-    if (node.path.toLocaleLowerCase().includes(text)) return [node];
-    const children = filterFileTree(node.children, text);
-    return children.length === 0 ? [] : [{ ...node, children }];
-  });
-}
-
 /** 将展开后的树按显示次序排列；搜索时临时展开匹配祖先，不改变原折叠状态。 */
 export function visibleFileRows(
   nodes: FileTreeNode[],

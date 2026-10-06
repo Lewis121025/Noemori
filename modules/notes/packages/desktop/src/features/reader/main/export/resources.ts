@@ -11,7 +11,7 @@ import type { NativeExport } from "./native";
 import type { ExportComputation } from "./computation";
 
 /** 冻结图片以实际内容命名，确保同内容资源去重且输出路径稳定。 */
-export function resourceName(bytes: Uint8Array, extension: string): string {
+function resourceName(bytes: Uint8Array, extension: string): string {
   return `resources/${createHash("sha256").update(bytes).digest("hex")}.${extension}`;
 }
 

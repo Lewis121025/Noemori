@@ -1,3 +1,4 @@
+import { documentTools, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +65,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     });
     const files = page.getByRole("navigation", { name: "文件列表" });
     const open = async (name: string) => {
+      await sidebarComponent(page, "文件");
       await files.getByRole("treeitem", { name, exact: true }).click();
       await page.waitForFunction(
         (path) =>
@@ -78,6 +80,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
             .evaluate((node) => node.contains(document.activeElement)),
         )
         .toBe(true);
+      await documentTools(page);
     };
     const ready = (number: number) =>
       page.waitForFunction(
@@ -89,7 +92,10 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       );
 
     await ready(1);
-    const mentions = await page.evaluate(() => window.noemori.reader.indexMentionsTo("preview.pdf"));
+    await documentTools(page);
+    const mentions = await page.evaluate(() =>
+      window.noemori.reader.indexMentionsTo("preview.pdf"),
+    );
     expect(mentions.linked.some((mention) => mention.fromPath === "note.md")).toBe(true);
     const session = await page.evaluate(async () => {
       const panes = await window.noemori.reader.sessionGetPanes();

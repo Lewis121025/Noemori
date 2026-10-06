@@ -6,7 +6,6 @@ pub mod entries;
 pub mod entry_batch;
 pub mod export;
 pub mod files;
-pub mod graph;
 pub mod ink;
 pub mod links;
 pub mod metadata;

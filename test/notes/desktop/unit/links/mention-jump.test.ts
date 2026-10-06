@@ -2,11 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
-import {
-  findMentionPmPos,
-  utf8ByteToJsIndex,
-} from "@reader/renderer/links/mention-jump";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { findMentionPmPos, utf8ByteToJsIndex } from "@reader/renderer/links/mention-jump";
 
 const skipFixture = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../../../vault/fixtures/links/unlinked_skip.md"),

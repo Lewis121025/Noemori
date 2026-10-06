@@ -19,7 +19,7 @@ const settle = async () => {
 };
 const row = (path: string) => target.querySelector<HTMLButtonElement>(`[data-path="${path}"]`)!;
 const selected = () =>
-  [...target.querySelectorAll('[role="treeitem"][aria-selected="true"]')].map((node) =>
+  [...target.querySelectorAll('[role="gridcell"][aria-selected="true"] [data-path]')].map((node) =>
     node.getAttribute("data-path"),
   );
 const click = (path: string, options: MouseEventInit = {}) => {
@@ -102,6 +102,14 @@ afterEach(async () => {
 });
 
 describe("文件树多选与批量整理", () => {
+  it("浏览器滚动事件尚未交付时，行焦点更新不回放旧锚点", () => {
+    const viewport = target.querySelector<HTMLElement>('[role="grid"]')!;
+    viewport.scrollTop = 48;
+    row("c.md").focus();
+    flushSync();
+    expect(viewport.scrollTop).toBe(48);
+  });
+
   it("显示提交进度，停止后保留已完成项，继续只处理剩余项", async () => {
     let finish = () => {};
     vi.mocked(api.entryBatch).mockImplementationOnce(async (_request, onProgress) => {
@@ -228,35 +236,26 @@ describe("文件树多选与批量整理", () => {
     expect(selected()).toEqual([]);
   });
 
-  it("收起与过滤后不携带隐藏选择，父子同时选择只执行父目录", async () => {
+  it("进入文件夹不携带旧目录选择，路径搜索的父子多选只执行父目录", async () => {
     click("folder");
-    click("folder/note.md", { metaKey: true });
-    expect(selected()).toEqual(["folder", "folder/note.md"]);
-    key("folder", "ArrowLeft");
-    expect(selected()).toEqual(["folder"]);
-    click("folder");
-    click("folder/note.md", { metaKey: true });
+    row("folder").dispatchEvent(new MouseEvent("dblclick", { bubbles:true }));
+    await settle();
+    expect(selected()).toEqual([]);
+    expect(row("folder/note.md")).not.toBeNull();
+    const root = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "全部文件")!;
+    root.click();
+    const search = target.querySelector<HTMLInputElement>('[role="searchbox"]')!;
+    search.value = "folder";
+    search.dispatchEvent(new Event("input", { bubbles:true }));
+    flushSync();
+    click("folder", { metaKey:true });
+    click("folder/note.md", { metaKey:true });
     key("folder/note.md", "Delete");
     await settle();
-    expect(target.querySelector(".batch-dialog")?.textContent).toMatch(/移到废纸篓\s+1 项/);
     submit();
     await settle();
-    expect(api.entryBatch).toHaveBeenCalledExactlyOnceWith(
-      {
-        root: "/notes",
-        action: "trash",
-        paths: ["folder"],
-      },
-      expect.any(Function),
-    );
+    expect(api.entryBatch).toHaveBeenCalledExactlyOnceWith({ root:"/notes", action:"trash", paths:["folder"] }, expect.any(Function));
     expect(entries.some((entry) => entry.path.startsWith("folder"))).toBe(false);
-    click("a.md", { metaKey: true });
-    click("b.md", { metaKey: true });
-    const search = target.querySelector<HTMLInputElement>('[role="searchbox"]')!;
-    search.value = "a.md";
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-    expect(workspace.fileTree.state.selected).toEqual(["a.md"]);
   });
 
   it("部分成功保留已提交项，重试只发送剩余项，输入法与忙碌状态不会重复提交", async () => {
@@ -325,14 +324,14 @@ describe("文件树多选与批量整理", () => {
       props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
     });
     flushSync();
-    expect(row("folder").getAttribute("aria-expanded")).toBe("false");
+    expect(workspace.fileTree.state.expanded).toEqual([]);
     expect(selected()).toEqual(["b.md", "c.md"]);
-    const tree = target.querySelector<HTMLUListElement>('[role="tree"]')!;
+    const tree = target.querySelector<HTMLUListElement>('[role="grid"]')!;
     const before = tree.scrollTop;
     entries = [...entries, { path: "0.md", kind: "file" }];
     await workspace.refreshList();
     flushSync();
-    expect(tree.scrollTop).toBeCloseTo(before + 35.2);
+    expect(tree.scrollTop).toBeCloseTo(before + 148);
     expect(workspace.fileTree.state.scroll).toEqual({ path: "b.md", offset: 7 });
     entries = entries.filter((entry) => entry.path !== "c.md");
     await workspace.refreshList();
@@ -353,4 +352,13 @@ describe("文件树多选与批量整理", () => {
     await settle();
     expect(api.entryBatch).toHaveBeenCalledTimes(1);
   });
+});
+
+it("从未选中行开始拖动时，拖拽载荷只包含该行，不沿用上次选择", () => {
+  click("b.md");
+  const setData = vi.fn();
+  const event = new Event("dragstart", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: { setData, effectAllowed: "none" } });
+  row("a.md").dispatchEvent(event);
+  expect(setData).toHaveBeenCalledWith("text/plain", "a.md");
 });

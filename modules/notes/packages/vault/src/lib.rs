@@ -18,7 +18,6 @@ mod vault;
 pub use error::Error;
 pub use opening::{OpenObserver, OpenPhase, OpenProgress};
 pub use index::{HeadingRecord, TagCount};
-pub use links::graph::{Graph, GraphEdge, GraphNode};
 pub use links::identity::NoteKeys;
 pub use links::link::{LinkKind, LinkRecord, LinkResolution, LinkTarget};
 pub use links::mention::{MentionKind, MentionRecord, Mentions};

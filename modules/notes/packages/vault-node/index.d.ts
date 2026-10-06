@@ -71,33 +71,6 @@ export interface JsSavedCopy {
   /** 内容已保存后的警告。 */
   warning?: string
 }
-/** 图谱节点：笔记或死链目标。 */
-export interface JsGraphNode {
-  /** 笔记的库内相对路径；死链为去掉锚点后的目标原文。 */
-  path: string
-  /** 展示标题。 */
-  title: string
-  /** 标签，升序。 */
-  tags: Array<string>
-  /** 是否为尚未创建的死链目标。 */
-  dead: boolean
-}
-/** 图谱中的有向边。 */
-export interface JsGraphEdge {
-  /** 源笔记路径。 */
-  from: string
-  /** 目标节点的 `path`。 */
-  to: string
-  /** 这对起止之间的链接条数。 */
-  count: number
-}
-/** 全库图谱。 */
-export interface JsGraph {
-  /** 节点，按路径升序。 */
-  nodes: Array<JsGraphNode>
-  /** 边，按起止升序。 */
-  edges: Array<JsGraphEdge>
-}
 /** 已验证类别和归一化概率。 */
 export interface JsShapePrediction {
   /** 固定模型类别名。 */
@@ -406,14 +379,6 @@ export declare class NativeRuntime {
    * 未打开库、路径非法或副本提交失败。
    */
   fileWriteCopy(rel: string, bytes: Buffer, expected?: Buffer | undefined | null): Promise<JsSavedCopy>
-  /**
-   * 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
-   *
-   * # Errors
-   *
-   * 未打开库或索引查询失败。
-   */
-  indexGraph(includeDead: boolean): Promise<JsGraph>
   /**
    * 解析链接目标。
    *

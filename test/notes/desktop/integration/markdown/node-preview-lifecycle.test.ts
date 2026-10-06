@@ -5,9 +5,11 @@ import { EditorView } from "prosemirror-view";
 import { createHtmlNodeViews } from "@reader/renderer/markdown/views/html-view";
 import { createImageNodeViews } from "@reader/renderer/markdown/views/image-view";
 import { mathNodeViews } from "@reader/renderer/markdown/views/math-view";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { observeViewport } from "@reader/renderer/markdown/views/viewport";
-import { editSelectedSource, sourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+import { editSelectedSource, createSourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+
+const sourceEditingPlugin = createSourceEditingPlugin();
 
 const { visibility, renderTex, peekRenderedTex } = vi.hoisted(() => ({
   visibility: new Map<HTMLElement, (visible: boolean) => void>(),

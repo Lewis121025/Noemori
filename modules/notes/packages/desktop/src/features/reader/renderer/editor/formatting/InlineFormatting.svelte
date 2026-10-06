@@ -4,7 +4,15 @@
   import { writingCommands } from "../writing";
   import { readInlineMarkStates } from "./inline-formatting";
 
-  let { state, onFormat }: { state: EditorState; onFormat: (command: Command) => void } = $props();
+  let {
+    state,
+    onFormat,
+    variant = "all",
+  }: {
+    state: EditorState;
+    onFormat: (command: Command) => void;
+    variant?: "all" | "primary" | "secondary";
+  } = $props();
   const formats = [
     { name: "bold", label: "加粗", text: "B", mark: "strong", shortcut: "B" },
     { name: "italic", label: "斜体", text: "I", mark: "em", shortcut: "I" },
@@ -13,11 +21,18 @@
     { name: "code", label: "行内代码", text: "〈〉", mark: "code", shortcut: "`" },
   ] as const;
 
+  const visibleFormats = $derived(
+    formats.filter(
+      (format) =>
+        variant === "all" ||
+        (variant === "primary") === ["bold", "italic", "highlight"].includes(format.name),
+    ),
+  );
   const marks = $derived(readInlineMarkStates(state));
 </script>
 
 <div class="marks" role="group" aria-label="文字样式">
-  {#each formats as format (format.name)}
+  {#each visibleFormats as format (format.name)}
     <button
       class="reader-button"
       type="button"
@@ -65,7 +80,7 @@
   button[aria-label="删除线"] {
     text-decoration: line-through;
   }
-  button[aria-label="高亮"] {
+  button[aria-label="高亮"][aria-pressed="true"] {
     background: light-dark(#fff3a3, #5c4a12);
   }
 </style>

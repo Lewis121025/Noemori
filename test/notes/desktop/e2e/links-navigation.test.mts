@@ -9,6 +9,165 @@ import { _electron as electron } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
+test("双链显示：来源与目标去重、内部锚点分区、逐处跳转与高度调整", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "noemori-links-display-"));
+  t.onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const vault = join(root, "vault");
+  const userData = join(root, "state");
+  await Promise.all([mkdir(vault), mkdir(userData)]);
+  await Promise.all([
+    writeFile(
+      join(vault, "当前.md"),
+      "# 当前\n\n## 本节\n\n[[目标#甲节]] [[目标#乙节]] [本节](#本节) [[当前#本节]]\n",
+    ),
+    writeFile(join(vault, "来源.md"), "# 来源\n\n开头 [[当前]] 中间 [[当前]] 结尾。\n"),
+    writeFile(join(vault, "目标.md"), "# 目标\n\n## 甲节\n\n甲内容。\n\n## 乙节\n\n乙内容。\n"),
+    writeFile(join(vault, "提及.md"), "# 提及\n\n提到 当前 的正文。\n"),
+    writeFile(
+      join(userData, "session.json"),
+      JSON.stringify({
+        reader: {
+          vaultRoot: vault,
+          currentPath: "当前.md",
+          filesCollapsed: false,
+          leftWidth: 260,
+          sidebarView: "outline",
+        },
+        appearance: "light",
+        window: null,
+      }),
+    ),
+  ]);
+  const executablePath: unknown = require("electron");
+  if (typeof executablePath !== "string") throw new Error("缺少 Electron 可执行文件");
+  const app = await electron.launch({
+    executablePath,
+    args: [
+      fileURLToPath(new URL("out/main/index.js", desktop)),
+      `--user-data-dir=${userData}`,
+      "--no-sandbox",
+    ],
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] =>
+          entry[1] !== undefined && entry[0] !== "ELECTRON_RENDERER_URL",
+      ),
+    ),
+  });
+  try {
+    const page = await app.firstWindow();
+    page.setDefaultTimeout(6000);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) throw new Error("缺少应用窗口");
+      window.setContentSize(1100, 760);
+    });
+    const documentReady = (name: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.querySelector(".document-name")?.textContent === expected &&
+          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
+        name,
+      );
+    await documentReady("当前.md");
+    const toggle = page.getByRole("button", { name: "双链", exact: true });
+    expect(await toggle.getAttribute("aria-expanded")).toBe("false");
+    await toggle.click();
+    const incoming = page.getByRole("button", { name: "入链", exact: true });
+    const outgoing = page.getByRole("button", { name: "出链", exact: true });
+    const mentions = page.getByRole("button", { name: "提及", exact: true });
+    await expect.poll(async () => (await incoming.textContent())?.trim()).toBe("1");
+    await expect.poll(async () => (await outgoing.textContent())?.trim()).toBe("1");
+    expect(await incoming.getAttribute("title")).toContain("其他笔记 → 当前笔记");
+    expect(await outgoing.getAttribute("title")).toContain("当前笔记 → 其他目标");
+    expect(await incoming.getAttribute("aria-pressed")).toBe("true");
+    const references = page.locator(".references");
+    expect(await references.locator(".group").count()).toBe(1);
+    expect(await references.locator(".hit").count()).toBe(1);
+    expect(await references.getByRole("button").count()).toBe(2);
+    expect(await references.locator(".occurrence-count").textContent()).toBe("×2");
+    if (process.env.NOEMORI_LINKS_DISPLAY_SCREENSHOT)
+      await page.screenshot({ path: process.env.NOEMORI_LINKS_DISPLAY_SCREENSHOT });
+
+    // 合并摘要后每个数字仍定位原文中的不同位置，不能都跳到第一处。
+    await references.getByRole("button", { name: "第 2 处引用", exact: true }).click();
+    await documentReady("来源.md");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const selection = document.getSelection();
+          const node = selection?.anchorNode;
+          const paragraph = (node instanceof Element ? node : node?.parentElement)?.closest("p");
+          if (!selection || !node || !paragraph) return "";
+          const range = document.createRange();
+          range.selectNodeContents(paragraph);
+          range.setEnd(node, selection.anchorOffset);
+          return range.toString();
+        }),
+      )
+      .toContain("中间");
+    await page.keyboard.press("ControlOrMeta+[");
+    await documentReady("当前.md");
+
+    await outgoing.click();
+    const targets = page.locator(".outlinks > ul > .outlink-group");
+    await expect.poll(() => targets.locator(".raw").textContent()).toBe("目标.md");
+    expect(await targets.count()).toBe(1);
+    expect(await targets.getByRole("button").count()).toBe(2);
+    expect(await targets.locator(".occurrence-count").textContent()).toBe("×2");
+    await page.getByRole("region", { name: "本文内部跳转", exact: true }).waitFor();
+    expect(
+      await page
+        .getByRole("region", { name: "本文内部跳转", exact: true })
+        .getByRole("button")
+        .count(),
+    ).toBe(2);
+    await targets.getByRole("button", { name: "第 2 处引用：目标#乙节", exact: true }).click();
+    await documentReady("目标.md");
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.getSelection()?.anchorNode?.parentElement?.textContent),
+      )
+      .toContain("乙节");
+    await page.keyboard.press("ControlOrMeta+[");
+    await documentReady("当前.md");
+    await page
+      .getByRole("region", { name: "本文内部跳转", exact: true })
+      .getByRole("button", { name: "#本节", exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.getSelection()?.anchorNode?.parentElement?.textContent),
+      )
+      .toContain("本节");
+    expect(await page.locator(".document-name").textContent()).toBe("当前.md");
+    await mentions.click();
+    expect(await references.locator(".suggestions .group").count()).toBe(1);
+    expect(await references.getByRole("button", { name: "转为链接", exact: true }).count()).toBe(1);
+
+    const panel = page.getByRole("region", { name: "双链面板", exact: true });
+    const separator = page.getByRole("separator", { name: "调整双链高度", exact: true });
+    const initialHeight = (await panel.boundingBox())!.height;
+    const grip = (await separator.boundingBox())!;
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2 - 48, { steps: 4 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await panel.boundingBox())!.height)
+      .toBeCloseTo(initialHeight + 48, 0);
+    await toggle.click();
+    await toggle.click();
+    expect(await mentions.getAttribute("aria-pressed")).toBe("true");
+    expect((await panel.boundingBox())!.height).toBeCloseTo(initialHeight + 48, 0);
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
 test("链接跳转：路径锚点定位、同名歧义选择、文内锚点与失效锚点提示", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-links-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));

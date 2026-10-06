@@ -68,11 +68,19 @@ export function markdownPosition(
   view: MarkdownView,
   session: ReturnType<typeof createMarkdownSession>,
 ): EditorPositionApi {
+  // ProseMirror 文档不可变；滚动和选区变化不应反复编码、解码整篇正文。
+  // 只保留当前版本，编辑或撤销后的新节点必须重新生成保真快照。
+  let decoded: { doc: typeof view.state.doc; source: string } | null = null;
+  function currentSource(): string {
+    const doc = view.state.doc;
+    if (decoded?.doc !== doc) decoded = { doc, source: decode(session.snapshot(doc)) };
+    return decoded.source;
+  }
   return {
     capturePosition() {
       let source: string;
       try {
-        source = decode(session.snapshot(view.state.doc));
+        source = currentSource();
       } catch (error) {
         // 无法表达为源码的草稿没有合法源码锚点；正文恢复仍由保存链路负责。
         if (error instanceof MarkdownSnapshotError) return null;
@@ -98,7 +106,7 @@ export function markdownPosition(
     },
     async restorePosition(position, isCurrent) {
       if (view.isDestroyed || !isCurrent()) return;
-      const source = decode(session.snapshot(view.state.doc));
+      const source = currentSource();
       const at = (offset: number) =>
         session.positionAt(Math.min(source.length, Math.max(0, offset)));
       if (position.selection !== null) {

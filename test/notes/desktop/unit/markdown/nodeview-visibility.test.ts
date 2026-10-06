@@ -5,6 +5,8 @@ import { flushSync, mount, unmount, type Component } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentEditor from "@reader/renderer/editor/DocumentEditor.svelte";
 import type { MarkdownEditorApi } from "@reader/renderer/editor/editor-api";
+import { createBrowserMediaIo } from "@reader/renderer/preview/media";
+import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 
 vi.mock("@reader/renderer/markdown/views/mathjax", () => ({
   peekRenderedTex: (tex: string, display: boolean) => {
@@ -57,6 +59,9 @@ function mountNote(source: string): HTMLDivElement {
     target,
     props: {
       path: "Note.md",
+      mediaIo: createBrowserMediaIo(createReaderApiMock()),
+      importAttachment: async () => ({ path: "attachments/test.png", warning: null }),
+      onAttachmentReport: () => {},
       source,
       onDirty: () => {},
       onSave: () => {},

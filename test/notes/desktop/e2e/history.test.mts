@@ -155,7 +155,9 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     await expect.poll(() => readFile(join(vault, "笔记.md"), "utf8")).toBe(saved);
 
     await openLibrary(page);
-    const note = page.getByRole("treeitem", { name: "笔记.md", exact: true });
+    const note = page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("treeitem", { name: "笔记.md", exact: true });
     await note.focus();
     await page.keyboard.press("F2");
     const filename = page.getByRole("textbox", { name: "重命名文件", exact: true });
@@ -172,7 +174,10 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     expect(await filename.inputValue()).toBe("笔记.md");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("treeitem", { name: "文本.txt", exact: true }).dblclick();
+    await page
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("treeitem", { name: "文本.txt", exact: true })
+      .dblclick();
     const code = page.locator(".cm-content");
     await code.locator(".cm-line").first().click();
     await expect.poll(historyState).toEqual({ undo: false, redo: false });

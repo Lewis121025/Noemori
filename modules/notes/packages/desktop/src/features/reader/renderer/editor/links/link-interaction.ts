@@ -8,7 +8,7 @@ export type OpenContentLink = (kind: LinkKind, raw: string, from?: string) => vo
 
 /**
  * 编辑表面保留普通点击的光标与选区语义，仅修饰键点击打开链接或本地图片；
- * 阅读模式与只读预览优先导航，普通点击直接打开。
+ * 只读预览优先导航，普通点击直接打开。
  * @param open 经工作区保存门禁与目标校验的打开操作。
  * @returns 拦截浏览器原生链接导航的插件，不直接操作磁盘或外部浏览器。
  */

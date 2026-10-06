@@ -3,7 +3,6 @@ import {
   ancestorDirectories,
   buildFileTree,
   entryNameError,
-  filterFileTree,
   suggestEntryName,
   visibleFileRows,
 } from "@reader/renderer/library/file-tree";
@@ -48,18 +47,6 @@ describe("文件树数据契约", () => {
       "项目/深层/内容.md",
     );
     expect(ancestorDirectories("顶层.md")).toEqual([]);
-  });
-  it("搜索保留父级路径和匹配目录的后代，不改变折叠集合", () => {
-    const tree = buildFileTree(entries);
-    const folded = new Set<string>();
-    expect(
-      visibleFileRows(filterFileTree(tree, "内容"), folded, true).map((row) => row.node.path),
-    ).toEqual(["项目", "项目/深层", "项目/深层/内容.md"]);
-    expect(
-      visibleFileRows(filterFileTree(tree, "项目"), folded, true).map((row) => row.node.path),
-    ).toContain("项目/同名.md");
-    expect(filterFileTree(tree, "不存在")).toEqual([]);
-    expect(folded.size).toBe(0);
   });
   it("草稿目录和显式目录合并，不产生重复节点", () => {
     const tree = buildFileTree([

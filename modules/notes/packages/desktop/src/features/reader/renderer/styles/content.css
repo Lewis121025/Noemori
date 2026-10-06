@@ -190,6 +190,41 @@
   border-radius: 0.4rem;
 }
 
+.markdown-content .webpage-embed {
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+.markdown-content .webpage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  font: 0.8rem system-ui, sans-serif;
+}
+.markdown-content .webpage-address {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.markdown-content .webpage-surface {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+  font: 0.85rem system-ui, sans-serif;
+}
+
 .markdown-content :is(.note-image, .html-inline img, .html-block img) {
   max-width: 100%;
   height: auto;
@@ -489,6 +524,367 @@
 
 .markdown-content.reading .mermaid-source {
   display: none;
+}
+
+/* 界面配色在应用根部生效，阅读、源码与管理空间共享颜色，导出样式独立。 */
+.app {
+  --bg: light-dark(#fdfcf9, #242320);
+  --surface: light-dark(#fffefc, #302e29);
+  --chrome: light-dark(#f7f6f2, #292722);
+  --fg: light-dark(#242424, #f0f0ed);
+  --muted: light-dark(#5d5d58, #bebeb6);
+  --border: light-dark(#e3e1db, #49443b);
+  --sidebar: light-dark(#f2f1ed, #2b2924);
+  --selected: light-dark(#eae9e3, #3b362e);
+  --accent: light-dark(#242424, #efefe8);
+  --accent-fill: light-dark(#303030, #65655e);
+  color: var(--fg);
+  background: var(--bg);
+}
+
+/* 黑白方案的辅助区域保持轻量选中态；绿色方案另行提供完整的深色上下文。 */
+.app :is(.file-sidebar, .window-toolbar) {
+  --fg: light-dark(#62625b, #bcbcb4);
+  --muted: light-dark(#6b6b64, #afafa7);
+  --border: light-dark(#e9e7e1, #3d3a32);
+  --sidebar: light-dark(#f6f5f2, #292722);
+  --chrome: light-dark(#f3f2ef, #27251f);
+  --surface: light-dark(#fdfcf9, #2d2b25);
+  --selected: light-dark(#ecebe7, #36332c);
+  --accent: light-dark(#55554f, #c2c2b9);
+  color: var(--fg);
+}
+
+.app:has(.reading-space:not([hidden]) .surface > .markdown-content) .component-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.5;
+}
+
+.app:has(.reading-space:not([hidden]) .surface > .markdown-content) .window-toolbar .reader-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.app .quick-navigation .file[aria-selected="true"] {
+  background: var(--selected);
+  box-shadow: none;
+}
+
+.main:has(> .document-body > .surface > .markdown-content) {
+  --reading-heading: light-dark(#111111, #f4f4ef);
+  --reading-heading-2: light-dark(#202020, #edede7);
+  --reading-heading-3: light-dark(#292929, #e7e7e0);
+  --reading-heading-4: light-dark(#343434, #e0e0d9);
+  --reading-heading-5: light-dark(#404040, #d9d9d1);
+  --reading-heading-6: light-dark(#4a4a4a, #d2d2c9);
+  --reading-math: light-dark(#242424, #f0f0e9);
+  --reading-moss: light-dark(#85857e, #96968f);
+  --reading-inset: light-dark(#f4f3ef, #302d27);
+  --reading-canvas: light-dark(#f3f2ef, #1d1c19);
+  --reading-quote: light-dark(#f8f7f4, #2b2822);
+  --reading-code: light-dark(#f0efec, #353129);
+  --reading-formula: light-dark(#faf9f6, #2b2a25);
+  --reading-shadow: light-dark(#38383108, #00000026);
+  --font-reading: 19px;
+  --line-reading: 1.85;
+  color: var(--fg);
+  background: var(--reading-canvas);
+}
+
+/* 森林绿、纸白与苔色分别承担框架、内容和交互层级，颜色不依赖当前文档类型。 */
+.app[data-reading-palette="green"] {
+  --bg: light-dark(#fdfcf9, #242820);
+  --surface: light-dark(#fffefb, #2d3429);
+  --chrome: light-dark(#f2f3eb, #23372a);
+  --fg: light-dark(#28382e, #e7e9dc);
+  --muted: light-dark(#536858, #b5c2ad);
+  --border: light-dark(#d7dece, #3b5140);
+  --sidebar: light-dark(#eff1e8, #253a2c);
+  --selected: light-dark(#e3e8d7, #334d39);
+  --accent: light-dark(#255a41, #b2c995);
+  --accent-fill: light-dark(#254e3c, #b2c995);
+  --accent-text: light-dark(#f1f2e2, #1c2b22);
+  --warning: light-dark(#836227, #dcc58b);
+  --danger: light-dark(#a44e3f, #e8a897);
+  --shadow: light-dark(#203a2714, #06140d40);
+  --scrim: light-dark(#142d2460, #06140d80);
+}
+
+/* 深色框架独立提供完整的前景、背景和状态色，嵌套弹层与输入框也保持可读。 */
+.app[data-reading-palette="green"] :is(.file-sidebar, .window-toolbar, .settings-window nav) {
+  --bg: light-dark(#1e4238, #153528);
+  --surface: light-dark(#2b5141, #214936);
+  --chrome: light-dark(#21493c, #18382b);
+  --fg: light-dark(#e9edde, #dce6ce);
+  --muted: light-dark(#bdcbbb, #acbeb0);
+  --border: light-dark(#456454, #355847);
+  --sidebar: light-dark(#1e4238, #153528);
+  --selected: light-dark(#365b48, #2b503c);
+  --accent: light-dark(#e3e8bd, #d0ddb0);
+  --accent-fill: light-dark(#d7dfb2, #b9c997);
+  --accent-text: #173b2b;
+  --warning: light-dark(#e9c68b, #e6c691);
+  --danger: light-dark(#efb1a0, #f1b5a4);
+  --shadow: #071c1233;
+  color: var(--fg);
+}
+
+.app[data-reading-palette="green"] .file-sidebar {
+  background: var(--sidebar);
+}
+
+.app[data-reading-palette="green"] .files-scrim {
+  background: var(--scrim);
+}
+
+.app[data-reading-palette="green"] .quick-navigation .file[aria-selected="true"] {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+/* 白纸、浅苔色内容底与深绿代码块呼应外框；标题仍按感知明度区分六个层级。 */
+.app[data-reading-palette="green"] .main:has(> .document-body > .surface > .markdown-content) {
+  --reading-heading: light-dark(#124e34, #8adaaf);
+  --reading-heading-2: light-dark(#1e583d, #86cea8);
+  --reading-heading-3: light-dark(#2d6046, #87c4a3);
+  --reading-heading-4: light-dark(#38624c, #86bc9f);
+  --reading-heading-5: light-dark(#416551, #87b59c);
+  --reading-heading-6: light-dark(#496656, #89ae99);
+  --reading-math: light-dark(#16523f, #96e0bd);
+  --reading-moss: light-dark(#73927f, #658471);
+  --reading-inset: light-dark(#edf0e4, #2f392a);
+  --reading-canvas: light-dark(#e6e7dd, #132219);
+  --reading-quote: light-dark(#f0f2e8, #2b3427);
+  --reading-code: light-dark(#244b3b, #294c39);
+  --reading-code-ink: light-dark(#edf0da, #e5ecd4);
+  --reading-formula: light-dark(#f4f5ed, #2d3629);
+  --reading-shadow: light-dark(#213c2d14, #04110940);
+}
+
+.app[data-reading-palette="green"]
+  .main:has(> .document-body > .surface > .markdown-content)
+  .surface
+  > .markdown-content
+  pre {
+  color: var(--reading-code-ink);
+}
+
+/* 纸页边缘只通过绘制建立层次，不改变正文宽度、内边距和滚动布局。 */
+.main > .document-body:has(> .surface > .markdown-content) {
+  background: var(--bg);
+  border-radius: 0.5rem;
+  box-shadow:
+    0 0 0 0.75rem var(--bg),
+    0 6px 26px 14px var(--reading-shadow);
+}
+
+/* 可变字体略增笔画厚度，避免浅纸面上的宋体细笔画在小字号下显得发虚。 */
+.surface > .markdown-content {
+  font-weight: 450;
+}
+
+/* break-spaces 会禁用浏览器的段落评分；正文保留空格与换行，并启用尾行优化。 */
+.surface > .markdown-content p {
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+.surface > .markdown-content > p {
+  margin: 0.8em 0;
+}
+
+.surface > .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.surface > .markdown-content :is(h2, h3, h4, h5, h6) {
+  margin: 1.75rem 0 0.55rem;
+}
+
+.surface > .markdown-content h1 {
+  padding-bottom: 0.65em;
+  color: var(--reading-heading);
+  background: linear-gradient(var(--reading-moss), var(--reading-moss)) left bottom / 2.5rem 2px
+    no-repeat;
+  font-size: 2.25em;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: 0.015em;
+}
+
+.surface > .markdown-content h2 {
+  color: var(--reading-heading-2);
+  margin-top: 2.25rem;
+  font-size: 1.6em;
+  letter-spacing: 0.01em;
+}
+
+.surface > .markdown-content h3 {
+  color: var(--reading-heading-3);
+  font-size: 1.3em;
+}
+
+.surface > .markdown-content h4 {
+  color: var(--reading-heading-4);
+  font-size: 1.125em;
+}
+
+.surface > .markdown-content h5 {
+  color: var(--reading-heading-5);
+  font-size: 1em;
+  font-weight: 650;
+}
+
+.surface > .markdown-content h6 {
+  color: var(--reading-heading-6);
+  font-size: 0.9em;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+}
+
+/* 连续进入更深的小节时紧邻上级；同级或返回上级仍保留章节间距。 */
+.surface > .markdown-content h1 + :is(h2, h3, h4, h5, h6),
+.surface > .markdown-content h2 + :is(h3, h4, h5, h6),
+.surface > .markdown-content h3 + :is(h4, h5, h6),
+.surface > .markdown-content h4 + :is(h5, h6),
+.surface > .markdown-content h5 + h6 {
+  margin-top: 0.45rem;
+}
+
+.surface > .markdown-content :is(ul, ol) {
+  margin: 0.8rem 0;
+}
+
+.surface > .markdown-content :is(ul, ol) :is(ul, ol) {
+  margin: 0.25rem 0;
+}
+
+.surface > .markdown-content li + li {
+  margin-top: 0.4em;
+}
+
+.surface > .markdown-content :is(li, .list-item-content) > p + p {
+  margin-top: 0.55em;
+}
+
+.surface > .markdown-content :is(blockquote, .callout, pre, table, .math-block) {
+  margin-block: 1.25rem;
+}
+
+/* 首个内容块跟随标题，避免代码或公式使用自己的字号把标题与内容拉开。 */
+.surface
+  > .markdown-content
+  :is(h1, h2, h3, h4, h5, h6)
+  + :is(p, ul, ol, blockquote, .callout, pre, table, .math-block) {
+  margin-top: 0.55rem;
+}
+
+.surface > .markdown-content > :first-child,
+.surface > .markdown-content > [data-frontmatter] + * {
+  margin-top: 0.5rem;
+}
+
+.surface > .markdown-content :is(blockquote, li, .list-item-content) > :first-child {
+  margin-top: 0;
+}
+
+.surface > .markdown-content .callout-content > :first-child {
+  margin-top: 0.4em;
+}
+
+.surface > .markdown-content > :last-child,
+.surface
+  > .markdown-content
+  :is(blockquote, .callout-content, li, .list-item-content)
+  > :last-child {
+  margin-bottom: 0;
+}
+
+.surface > .markdown-content strong {
+  font-weight: 650;
+}
+
+.surface > .markdown-content :is(a, .wiki-link) {
+  font-weight: 500;
+}
+
+/* 公式预览继承独立强调色；源码编辑框与公式错误仍使用各自的状态样式。 */
+.surface > .markdown-content :is(.math-inline, .math-block) {
+  color: var(--reading-math);
+}
+
+/* 公式的细笔画需要略大的预览字号；源码输入保持既有尺寸和编辑体验。 */
+.surface > .markdown-content .math-inline:not(.source-editing) {
+  font-size: 1.15em;
+}
+
+.surface > .markdown-content .math-block:not(.source-editing) {
+  font-size: 1.3em;
+  padding: 0.35em 0.8em;
+  background: var(--reading-formula);
+  border: 0;
+  border-radius: 0.35rem;
+}
+
+.surface > .markdown-content .math-block:not(.source-editing) mjx-container[display="true"] {
+  margin: 0.45em 0;
+}
+
+.surface > .markdown-content blockquote {
+  padding: 0.7em 1.1em;
+  border-left-color: var(--reading-moss);
+  color: var(--muted);
+  background: var(--reading-quote);
+  font-size: 0.94em;
+  font-weight: 400;
+}
+
+.surface > .markdown-content code {
+  color: var(--accent);
+  background: var(--reading-inset);
+  border-radius: 0.2rem;
+  font-size: 0.9em;
+  font-weight: 500;
+  white-space: break-spaces;
+}
+
+.surface > .markdown-content pre {
+  border: 0;
+  border-radius: 0.25rem;
+  background: var(--reading-code);
+  box-shadow: none;
+}
+
+.surface > .markdown-content pre code {
+  color: inherit;
+  background: transparent;
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.surface > .markdown-content th {
+  color: var(--reading-heading);
+  background: var(--reading-inset);
+  font-weight: 600;
+}
+
+.surface > .markdown-content tr:nth-child(even) td {
+  background: var(--reading-formula);
+}
+
+.surface > .markdown-content .footnote-def {
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.surface > .markdown-content li::marker {
+  color: var(--accent);
+}
+
+.surface > .markdown-content .callout {
+  border-radius: 0.25rem;
+  background: var(--reading-inset);
 }
 
 /* 正文的键盘位置由插入光标和选区表达，避免把整篇文章画成表单输入框。 */

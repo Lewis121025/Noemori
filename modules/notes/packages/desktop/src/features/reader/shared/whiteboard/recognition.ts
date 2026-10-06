@@ -1,7 +1,7 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 
 /** 模型输出顺序与训练、ONNX 元数据固定一致；other 永远不进入几何修复。 */
-export const SHAPE_LABELS = [
+const SHAPE_LABELS = [
   "line",
   "circle",
   "ellipse",

@@ -46,11 +46,13 @@ describe("搜索导航时序", () => {
       ...api,
       openAttachments: () => {},
       insertWhiteboard: () => {},
+      insertWebPage: () => {},
       settleAttachments: async () => true,
       jumpTo: () => {},
       jumpToMention: jump,
       jumpToHeading: jump,
       currentHeading: () => null,
+      visibleHeading: () => null,
     };
     const open = async () => {
       document.load("next.md", { disk: bytes, draft: null });

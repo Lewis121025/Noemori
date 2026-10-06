@@ -27,6 +27,7 @@ import { createHtmlNodeViews } from "./html-view";
 import { createImageNodeViews } from "./image-view";
 import { createPdfNodeViews } from "./pdf-view";
 import { createPlayerNodeViews } from "./media-view";
+import { createWebPageNodeViews } from "./webpage-view";
 import { taskItemView } from "./task-view";
 import {
   calloutNodeViews,
@@ -67,12 +68,13 @@ export function createContentNodeViews(
     ...createImageNodeViews((src, kind) => resolveMediaUrl(from, src, kind, io)),
     ...createPdfNodeViews(from, open, io),
     ...createPlayerNodeViews(from, io),
+    ...createWebPageNodeViews(io.webPages, (url) => open("md", url)),
     ...createNoteEmbedViews(from, openLink, io, depth, chain),
   };
 }
 
 /** 嵌入嵌套上限（宿主文档的直接嵌入算第 1 层）。 */
-export const EMBED_DEPTH_LIMIT = 3;
+const EMBED_DEPTH_LIMIT = 3;
 
 /** 取消为 null，失败携带说明；白板只解析路径，由自己的预览生命周期先订阅再读取。 */
 type LoadedEmbed =

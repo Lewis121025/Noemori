@@ -8,6 +8,23 @@ import {
 } from "@reader/shared/file-browser";
 
 describe("目录会话边界", () => {
+  it("文件系统的当前文件夹跟随改名，并拒绝越界目录", () => {
+    const state = {
+      ...emptyFileTreeState(),
+      browse: { query: "", section: "files" as const, directory: "old/child" },
+    };
+    expect(parseFileTreeMessage(state)).toEqual(state);
+    expect(mapFileTreeState(state, (path) => path.replace(/^old/u, "new")).browse?.directory).toBe(
+      "new/child",
+    );
+    expect(
+      reconcileFileTreeState(state, [{ path: "old/child", kind: "directory" }]).browse?.directory,
+    ).toBe("old/child");
+    expect(reconcileFileTreeState(state, []).browse?.directory).toBe("");
+    expect(() =>
+      parseFileTreeMessage({ ...state, browse: { ...state.browse, directory: "../escape" } }),
+    ).toThrow();
+  });
   it("资料管理的查询和浏览分类随现场保存，改名不清空当前查询", () => {
     const state = {
       ...emptyFileTreeState(),
@@ -69,4 +86,24 @@ describe("目录会话边界", () => {
     ).toEqual({ expanded: ["keep"], selected: ["keep/b.md"], focused: null, scroll: null });
     expect(state.focused).toBe("old/a.md");
   });
+});
+
+it("左侧导航与资料管理独立保存滚动锚点，路径迁移同时处理两个视口", () => {
+  const state = {
+    ...emptyFileTreeState(),
+    scroll: { path: "目录/a.md", offset: 8 },
+    navigationScroll: { path: "目录/b.md", offset: 3 },
+  };
+  expect(parseFileTreeMessage(state)).toEqual(state);
+  expect(mapFileTreeState(state, (path) => path.replace("目录/", "新目录/"))).toMatchObject({
+    scroll: { path: "新目录/a.md", offset: 8 },
+    navigationScroll: { path: "新目录/b.md", offset: 3 },
+  });
+  expect(reconcileFileTreeState(state, [{ path: "目录/a.md", kind: "file" }])).toMatchObject({
+    scroll: state.scroll,
+    navigationScroll: null,
+  });
+  expect(() =>
+    parseFileTreeMessage({ ...state, navigationScroll: { path: "../a", offset: 0 } }),
+  ).toThrow();
 });

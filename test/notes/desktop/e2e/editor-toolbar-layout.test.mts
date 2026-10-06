@@ -5,20 +5,23 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { _electron as electron, type Page } from "playwright-core";
-import { noteAction } from "../support/workspace-actions";
+import { documentTools, openSplit, noteAction } from "../support/workspace-actions";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
 async function checkToolbar(page: Page, label: string): Promise<void> {
   const pane = page.locator(".pane-column.active");
-  const toolbar = pane.getByRole("toolbar", { name: label, exact: true });
+  await documentTools(page);
+  const toolbar = page
+    .locator(".topbar-document:not([hidden])")
+    .getByRole("toolbar", { name: label, exact: true });
   await toolbar.waitFor();
+  await toolbar.scrollIntoViewIfNeeded();
   const before = (await toolbar.boundingBox())!;
-  const viewport = (await pane.locator(".main").boundingBox())!;
-  expect(before.y + before.height, "工具栏应在正文滚动视口之外占据独立高度").toBeLessThanOrEqual(
-    viewport.y + 1,
-  );
+  const header = (await page.locator(".window-toolbar").boundingBox())!;
+  expect(before.y).toBeGreaterThanOrEqual(header.y);
+  expect(before.y + before.height).toBeLessThanOrEqual(header.y + header.height);
   await pane.locator(".main").evaluate((node) => {
     node.scrollTop = 600;
   });
@@ -31,18 +34,19 @@ async function checkToolbar(page: Page, label: string): Promise<void> {
   const after = (await toolbar.boundingBox())!;
   expect(after.y).toBeCloseTo(before.y, 0);
   expect(after.x).toBeGreaterThanOrEqual(0);
-  expect(after.x + after.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
-  for (const control of await toolbar.locator("button, select").all()) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const control of await toolbar.locator("button:not(:disabled), select:not(:disabled)").all()) {
+    await control.focus();
     const box = await control.boundingBox();
+    const port = (await page.locator(".window-document-tools").boundingBox())!;
     if (box === null) continue;
-    expect(box.x, (await control.getAttribute("aria-label")) ?? "工具按钮").toBeGreaterThanOrEqual(
-      after.x - 1,
-    );
-    expect(box.x + box.width).toBeLessThanOrEqual(after.x + after.width + 1);
+    expect(box.x).toBeGreaterThanOrEqual(port.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(port.x + port.width + 1);
   }
+
 }
 
-test("编辑工具栏独立占位，滚动、跳转、源码与窄屏分栏均不遮挡正文", async (t) => {
+test("编辑工具常驻顶栏，滚动与窄屏分栏保留工具和正文独立布局", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-toolbar-layout-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -112,13 +116,10 @@ test("编辑工具栏独立占位，滚动、跳转、源码与窄屏分栏均�
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]!.setContentSize(1100, 720),
     );
-    await noteAction(page, "拆分为两栏");
-    await page.locator(".pane-column").nth(1).focus();
-    await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-    await page
-      .getByRole("tree", { name: "当前笔记库文件树" })
-      .getByRole("treeitem", { name: "对照.md", exact: true })
-      .click();
+    await openSplit(page);
+    const picker = page.locator("dialog.picker[open]").getByRole("combobox");
+    await picker.fill("对照");
+    await picker.press("Enter");
     await expect.poll(() => page.locator(".ProseMirror").count()).toBe(2);
     for (const width of [650, 1100]) {
       await app.evaluate(
@@ -126,8 +127,8 @@ test("编辑工具栏独立占位，滚动、跳转、源码与窄屏分栏均�
         width,
       );
       await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
-      for (const pane of await page.locator(".pane-column").all()) {
-        await pane.click({ position: { x: 5, y: 5 } });
+      for (const button of await page.locator(".pane-switch button").all()) {
+        await button.click();
         await checkToolbar(page, "编辑工具栏");
       }
     }

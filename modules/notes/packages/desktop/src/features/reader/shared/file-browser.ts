@@ -4,7 +4,11 @@ import type { VaultEntry } from "./api";
 export type FileTreePosition = { path: string; offset: number };
 
 /** 资料管理的浏览入口；只保存查询文本，结果恢复时从当前索引重新读取。 */
-export type LibraryBrowse = { query: string; section: "files" | "tags" | "bookmarks" };
+type LibraryBrowse = {
+  query: string;
+  section: "files" | "tags" | "bookmarks";
+  directory?: string;
+};
 
 /** 目录的持久化工作现场；旧会话缺少 browse 时显示全部资料。 */
 export type FileTreeState = {
@@ -13,6 +17,8 @@ export type FileTreeState = {
   selected: string[];
   focused: string | null;
   scroll: FileTreePosition | null;
+  /** 左侧导航与资料管理可同时显示，滚动锚点必须按视口独立。 */
+  navigationScroll?: FileTreePosition | null;
 };
 
 /** 返回互不共享数组的空目录状态，不触发磁盘读写。 */
@@ -39,7 +45,28 @@ function parseBrowse(value: unknown): LibraryBrowse | null {
     (value.section !== "files" && value.section !== "tags" && value.section !== "bookmarks")
   )
     return null;
-  return { query: value.query, section: value.section };
+  return {
+    query: value.query,
+    section: value.section,
+    ...("directory" in value && (value.directory === "" || isEntryPath(value.directory))
+      ? { directory: value.directory }
+      : {}),
+  };
+}
+
+/** 恢复单个文件视口；非法字段回退为无锚点。 */
+function parseTreePosition(value: unknown): FileTreePosition | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("path" in value) ||
+    !("offset" in value) ||
+    !isEntryPath(value.path) ||
+    typeof value.offset !== "number" ||
+    !Number.isFinite(value.offset)
+  )
+    return null;
+  return { path: value.path, offset: Math.max(0, Math.min(value.offset, 500)) };
 }
 
 /** 损坏的会话字段逐项丢弃；缺失状态返回 null，供首次打开时定位当前文档。 */
@@ -48,23 +75,16 @@ export function parseFileTreeState(value: unknown): FileTreeState | null {
   const record = value as Record<string, unknown>;
   const paths = (input: unknown): string[] =>
     Array.isArray(input) ? [...new Set(input.filter(isEntryPath))] : [];
-  const scroll = record.scroll;
   const browse = parseBrowse(record.browse);
   return {
     ...(browse === null ? {} : { browse }),
     expanded: paths(record.expanded),
     selected: paths(record.selected),
     focused: isEntryPath(record.focused) ? record.focused : null,
-    scroll:
-      typeof scroll === "object" &&
-      scroll !== null &&
-      "path" in scroll &&
-      "offset" in scroll &&
-      isEntryPath(scroll.path) &&
-      typeof scroll.offset === "number" &&
-      Number.isFinite(scroll.offset)
-        ? { path: scroll.path, offset: Math.max(0, Math.min(scroll.offset, 500)) }
-        : null,
+    scroll: parseTreePosition(record.scroll),
+    ...(record.navigationScroll === undefined
+      ? {}
+      : { navigationScroll: parseTreePosition(record.navigationScroll) }),
   };
 }
 
@@ -81,7 +101,16 @@ export function parseFileTreeMessage(value: unknown): FileTreeState {
     !item.selected.every(isEntryPath) ||
     (item.focused !== null && !isEntryPath(item.focused)) ||
     (item.scroll !== null && state.scroll === null) ||
-    (item.browse !== undefined && parseBrowse(item.browse) === null)
+    (item.navigationScroll !== undefined &&
+      item.navigationScroll !== null &&
+      state.navigationScroll === null) ||
+    (item.browse !== undefined &&
+      (parseBrowse(item.browse) === null ||
+        (typeof item.browse === "object" &&
+          item.browse !== null &&
+          "directory" in item.browse &&
+          item.browse.directory !== "" &&
+          !isEntryPath(item.browse.directory))))
   )
     throw new Error("目录会话无效");
   return state;
@@ -100,13 +129,32 @@ export function mapFileTreeState(
       }),
     ),
   ];
-  const scrollPath = state.scroll === null ? null : map(state.scroll.path);
+  const mapPosition = (position: FileTreePosition | null): FileTreePosition | null => {
+    if (position === null) return null;
+    const path = map(position.path);
+    return path === null ? null : { path, offset: position.offset };
+  };
   return {
-    ...(state.browse === undefined ? {} : { browse: { ...state.browse } }),
+    ...(state.browse === undefined
+      ? {}
+      : {
+          browse: {
+            ...state.browse,
+            ...(state.browse.directory === undefined
+              ? {}
+              : {
+                  directory:
+                    state.browse.directory === "" ? "" : (map(state.browse.directory) ?? ""),
+                }),
+          },
+        }),
     expanded: paths(state.expanded),
     selected: paths(state.selected),
     focused: state.focused === null ? null : map(state.focused),
-    scroll: scrollPath === null ? null : { path: scrollPath, offset: state.scroll?.offset ?? 0 },
+    scroll: mapPosition(state.scroll),
+    ...(state.navigationScroll === undefined
+      ? {}
+      : { navigationScroll: mapPosition(state.navigationScroll) }),
   };
 }
 
@@ -129,6 +177,7 @@ export function reconcileFileTreeState(
     }
   }
   const next = mapFileTreeState(state, (path) => (paths.has(path) ? path : null));
+  if (next.browse?.directory && !directories.has(next.browse.directory)) next.browse.directory = "";
   next.expanded = next.expanded.filter((path) => directories.has(path));
   return next;
 }

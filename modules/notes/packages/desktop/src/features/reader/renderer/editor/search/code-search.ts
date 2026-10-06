@@ -5,9 +5,13 @@ import type { EditorView } from "@codemirror/view";
  * 将源码查找框的输入立即提交到 CodeMirror 查询状态。
  * 内置面板只监听 keyup/change，粘贴后第一次回车与按钮替换会读取旧查询。
  * @param view 拥有内置查找面板的源码编辑器。
+ * @param container 查找面板的实际宿主；移入侧栏后仍保持粘贴与替换即时同步。
  * @returns 卸载时移除监听；查询更新不修改正文，也不移动选区或焦点。
  */
-export function bindCodeSearchInput(view: EditorView): () => void {
+export function bindCodeSearchInput(
+  view: EditorView,
+  container: HTMLElement = view.dom,
+): () => void {
   const input = (event: Event) => {
     const field = event.target;
     if (
@@ -28,6 +32,6 @@ export function bindCodeSearchInput(view: EditorView): () => void {
     });
     if (!query.eq(previous)) view.dispatch({ effects: setSearchQuery.of(query) });
   };
-  view.dom.addEventListener("input", input);
-  return () => view.dom.removeEventListener("input", input);
+  container.addEventListener("input", input);
+  return () => container.removeEventListener("input", input);
 }

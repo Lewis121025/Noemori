@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { expect, test } from "vitest";
 import { _electron as electron } from "playwright-core";
+import { openLibrary } from "../support/workspace-actions";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
@@ -71,12 +72,13 @@ test("死链创建：#标题锚点随创建写入新笔记并直接定位", asyn
       (document.getSelection()?.anchorNode?.parentElement?.textContent ?? "").includes("计划小节"),
     );
     await expect.poll(() => readFile(join(vault, "新笔记.md"), "utf8")).toBe("# 计划小节\n\n");
-    // 文件树同步出现新条目，且没有误报锚点失效。
+    // 文件系统同步出现新条目，且没有误报锚点失效。
+    await openLibrary(page);
     await expect
       .poll(() =>
         page
-          .getByRole("navigation", { name: "文件列表" })
-          .locator('[data-path="新笔记.md"]')
+          .getByRole("grid")
+          .getByRole("button", { name: "新笔记.md", exact: true })
           .count(),
       )
       .toBe(1);

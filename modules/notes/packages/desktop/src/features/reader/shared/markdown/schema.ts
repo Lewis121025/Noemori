@@ -4,6 +4,7 @@
  * 这是文档表面的唯一模型；Markdown 适配器只做映射，不再另造 IR。
  */
 import { Schema, type DOMOutputSpec, type MarkSpec, type NodeSpec } from "prosemirror-model";
+import { webPageHeight, webPageUrl } from "../webpage";
 
 const mediaAttrs = {
   src: { default: "", validate: "string" },
@@ -191,6 +192,31 @@ const nodes: Record<string, NodeSpec> = {
   },
   audio: mediaNode("audio"),
   video: mediaNode("video"),
+  webpage: {
+    atom: true,
+    group: "block",
+    attrs: {
+      url: { validate: webPageUrl },
+      height: { default: 480, validate: webPageHeight },
+    },
+    parseDOM: [
+      {
+        tag: "div[data-webpage-url]",
+        getAttrs: (dom) => ({
+          url: dom.getAttribute("data-webpage-url"),
+          height: Number(dom.getAttribute("data-webpage-height") ?? 480),
+        }),
+      },
+    ],
+    toDOM: (node) => [
+      "div",
+      {
+        "data-webpage-url": String(node.attrs["url"]),
+        "data-webpage-height": String(node.attrs["height"]),
+      },
+      String(node.attrs["url"]),
+    ],
+  },
   note_embed: {
     atom: true,
     group: "block",

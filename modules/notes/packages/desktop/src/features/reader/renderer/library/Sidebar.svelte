@@ -60,7 +60,14 @@
   }
 </script>
 
-<aside {hidden} class="file-sidebar" style:width="{resize?.width ?? width}px" aria-label="文件栏">
+<aside
+  {hidden}
+  inert={hidden}
+  class="file-sidebar"
+  class:resizing={resize !== null}
+  style:--sidebar-width="{resize?.width ?? width}px"
+  aria-label="文件栏"
+>
   <div class="body">{@render children()}</div>
   <!-- 按 WAI-ARIA 分隔条模式，带范围值的 separator 需要键盘焦点；Svelte 将该角色一律归为静态元素。 -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -92,15 +99,35 @@
 <style>
   .file-sidebar[hidden] {
     display: none;
+    position: absolute;
+    inset: 0 auto 0 0;
+    translate: -100% 0;
+    opacity: 0;
   }
   .file-sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar);
     position: relative;
+    z-index: 1;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
+    transition:
+      translate var(--motion-enter) var(--motion-ease),
+      opacity var(--motion-fast) ease,
+      display var(--motion-enter) allow-discrete;
+  }
+  .file-sidebar.resizing {
+    transition: none;
+  }
+  @starting-style {
+    .file-sidebar:not([hidden]) {
+      translate: -100% 0;
+      opacity: 0;
+    }
   }
 
   .body {
@@ -109,6 +136,8 @@
     flex: 1 1 auto;
     min-height: 0;
     min-width: 0;
+    /* 开合只移动整栏，正文和侧栏都不逐帧重排；拖动宽度仍使用真实布局。 */
+    width: var(--sidebar-width);
   }
 
   .resize {
@@ -137,6 +166,25 @@
       z-index: 2;
       max-width: 80%;
       box-shadow: 8px 0 24px var(--shadow);
+      transition:
+        translate var(--motion-drawer) var(--motion-ease-spatial),
+        display var(--motion-drawer) allow-discrete;
+    }
+    .file-sidebar[hidden] {
+      width: var(--sidebar-width);
+      opacity: 1;
+      translate: -100% 0;
+      transition-duration: var(--motion-enter);
+    }
+    .body {
+      max-width: calc(100vw - 3rem);
+    }
+    @starting-style {
+      .file-sidebar:not([hidden]) {
+        width: var(--sidebar-width);
+        opacity: 1;
+        translate: -100% 0;
+      }
     }
   }
 </style>

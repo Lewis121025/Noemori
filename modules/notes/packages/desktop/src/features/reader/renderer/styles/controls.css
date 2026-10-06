@@ -9,10 +9,10 @@
 }
 .reader-input {
   min-width: 0;
-  padding: 0.5rem 0.65rem;
+  padding: 0.25rem 0.65rem;
   transition:
-    border-color var(--motion-fast),
-    background var(--motion-fast);
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
 }
 .reader-input::placeholder {
   color: var(--muted);
@@ -24,14 +24,18 @@
   outline-offset: 1px;
 }
 .reader-button {
+  background: transparent;
+  border-color: transparent;
   min-width: 32px;
   padding: 0.4rem 0.7rem;
   cursor: pointer;
   font-weight: 500;
   transition:
-    background var(--motion-fast),
-    border-color var(--motion-fast),
-    box-shadow var(--motion-fast);
+    background var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    filter var(--motion-fast) var(--motion-ease);
 }
 .reader-button:hover:not(:disabled) {
   background: var(--selected);
@@ -40,8 +44,9 @@
   background: var(--selected);
   color: var(--accent);
 }
-.reader-button:active:not(:disabled) {
-  box-shadow: inset 0 1px 3px var(--shadow);
+.reader-button:active:is(:hover, :focus-visible):not(:disabled) {
+  box-shadow: inset 0 1px 2px var(--shadow);
+  transition-duration: var(--motion-press);
 }
 .reader-button.primary {
   background: var(--accent-fill);
@@ -59,8 +64,10 @@
 
 .reader-popover {
   position: fixed;
-  inset: 4rem 1rem auto auto;
-  margin: 0;
+  inset: auto;
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block, flip-inline;
+  margin: 0.3rem;
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -81,4 +88,35 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   flex-shrink: 0;
+}
+
+.reader-button.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.reader-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .reader-button,
+  .reader-input,
+  button {
+    min-height: 44px;
+  }
+  .reader-button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-button,
+  .reader-input {
+    transition: none;
+  }
 }

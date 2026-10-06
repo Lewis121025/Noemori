@@ -221,6 +221,11 @@ export class ExportDocuments {
     const origin = this.origins.get(node) ?? { path: from, position: -1 };
     const attribute = (key: string) => String(node.attrs[key] ?? "");
     let result: PmNode[];
+    if (name === "webpage") {
+      // 导出保留可访问的原始入口，不在导出事务中请求或执行远程网页。
+      const url = attribute("url");
+      return [paragraph([text(url).mark([documentSchema.mark("link", { href: url })])])];
+    }
     if (name === "note_embed") {
       const result = await this.embed(node, from, chain);
       const first = result[0];

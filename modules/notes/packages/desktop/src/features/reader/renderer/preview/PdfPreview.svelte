@@ -1,11 +1,22 @@
 <script lang="ts">
+  import { revealOnChange } from "../motion";
+  import type { Snippet } from "svelte";
   import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
   import type { PdfPageRender } from "./pdf";
   import PreviewZoom from "./PreviewZoom.svelte";
   import "pdfjs-dist/web/pdf_viewer.css";
   import "./preview.css";
 
-  let { bytes, compact = false }: { bytes: Uint8Array; compact?: boolean } = $props();
+  let {
+    bytes,
+    compact = false,
+    registerToolbar,
+  }: {
+    bytes: Uint8Array;
+    compact?: boolean;
+    /** 嵌入预览保留就地导航，独立文档的操作交由左侧栏呈现。 */
+    registerToolbar?: (toolbar: Snippet | null) => void;
+  } = $props();
   let pdf = $state.raw<PDFDocumentProxy | null>(null);
   let page = $state.raw<PDFPageProxy | null>(null);
   let pageNumber = $state(1);
@@ -121,9 +132,15 @@
     if (pdf !== null && Number.isInteger(next) && next >= 1 && next <= pdf.numPages)
       pageNumber = next;
   }
+  $effect(() => {
+    const register = registerToolbar;
+    if (!register) return;
+    register(previewTools);
+    return () => register(null);
+  });
 </script>
 
-<section class="attachment-preview" class:compact aria-label="PDF 预览">
+{#snippet previewTools()}
   <div class="preview-toolbar">
     <button
       type="button"
@@ -160,6 +177,10 @@
     />
     {#if rendering}<span role="status">正在渲染…</span>{/if}
   </div>
+{/snippet}
+
+<section class="attachment-preview" class:compact aria-label="PDF 预览">
+  {#if registerToolbar === undefined}{@render previewTools()}{/if}
   <div class="preview-viewport" bind:clientWidth={width} bind:clientHeight={height}>
     {#if passwordRequest !== null}
       <form
@@ -184,6 +205,7 @@
     {/if}
     <div
       class="preview-stage"
+      use:revealOnChange={{ key: JSON.stringify([pageNumber, zoom]), kind: "media" }}
       class:concealed={page === null || error !== "" || rendering}
       aria-label={`第 ${pageNumber} 页内容`}
       aria-busy={rendering}

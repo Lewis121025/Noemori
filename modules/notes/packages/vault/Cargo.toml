@@ -66,10 +66,6 @@ name = "links_unit_note_keys"
 path = "../../../../test/notes/vault/unit/links/note_keys.rs"
 
 [[test]]
-name = "links_unit_graph"
-path = "../../../../test/notes/vault/unit/links/graph.rs"
-
-[[test]]
 name = "links_integration_rename"
 path = "../../../../test/notes/vault/integration/rename/rename.rs"
 

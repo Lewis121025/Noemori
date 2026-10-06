@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
-import {
-  findHeadingPmPos,
-  normalizeHeadingText,
-} from "@reader/shared/markdown/heading-anchor";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { findHeadingPmPos, normalizeHeadingText } from "@reader/shared/markdown/heading-anchor";
 
 describe("normalizeHeadingText", () => {
   it("折叠连续空白、去首尾并小写", () => {

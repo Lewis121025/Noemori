@@ -110,28 +110,24 @@ it("只读事务边界拒绝直接写入、替换、撤销和追加写入，同�
   expect(view.state.doc.textContent).toBe("正文");
 });
 
-it("阅读模式允许正文与高亮，完整格式命令被消费且不改变内容", () => {
+it("正常文档同时支持正文、高亮与完整格式，真实只读权限仍拒绝修改", () => {
   const host = document.createElement("div");
   document.body.append(host);
   view = new EditorView(host, {
     state: EditorState.create({
       doc: parseMarkdown("正文"),
-      plugins: [documentAccess(false, true), history()],
+      plugins: [documentAccess(false), history()],
     }),
     handleScrollToSelection: () => true,
   });
   view.dispatch(view.state.tr.insertText("补充", 1));
-  expect(view.state.doc.textContent).toBe("补充正文");
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)));
   writingCommands.highlight(view.state, view.dispatch, view);
-  expect(view.state.doc.rangeHasMark(1, 3, view.state.schema.marks["highlight"]!)).toBe(true);
-  const before = view.state.doc;
-  expect(writingCommands.bold(view.state)).toBe(false);
-  expect(writingCommands.bold(view.state, view.dispatch, view)).toBe(true);
-  writingCommands.heading1(view.state, view.dispatch, view);
-  expect(view.state.doc.eq(before)).toBe(true);
-  setDocumentReadOnly(view, false, false);
-  expect(writingCommands.bold(view.state)).toBe(true);
   writingCommands.bold(view.state, view.dispatch, view);
+  expect(view.state.doc.rangeHasMark(1, 3, view.state.schema.marks["highlight"]!)).toBe(true);
   expect(view.state.doc.rangeHasMark(1, 3, view.state.schema.marks["strong"]!)).toBe(true);
+  setDocumentReadOnly(view, true);
+  const before = view.state.doc;
+  view.dispatch(view.state.tr.insertText("不允许", 1));
+  expect(view.state.doc.eq(before)).toBe(true);
 });

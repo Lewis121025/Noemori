@@ -668,16 +668,6 @@ impl Vault {
         Ok(crate::links::identity::note_keys(&files, &aliases))
     }
 
-    /// 全库关系图谱；`include_dead` 为真时死链目标作为虚节点出现。
-    ///
-    /// # Errors
-    ///
-    /// 索引查询失败。
-    pub fn graph(&self, include_dead: bool) -> Result<crate::Graph, Error> {
-        let conn = self.lock_conn()?;
-        crate::links::graph::load_graph(&conn, include_dead)
-    }
-
     /// 先将排名索引同步到正文版本，再执行结构化全文搜索；条件语义见 [`SearchQuery`]。
     ///
     /// # Errors

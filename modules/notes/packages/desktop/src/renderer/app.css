@@ -34,7 +34,18 @@
   --space-12: 48px;
   --radius-control: 8px;
   --radius-panel: 12px;
-  --motion-fast: 120ms;
+  --motion-fast: 140ms;
+  --motion-press: 70ms;
+  --motion-select: 200ms;
+  --motion-enter: 220ms;
+  --motion-exit: 130ms;
+  --motion-menu: 160ms;
+  --motion-dialog: 260ms;
+  --motion-drawer: 300ms;
+  --motion-scene: 180ms;
+  --motion-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --motion-ease-spatial: cubic-bezier(0.3, 0, 0.2, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --font-interface:
     -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", "Segoe UI", sans-serif;
   --reading-width: 48rem;
@@ -88,7 +99,9 @@ select {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
 }

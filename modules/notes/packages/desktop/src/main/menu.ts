@@ -52,6 +52,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
         command("save"),
         command("export-document"),
         command("export-vault"),
+        ...(process.platform === "darwin" ? [] : [command("open-settings")]),
         { role: "close", label: "关闭窗口" },
       ],
     },
@@ -67,6 +68,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
         { role: "selectAll", label: "全选" },
         command("insert-attachment"),
         command("insert-whiteboard"),
+        command("insert-webpage"),
         { type: "separator" },
         command("find"),
         command("find-files"),
@@ -83,7 +85,6 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
         command("go-forward"),
         { type: "separator" },
         command("toggle-source"),
-        command("toggle-reading"),
       ],
     },
     {
@@ -104,6 +105,7 @@ export function installApplicationMenu(dispatch: (command: AppCommand) => void):
       label: "Noemori",
       submenu: [
         { role: "about", label: "关于 Noemori" },
+        command("open-settings"),
         { type: "separator" },
         { role: "services", label: "服务" },
         { type: "separator" },

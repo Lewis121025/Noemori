@@ -12,7 +12,7 @@ import type { EditorSnapshot } from "../markdown/source-session";
 import type { EditorPositionApi } from "./editor-position";
 
 /** 所有可编辑表面共有的保存与历史契约，不要求内容具有文本位置。 */
-export type ContentEditorApi = {
+type ContentEditorApi = {
   /** 操作所属文档的历史；焦点属于普通输入框时返回 false，由输入框处理。 */
   history: (action: HistoryAction) => boolean;
   /** 响应式读取历史可用性；焦点属于普通输入框时返回 null。 */
@@ -53,6 +53,8 @@ export type MarkdownEditorApi = TextEditorApi & {
   openAttachments: () => void;
   /** 在当前正文位置创建独立白板并插入引用，复用附件异步插入与保存门禁。 */
   insertWhiteboard: () => void;
+  /** 从当前正文选区打开网页插入对话框，取消不修改文档。 */
+  insertWebPage: () => void;
   /** 等待附件导入与引用插入；失败返回 false，必须先重试或关闭失败提示。 */
   settleAttachments: () => Promise<boolean>;
   /** 把选区移到标题内，并把该标题滚到阅读区顶部。 */
@@ -73,6 +75,8 @@ export type MarkdownEditorApi = TextEditorApi & {
   jumpToHeading: (anchor: string) => boolean;
   /** 选区所在章节的标题文本（大纲同一口径）；选区在首个标题之前时为 `null`。 */
   currentHeading: () => string | null;
+  /** 当前滚动视口的章节位置，不使用编辑选区；同名标题仍可区分。 */
+  visibleHeading: () => number | null;
 };
 
 /** 代码表面：快照保留原始换行，并支持源码字节位置跳转。 */

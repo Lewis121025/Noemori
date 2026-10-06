@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 import { DOMParser, DOMSerializer } from "prosemirror-model";
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { documentSchema } from "@reader/shared/markdown/schema";
 
 describe("源码节点的剪贴板保真", () => {

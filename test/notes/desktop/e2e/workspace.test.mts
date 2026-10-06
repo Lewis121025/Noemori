@@ -102,7 +102,7 @@ $$
         return { radius: style.borderRadius, padding: style.paddingTop, shadow: style.boxShadow };
       }),
     ).toEqual({ radius: "0px", padding: "0px", shadow: "none" });
-    expect(await page.locator("#outline-panel").isVisible()).toBe(false);
+    expect(await page.locator("#outline-panel-0").isVisible()).toBe(false);
     expect(await page.locator(".entry-dialog").isVisible()).toBe(false);
     expect(await page.locator(".references details").getAttribute("open")).toBeNull();
     expect(await page.locator(".references summary").innerText()).toBe("被 1 篇笔记引用");
@@ -110,10 +110,10 @@ $$
     await page.getByRole("button", { name: "目录", exact: true }).click();
     await page.getByRole("navigation", { name: "文档目录" }).waitFor();
     await page.keyboard.press("Escape");
-    expect(await page.locator("#outline-panel").isVisible()).toBe(false);
+    expect(await page.locator("#outline-panel-0").isVisible()).toBe(false);
     await page.getByRole("button", { name: "目录", exact: true }).click();
     await page.getByRole("button", { name: "少一点选择", exact: true }).click();
-    expect(await page.locator("#outline-panel").isVisible()).toBe(false);
+    expect(await page.locator("#outline-panel-0").isVisible()).toBe(false);
 
     await page.locator(".references summary").click();
     await page.locator(".references .hit").click();
@@ -240,7 +240,8 @@ $$
     ).toBe(dark);
     await page.emulateMedia({ colorScheme: null });
     await chooseAppearance("深色");
-    if (screenshots) await page.screenshot({ path: join(screenshots, "noemori-appearance-dark.png") });
+    if (screenshots)
+      await page.screenshot({ path: join(screenshots, "noemori-appearance-dark.png") });
     await page.keyboard.press("Escape");
 
     const remoteRequests: string[] = [];

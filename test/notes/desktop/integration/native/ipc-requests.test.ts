@@ -183,9 +183,7 @@ it("错误会话参数不能清空当前路径或重置布局，额外字段不�
   expect(call).toHaveBeenLastCalledWith("readerSessionPatch", { recentFiles: ["b.md", "a.md"] });
   await invoke("reader.index.noteKeys");
   expect(call).toHaveBeenLastCalledWith("indexNoteKeys");
-  await expect(invoke("reader.index.graph", "true")).rejects.toThrow("图谱");
-  await invoke("reader.index.graph", true);
-  expect(call).toHaveBeenLastCalledWith("indexGraph", true);
+  expect(handlers.has("reader.index.graph")).toBe(false);
   // 书签整体校验：越界路径、空查询与多余字段不能写进库内书签文件。
   call.mockClear();
   for (const invalid of [

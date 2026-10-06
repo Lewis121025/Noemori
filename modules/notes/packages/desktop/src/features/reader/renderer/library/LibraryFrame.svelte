@@ -17,6 +17,8 @@
     children,
     previewOpen = $bindable(false),
     onClosePreview,
+    onNewWhiteboard,
+    count,
   }: {
     workspace: ReaderWorkspaceController;
     hidden: boolean;
@@ -27,11 +29,13 @@
     children: Snippet;
     previewOpen?: boolean;
     onClosePreview: () => void;
+    onNewWhiteboard?: () => void;
+    count: number;
   } = $props();
   let compact = $state(false);
   let container: HTMLElement;
   const current = $derived(selected.length === 1 ? selected[0]! : null);
-  const busy = $derived(workspace.switching || workspace.copying || workspace.vaultRoot === null);
+  const busy = $derived(workspace.switching || workspace.copying);
 
   function resize(): void {
     compact = window.innerWidth <= 720;
@@ -60,21 +64,27 @@
 
 <svelte:window onresize={resize} onkeydown={previewKeydown} />
 
-<section class="library" {hidden} aria-label="资料管理" bind:this={container}>
+<section class="library" data-motion="reveal" {hidden} aria-label="文件系统" bind:this={container}>
   <header class="library-heading">
     <div>
-      <h1>资料</h1>
+      <h1>文件系统</h1>
       <p>
-        {workspace.files.length} 项资料
+        {count} 个文件和文件夹
       </p>
     </div>
     <div class="create-actions">
+      {#if onNewWhiteboard}<button
+          class="reader-button"
+          type="button"
+          disabled={busy}
+          onclick={onNewWhiteboard}>新建白板</button
+        >{/if}
       <button
         class="reader-button"
         type="button"
         aria-label="新建文件夹"
         title="新建文件夹"
-        disabled={busy}
+        disabled={busy || workspace.vaultRoot === null}
         onclick={() => onAction("directory", current)}
         ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
           ><path d="M3 7V5h7l2 2h9v13H3V7M12 10v7m-3-3.5h6" /></svg

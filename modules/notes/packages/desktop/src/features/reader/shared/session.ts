@@ -1,5 +1,5 @@
-/** 阅读器会话记录笔记库、文档、交互模式、文件栏与阅读栈，不包含主题或窗口几何。 */
-import { isReaderMode, isReaderSpace, SIDEBAR_LAYOUT, type PaneLayout } from "./api";
+/** 阅读器会话记录笔记库、文档、文件栏与阅读栈，不包含主题或窗口几何。 */
+import { isReaderSpace, isWorkspaceDestination, SIDEBAR_LAYOUT, type PaneLayout } from "./api";
 import { parseFileTreeState, type FileTreeState } from "./file-browser";
 import { parseReadingBookmark, type ReadingBookmark } from "./reading-position";
 
@@ -10,10 +10,10 @@ export const DEFAULT_LEFT_WIDTH = SIDEBAR_LAYOUT.leftWidth;
 export const HISTORY_LIMIT = 100;
 
 /** 视图记忆条数上限；只防会话文件病态增长，正常库远达不到。 */
-export const VIEW_MODE_LIMIT = 500;
+const VIEW_MODE_LIMIT = 500;
 
 /** 需要记住的 Markdown 视图；排版视图是默认值，不写入记忆。 */
-export type RememberedView = "source" | "reading";
+export type RememberedView = "source";
 
 /** 按库内路径记住的视图选择。 */
 export type ViewModes = Record<string, RememberedView>;
@@ -41,6 +41,8 @@ export type SessionHistory = {
 
 /** 单个分栏的持久化形态。 */
 export type PaneSession = {
+  /** 本栏目录的手动收起偏好；缺失表示默认展开。 */
+  outlineCollapsed?: boolean;
   /** 该栏打开文件的库内相对路径；空栏为 `null`。 */
   currentPath: string | null;
   /** 该栏的阅读栈。 */
@@ -60,12 +62,12 @@ export type SessionDocuments = {
 };
 
 /** 单栏空文档会话。 */
-export function emptyPaneSession(): PaneSession {
+function emptyPaneSession(): PaneSession {
   return { currentPath: null, history: { back: [], forward: [] } };
 }
 
 /** 单栏空文档会话集合。 */
-export function emptySessionDocuments(): SessionDocuments {
+function emptySessionDocuments(): SessionDocuments {
   return { panes: [emptyPaneSession()], active: 0, split: false };
 }
 
@@ -75,7 +77,7 @@ export type ReaderSession = PaneLayout & {
   vaultRoot: string | null;
   /** 各分栏的文档与阅读栈；切库时重置为单栏。 */
   documents: SessionDocuments;
-  /** 按文件记住的源码或阅读视图；切库时清空。 */
+  /** 按文件记住的源码视图；切库时清空。 */
   viewModes: ViewModes;
   /** 最近打开的文件，最新在前；切库时清空。 */
   recentFiles: string[];
@@ -124,7 +126,19 @@ export function parsePaneLayout(value: unknown): PaneLayout | null {
     filesCollapsed: parseCollapsed(record.filesCollapsed),
     leftWidth: clampWidth(record.leftWidth, DEFAULT_LEFT_WIDTH),
     ...(isReaderSpace(record.space) ? { space: record.space } : {}),
-    ...(isReaderMode(record.mode) ? { mode: record.mode } : {}),
+    ...(record.destination === "graph"
+      ? { destination: "document" }
+      : record.destination === "boards"
+        ? { destination: "library" }
+        : isWorkspaceDestination(record.destination)
+          ? { destination: record.destination }
+          : {}),
+    ...(record.sidebarView === "files"
+      ? { sidebarView: "outline" }
+      : record.sidebarView === "outline" || record.sidebarView === "search"
+        ? { sidebarView: record.sidebarView }
+        : {}),
+    ...(typeof record.searchQuery === "string" ? { searchQuery: record.searchQuery } : {}),
   };
 }
 
@@ -147,7 +161,7 @@ function parseHistoryEntries(value: unknown): HistoryEntry[] {
  *
  * 会话文件是恢复性数据，损坏条目不该阻止整个会话恢复。
  */
-export function parseSessionHistory(value: unknown): SessionHistory {
+function parseSessionHistory(value: unknown): SessionHistory {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return { back: [], forward: [] };
   const record = value as Record<string, unknown>;
@@ -185,7 +199,7 @@ export function parseViewModes(value: unknown, legacy?: unknown): ViewModes {
   let count = 0;
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     for (const [path, mode] of Object.entries(value)) {
-      if (path === "" || (mode !== "source" && mode !== "reading")) continue;
+      if (path === "" || mode !== "source") continue;
       out[path] = mode;
       if (++count >= VIEW_MODE_LIMIT) break;
     }
@@ -256,7 +270,7 @@ export function mapPathList(
 }
 
 /** 分栏数量上限；界面只提供双栏，多余条目丢弃。 */
-export const PANE_LIMIT = 2;
+const PANE_LIMIT = 2;
 
 function parsePaneSession(value: unknown): PaneSession {
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -267,6 +281,9 @@ function parsePaneSession(value: unknown): PaneSession {
   return {
     currentPath,
     history: parseSessionHistory(record.history),
+    ...(typeof record.outlineCollapsed === "boolean"
+      ? { outlineCollapsed: record.outlineCollapsed }
+      : {}),
     ...(position === null ? {} : { position }),
   };
 }

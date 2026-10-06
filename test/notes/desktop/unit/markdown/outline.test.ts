@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectOutline, outlineEquals, buildOutlineTree } from "@reader/shared/markdown/outline";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 
 describe("heading outline", () => {
   it("collects headings in document order with levels and node positions", () => {
@@ -43,9 +43,7 @@ intro
 
   it("uses wiki alias or target as heading text", () => {
     const doc = parseMarkdown("## See [[Other|别名]]\n");
-    expect(collectOutline(doc)).toEqual([
-      expect.objectContaining({ level: 2, text: "See 别名" }),
-    ]);
+    expect(collectOutline(doc)).toEqual([expect.objectContaining({ level: 2, text: "See 别名" })]);
     expect(doc.nodeAt(collectOutline(doc)[0]?.pos ?? -1)?.type.name).toBe("heading");
   });
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { SearchQuery, search } from "prosemirror-search";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { replaceSearch } from "@reader/renderer/editor/search/search-replace";
 
 describe("替换命令的边界", () => {

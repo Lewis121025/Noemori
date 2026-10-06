@@ -4,7 +4,7 @@ import { writable } from "svelte/store";
 import { expect, it, vi } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { parseMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
 import Harness from "./EditorFormattingHarness.svelte";
 
 it("编辑工具栏常驻，随选区更新格式状态，应用命令后仍保持可用", async () => {
@@ -20,7 +20,7 @@ it("编辑工具栏常驻，随选区更新格式状态，应用命令后仍保�
   try {
     flushSync();
     expect(target.querySelector('[role="toolbar"][aria-label="编辑工具栏"]')).not.toBeNull();
-    expect(target.querySelector("[popover]")).toBeNull();
+    expect(target.querySelectorAll("[popover]")).toHaveLength(2);
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)));
     state.set(view.state);
     flushSync();

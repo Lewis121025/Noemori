@@ -83,7 +83,9 @@ test("真实窗口开库进度、取消、文件错误和修正重试", async (t
     await expect
       .poll(() => page.getByRole("button", { name: "切换笔记库", exact: true }).textContent())
       .toContain("待修正");
-    await page.getByRole("treeitem", { name: "不可读.md", exact: true }).dblclick();
+    if (!(await page.getByRole("treeitem", { name: "不可读.md", exact: true }).isVisible()))
+      await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
+    await page.getByRole("treeitem", { name: "不可读.md", exact: true }).click();
     await page.getByRole("heading", { name: "已修正", exact: true }).waitFor();
   } finally {
     await app.close();

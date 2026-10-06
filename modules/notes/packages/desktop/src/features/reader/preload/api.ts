@@ -1,4 +1,5 @@
 import { ipcRenderer } from "electron";
+import { parseWebPageState } from "../shared/webpage";
 import type { ReaderApi, VaultEvent } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
 import { parseVaultOpenProgress, type VaultOpenProgress } from "../shared/vault-opening";
@@ -14,7 +15,6 @@ import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
 import { parseRecognitionPoints, parseShapePrediction } from "../shared/whiteboard/recognition";
 import {
   parseBookmarks,
-  parseGraph,
   parseEmptyReply,
   parseEntryOutcome,
   parseFileBytes,
@@ -117,6 +117,18 @@ export function createReaderApi(): ReaderApi {
     },
     exportReveal: async () => parseEmptyReply(await ipcRenderer.invoke("reader.export.reveal")),
     exportRecover: async () => parseEmptyReply(await ipcRenderer.invoke("reader.export.recover")),
+    webPages: {
+      sync: async (update) =>
+        parseEmptyReply(await ipcRenderer.invoke("reader.webpage.sync", update)),
+      action: async (id, action) =>
+        parseEmptyReply(await ipcRenderer.invoke("reader.webpage.action", id, action)),
+      subscribe: (changed) => {
+        const listener = (_event: Electron.IpcRendererEvent, value: unknown) =>
+          changed(parseWebPageState(value));
+        ipcRenderer.on("reader.webpage.changed", listener);
+        return () => ipcRenderer.removeListener("reader.webpage.changed", listener);
+      },
+    },
     openExternal: async (url) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.links.openExternal", url)),
     vaultOpen: (progress) => open("reader.vault.open", parseVaultOpen, progress),
@@ -233,8 +245,6 @@ export function createReaderApi(): ReaderApi {
       parseHeadingRecords(await ipcRenderer.invoke("reader.index.headings", path)),
     indexTags: async () => parseTagCounts(await ipcRenderer.invoke("reader.index.tags")),
     indexNoteKeys: async () => parseNoteKeys(await ipcRenderer.invoke("reader.index.noteKeys")),
-    indexGraph: async (includeDead) =>
-      parseGraph(await ipcRenderer.invoke("reader.index.graph", includeDead)),
     bookmarksList: async () => parseBookmarks(await ipcRenderer.invoke("reader.bookmarks.list")),
     bookmarksSet: async (items) =>
       parseEmptyReply(await ipcRenderer.invoke("reader.bookmarks.set", items)),

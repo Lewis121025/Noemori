@@ -1,5 +1,5 @@
 /** 开库阶段只描述真实工作，不把阶段序号作为总体百分比。 */
-export const VAULT_OPEN_PHASES = [
+const VAULT_OPEN_PHASES = [
   "preparing",
   "recovering",
   "scanning",

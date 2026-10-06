@@ -7,13 +7,19 @@ import { EditorView } from "prosemirror-view";
 import { history, undo } from "prosemirror-history";
 import { search, getSearchState } from "prosemirror-search";
 import SearchPanel from "@reader/renderer/editor/search/EditorSearch.svelte";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { documentAccess } from "@reader/renderer/editor/read-only";
 
 let view: EditorView;
 let panel: ReturnType<typeof mount>;
 
-function mountPanel(target: HTMLElement, onClose = () => {}, readOnly = false): void {
+function mountPanel(
+  target: HTMLElement,
+  onClose = () => {},
+  readOnly = false,
+  sidebar = false,
+): void {
   const state = fromStore(writable(view.state));
   view.setProps({
     dispatchTransaction(tr) {
@@ -30,6 +36,7 @@ function mountPanel(target: HTMLElement, onClose = () => {}, readOnly = false): 
       },
       onClose,
       readOnly,
+      sidebar,
     },
   });
   flushSync();
@@ -188,6 +195,41 @@ it.each([false, true])(
   },
 );
 
+it.each([
+  { from: 600, to: 625, delta: 137 },
+  { from: 50, to: 75, delta: -62 },
+  { from: 250, to: 900, delta: 138 },
+])("侧栏查找不能聚焦正文时，仍将逻辑命中滚入视口（$from → $to）", ({ from, to, delta }) => {
+  const scroller = document.createElement("div");
+  scroller.className = "main";
+  scroller.inert = true;
+  scroller.scrollTop = 1000;
+  const controls = document.createElement("div");
+  document.body.append(controls, scroller);
+  view = new EditorView(scroller, {
+    state: EditorState.create({ doc: parseMarkdown("目标"), plugins: [search()] }),
+  });
+  vi.spyOn(view, "focus").mockImplementation(() => {});
+  vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 600, 400));
+  vi.spyOn(view, "coordsAtPos").mockImplementation((pos) => ({
+    left: 0,
+    right: 10,
+    top: pos === 1 ? from : to - 20,
+    bottom: pos === 1 ? from + 20 : to,
+  }));
+  mountPanel(controls, () => {}, false, true);
+  const input = controls.querySelector<HTMLInputElement>('[aria-label="查找"]')!;
+  input.value = "目标";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  expect(view.state.doc.textBetween(view.state.selection.from, view.state.selection.to)).toBe(
+    "目标",
+  );
+  expect(scroller.scrollTop).toBe(1000 + delta);
+  expect(document.activeElement).toBe(input);
+});
+
 it("查找组词期间不跳转、替换或退出，输入法结束键不冒充查找命令", () => {
   const host = document.createElement("div");
   const controls = document.createElement("div");
@@ -211,7 +253,12 @@ it("查找组词期间不跳转、替换或退出，输入法结束键不冒充�
   expect(onClose).not.toHaveBeenCalled();
   input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
   for (const key of ["Enter", "Escape"]) {
-    const event = new KeyboardEvent("keydown", { key, keyCode: 229, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent("keydown", {
+      key,
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    });
     input.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
   }

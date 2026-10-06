@@ -172,3 +172,22 @@ function sameJumpKey(left: MentionRecord, right: MentionRecord): boolean {
   }
   return left.linkKind === right.linkKind && left.toRaw === right.toRaw;
 }
+
+/** 同段落引用共用一份摘要，原始位置仍保留为非空的跳转列表。 */
+export type MentionContext = { key: string; items: [MentionRecord, ...MentionRecord[]] };
+
+/**
+ * 合并相同的段落上下文，避免同一个链接出现多次时重复铺满侧栏。
+ * @param items 同一来源文件中的提及，按原文出现顺序。
+ * @returns 按首次出现排列的上下文，每一处原始跳转位置均保留，不修改输入。
+ */
+export function groupMentionContexts(items: readonly MentionRecord[]): MentionContext[] {
+  const groups = new Map<string, MentionContext>();
+  for (const item of items) {
+    const key = JSON.stringify([item.snippet, item.toRaw, item.kind, item.linkKind]);
+    const existing = groups.get(key);
+    if (existing) existing.items.push(item);
+    else groups.set(key, { key, items: [item] });
+  }
+  return Array.from(groups.values());
+}

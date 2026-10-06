@@ -20,7 +20,7 @@
     syntaxHighlighting,
   } from "@codemirror/language";
   import { EditorState, Compartment, EditorSelection, type Extension } from "@codemirror/state";
-  import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+  import { EditorView, keymap, lineNumbers, panels } from "@codemirror/view";
   import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
   import type { CodeEditorApi } from "./editor-api";
   import { languageExtensions } from "./language";
@@ -38,10 +38,10 @@
   type Props = {
     /** 文档加载代次；文本相同的重载只重新登记表面归属。 */
     epoch?: number;
-    /** 阅读模式可修改文本，但不显示编辑工具栏。 */
-    reading?: boolean;
     /** 将工具栏交给分栏独立排版；独立挂载时使用普通文档流。 */
     registerToolbar?: (toolbar: Snippet | null) => void;
+    /** 快捷键打开侧栏工具前恢复侧栏可见性。 */
+    onShowTools?: () => void;
     /** 打开时的文本。 */
     source: string;
     /** 用于选择高亮语言的库内路径。 */
@@ -64,16 +64,34 @@
     register,
     completions,
     epoch = 0,
-    reading = false,
     registerToolbar,
+    onShowTools,
   }: Props = $props();
   $effect(() => {
     const register = registerToolbar;
     if (register === undefined) return;
-    register(reading ? null : editorToolbar);
+    register(editorToolbar);
     return () => register(null);
   });
   let host: HTMLDivElement | undefined = $state();
+  let searchHost: HTMLDivElement | undefined = $state();
+  let editor = $state.raw<EditorView | null>(null);
+  const panelPlacement = new Compartment();
+
+  $effect(() => {
+    const view = editor;
+    const container = searchHost;
+    if (!view) return;
+    view.dispatch({
+      effects: panelPlacement.reconfigure(panels(container ? { topContainer: container } : {})),
+    });
+    return bindCodeSearchInput(view, container ?? view.dom);
+  });
+
+  function showSearch(view: EditorView): boolean {
+    onShowTools?.();
+    return openSearchPanel(view);
+  }
   let editorState = $state.raw<EditorState | null>(null);
   let publicApi = $state.raw<CodeEditorApi | null>(null);
   let previous: CodeReloadContext | null = null;
@@ -103,6 +121,7 @@
           extensions: [
             history(),
             search({ top: true }),
+            panelPlacement.of(panels()),
             EditorState.phrases.of({
               Find: "查找",
               Replace: "替换为",
@@ -123,6 +142,7 @@
               "replaced $ matches": "已替换 $ 处匹配",
             }),
             keymap.of([
+              { key: "Mod-f", run: showSearch },
               {
                 key: "Mod-s",
                 run: () => {
@@ -173,7 +193,7 @@
           ],
         }),
       });
-      const stopSearchInput = bindCodeSearchInput(view);
+      editor = view;
       reload?.restore(view);
       editorState = view.state;
       const snapshot = () => ({ bytes: new TextEncoder().encode(rawSource), revision });
@@ -194,7 +214,7 @@
         },
         focus: () => view.focus(),
         openSearch: () => {
-          openSearchPanel(view);
+          showSearch(view);
         },
         snapshot,
         jumpToSearch: (location, snapshot) => {
@@ -224,7 +244,7 @@
         view.dispatch({ effects: langConf.reconfigure(lang) });
       });
       return () => {
-        stopSearchInput();
+        editor = null;
         previous = captureCodeReload(view);
         cancelled = true;
         publicApi = null;
@@ -248,31 +268,30 @@
 </script>
 
 {#snippet editorToolbar()}
-  {#if !reading}
-    <div
-      class="code-toolbar"
-      role="toolbar"
-      aria-label="文本编辑工具栏"
-      tabindex="-1"
-      onmousedown={(event) => event.preventDefault()}
+  {#if registerToolbar !== undefined}<div
+      class="code-search-host"
+      bind:this={searchHost}
+    ></div>{/if}
+  <div
+    class="code-toolbar"
+    role="toolbar"
+    aria-label="文本编辑工具栏"
+    tabindex="-1"
+    onmousedown={(event) => event.preventDefault()}
+  >
+    <button
+      type="button"
+      class="reader-button"
+      disabled={editorState === null || undoDepth(editorState) === 0}
+      onclick={() => publicApi?.history("undo")}>撤销</button
     >
-      <button
-        type="button"
-        class="reader-button"
-        disabled={editorState === null || undoDepth(editorState) === 0}
-        onclick={() => publicApi?.history("undo")}>撤销</button
-      >
-      <button
-        type="button"
-        class="reader-button"
-        disabled={editorState === null || redoDepth(editorState) === 0}
-        onclick={() => publicApi?.history("redo")}>重做</button
-      >
-      <button type="button" class="reader-button" onclick={() => publicApi?.openSearch()}
-        >查找</button
-      >
-    </div>
-  {/if}
+    <button
+      type="button"
+      class="reader-button"
+      disabled={editorState === null || redoDepth(editorState) === 0}
+      onclick={() => publicApi?.history("redo")}>重做</button
+    >
+  </div>
 {/snippet}
 {#if registerToolbar === undefined}{@render editorToolbar()}{/if}
 <div class="surface" bind:this={host}></div>
@@ -285,6 +304,25 @@
     border-bottom: 1px solid var(--border);
     padding: 0.5rem;
     margin: 0;
+  }
+  .code-search-host :global(.cm-panels) {
+    position: fixed;
+    top: 52px;
+    right: 12px;
+    z-index: 20;
+    width: min(32rem, calc(100vw - 24px));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px var(--shadow);
+    color: var(--fg);
+    background: var(--sidebar);
+    font-size: 0.8rem;
+  }
+  .code-search-host :global(.cm-search) {
+    padding: 0.5rem;
+  }
+  .code-search-host :global(input) {
+    max-width: 100%;
   }
   .code-toolbar button {
     font-size: 0.8rem;

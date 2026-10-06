@@ -4,9 +4,12 @@ import { EditorState, NodeSelection, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { parseMarkdown, serializeMarkdown } from "@reader/renderer/markdown/markdown";
+import { parseMarkdown } from "@reader/shared/markdown/parse";
+import { serializeMarkdown } from "@reader/shared/markdown/serialize";
 import { mathInputPlugins, mathNodeViews } from "@reader/renderer/markdown/views/math-view";
-import { editSelectedSource, sourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+import { editSelectedSource, createSourceEditingPlugin } from "@reader/renderer/editor/source/source-editing";
+
+const sourceEditingPlugin = createSourceEditingPlugin();
 
 vi.mock("@reader/renderer/markdown/views/mathjax", () => ({
   peekRenderedTex: (source: string) => {

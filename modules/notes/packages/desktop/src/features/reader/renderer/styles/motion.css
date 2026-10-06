@@ -1,0 +1,322 @@
+/* 颜色承担控件状态，空间承担导航；文字不随点击缩放或闪烁。 */
+.app
+  :where(
+    button,
+    summary,
+    input,
+    select,
+    textarea,
+    a[href],
+    [role="option"],
+    [role="tab"],
+    [role="separator"]
+  ) {
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    outline-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    filter var(--motion-fast) var(--motion-ease);
+}
+
+.app
+  :where(
+    button:active:is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]),
+    summary:active:is(:hover, :focus-visible),
+    [role="option"]:active:is(:hover, :focus-visible)
+  ) {
+  background-color: var(--selected);
+  box-shadow: inset 0 1px 2px var(--shadow);
+  transition-duration: var(--motion-press);
+}
+
+@media (hover: hover) {
+  .app
+    :where(
+      button:hover:not(:disabled, [aria-disabled="true"]),
+      summary:hover,
+      [role="option"]:hover
+    ) {
+    background-color: var(--selected);
+  }
+  .app .file-card:hover:not(:disabled, .dragging) > .entry-icon {
+    translate: 0 -2px;
+  }
+}
+
+.app :where(input:not([type="checkbox"]), textarea, select):focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.app a[href] {
+  transition:
+    color var(--motion-fast) var(--motion-ease),
+    text-decoration-color var(--motion-fast) var(--motion-ease);
+}
+
+.app .file-card > .entry-icon {
+  transition: translate var(--motion-enter) var(--motion-ease);
+}
+
+.app .reader-button.icon-button > svg {
+  transition: translate var(--motion-fast) var(--motion-ease);
+}
+.app .reader-button.icon-button:active:is(:hover, :focus-visible):not(:disabled) > svg {
+  translate: 0 1px;
+  transition-duration: var(--motion-press);
+}
+
+/* 同组选择只有一块底色移动，按钮尺寸、文字与键盘焦点保持原位。 */
+.app [data-motion-selection] {
+  position: relative;
+  isolation: isolate;
+}
+.app [data-motion-selection]::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  visibility: hidden;
+  width: var(--selection-width, 0px);
+  height: var(--selection-height, 0px);
+  translate: var(--selection-x, 0px) var(--selection-y, 0px);
+  border-radius: var(--selection-radius, 7px);
+  background: var(--selection-fill, var(--selected));
+  box-shadow: var(--selection-shadow, none);
+  z-index: 0;
+}
+.app [data-selection-ready]::before {
+  visibility: visible;
+}
+.app [data-motion-selection] > button {
+  position: relative;
+  z-index: 1;
+}
+@media (hover: hover) {
+  .app [data-motion-selection] > button:hover:not([aria-pressed="true"], :disabled) {
+    background: color-mix(in srgb, var(--selected) 50%, transparent);
+  }
+}
+.app [data-selection-ready] > button[aria-pressed="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+.app .settings-window nav {
+  --selection-radius: var(--radius-control);
+}
+.app .relation-tabs {
+  --selection-radius: 6px;
+  --selection-fill: var(--surface);
+  --selection-shadow: 0 1px 3px var(--shadow);
+}
+
+/* 详情开合先建立空间，再显露内容；关闭更短，原生语义立即关闭交互。 */
+.app details::details-content {
+  interpolate-size: allow-keywords;
+  block-size: 0;
+  opacity: 0;
+  overflow: clip;
+  transition:
+    block-size var(--motion-exit) var(--motion-ease-spatial),
+    opacity 90ms ease,
+    content-visibility var(--motion-exit) allow-discrete;
+}
+.app details[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+  transition-duration: var(--motion-enter), var(--motion-fast), var(--motion-enter);
+}
+.app details:not([open])::details-content {
+  pointer-events: none;
+}
+
+/* 菜单贴近触发位置快速展开；对话框的遮罩和位移分别收尾。 */
+.app :where(dialog, [popover]) {
+  --surface-enter: var(--motion-menu);
+  --surface-exit: 100ms;
+  --surface-opacity: 120ms;
+  --surface-offset: -3px;
+  opacity: 0;
+  translate: 0 var(--surface-offset);
+  transition:
+    opacity var(--surface-exit) ease,
+    translate var(--surface-exit) var(--motion-ease-exit),
+    display var(--surface-exit) allow-discrete,
+    overlay var(--surface-exit) allow-discrete;
+}
+.app dialog {
+  --surface-enter: var(--motion-dialog);
+  --surface-exit: 150ms;
+  --surface-opacity: 180ms;
+  --surface-offset: 6px;
+}
+.app .picker {
+  --surface-enter: 180ms;
+  --surface-exit: 100ms;
+  --surface-opacity: 120ms;
+  --surface-offset: 3px;
+}
+.app .file-menu {
+  /* 右键菜单的坐标直接来自指针，不能位移或缩放后再夹取窗口边界。 */
+  --surface-enter: 100ms;
+  --surface-exit: 80ms;
+  --surface-opacity: 100ms;
+  --surface-offset: 0px;
+}
+.app :is(dialog[open], [popover]:popover-open) {
+  opacity: 1;
+  translate: 0 0;
+  transition-duration:
+    var(--surface-opacity), var(--surface-enter), var(--surface-enter), var(--surface-enter);
+  transition-timing-function: ease, var(--motion-ease), linear, linear;
+}
+.app :is(dialog:not([open]), [popover]:not(:popover-open)) {
+  pointer-events: none;
+}
+.app dialog::backdrop {
+  opacity: 0;
+  transition:
+    opacity 130ms ease,
+    display 150ms allow-discrete,
+    overlay 150ms allow-discrete;
+}
+.app dialog[open]::backdrop {
+  opacity: 1;
+  transition-duration: 180ms;
+}
+.app dialog:not([open])::backdrop {
+  pointer-events: none;
+}
+@starting-style {
+  .app :is(dialog[open], [popover]:popover-open) {
+    opacity: 0;
+    translate: 0 var(--surface-offset);
+  }
+  .app dialog[open]::backdrop {
+    opacity: 0;
+  }
+}
+
+/* 常用菜单不逐项排队；仅页面和辅助内容交接使用很小的进入位移。 */
+.app [data-motion="reveal"]:not([hidden]) {
+  animation: panel-arrive var(--motion-enter) var(--motion-ease);
+}
+.app [data-motion="document"]:not([hidden]) {
+  animation: document-arrive var(--motion-scene) ease-out;
+}
+.app :is(.hover-preview, .suggest-popup) {
+  animation: anchored-arrive var(--motion-menu) var(--motion-ease);
+}
+.app :is(.attachment-progress, .search-panel, .save-notice, .opening, .preview-message) {
+  animation: panel-arrive var(--motion-enter) var(--motion-ease);
+}
+.app :is(.inline-rename, .feedback-button) {
+  animation: document-arrive var(--motion-fast) ease-out;
+}
+.app :is(.occurrences, .replace-row:not([hidden])) {
+  animation: panel-arrive var(--motion-enter) var(--motion-ease);
+}
+@keyframes panel-arrive {
+  from {
+    opacity: 0.94;
+    translate: 0 2px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes anchored-arrive {
+  from {
+    opacity: 0;
+    translate: 0 2px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes document-arrive {
+  from {
+    opacity: 0.97;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.app :is(.disclosure, .disclosure svg, .twist > span, .expand > span[aria-hidden]) {
+  transition: transform var(--motion-select) var(--motion-ease-spatial);
+}
+.app :is(.twist, .expand)[aria-expanded="true"] > span[aria-hidden] {
+  transform: rotate(90deg);
+}
+.app .folder-row {
+  transition:
+    top var(--motion-enter) var(--motion-ease-spatial),
+    background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+.app .save-status {
+  transition: color var(--motion-fast) ease;
+}
+.app progress::-webkit-progress-value {
+  transition: width var(--motion-enter) var(--motion-ease);
+}
+.app :is(.file-card.dragging, .drop-target) {
+  transition:
+    opacity var(--motion-fast) ease,
+    outline-color var(--motion-fast) ease;
+}
+.app .height-resize::after {
+  transition: background-color var(--motion-fast) ease;
+}
+.app .files-scrim {
+  opacity: 1;
+  transition:
+    opacity var(--motion-enter) ease,
+    display var(--motion-enter) allow-discrete;
+}
+.app .files-scrim[hidden] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: var(--motion-exit);
+}
+@starting-style {
+  .app .files-scrim:not([hidden]) {
+    opacity: 0;
+  }
+}
+
+/* 配色切换不插值单个控件的颜色，前景与所在表面必须同时换色。 */
+.app[data-palette-settling],
+.app[data-palette-settling] *,
+.app[data-palette-settling] *::before,
+.app[data-palette-settling] *::after,
+.app[data-palette-settling] dialog::backdrop {
+  transition-property: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app *,
+  .app *::before,
+  .app *::after,
+  .app details::details-content,
+  .app progress::-webkit-progress-value {
+    animation: none !important;
+    transition: none !important;
+  }
+  .app :is(dialog, [popover]),
+  .app [data-motion],
+  .app .file-sidebar,
+  .app .dock-panel,
+  .app .files-scrim,
+  .app .file-card > .entry-icon,
+  .app .reader-button.icon-button > svg {
+    translate: none !important;
+  }
+  .app dialog::backdrop {
+    transition: none;
+  }
+}

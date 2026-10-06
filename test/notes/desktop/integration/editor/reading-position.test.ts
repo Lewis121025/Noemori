@@ -5,6 +5,30 @@ import { expect, it, vi } from "vitest";
 import { markdownPosition } from "@reader/renderer/editor/editor-position";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
 
+it("滚动复用同一不可变文档的源码，编辑后重新捕获而不沿用旧锚点", () => {
+  const session = createMarkdownSession("# 原文\n\n正文。\n");
+  const snapshot = vi.spyOn(session, "snapshot");
+  const scroller = document.createElement("div");
+  scroller.className = "main";
+  document.body.append(scroller);
+  const view = new EditorView(scroller, { state: EditorState.create({ doc: session.doc }) });
+  try {
+    const api = markdownPosition(view, session);
+    for (let index = 0; index < 30; index += 1) api.capturePosition();
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    const change = view.state.tr.insertText("新", 1);
+    session.track(change);
+    view.updateState(view.state.apply(change));
+    expect(api.capturePosition()?.reading?.source.after).toContain("新原文");
+    api.capturePosition();
+    expect(snapshot).toHaveBeenCalledTimes(2);
+  } finally {
+    view.destroy();
+    scroller.remove();
+    vi.restoreAllMocks();
+  }
+});
+
 it("不透明长块使用可恢复的源码边界及完整偏移，切换布局后仍停在块中部", async () => {
   const session = createMarkdownSession(
     "> [!note] 长标注\n>\n" +

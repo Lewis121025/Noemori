@@ -26,13 +26,13 @@ import { classifyCharacter } from "micromark-util-classify-character";
 import { resolveAll } from "micromark-util-resolve-all";
 
 /** `==高亮==`；子节点是普通行内内容。 */
-export interface Highlight extends Parent {
+interface Highlight extends Parent {
   type: "highlight";
   children: PhrasingContent[];
 }
 
 /** `%%注释%%`；`value` 是两组 `%%` 之间的原文。 */
-export interface Comment extends Literal {
+interface Comment extends Literal {
   type: "comment";
 }
 

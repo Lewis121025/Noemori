@@ -7,6 +7,7 @@ import { previewKindFromReference } from "../media-kind";
 import { noteEmbedFromParagraph } from "./embed";
 import { documentSchema } from "./schema";
 import { parseMarkdownLayout } from "./source-layout";
+import { parseWebPage } from "../webpage";
 
 type Definitions = ReadonlyMap<string, Definition>;
 
@@ -126,6 +127,13 @@ function mapBlock(node: RootContent, definitions: Definitions): PmNode {
       );
     }
     case "code":
+      if (node.lang === "webpage" && !node.meta) {
+        try {
+          return documentSchema.node("webpage", parseWebPage(JSON.parse(node.value)));
+        } catch {
+          // 无效配置仍属于用户源码，保留完整代码块供用户修正。
+        }
+      }
       return documentSchema.node(
         "code_block",
         { params: node.lang ?? "", meta: node.meta ?? null },

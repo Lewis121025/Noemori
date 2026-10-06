@@ -153,7 +153,7 @@ describe("关窗阅读现场", () => {
       fileSnapshot: async () => ({ disk: bytes, draft: null }),
       vaultRestore: async () => ({
         root: "/notes",
-      entries: await api.vaultEntries(),
+        entries: await api.vaultEntries(),
         documents: {
           panes: [280, 640].map((offset) => ({
             currentPath: "长文.md",
@@ -198,6 +198,7 @@ describe("关窗阅读现场", () => {
           currentPath: "长文.md",
           history: { back: [], forward: [] },
           position: position(offset).reading,
+          outlineCollapsed: false,
         })),
         active: 1,
         split: true,

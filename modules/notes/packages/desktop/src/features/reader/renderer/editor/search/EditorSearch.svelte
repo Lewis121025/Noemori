@@ -14,7 +14,15 @@
     state: editorState,
     onClose,
     readOnly = false,
-  }: { view: EditorView; state: EditorState; onClose: () => void; readOnly?: boolean } = $props();
+    sidebar = false,
+  }: {
+    view: EditorView;
+    state: EditorState;
+    onClose: () => void;
+    readOnly?: boolean;
+    /** 左栏查找不占正文顶部，不增加命中定位的避让距离。 */
+    sidebar?: boolean;
+  } = $props();
   let term = $state("");
   let replacement = $state("");
   let caseSensitive = $state(false);
@@ -77,7 +85,7 @@
 
   // 布局通知晚于首次回车或替换行展开；执行定位前也读取当前高度，避免命中被搜索栏挡住。
   function updateScrollMargin(current: EditorView): void {
-    const top = form.offsetHeight + 12;
+    const top = sidebar ? 12 : form.offsetHeight + 12;
     current.setProps({
       scrollMargin: { top, bottom: 12, left: 5, right: 5 },
       scrollThreshold: { top, bottom: 0, left: 0, right: 0 },
@@ -91,6 +99,18 @@
     const focused = document.activeElement;
     focusDocument(view);
     command(view.state, view.dispatch, view);
+    // 抽屉展开时正文 inert，不能依赖原生选区滚动；命中位置仍由编辑器逻辑选区确定。
+    const scroller = view.dom.closest(".main");
+    if (scroller instanceof HTMLElement) {
+      const bounds = scroller.getBoundingClientRect();
+      const from = view.coordsAtPos(view.state.selection.from);
+      const to = view.coordsAtPos(view.state.selection.to);
+      const top = bounds.top + (sidebar ? 12 : form.offsetHeight + 12);
+      const bottom = bounds.bottom - 12;
+      if (from.top < top || to.bottom - from.top > bottom - top)
+        scroller.scrollTop += from.top - top;
+      else if (to.bottom > bottom) scroller.scrollTop += to.bottom - bottom;
+    }
     if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
   }
   function close(): void {
@@ -114,6 +134,7 @@
 
 <form
   class="search-panel"
+  class:docked={sidebar}
   bind:this={form}
   use:composition.bind
   aria-label="文内查找替换"
@@ -198,7 +219,7 @@
     </button>
   </div>
   {#if !readOnly}
-    <div id={replaceId} class="replace-row" hidden={!showReplace}>
+    <div id={replaceId} class="replace-row" hidden={!showReplace} inert={!showReplace}>
       <input
         class="reader-input"
         aria-label="替换为"
@@ -219,7 +240,14 @@
       >
     </div>
   {/if}
-  <div class="search-status" id={statusId} role="status" aria-atomic="true">{status}</div>
+  <div
+    class="search-status"
+    id={statusId}
+    role="status"
+    aria-atomic="true"
+  >
+    {status}
+  </div>
 </form>
 
 <style>
@@ -239,6 +267,21 @@
     display: flex;
     gap: 0.25rem;
     align-items: center;
+  }
+  .search-panel.docked {
+    position: static;
+    margin: 0.5rem;
+    box-shadow: none;
+  }
+  .docked .search-row,
+  .docked .replace-row {
+    flex-wrap: wrap;
+    padding-left: 0;
+  }
+  .docked input {
+    flex: 1 1 100%;
+    width: 100%;
+    order: -1;
   }
   .replace-row {
     padding: 0.5rem 0 0 2.25rem;

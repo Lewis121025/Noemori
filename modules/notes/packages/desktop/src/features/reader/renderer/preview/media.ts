@@ -5,16 +5,15 @@
 
 import type { ReaderApi } from "../../shared/api";
 import { mimeFromPath } from "../../shared/media-kind";
-export {
-  mimeFromPath,
-  previewKindFromMime,
-  previewKindFromReference,
-} from "../../shared/media-kind";
+import { createWebPageHost, type WebPageHost } from "./webpage-host";
+export { mimeFromPath, previewKindFromMime } from "../../shared/media-kind";
 
 export type MediaKind = "md" | "wiki";
 
 /** 注入点，便于测试；由阅读器桥接与 URL.createObjectURL 提供能力。 */
 export type MediaIo = {
+  /** 实时网页只由可信主窗口提供，静态预览不强制创建浏览会话。 */
+  webPages?: WebPageHost;
   resolveLink: (from: string, raw: string, kind: MediaKind) => Promise<string | null>;
   readFile: (rel: string) => Promise<Uint8Array>;
   createUrl: (bytes: Uint8Array, mime: string) => string;
@@ -81,9 +80,10 @@ export async function resolveMediaUrl(
  */
 export function createBrowserMediaIo(
   api: Pick<ReaderApi, "linksResolve" | "fileRead"> &
-    Partial<Pick<ReaderApi, "subscribeVaultChanged">>,
+    Partial<Pick<ReaderApi, "subscribeVaultChanged" | "webPages">>,
 ): MediaIo {
   return {
+    ...(api.webPages ? { webPages: createWebPageHost(api.webPages) } : {}),
     // 媒体加载只认唯一解析；歧义与死链按不可加载处理，锚点对媒体无意义。
     resolveLink: async (from, raw, kind) => {
       const target = await api.linksResolve(from, raw, kind);

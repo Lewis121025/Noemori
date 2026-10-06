@@ -9,6 +9,7 @@ import type {
 import type { FileSnapshot, ReaderApi, WriteResult } from "@reader/shared/api";
 import type { SessionDocuments } from "@reader/shared/session";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
+import { createAppApiMock } from "../../fixtures/app-api-mock";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -55,11 +56,16 @@ function activatePane(id: number): void {
 }
 
 function clickPath(path: string): void {
-  const button = target.querySelector<HTMLButtonElement>(
-    `.quick-navigation button[data-path="${path}"]`,
-  );
-  expect(button, path).not.toBeNull();
-  button!.click();
+  // 侧栏文件树已移除；同栏打开改走快速切换器，仍在当前活动栏加载。
+  onCommand("quick-switcher");
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("dialog.picker input");
+  expect(input, "快速切换器输入框").not.toBeNull();
+  input!.value = path;
+  input!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(target.querySelector('dialog.picker [role="option"]')?.textContent).toContain(path.replace(/\.md$/, ""));
+  input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   flushSync();
 }
 
@@ -72,6 +78,9 @@ async function editPane(id: number, text: string): Promise<void> {
 }
 
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
   Range.prototype.getClientRects = () => Object.assign([], { item: () => null });
   Range.prototype.getBoundingClientRect = () => new DOMRect();
   const proto = HTMLElement.prototype as HTMLElement & { hidePopover?: () => void };
@@ -106,6 +115,7 @@ beforeEach(() => {
       documents,
       viewModes: {},
       recentFiles: [],
+      fileTree: null,
     })),
     vaultList: vi.fn(async () => [...disk.keys()]),
     vaultEntries: vi.fn(async () =>
@@ -118,18 +128,12 @@ beforeEach(() => {
       return { status: "saved" as const, warning: null };
     }),
   });
-  const appApi: AppApi = {
-    historyChanged: vi.fn(),
+  const appApi: AppApi = createAppApiMock({
     subscribeCommand: (callback) => {
       onCommand = callback;
       return () => {};
     },
-    appearanceGet: vi.fn(async () => "system"),
-    appearanceSet: vi.fn(async () => {}),
-    subscribeFlushBeforeClose: () => () => {},
-    closeAfterFlush: vi.fn(async () => {}),
-    closeBlocked: vi.fn(async () => {}),
-  };
+  });
   window.noemori = { app: appApi, reader: api };
 });
 
@@ -160,14 +164,29 @@ async function openInPane(id: number, path: string, text: string): Promise<void>
   await vi.waitFor(() => {
     flushSync();
     expect(prose(id)).toBe(text);
+    expect(target.querySelector("dialog.picker")).toBeNull();
+  });
+}
+
+async function chooseOtherPane(path: string): Promise<void> {
+  onCommand("toggle-split");
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("dialog.picker input")!;
+  input.value = path;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(prose(1)).toBe("other");
+    expect(target.querySelector("dialog.picker")).toBeNull();
   });
 }
 
 describe("双栏编辑", () => {
   it("非活动栏的在途保存发生冲突后仍可见，重试只保存所属笔记", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
     const saving = deferred<WriteResult>();
     vi.mocked(api.fileWrite).mockReturnValueOnce(saving.promise);
@@ -181,8 +200,12 @@ describe("双栏编辑", () => {
       flushSync();
       expect(target.querySelector('[aria-label="处理保存问题"]')).not.toBeNull();
     });
-    expect(target.querySelector(".document-name")?.textContent).toBe("other.md");
-    expect(target.querySelector(".save-status")?.textContent).toBe("已保存");
+    expect(
+      target.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent,
+    ).toBe("other.md");
+    expect(target.querySelector(".topbar-document:not([hidden]) .save-status")?.textContent).toBe(
+      "已保存",
+    );
     const issue = target.querySelector<HTMLElement>('[aria-label="保存问题：note.md"]');
     expect(issue).not.toBeNull();
     const retry = [...issue!.querySelectorAll("button")].find(
@@ -198,20 +221,21 @@ describe("双栏编辑", () => {
       encode("需要保留的编辑\n"),
       encode("base\n"),
     );
-    expect(target.querySelector(".document-name")?.textContent).toBe("other.md");
+    expect(
+      target.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent,
+    ).toBe("other.md");
     expect(prose(1)).toBe("other");
   });
 
   it("进入资料管理被另一栏保存失败阻止时，说明文件名并允许定位该栏", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
     await editPane(0, "尚未保存");
     activatePane(1);
     vi.mocked(api.fileWrite).mockRejectedValue(new Error("磁盘暂不可写"));
     [...target.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.getAttribute("aria-label") === "资料管理")!
+      .find((button) => button.getAttribute("aria-label") === "文件系统")!
       .click();
     await vi.waitFor(() => {
       flushSync();
@@ -221,7 +245,9 @@ describe("双栏编辑", () => {
     expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false");
     target.querySelector<HTMLButtonElement>('[aria-label="前往笔记：note.md"]')!.click();
     flushSync();
-    expect(target.querySelector(".document-name")?.textContent).toBe("note.md");
+    expect(
+      target.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent,
+    ).toBe("note.md");
     expect(prose(0)).toBe("尚未保存");
     expect(prose(1)).toBe("other");
     vi.mocked(api.fileWrite).mockResolvedValue({ status: "saved", warning: null });
@@ -235,8 +261,7 @@ describe("双栏编辑", () => {
 
   it("两栏同时打开不同笔记，各自编辑不互相改写", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     expect(target.querySelectorAll("section[data-pane]")).toHaveLength(2);
 
     await openInPane(1, "other.md", "other");
@@ -250,16 +275,19 @@ describe("双栏编辑", () => {
     expect(prose(1)).toBe("右边改过");
     activatePane(0);
     flushSync();
-    expect(target.querySelector(".save-status")?.textContent).toBe("未保存");
+    expect(target.querySelector(".topbar-document:not([hidden]) .save-status")?.textContent).toBe(
+      "未保存",
+    );
     activatePane(1);
     flushSync();
-    expect(target.querySelector(".save-status")?.textContent).toBe("未保存");
+    expect(target.querySelector(".topbar-document:not([hidden]) .save-status")?.textContent).toBe(
+      "未保存",
+    );
   });
 
   it("一栏加载文件时，另一栏保持可编辑", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
 
     const pending = deferred<FileSnapshot>();
@@ -277,7 +305,7 @@ describe("双栏编辑", () => {
     expect(blocked(1)).toBe(false);
     expect(prose(1)).toBe("other");
     const searchBox = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]');
-    expect(searchBox?.disabled).toBe(true);
+    expect(searchBox?.disabled).toBe(false);
     searchBox?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(api.searchQuery).not.toHaveBeenCalled();
     await editPane(1, "加载期间仍可写");
@@ -293,31 +321,26 @@ describe("双栏编辑", () => {
     expect(searchBox?.disabled).toBe(false);
   });
 
-  it("两栏的编辑工具栏绑定各自文档，模式切换对两栏同时生效", async () => {
+  it("两栏始终可编辑，各自工具绑定所属文档", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
     expect(
       [...target.querySelectorAll<HTMLElement>(".formatting-panel")].map((panel) => panel.id),
     ).toEqual(["editor-formatting-0", "editor-formatting-1"]);
-    target.querySelector<HTMLButtonElement>('[aria-label="切换阅读模式"]')!.click();
-    await vi.waitFor(() => expect(target.querySelectorAll(".formatting-panel")).toHaveLength(0));
     expect(
       [...target.querySelectorAll(".ProseMirror")].every(
         (node) => node.getAttribute("contenteditable") === "true",
       ),
     ).toBe(true);
+    expect(target.querySelector(".mode-switch")).toBeNull();
     activatePane(0);
-    expect(target.querySelectorAll(".formatting-panel")).toHaveLength(0);
-    target.querySelector<HTMLButtonElement>('[aria-label="切换编辑模式"]')!.click();
-    await vi.waitFor(() => expect(target.querySelectorAll(".formatting-panel")).toHaveLength(2));
+    expect(target.querySelectorAll(".formatting-panel")).toHaveLength(2);
   });
 
   it("两栏的后退与滚动位置互不覆盖", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
 
     activatePane(0);
@@ -341,8 +364,7 @@ describe("双栏编辑", () => {
 
   it("重启后恢复分栏、各自文档与阅读栈", async () => {
     await start();
-    target.querySelector<HTMLButtonElement>('[aria-label="拆分为两栏"]')!.click();
-    flushSync();
+    await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
     await openInPane(0, "third.md", "third");
 
@@ -364,7 +386,9 @@ describe("双栏编辑", () => {
     expect(target.querySelectorAll("section[data-pane]")).toHaveLength(2);
     expect(prose(0)).toBe("third");
     expect(prose(1)).toBe("other");
-    expect(target.querySelector(".document-name")?.textContent).toBe("third.md");
+    expect(
+      target.querySelector(".topbar-document:not([hidden]) .document-name")?.textContent,
+    ).toBe("third.md");
 
     onCommand("go-back");
     await vi.waitFor(() => {

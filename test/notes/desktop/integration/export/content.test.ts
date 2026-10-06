@@ -44,6 +44,32 @@ function renderer(): ExportRenderer {
 }
 
 describe("EXP-CONTENT 组合内容与失败边界", () => {
+  it.for<ExportFormat>(["markdown", "pdf", "docx"])(
+    "网页导出为可访问链接，不把实时浏览器带进 %s 产物",
+    async (format, t) => {
+      const url = "https://example.com/page?q=1#section";
+      const fixture = await nativeExportFixture(t, {
+        "a.md": `前文\n\n\`\`\`webpage\n${JSON.stringify({ url, height: 480 })}\n\`\`\`\n\n后文\n`,
+      }, format);
+      const render = renderer();
+      const signal = new AbortController().signal;
+      const documents = new ExportDocuments(fixture.native,
+        new ExportResources(fixture.native, render, signal, computeExport), render, format,
+        exportOutputNames(["a.md"], format), signal, fixture.parse);
+      await documents.prepare("a.md");
+      await documents.resolveLinks();
+      const prepared = await documents.preparedDocuments().next();
+      if (prepared.done) throw new Error("缺少导出文档");
+      expect(prepared.value.doc.textContent).toBe(`前文${url}后文`);
+      const targets: string[] = [];
+      prepared.value.doc.descendants((node) => {
+        for (const mark of node.marks) if (mark.type.name === "link") targets.push(String(mark.attrs["href"]));
+      });
+      expect(targets).toContain(url);
+      expect(render.render).not.toHaveBeenCalled();
+    },
+  );
+
   it("PDF 前置转换保留 HTML 中公式来源、图片、Callout、指定 PDF 页和音视频附件", async (t) => {
     const fixture = await nativeExportFixture(
       t,

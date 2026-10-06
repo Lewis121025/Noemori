@@ -293,6 +293,9 @@ fn documents(value: &Value, legacy: &Value) -> Value {
         .map(|pane| {
             let current = text(&pane["currentPath"]);
             let mut result = json!({"currentPath": current, "history": history(&pane["history"])});
+            if pane["outlineCollapsed"].is_boolean() {
+                result["outlineCollapsed"] = pane["outlineCollapsed"].clone();
+            }
             if !current.is_null() {
                 if let Some(p) = position(&pane["position"]) {
                     result["position"] = p;
@@ -309,6 +312,16 @@ fn documents(value: &Value, legacy: &Value) -> Value {
     json!({"active": active, "split": value["split"] == true && panes.len() == 2, "panes": panes})
 }
 
+// 每个文件视口独立恢复；同一条目录清单不能共享像素滚动位置。
+fn tree_position(value: &Value) -> Value {
+    match (value["path"].as_str(), value["offset"].as_f64()) {
+        (Some(path), Some(offset)) if entry_path(path) => {
+            json!({"path": path, "offset": offset.clamp(0.0, 500.0)})
+        }
+        _ => Value::Null,
+    }
+}
+
 fn file_tree(value: &Value) -> Value {
     if !value.is_object() {
         return Value::Null;
@@ -319,15 +332,12 @@ fn file_tree(value: &Value) -> Value {
             .map_or(Value::Null, |s| json!(s))
     };
     let focused = path(&value["focused"]);
-    let mut scroll = Value::Null;
-    if let Some(offset) = value["scroll"]["offset"].as_f64() {
-        let p = path(&value["scroll"]["path"]);
-        if !p.is_null() {
-            scroll = json!({"path": p, "offset": offset.clamp(0.0, 500.0)});
-        }
-    }
+    let scroll = tree_position(&value["scroll"]);
     let mut result = json!({"expanded": paths(&value["expanded"], usize::MAX, true),
         "selected": paths(&value["selected"], usize::MAX, true), "focused": focused, "scroll": scroll});
+    if value.get("navigationScroll").is_some() {
+        result["navigationScroll"] = tree_position(&value["navigationScroll"]);
+    }
     let browse = &value["browse"];
     if browse["query"].is_string()
         && matches!(
@@ -336,6 +346,9 @@ fn file_tree(value: &Value) -> Value {
         )
     {
         result["browse"] = json!({"query": browse["query"], "section": browse["section"]});
+        if browse["directory"].as_str().is_some_and(|path| path.is_empty() || entry_path(path)) {
+            result["browse"]["directory"] = browse["directory"].clone();
+        }
     }
     result
 }
@@ -348,7 +361,7 @@ pub fn normalize(value: &Value) -> Value {
     if let Some(items) = reader["viewModes"].as_object() {
         for (path, mode) in items
             .iter()
-            .filter(|(p, m)| !p.is_empty() && matches!(m.as_str(), Some("source" | "reading")))
+            .filter(|(p, m)| !p.is_empty() && matches!(m.as_str(), Some("source")))
             .take(500)
         {
             modes.insert(path.clone(), mode.clone());
@@ -366,14 +379,29 @@ pub fn normalize(value: &Value) -> Value {
     let mut r = json!({"vaultRoot": text(&reader["vaultRoot"]), "documents": documents(&reader["documents"], reader),
         "viewModes": modes, "recentFiles": paths(&reader["recentFiles"], 50, false), "fileTree": file_tree(&reader["fileTree"]),
         "filesCollapsed": reader["filesCollapsed"] == true, "leftWidth": width});
-    if matches!(reader["mode"].as_str(), Some("reading" | "editing")) {
-        r["mode"] = reader["mode"].clone();
-    }
     if matches!(
         reader["space"].as_str(),
         Some("writing" | "library" | "connections")
     ) {
         r["space"] = reader["space"].clone();
+    }
+    match reader["destination"].as_str() {
+        Some("graph") => r["destination"] = json!("document"),
+        Some("boards") => r["destination"] = json!("library"),
+        Some("document" | "library") => {
+            r["destination"] = reader["destination"].clone();
+        }
+        _ => {}
+    }
+    match reader["sidebarView"].as_str() {
+        Some("files") => r["sidebarView"] = json!("outline"),
+        Some("outline" | "search") => {
+            r["sidebarView"] = reader["sidebarView"].clone();
+        }
+        _ => {}
+    }
+    if reader["searchQuery"].is_string() {
+        r["searchQuery"] = reader["searchQuery"].clone();
     }
     let w = &value["window"];
     let window = if ["x", "y", "width", "height"]
@@ -393,7 +421,12 @@ pub fn normalize(value: &Value) -> Value {
         .as_str()
         .filter(|s| matches!(*s, "lora" | "newsreader" | "sans"))
         .unwrap_or("lora");
-    json!({"appearance": appearance, "readingFont": reading_font, "reader": r, "window": window})
+    let reading_palette = value["readingPalette"]
+        .as_str()
+        .filter(|s| matches!(*s, "monochrome" | "green"))
+        .unwrap_or("monochrome");
+    json!({"appearance": appearance, "readingFont": reading_font,
+        "readingPalette": reading_palette, "reader": r, "window": window})
 }
 
 // 旧会话数字采用 JavaScript 双精度语义；超出安全整数的值也必须保持 number，而非跨语言恢复成 bigint。
@@ -457,10 +490,12 @@ fn remap_reader(reader: &mut Value, from: &str, to: Option<&str>) {
             map_list(&mut tree[field], true);
         }
         tree["focused"] = map(&tree["focused"]);
-        if tree["scroll"].is_object() {
-            tree["scroll"]["path"] = map(&tree["scroll"]["path"]);
-            if tree["scroll"]["path"].is_null() {
-                tree["scroll"] = Value::Null;
+        for field in ["scroll", "navigationScroll"] {
+            if tree[field].is_object() {
+                tree[field]["path"] = map(&tree[field]["path"]);
+                if tree[field]["path"].is_null() {
+                    tree[field] = Value::Null;
+                }
             }
         }
     }

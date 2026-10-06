@@ -102,7 +102,7 @@
     border-top: 1px solid var(--border);
     min-width: 0;
     width: 17rem;
-    max-width: calc(100vw - 3rem);
+    max-width: 100%;
   }
   legend {
     padding: 0 0.65rem;

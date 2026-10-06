@@ -12,6 +12,7 @@ import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./
 import type { ExportRequest, ExportProgress, ExportPlan, ExportResult } from "./export";
 import type { InkPoint } from "./whiteboard/model";
 import type { ShapePrediction } from "./whiteboard/recognition";
+import type { WebPageApi } from "./webpage";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
 export type HistoryAction = "undo" | "redo";
@@ -88,7 +89,7 @@ export type LinkRecord = {
 };
 
 /** 提及是入链还是未做成链接的正文出现。 */
-export type MentionKind = "linked" | "unlinked";
+type MentionKind = "linked" | "unlinked";
 
 /** 一条已链接或未链接提及。 */
 export type MentionRecord = {
@@ -149,7 +150,7 @@ export type SearchFilter =
   | { kind: "attr"; key: string; value: string | null };
 
 /** 普通文本的融合请求与既有严格查询保持明确边界。 */
-export type HybridSearchQuery = {
+type HybridSearchQuery = {
   kind: "hybrid";
   text: string;
   filter: SearchFilter;
@@ -228,18 +229,6 @@ export type TagCount = {
   count: number;
 };
 
-/**
- * 图谱节点。笔记的 `path` 是库内相对路径；死链节点（`dead`）的 `path`
- * 是去掉锚点后的链接目标原文，只能当作 wiki 目标重新解析，不能直接读盘。
- */
-export type GraphNode = { path: string; title: string; tags: string[]; dead: boolean };
-
-/** 两个节点之间的有向边；`count` 为这对起止之间的链接条数（≥ 1）。 */
-export type GraphEdge = { from: string; to: string; count: number };
-
-/** 全库关系图谱；节点按路径升序，边只引用已列出的节点。 */
-export type VaultGraph = { nodes: GraphNode[]; edges: GraphEdge[] };
-
 /** 一条书签；存放在库内，随库同步。`title` 为空时界面按目标生成显示名。 */
 export type Bookmark =
   | { kind: "file" | "folder"; path: string; title: string | null }
@@ -280,12 +269,13 @@ export const SIDEBAR_LAYOUT = {
 /** 用户所在的工作空间；读写、资料与关联共用笔记库及保存契约。 */
 export type ReaderSpace = "writing" | "library" | "connections";
 
-/** 应用交互模式：阅读保留正文修改与标注，编辑提供完整格式和结构工具。 */
-export type ReaderMode = "reading" | "editing";
-
-/** @returns 是否为有效应用模式；未知输入返回 false，不抛出异常。 */
-export function isReaderMode(value: unknown): value is ReaderMode {
-  return value === "reading" || value === "editing";
+/** 工作台目的地与文档类型独立，打开白板也属于文档页面。 */
+export type WorkspaceDestination = "document" | "library";
+/** 左侧内容选择；目录随当前文档，搜索结果与文档同时显示。 */
+export type SidebarView = "outline" | "search";
+/** @returns 是否为已知工作台目的地；未知值由恢复层迁移或回退。 */
+export function isWorkspaceDestination(value: unknown): value is WorkspaceDestination {
+  return value === "document" || value === "library";
 }
 
 /**
@@ -297,10 +287,13 @@ export function isReaderSpace(value: unknown): value is ReaderSpace {
   return value === "writing" || value === "library" || value === "connections";
 }
 
-/** 工作空间、共享交互模式与导航布局；旧会话缺少 space 时恢复读写空间。 */
+/** 工作空间与导航布局；旧会话缺少 space 时恢复读写空间。 */
 export type PaneLayout = {
-  /** 全部笔记与分栏共享的模式；旧会话缺省时从活动笔记的视图迁移。 */
-  mode?: ReaderMode;
+  /** 新版工作台页面；缺失时读取旧 space。 */
+  destination?: WorkspaceDestination;
+  /** 左栏内容及查询原文；结果不写入会话。 */
+  sidebarView?: SidebarView;
+  searchQuery?: string;
   /** 当前空间；可缺省以读取旧版会话。 */
   space?: ReaderSpace;
   /** 文件栏是否收起。 */
@@ -363,6 +356,8 @@ export type VaultEntry = {
  * 订阅返回取消函数，阅读器卸载时必须调用，避免继续接收旧实例事件。
  */
 export type ReaderApi = {
+  /** 隔离网页的布局与浏览控制；不会向网站提供应用或笔记库访问能力。 */
+  webPages: WebPageApi;
   /** 停笔时分类一个连续笔迹；错误通过 Promise 拒绝，不修改文档。 */
   whiteboardRecognize: (points: readonly InkPoint[]) => Promise<ShapePrediction>;
   /** 全栏保存门禁之后生成并提交整批导出；取消与失败具有明确结果。 */
@@ -494,8 +489,6 @@ export type ReaderApi = {
   indexTags: () => Promise<TagCount[]>;
   /** 全部 Markdown 笔记的标题与别名，路径升序；供快速切换器与别名补全。 */
   indexNoteKeys: () => Promise<NoteKeys[]>;
-  /** 全库关系图谱；`includeDead` 为真时死链目标作为虚节点出现。 */
-  indexGraph: (includeDead: boolean) => Promise<VaultGraph>;
   /** 读出库内书签；书签文件损坏时拒绝，界面显示原因。 */
   bookmarksList: () => Promise<Bookmark[]>;
   /** 整体替换书签清单；损坏的旧文件先备份再覆盖。 */

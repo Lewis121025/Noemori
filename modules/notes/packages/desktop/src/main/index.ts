@@ -80,6 +80,9 @@ function createWindow(client: CoreClient): void {
     show: !hiddenTestWindow,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#202022" : "#ffffff",
     autoHideMenuBar: true,
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 14 } }
+      : {}),
     webPreferences: {
       // 沙箱 preload 必须是 CJS；electron-vite 在 format: "cjs" 时产出 index.cjs。
       preload: join(__dirname, "../preload/index.cjs"),

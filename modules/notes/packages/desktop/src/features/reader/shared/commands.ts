@@ -21,32 +21,31 @@ const cmdShift = (key: string) => ({ key, shift: true });
 
 /** 全部阅读器命令，顺序即命令面板空查询时的默认顺序。 */
 export const READER_COMMANDS = [
-  { id: "quick-switcher", label: "快速切换…", shortcut: cmd("o") },
+  { id: "quick-switcher", label: "快速打开…", shortcut: cmd("o") },
   { id: "command-palette", label: "命令面板…", shortcut: cmd("p") },
+  { id: "open-settings", label: "设置…", shortcut: cmd(",") },
   { id: "open-vault", label: "打开笔记库…", shortcut: cmdShift("o") },
-  { id: "open-library", label: "资料管理", shortcut: cmdShift("l") },
+  { id: "open-library", label: "文件系统", shortcut: cmdShift("l") },
   { id: "new-note", label: "新建笔记", shortcut: cmd("n") },
   { id: "new-whiteboard", label: "新建白板", shortcut: null },
   { id: "insert-whiteboard", label: "插入白板", shortcut: null },
+  { id: "insert-webpage", label: "插入网页…", shortcut: null },
   { id: "new-folder", label: "新建文件夹", shortcut: cmdShift("n") },
   { id: "save", label: "保存", shortcut: cmd("s") },
   { id: "export-document", label: "导出当前文件…", shortcut: null },
   { id: "export-vault", label: "导出笔记库…", shortcut: null },
   { id: "insert-attachment", label: "插入附件…", shortcut: cmdShift("i") },
   { id: "find", label: "文内查找", shortcut: cmd("f") },
-  { id: "find-files", label: "查找文件", shortcut: cmdShift("f") },
+  { id: "find-files", label: "搜索笔记库", shortcut: cmdShift("f") },
   { id: "go-back", label: "后退", shortcut: cmd("[") },
   { id: "go-forward", label: "前进", shortcut: cmd("]") },
   { id: "toggle-source", label: "切换排版/源码视图", shortcut: cmd("e") },
-  { id: "toggle-reading", label: "切换阅读 / 编辑模式", shortcut: cmdShift("e") },
   { id: "toggle-files", label: "显示或隐藏文件栏", shortcut: cmd("\\") },
-  { id: "toggle-split", label: "切换分栏", shortcut: null },
+  { id: "toggle-split", label: "切换单栏 / 双栏", shortcut: null },
   { id: "rename-file", label: "重命名当前文件…", shortcut: null },
   { id: "bookmark-file", label: "收藏或取消收藏当前文件", shortcut: null },
   { id: "bookmark-heading", label: "收藏或取消收藏当前标题", shortcut: null },
   { id: "show-bookmarks", label: "显示书签", shortcut: null },
-  // 不进原生菜单：菜单加速键会抢走源码视图里 CodeMirror 的「查找下一个」（同为 Mod-g）。
-  { id: "open-graph", label: "打开关系图谱", shortcut: cmd("g") },
 ] as const satisfies readonly CommandSpec[];
 
 /** 阅读器提供的用户动作；外壳可以通过菜单调用，不直接接触编辑状态。 */
@@ -129,8 +128,6 @@ export type CommandContext = {
   readonly hasDocument: boolean;
   /** 活动栏文档可编辑。 */
   readonly canEdit: boolean;
-  /** 活动栏处于阅读态；允许保存此前的编辑，不允许发起正文写入。 */
-  readonly reading: boolean;
   /** 活动栏文档是 Markdown。 */
   readonly markdown: boolean;
   /** 活动栏正在编辑 Markdown 源码，块级插入命令由排版表面提供。 */
@@ -151,27 +148,27 @@ export type CommandContext = {
 export function commandAvailable(id: ReaderCommand, context: CommandContext): boolean {
   switch (id) {
     case "command-palette":
+    case "open-settings":
     case "open-vault":
     case "open-library":
     case "new-note":
     case "new-whiteboard":
     case "toggle-files":
     case "toggle-split":
-    case "toggle-reading":
       return true;
     case "quick-switcher":
     case "export-vault":
     case "new-folder":
     case "find-files":
     case "show-bookmarks":
-    case "open-graph":
       return context.vaultOpen;
     case "save":
       return context.canEdit;
     case "insert-attachment":
-      return context.canEdit && context.markdown && !context.reading;
+      return context.canEdit && context.markdown;
     case "insert-whiteboard":
-      return context.canEdit && context.markdown && !context.reading && !context.source;
+    case "insert-webpage":
+      return context.canEdit && context.markdown && !context.source;
     case "find":
       return context.hasDocument && !context.whiteboard;
     case "rename-file":
@@ -179,7 +176,7 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "bookmark-file":
       return context.hasDocument;
     case "toggle-source":
-      return context.hasDocument && context.markdown && !context.reading;
+      return context.hasDocument && context.markdown;
     case "bookmark-heading":
       return context.hasDocument && context.markdown;
     case "go-back":
