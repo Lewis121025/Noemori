@@ -1,4 +1,4 @@
-//! 静态笔迹分类：原始向量等比栅格化，CPU FP32 推理；几何修复由编辑器独立校验。
+//! 静态笔迹分类：输入轮廓等比栅格化，CPU FP32 推理；几何修复由编辑器独立校验原始观测。
 
 use image::{GrayImage, imageops::FilterType};
 use ort::{session::Session, value::Tensor};
@@ -18,7 +18,7 @@ pub const LABELS: [&str; 8] = [
     "other",
 ];
 /// 固定候选的权重散列；切换模型须重新验证分类顺序、预处理与质量。
-pub const MODEL_SHA256: &str = "adb4e298df627314306fa99971c00b0ea4d5e273e5cc099d29bd4c986b807e89";
+pub const MODEL_SHA256: &str = "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a";
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// 一个 CPU 分类会话；调用方负责串行运行与生命周期，不阻塞 UI 线程。

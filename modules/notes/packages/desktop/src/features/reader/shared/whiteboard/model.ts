@@ -6,10 +6,12 @@ export type InkStroke = {
   readonly id: string;
   readonly width: number;
   readonly points: readonly InkPoint[];
+  /** 平滑或修复前的完整原始观测；显示、命中与导出统一使用 points。 */
+  readonly source?: readonly InkPoint[];
 };
 
 /** 独立白板文件的唯一内容；视口、选择与临时修正预览不属于文档历史。 */
-export type WhiteboardDocument = { readonly version: 1; readonly strokes: readonly InkStroke[] };
+export type WhiteboardDocument = { readonly version: 2; readonly strokes: readonly InkStroke[] };
 
 /** 世界坐标的有限范围，避免损坏文件或失控输入产生不可绘制的路径。 */
 export const BOARD_COORDINATE_LIMIT = 10_000_000;
@@ -23,7 +25,7 @@ export function isWhiteboardPath(path: string): boolean {
 
 /** 返回没有共享可变数组的空白板；不访问磁盘。 */
 export function emptyWhiteboard(): WhiteboardDocument {
-  return { version: 1, strokes: [] };
+  return { version: 2, strokes: [] };
 }
 
 function record(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -40,35 +42,48 @@ function numberIn(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 }
 
-function readStroke(value: unknown): InkStroke {
+function readPoints(value: unknown): readonly InkPoint[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_POINTS)
+    throw new Error("白板包含无效笔迹采样");
+  return Object.freeze(
+    value.map((point: unknown): InkPoint => {
+      if (
+        !record(point, ["x", "y", "pressure"]) ||
+        !numberIn(point.x, -BOARD_COORDINATE_LIMIT, BOARD_COORDINATE_LIMIT) ||
+        !numberIn(point.y, -BOARD_COORDINATE_LIMIT, BOARD_COORDINATE_LIMIT) ||
+        !numberIn(point.pressure, 0, 1)
+      )
+        throw new Error("白板包含无效坐标或压力");
+      return Object.freeze({ x: point.x, y: point.y, pressure: point.pressure });
+    }),
+  );
+}
+
+function readStroke(value: unknown, legacy = false): InkStroke {
   if (
-    !record(value, ["id", "width", "points"]) ||
+    !(
+      record(value, ["id", "width", "points"]) ||
+      (!legacy && record(value, ["id", "width", "points", "source"]))
+    ) ||
     typeof value.id !== "string" ||
     value.id.length === 0 ||
     value.id.length > 128 ||
-    !numberIn(value.width, 0.1, 100) ||
-    !Array.isArray(value.points) ||
-    value.points.length === 0 ||
-    value.points.length > MAX_POINTS
+    !numberIn(value.width, 0.1, 100)
   )
     throw new Error("白板包含无效笔迹");
-  const points = value.points.map((point: unknown): InkPoint => {
-    if (
-      !record(point, ["x", "y", "pressure"]) ||
-      !numberIn(point.x, -BOARD_COORDINATE_LIMIT, BOARD_COORDINATE_LIMIT) ||
-      !numberIn(point.y, -BOARD_COORDINATE_LIMIT, BOARD_COORDINATE_LIMIT) ||
-      !numberIn(point.pressure, 0, 1)
-    )
-      throw new Error("白板包含无效坐标或压力");
-    return Object.freeze({ x: point.x, y: point.y, pressure: point.pressure });
-  });
-  return Object.freeze({ id: value.id, width: value.width, points: Object.freeze(points) });
+  const points = readPoints(value.points);
+  const source = "source" in value ? readPoints(value.source) : undefined;
+  return Object.freeze({ id: value.id, width: value.width, points, ...(source ? { source } : {}) });
+}
+
+function pointCount(stroke: InkStroke): number {
+  return stroke.points.length + (stroke.source?.length ?? 0);
 }
 
 function validate(value: unknown): WhiteboardDocument {
   if (
     !record(value, ["version", "strokes"]) ||
-    value.version !== 1 ||
+    (value.version !== 1 && value.version !== 2) ||
     !Array.isArray(value.strokes) ||
     value.strokes.length > MAX_STROKES
   )
@@ -76,19 +91,19 @@ function validate(value: unknown): WhiteboardDocument {
   const ids = new Set<string>();
   let count = 0;
   const strokes = value.strokes.map((item: unknown) => {
-    const stroke = readStroke(item);
-    count += stroke.points.length;
+    const stroke = readStroke(item, value.version === 1);
+    count += pointCount(stroke);
     if (ids.has(stroke.id) || count > MAX_POINTS) throw new Error("白板笔迹重复或采样数量超限");
     ids.add(stroke.id);
     return stroke;
   });
-  return Object.freeze({ version: 1, strokes: Object.freeze(strokes) });
+  return Object.freeze({ version: 2, strokes: Object.freeze(strokes) });
 }
 
 /**
  * 严格读取白板，保留未知版本的原文件，禁止以空白内容代替解析失败。
  * @param source UTF-8 解码后的独立文件。
- * @returns 已校验且不可变的原始笔迹。
+ * @returns 已校验且不可变的版本2笔迹；版本1无损读取，不生成或推断平滑轨迹。
  * @throws JSON、版本、字段或数值无效时抛出可展示的错误。
  */
 export function parseWhiteboard(source: string): WhiteboardDocument {
@@ -150,15 +165,12 @@ export class WhiteboardHistory {
       strokes.every((stroke, i) => stroke === this.current.strokes[i])
     )
       return false;
-    if (
-      strokes.length > MAX_STROKES ||
-      strokes.reduce((n, s) => n + s.points.length, 0) > MAX_POINTS
-    )
+    if (strokes.length > MAX_STROKES || strokes.reduce((n, s) => n + pointCount(s), 0) > MAX_POINTS)
       throw new Error("白板采样数量已达上限，请新建另一张白板");
     this.past.push(this.current);
     if (this.past.length > 200) this.past.shift();
     this.future = [];
-    this.current = Object.freeze({ version: 1, strokes: Object.freeze(strokes) });
+    this.current = Object.freeze({ version: 2, strokes: Object.freeze(strokes) });
     this.generation += 1;
     return true;
   }
@@ -197,6 +209,9 @@ export class WhiteboardHistory {
           ? readStroke({
               ...stroke,
               points: stroke.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })),
+              ...(stroke.source
+                ? { source: stroke.source.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) }
+                : {}),
             })
           : stroke,
       ),

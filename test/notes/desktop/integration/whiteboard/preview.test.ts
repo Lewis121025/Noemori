@@ -2,6 +2,34 @@
 import { expect, it, vi } from "vitest";
 import { mountNotePreview } from "@reader/renderer/markdown/views/content-view";
 import { emptyWhiteboard, serializeWhiteboard } from "@reader/shared/whiteboard/model";
+import { createWhiteboardPreview } from "@reader/renderer/whiteboard/preview";
+import { whiteboardSvg } from "@reader/main/export/resources";
+import { erasedStrokes, inkBounds, strokePath } from "@reader/shared/whiteboard/geometry";
+
+it("显示、嵌入、导出与命中使用平滑轨迹，原始抖动观测不制造虚假边界和命中", () => {
+  const point = (x: number, y: number) => ({ x, y, pressure: 0.5 });
+  const stroke = {
+    id: "smooth",
+    width: 2,
+    points: [point(40, 40), point(40, 80)],
+    source: [point(140, 0), point(140, 120)],
+  };
+  const board = { ...emptyWhiteboard(), strokes: [stroke] };
+  const path = strokePath(stroke.points);
+  expect(createWhiteboardPreview(board).querySelector("path")!.getAttribute("d")).toBe(path);
+  expect(whiteboardSvg(serializeWhiteboard(board))).toContain(`d="${path}"`);
+  expect(inkBounds(board.strokes)).toEqual({ x: 39, y: 39, width: 2, height: 42 });
+  const scratch = [
+    point(10, 45),
+    point(90, 50),
+    point(10, 55),
+    point(90, 60),
+    point(10, 65),
+    point(90, 70),
+  ];
+  expect(erasedStrokes(scratch, board.strokes, 1)).toEqual(["smooth"]);
+  expect(board.strokes[0]!.source).toEqual(stroke.source);
+});
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {

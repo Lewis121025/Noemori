@@ -1,19 +1,25 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
-import { RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
+import { HOLD_RADIUS_CSS_PX, RECOGNITION_POINT_LIMIT, type ShapePrediction } from "./recognition";
+import { fitArrow } from "./fitting-arrow";
+import { stabilizeTrace } from "./stabilization";
 import {
   distance,
+  angleAdvance,
+  contourHull,
   fitAgrees,
+  observationsAgree,
   leastSquares,
   principalLine,
+  perimeterAdvance,
   resample,
-  simplify,
+  traceAdvance,
   type FitPoint,
 } from "./fitting-math";
 
 /** 单路径验证集上的联合门槛；多数模型候选还必须通过完整几何约束与双向轮廓检查。 */
 export const MIN_SHAPE_SCORE = 0.5;
 
-function line(points: readonly FitPoint[]): FitPoint[] | null {
+function line(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   const fit = principalLine(points);
   if (!fit) return null;
   const dx = Math.cos(fit.angle),
@@ -25,17 +31,19 @@ function line(points: readonly FitPoint[]): FitPoint[] | null {
   };
   const result = [project(points[0]!), project(points.at(-1)!)];
   // 横向于主轴的手抖不能当成涂划；只有主轴上的往返才消耗净推进比例。
-  const traveled = points
-    .slice(1)
-    .reduce((sum, p, i) => sum + Math.abs(along(p) - along(points[i]!)), 0);
-  return Math.abs(along(points.at(-1)!) - along(points[0]!)) >= traveled * 0.9 ? result : null;
+  const advance = traceAdvance(trace.slice(1).map((p, i) => along(p) - along(trace[i]!)));
+  return advance === null ? null : result;
 }
 
 function closed(points: readonly FitPoint[]): boolean {
   return distance(points[0]!, points.at(-1)!) <= 0.12;
 }
 
-function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
+function circle(
+  points: readonly FitPoint[],
+  arc: boolean,
+  trace: readonly FitPoint[],
+): FitPoint[] | null {
   if (!arc && !closed(points)) return null;
   const solution = leastSquares(
     points.map((p) => [2 * p.x, 2 * p.y, 1]),
@@ -45,18 +53,9 @@ function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
   const [cx, cy, constant] = solution;
   const radius = Math.sqrt(constant! + cx! * cx! + cy! * cy!);
   if (!Number.isFinite(radius) || radius < 0.08 || radius > 3) return null;
-  const angles = points.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
-  let sweep = 0,
-    travel = 0;
-  for (let i = 1; i < angles.length; i++) {
-    const delta = Math.atan2(
-      Math.sin(angles[i]! - angles[i - 1]!),
-      Math.cos(angles[i]! - angles[i - 1]!),
-    );
-    sweep += delta;
-    travel += Math.abs(delta);
-  }
-  if (Math.abs(sweep) < travel * 0.9) return null;
+  const angles = trace.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
+  let sweep = angleAdvance(angles);
+  if (sweep === null) return null;
   if (
     arc
       ? Math.abs(sweep) < 0.4 || Math.abs(sweep) > Math.PI * 1.9
@@ -72,7 +71,7 @@ function circle(points: readonly FitPoint[], arc: boolean): FitPoint[] | null {
   return result;
 }
 
-function ellipse(points: readonly FitPoint[]): FitPoint[] | null {
+function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
   const fit = leastSquares(
     points.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y]),
@@ -98,15 +97,8 @@ function ellipse(points: readonly FitPoint[]): FitPoint[] | null {
       ((p.x - cx) * dx + (p.y - cy) * dy) / major,
     );
   const start = angleAt(points[0]!);
-  let sweep = 0,
-    travel = 0;
-  for (let i = 1; i < points.length; i++) {
-    const delta = angleAt(points[i]!) - angleAt(points[i - 1]!);
-    const wrapped = Math.atan2(Math.sin(delta), Math.cos(delta));
-    sweep += wrapped;
-    travel += Math.abs(wrapped);
-  }
-  if (Math.abs(sweep) < travel * 0.9 || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
+  const sweep = angleAdvance(trace.map(angleAt));
+  if (sweep === null || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
   const result = Array.from({ length: 129 }, (_, i) => {
     const angle = start + (Math.sign(sweep) * 2 * Math.PI * i) / 128;
     const x = major * Math.cos(angle),
@@ -145,81 +137,54 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
   return result;
 }
 
-function triangle(points: readonly FitPoint[]): FitPoint[] | null {
+function triangle(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
-  const start = points[0]!;
-  let split = 1;
-  for (let i = 2; i < points.length; i++)
-    if (distance(start, points[i]!) > distance(start, points[split]!)) split = i;
-  const ring = [...points.slice(0, -1), start];
-  const vertices = [
-    ...simplify(ring.slice(0, split + 1), 0.04).slice(0, -1),
-    ...simplify(ring.slice(split), 0.04).slice(0, -1),
-  ];
-  // 起笔可能在边中间，环形简化必须也检查跨越起点的那一条边。
-  let changed = true;
-  while (vertices.length > 3 && changed) {
-    changed = false;
-    for (let i = 0; i < vertices.length; i++) {
-      const a = vertices[(i + vertices.length - 1) % vertices.length]!,
-        p = vertices[i]!;
-      const b = vertices[(i + 1) % vertices.length]!;
-      const deviation =
-        Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / distance(a, b);
-      if (deviation < 0.04) {
-        vertices.splice(i, 1);
-        changed = true;
-        break;
+  // 顶点属于可见边界，不属于访问顺序；回描不能制造额外的几何角点。
+  const hull = contourHull(points);
+  if (hull.length < 3) return null;
+  let area = 0,
+    vertices: FitPoint[] = [];
+  // 已由模型选定三角形族；最大面积三点保留主体角点，边上细小凸起不增加边数。
+  // 凸包至多包含192个重采样点，后续仍用原始轮廓拒绝矩形、缺边与额外笔画。
+  for (let i = 0; i < hull.length - 2; i++) {
+    const a = hull[i]!;
+    for (let j = i + 1; j < hull.length - 1; j++) {
+      const b = hull[j]!;
+      for (let k = j + 1; k < hull.length; k++) {
+        const c = hull[k]!;
+        const current = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+        if (current > area) {
+          area = current;
+          vertices = [a, b, c];
+        }
       }
     }
   }
-  if (vertices.length !== 3) return null;
-  const [a, b, c] = vertices;
-  const area = Math.abs((b!.x - a!.x) * (c!.y - a!.y) - (b!.y - a!.y) * (c!.x - a!.x));
-  return area < 0.08 ? null : [...vertices, vertices[0]!];
-}
-
-function arrow(points: readonly FitPoint[]): FitPoint[] | null {
-  const vertices = simplify(points, 0.035);
-  if (vertices.length !== 5) return null;
-  const [first, tip, middle, returned, last] = vertices;
-  if (distance(tip!, returned!) > 0.07) return null;
-  const ends = [first!, middle!, last!].sort((a, b) => distance(b, tip!) - distance(a, tip!));
-  const [start, left, right] = ends;
-  const length = distance(start!, tip!);
-  if (length < 0.5) return null;
-  const dx = (tip!.x - start!.x) / length,
-    dy = (tip!.y - start!.y) / length;
-  const wings = [left!, right!].map((p) => ({
-    x: (p.x - tip!.x) * dx + (p.y - tip!.y) * dy,
-    y: -(p.x - tip!.x) * dy + (p.y - tip!.y) * dx,
-  }));
-  if (wings[0]!.y * wings[1]!.y >= 0 || wings.some((p) => p.x > -0.06)) return null;
-  const head = -(wings[0]!.x + wings[1]!.x) / 2;
-  const width = (Math.abs(wings[0]!.y) + Math.abs(wings[1]!.y)) / 2;
-  if (head > length * 0.45 || width < 0.04 || width > length * 0.4) return null;
-  const wing = (side: number) => ({
-    x: tip!.x - head * dx - side * width * dy,
-    y: tip!.y - head * dy + side * width * dx,
-  });
-  return [start!, tip!, wing(Math.sign(wings[0]!.y)), tip!, wing(Math.sign(wings[1]!.y))];
+  if (area < 0.08) return null;
+  const result = [...vertices, vertices[0]!];
+  const advance = perimeterAdvance(trace, result);
+  return advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI) ? null : result;
 }
 
 /**
- * 分类只决定拟合族，拟合使用原始向量；低置信度、退化或轮廓不符返回 null。
- * @param points 一个连续笔迹的已校验世界坐标，不修改原始采样。
+ * 分类只决定拟合族，拟合使用静态向量；低置信度、退化或轮廓不符返回 null。
+ * @param points 一个连续笔迹的已校验世界坐标，可归并已确认静止的末点观测。
  * @param prediction 静态模型候选；分数仅作入口门槛，不能代替几何证据。
- * @param scale 屏幕缩放，仅用于拒绝不到 16 CSS 像素的细小图形。
+ * @param scale 屏幕缩放，用于最小尺寸与有界顺序去抖半径。
+ * @param observations 归并前的全部原始观测；逐点验证既有最大偏差，防止隐藏额外笔画。
  * @returns 可存入原有笔迹格式的规范轮廓；拟合还需通过双向距离和覆盖检查。
  */
 export function fitShape(
   points: readonly InkPoint[],
   prediction: ShapePrediction,
   scale: number,
+  observations?: readonly InkPoint[],
 ): InkPoint[] | null {
   if (
     points.length < 2 ||
     points.length > RECOGNITION_POINT_LIMIT ||
+    (observations !== undefined &&
+      (observations.length < 2 || observations.length > RECOGNITION_POINT_LIMIT)) ||
     prediction.label === "other" ||
     !Number.isFinite(prediction.confidence) ||
     prediction.confidence < MIN_SHAPE_SCORE ||
@@ -239,19 +204,31 @@ export function fitShape(
   const cx = (left + right) / 2,
     cy = (top + bottom) / 2;
   const normalized = points.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
+  // 参数估计保留移动轨迹的统计信息；仅顺序校验使用有界去抖，最终验证仍覆盖完整几何。
+  // 顺序去抖限制为3 CSS像素和尺寸的2.5%，停笔观测归并由输入状态机独立负责。
+  const radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
   const sampled = resample(normalized, 192);
+  const trace = resample(stabilizeTrace(sampled, radius), 192);
   if (sampled.length === 0) return null;
   const fitters = {
     line,
-    circle: (p: readonly FitPoint[]) => circle(p, false),
+    circle: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, false, t),
     ellipse,
-    arc: (p: readonly FitPoint[]) => circle(p, true),
+    arc: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, true, t),
     rectangle,
     triangle,
-    arrow,
+    arrow: fitArrow,
   };
-  const fitted = fitters[prediction.label](sampled);
+  const fitted = fitters[prediction.label](sampled, trace);
   if (!fitted || !fitAgrees(normalized, fitted)) return null;
+  if (
+    observations &&
+    !observationsAgree(
+      observations.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size })),
+      fitted,
+    )
+  )
+    return null;
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
   const result = fitted.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
   return result.every(
