@@ -2,9 +2,14 @@ use super::*;
 use crate::ToolCall;
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
+    validate_images(request)?;
     let mut system = Vec::new();
     let mut messages = Vec::new();
-    for message in &request.messages {
+    for group in request
+        .messages
+        .chunk_by(|a, b| a.role == Role::Tool && b.role == Role::Tool)
+    {
+        let message = &group[0];
         if message.role == Role::System {
             system.push(json!({"text":text_only(message)?}));
             continue;
@@ -12,24 +17,7 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         let content = if let Some(raw) = native(config, message)? {
             raw
         } else {
-            let mut parts = Vec::new();
-            for part in &message.content {
-                parts.push(match part {
-                    ContentPart::Text(text) => json!({"text": text}),
-                    ContentPart::ToolCall(call) => json!({
-                        "toolUse": {"toolUseId": call.id, "name": call.name, "input": call.arguments}
-                    }),
-                    ContentPart::ToolResult(result) => json!({
-                        "toolResult": {
-                            "toolUseId": result.call_id,
-                            "content": [{"json": result.output}],
-                            "status": if result.is_error { "error" } else { "success" }
-                        }
-                    }),
-                    ContentPart::Reasoning(_) => return Err(Error::Unsupported("Bedrock 推理续轮需要原生签名".into())),
-                });
-            }
-            json!(parts)
+            json!(message_parts(group)?)
         };
         messages.push(json!({"role":if message.role==Role::Assistant{"assistant"}else{"user"},"content":content}));
     }
@@ -45,6 +33,92 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         body["inferenceConfig"] = json!(options);
     }
     Ok(body)
+}
+
+fn message_parts(group: &[Message]) -> Result<Vec<Value>, Error> {
+    // ToolResultContentBlock 没有 audio；整组媒体采用同一布局，避免延后的音频被后续嵌套视频抢先。
+    let separate_media = group
+        .iter()
+        .flat_map(|message| &message.content)
+        .flat_map(ContentPart::media)
+        .any(|media| matches!(media, MediaRef::Audio(_)));
+    let mut parts = Vec::new();
+    let mut attachments = Vec::new();
+    let mut result_index = 0;
+    for part in group.iter().flat_map(|message| &message.content) {
+        parts.push(match part {
+            ContentPart::Text(text) => json!({"text": text}),
+            ContentPart::ToolCall(call) => json!({
+                "toolUse": {"toolUseId": call.id, "name": call.name, "input": call.arguments}
+            }),
+            ContentPart::ToolResult(result) => {
+                result_index += 1;
+                let (value, extra) = tool_result(result, result_index, separate_media)?;
+                attachments.extend(extra);
+                value
+            }
+            ContentPart::Image(image) => media::encode(Protocol::Bedrock, MediaRef::Image(image))?,
+            ContentPart::Audio(audio) => media::encode(Protocol::Bedrock, MediaRef::Audio(audio))?,
+            ContentPart::Video(video) => media::encode(Protocol::Bedrock, MediaRef::Video(video))?,
+            ContentPart::Reasoning(_) => {
+                return Err(Error::Unsupported("Bedrock 推理续轮需要原生签名".into()));
+            }
+        });
+    }
+    parts.extend(attachments);
+    Ok(parts)
+}
+
+// Bedrock 的限制作用于每条消息，工具结果中的图片也属于该消息的图像输入。
+fn validate_images(request: &ModelRequest) -> Result<(), Error> {
+    for group in request
+        .messages
+        .chunk_by(|a, b| a.role == Role::Tool && b.role == Role::Tool)
+    {
+        let images: Vec<_> = group
+            .iter()
+            .flat_map(|message| &message.content)
+            .flat_map(ContentPart::media)
+            .filter_map(|media| match media {
+                MediaRef::Image(image) => Some(image),
+                _ => None,
+            })
+            .collect();
+        if images.len() > 20 {
+            return Err(Error::Config("Bedrock 每条消息最多允许 20 张图片".into()));
+        }
+        if images.iter().any(|image| image.data().len() > 3_750_000) {
+            return Err(Error::Config(
+                "Bedrock 单张图片不得超过 3.75 MB（3,750,000 字节）".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn tool_result(
+    result: &crate::ToolResult,
+    index: usize,
+    separate_media: bool,
+) -> Result<(Value, Vec<Value>), Error> {
+    let mut content = vec![json!({"json":result.output})];
+    let media = result
+        .media
+        .iter()
+        .map(|item| media::encode(Protocol::Bedrock, item.as_ref()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut extra = Vec::new();
+    if separate_media && !media.is_empty() {
+        extra
+            .push(json!({"text":format!("本轮第 {index} 个工具结果（{}）的媒体附件",result.name)}));
+        extra.extend(media);
+    } else {
+        content.extend(media);
+    }
+    Ok((
+        json!({"toolResult":{"toolUseId":result.call_id,"content":content,"status":if result.is_error {"error"} else {"success"}}}),
+        extra,
+    ))
 }
 
 /// 跟踪内容块闭合；文本可从增量开始，工具必须先声明，消息结束时统一核验。

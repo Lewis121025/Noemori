@@ -4,7 +4,11 @@ use crate::ToolCall;
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     let mut contents = Vec::new();
     let mut system = Vec::new();
-    for message in &request.messages {
+    for group in request
+        .messages
+        .chunk_by(|a, b| a.role == Role::Tool && b.role == Role::Tool)
+    {
+        let message = &group[0];
         if message.role == Role::System {
             system.push(json!({"text":text_only(message)?}));
             continue;
@@ -12,21 +16,7 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         let parts = if let Some(raw) = native(config, message)? {
             raw
         } else {
-            let mut parts = Vec::new();
-            for part in &message.content {
-                parts.push(match part{
-                    ContentPart::Text(text)=>json!({"text":text}),
-                    ContentPart::ToolCall(call)=>json!({"functionCall":{"id":call.id,"name":call.name,"args":call.arguments}}),
-                    ContentPart::ToolResult(result)=>{
-                        let mut function=json!({"name":result.name,"response":tool_json(result)});
-                        // 是否存在原生 ID 由原调用决定，不根据本地 ID 的字面前缀猜测。
-                        if let Some(id) = native_call_id(request, &result.call_id)? { function["id"] = json!(id); }
-                        json!({"functionResponse":function})
-                    }
-                    ContentPart::Reasoning(_)=>return Err(Error::Unsupported("Gemini 推理续轮需要原始 thoughtSignature".into())),
-                });
-            }
-            json!(parts)
+            json!(message_parts(request, group)?)
         };
         contents.push(
             json!({"role":if message.role==Role::Assistant{"model"}else{"user"},"parts":parts}),
@@ -44,6 +34,36 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         body["generationConfig"] = json!(options);
     }
     Ok(body)
+}
+
+// 工具结果与附件分别排列，防止并行调用尚未闭合时夹入用户媒体；说明文字保留附件归属。
+fn message_parts(request: &ModelRequest, group: &[Message]) -> Result<Vec<Value>, Error> {
+    let mut parts = Vec::new();
+    let mut attachments = Vec::new();
+    let mut result_index = 0;
+    for part in group.iter().flat_map(|message| &message.content) {
+        parts.push(match part {
+            ContentPart::Text(text) => json!({"text":text}),
+            ContentPart::ToolCall(call) => json!({"functionCall":{"id":call.id,"name":call.name,"args":call.arguments}}),
+            ContentPart::ToolResult(result) => {
+                let mut function = json!({"name":result.name,"response":tool_json(result)});
+                // 是否存在原生 ID 由原调用决定，不根据本地 ID 的字面前缀猜测。
+                if let Some(id) = native_call_id(request, &result.call_id)? { function["id"] = json!(id); }
+                result_index += 1;
+                if !result.media.is_empty() {
+                    attachments.push(json!({"text":format!("本轮第 {result_index} 个工具结果（{}）的媒体附件",result.name)}));
+                    attachments.extend(result.media.iter().map(|item| media::encode(Protocol::Gemini, item.as_ref())).collect::<Result<Vec<_>, _>>()?);
+                }
+                json!({"functionResponse":function})
+            }
+            ContentPart::Image(image) => media::encode(Protocol::Gemini, MediaRef::Image(image))?,
+            ContentPart::Audio(audio) => media::encode(Protocol::Gemini, MediaRef::Audio(audio))?,
+            ContentPart::Video(video) => media::encode(Protocol::Gemini, MediaRef::Video(video))?,
+            ContentPart::Reasoning(_) => return Err(Error::Unsupported("Gemini 推理续轮需要原始 thoughtSignature".into())),
+        });
+    }
+    parts.extend(attachments);
+    Ok(parts)
 }
 
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {

@@ -24,6 +24,9 @@ fn config(protocol: Protocol, url: &str, streaming: bool) -> ModelConfig {
     config.capabilities = Capabilities {
         tools: true,
         streaming,
+        vision: false,
+        audio: false,
+        video: false,
     };
     config
 }
@@ -59,7 +62,10 @@ fn bedrock_fixture(events: &[(&str, Value)]) -> Fixture {
 
 mod anthropic;
 mod bedrock;
+mod context;
 mod contracts;
 mod gemini;
+mod images;
+mod media;
 mod ollama;
 mod openai;

@@ -27,6 +27,9 @@ impl Model for ScriptedModel {
         Capabilities {
             tools: true,
             streaming: true,
+            vision: false,
+            audio: false,
+            video: false,
         }
     }
     fn generate(&self, request: ModelRequest, _: ExecutionContext) -> ModelStream {

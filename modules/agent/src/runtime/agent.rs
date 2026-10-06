@@ -1,6 +1,6 @@
 use super::{AgentEvent, RunReport, runner};
 use crate::{
-    CancellationToken, Error, ExecutionContext, Message,
+    AgentSession, CancellationToken, Error, ExecutionContext, Message,
     llm::{GenerationOptions, Model, ModelRequest},
     tool::ToolRegistry,
 };
@@ -37,6 +37,8 @@ impl Default for RunOptions {
 /// 每次运行独占的输入；父取消信号不会因单次运行结束而被取消。
 #[derive(Clone, Debug)]
 pub struct RunInput {
+    /// 对话资源归属；跨轮复用同一会话，关闭对话时由宿主调用 close。
+    pub session: AgentSession,
     /// 交给本次运行独占的完整历史，启动前校验工具调用是否闭合。
     pub messages: Vec<Message>,
     /// 每一轮共用的生成参数，工具声明由 Agent 的注册快照提供。
@@ -46,9 +48,12 @@ pub struct RunInput {
 }
 
 impl RunInput {
-    /// 从完整历史创建输入，默认使用独立取消信号和默认生成参数。
+    /// 从完整历史创建输入，默认创建独立会话、取消信号和生成参数。
+    ///
+    /// 同一对话跨轮运行时应将 session 替换为宿主持有的同一 AgentSession 克隆。
     pub fn new(messages: Vec<Message>) -> Self {
         Self {
+            session: AgentSession::new(),
             messages,
             generation: GenerationOptions::default(),
             cancellation: CancellationToken::new(),
@@ -106,7 +111,8 @@ impl Agent {
         .validate(self.model.capabilities())?;
         let context =
             ExecutionContext::new(input.cancellation.child_token(), self.options.timeout)?;
-        Ok(runner::drive(self.clone(), input, context))
+        let lease = input.session.register(context.cancellation.clone())?;
+        Ok(runner::drive(self.clone(), input, context, lease))
     }
 
     /// 消费与 stream 相同的执行路径，返回完整运行报告。

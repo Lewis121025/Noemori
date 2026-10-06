@@ -126,6 +126,8 @@ pub struct ModelConfig {
     pub include_stream_usage: bool,
     /// 单次认证、请求与响应读取的总时间上限，默认 120 秒，且受整个运行预算约束。
     pub request_timeout: Duration,
+    /// 完整 JSON 请求体字节上限，默认 20 MB，包含 Base64 和所有历史内容；超限时不发送。
+    pub max_request_bytes: usize,
     /// 单次响应的传输字节上限，默认 16 MiB，包含流分帧开销。
     pub max_response_bytes: usize,
 }
@@ -145,10 +147,14 @@ impl ModelConfig {
             capabilities: Capabilities {
                 tools: false,
                 streaming: true,
+                vision: false,
+                audio: false,
+                video: false,
             },
             chat_token_limit: ChatTokenLimit::default(),
             include_stream_usage: true,
             request_timeout: Duration::from_secs(120),
+            max_request_bytes: 20_000_000,
             max_response_bytes: 16 * 1024 * 1024,
         }
     }

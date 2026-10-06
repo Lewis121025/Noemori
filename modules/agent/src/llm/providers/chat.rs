@@ -3,29 +3,99 @@ use crate::ToolCall;
 
 pub(super) fn messages(config: &ModelConfig, request: &ModelRequest) -> Result<Vec<Value>, Error> {
     let mut messages = Vec::new();
+    let mut media_messages = Vec::new();
+    let mut result_index = 0;
     for message in &request.messages {
+        if message.role != Role::Tool {
+            messages.append(&mut media_messages);
+            result_index = 0;
+        }
         if let Some(raw) = native(config, message)? {
             messages.push(raw);
             continue;
         }
         match message.role {
-            Role::Tool => for part in &message.content {
-                if let ContentPart::ToolResult(result) = part {
-                    messages.push(json!({"role":"tool","tool_call_id":result.call_id,"content":tool_json(result).to_string()}));
+            Role::Tool => {
+                for part in &message.content {
+                    if let ContentPart::ToolResult(result) = part {
+                        messages.push(json!({"role":"tool","tool_call_id":result.call_id,"content":tool_json(result).to_string()}));
+                    }
                 }
-            },
+            }
             Role::Assistant => {
                 let calls: Vec<_> = message.tool_calls().map(|call| json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments.to_string()}})).collect();
                 let mut raw = json!({"role":"assistant","content":message.text_content()});
-                if !calls.is_empty() { raw["tool_calls"] = json!(calls); }
-                let reasoning: String = message.content.iter().filter_map(|part| match part { ContentPart::Reasoning(text) => Some(text.as_str()), _ => None }).collect();
-                if !reasoning.is_empty() { raw["reasoning_content"] = json!(reasoning); }
+                if !calls.is_empty() {
+                    raw["tool_calls"] = json!(calls);
+                }
+                let reasoning: String = message
+                    .content
+                    .iter()
+                    .filter_map(|part| match part {
+                        ContentPart::Reasoning(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if !reasoning.is_empty() {
+                    raw["reasoning_content"] = json!(reasoning);
+                }
                 messages.push(raw);
             }
-            Role::System | Role::User => messages.push(json!({"role": if message.role == Role::System {"system"} else {"user"},"content":text_only(message)?})),
+            Role::System => messages.push(json!({"role":"system","content":text_only(message)?})),
+            Role::User => messages.push(json!({"role":"user","content":user_content(message)?})),
+        }
+        // Chat 的 tool 正文仅支持文本；工具组闭合后再附加有归属说明的媒体消息。
+        if message.role == Role::Tool {
+            for part in &message.content {
+                if let ContentPart::ToolResult(result) = part {
+                    result_index += 1;
+                    if !result.media.is_empty() {
+                        let mut content = vec![
+                            json!({"type":"text","text":format!("本轮第 {result_index} 个工具结果（{}）的媒体附件",result.name)}),
+                        ];
+                        content.extend(
+                            result
+                                .media
+                                .iter()
+                                .map(|item| media::encode(Protocol::OpenAiChat, item.as_ref()))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        media_messages.push(json!({"role":"user","content":content}));
+                    }
+                }
+            }
         }
     }
+    messages.append(&mut media_messages);
     Ok(messages)
+}
+
+fn user_content(message: &Message) -> Result<Value, Error> {
+    if !message
+        .content
+        .iter()
+        .any(|part| part.media().next().is_some())
+    {
+        return Ok(json!(text_only(message)?));
+    }
+    message
+        .content
+        .iter()
+        .map(|part| match part {
+            ContentPart::Text(text) => Ok(json!({"type":"text","text":text})),
+            ContentPart::Image(image) => {
+                media::encode(Protocol::OpenAiChat, MediaRef::Image(image))
+            }
+            ContentPart::Audio(audio) => {
+                media::encode(Protocol::OpenAiChat, MediaRef::Audio(audio))
+            }
+            ContentPart::Video(video) => {
+                media::encode(Protocol::OpenAiChat, MediaRef::Video(video))
+            }
+            _ => Err(Error::Config("用户消息只接受文本和媒体".into())),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::Array)
 }
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {

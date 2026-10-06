@@ -6,14 +6,20 @@
 
 mod context;
 mod error;
+mod image;
 pub mod llm;
+mod media;
 mod message;
 pub mod runtime;
+mod session;
 pub mod tool;
 
 pub use context::ExecutionContext;
 pub use error::Error;
+pub use image::{Image, ImageFormat};
+pub use media::{Audio, AudioFormat, Media, MediaSource, Video, VideoFormat};
 pub use message::{
     ContentPart, Message, ProviderData, Role, ToolCall, ToolResult, validate_history,
 };
+pub use session::AgentSession;
 pub use tokio_util::sync::CancellationToken;

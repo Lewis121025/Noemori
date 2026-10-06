@@ -1,0 +1,264 @@
+//! 只负责操作系统资源；所有子进程在首次 await 前就拥有清理守卫。
+
+use super::io::{Reader, Writer};
+use super::sandbox::{Launch, Policy};
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, kill, killpg},
+    unistd::{Pid, getpgid},
+};
+use pty_process::blocking::Pty;
+use rustix::process::{WaitId, WaitIdOptions, WaitIdStatus, waitid};
+use std::{
+    os::{fd::AsFd, unix::process::CommandExt},
+    path::Path,
+    process::{Child, Command, Stdio},
+};
+
+/// 守卫持有尚未回收的 PID；先处理整个进程组，再回收组长，避免 PID 重用竞态。
+pub(super) struct OwnedChild {
+    child: Child,
+    pid: Pid,
+    master: Option<Pty>,
+    reaped: bool,
+}
+
+/// 完成同步启动的资源包；移交后台任务前任意失败都会释放其进程守卫。
+pub(super) struct Started {
+    pub(super) child: OwnedChild,
+    pub(super) readers: Vec<Reader>,
+    pub(super) writer: Option<Writer>,
+    pub(super) launch: Launch,
+}
+
+pub(super) fn spawn(
+    shell: &Path,
+    cwd: &Path,
+    cmd: &str,
+    tty: bool,
+    policy: &Policy,
+) -> Result<Started, String> {
+    if tty {
+        spawn_pty(shell, cwd, cmd, policy)
+    } else {
+        spawn_pipe(shell, cwd, cmd, policy)
+    }
+}
+
+fn spawn_pipe(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<Started, String> {
+    let launch = Launch::new(policy, shell, cwd, cmd, None)?;
+    let mut command = Command::new(&launch.program);
+    command.args(&launch.args);
+    if let Some(environment) = &launch.environment {
+        command.env_clear().envs(environment);
+    }
+    let mut child = command
+        .current_dir(cwd)
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("终端命令启动失败：{e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let child = OwnedChild::new(child, None)?;
+    let readers = vec![
+        Reader::new(stdout.ok_or("终端缺少 stdout")?.into())?,
+        Reader::new(stderr.ok_or("终端缺少 stderr")?.into())?,
+    ];
+    Ok(Started {
+        child,
+        readers,
+        writer: None,
+        launch,
+    })
+}
+
+fn spawn_pty(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<Started, String> {
+    let (master, slave) =
+        pty_process::blocking::open().map_err(|e| format!("PTY 分配失败：{e}"))?;
+    master
+        .resize(pty_process::Size::new(24, 120))
+        .map_err(|e| format!("PTY 尺寸设置失败：{e}"))?;
+    let reader = Reader::new(
+        master
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|e| format!("PTY 读取句柄创建失败：{e}"))?,
+    )?;
+    let writer = Writer::new(
+        master
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|e| format!("PTY 输入句柄创建失败：{e}"))?,
+    )?;
+    let tty = nix::unistd::ttyname(&slave).map_err(|e| format!("PTY 路径读取失败：{e}"))?;
+    let launch = Launch::new(policy, shell, cwd, cmd, Some(&tty))?;
+    let mut command = pty_process::blocking::Command::new(&launch.program).args(&launch.args);
+    if let Some(environment) = &launch.environment {
+        command = command.env_clear().envs(environment);
+    }
+    let child = command
+        .current_dir(cwd)
+        .env("TERM", "xterm-256color")
+        .spawn(slave)
+        .map_err(|e| format!("PTY 命令启动失败：{e}"))?;
+    let child = OwnedChild::new(child, Some(master))?;
+    Ok(Started {
+        child,
+        readers: vec![reader],
+        writer: Some(writer),
+        launch,
+    })
+}
+
+impl OwnedChild {
+    fn new(mut child: Child, master: Option<Pty>) -> Result<Self, String> {
+        let pid = i32::try_from(child.id()).ok().filter(|id| *id > 0);
+        match pid {
+            Some(pid) => Ok(Self {
+                child,
+                pid: Pid::from_raw(pid),
+                master,
+                reaped: false,
+            }),
+            None => {
+                let kill = child.kill();
+                let wait = child.wait();
+                Err(format!(
+                    "子进程没有有效 PID；终止结果：{kill:?}；回收结果：{wait:?}"
+                ))
+            }
+        }
+    }
+
+    pub(super) fn poll(&self) -> Result<Option<WaitIdStatus>, String> {
+        let pid = rustix::process::Pid::from_raw(self.pid.as_raw()).expect("进程守卫只持有正 PID");
+        waitid(
+            WaitId::Pid(pid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        )
+        .map_err(|error| format!("终端退出状态读取失败：{error}"))
+    }
+
+    pub(super) fn signal(&self, signal: Signal) -> Result<(), String> {
+        if self.reaped {
+            return Ok(());
+        }
+        let foreground = self.foreground_group().and_then(|foreground| {
+            if let Some(group) = foreground.filter(|group| *group != self.pid) {
+                send_signal(group, signal)
+            } else {
+                Ok(())
+            }
+        });
+        // 任一路径失败都必须继续清理其他目标；前台查询失败不能阻断组长回收。
+        let group = send_signal(self.pid, signal);
+        let child = self.signal_child(signal, group.is_ok());
+        let errors: Vec<_> = [foreground, group, child]
+            .into_iter()
+            .filter_map(Result::err)
+            .collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("；"))
+        }
+    }
+
+    fn foreground_group(&self) -> Result<Option<Pid>, String> {
+        // 交互程序可切换前台进程组；关闭时也终止当前前台任务。
+        self.master
+            .as_ref()
+            .map(nix::unistd::tcgetpgrp)
+            .transpose()
+            .or_else(|error| match error {
+                // 最后一个 slave 关闭后没有前台进程组；macOS 也可能成功返回零。
+                Errno::ENOTTY | Errno::EIO | Errno::ENXIO => Ok(None),
+                _ => Err(error),
+            })
+            .map(|group| group.filter(|pid| pid.as_raw() > 0))
+            .map_err(|e| format!("PTY 前台进程组查询失败：{e}"))
+    }
+
+    fn signal_child(&self, signal: Signal, group_signalled: bool) -> Result<(), String> {
+        match getpgid(Some(self.pid)) {
+            Ok(group) if group == self.pid && group_signalled => return Ok(()),
+            Err(Errno::ESRCH) => return Ok(()),
+            _ => {}
+        }
+        // 子进程可主动改变进程组；PID 在 wait 前仍归守卫所有，但新组可能属于宿主，禁止广播。
+        match kill(self.pid, signal) {
+            Ok(()) | Err(Errno::ESRCH) => Ok(()),
+            // macOS 在 poll 与 kill 之间进入退出态时也可能返回 EPERM；只接受已确认的退出。
+            Err(Errno::EPERM) if self.poll()?.is_some() => Ok(()),
+            Err(error) => Err(format!("终端子进程信号 {signal} 发送失败：{error}")),
+        }
+    }
+
+    pub(super) fn reap(&mut self) -> Result<(), String> {
+        // poll 使用 WNOWAIT 保留组长身份；清理遗留后代后才回收组长。
+        let cleanup = self.signal(Signal::SIGKILL);
+        if cleanup.is_err() && self.poll()?.is_none() {
+            return cleanup;
+        }
+        self.child
+            .wait()
+            .map_err(|e| format!("终端回收失败：{e}"))?;
+        self.reaped = true;
+        self.master.take();
+        cleanup
+    }
+}
+
+fn send_signal(pid: Pid, signal: Signal) -> Result<(), String> {
+    match killpg(pid, signal) {
+        Ok(()) | Err(Errno::ESRCH) => Ok(()),
+        #[cfg(target_os = "macos")]
+        Err(Errno::EPERM) if group_has_no_live_members(pid)? => Ok(()),
+        Err(error) => Err(format!("终端进程组信号 {signal} 发送失败：{error}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn group_has_no_live_members(group: Pid) -> Result<bool, String> {
+    use libproc::{
+        libproc::{bsd_info::BSDInfo, proc_pid::pidinfo},
+        processes::{ProcFilter, pids_by_type},
+    };
+    // sys/proc_info.h 的 PROC_FLAG_INEXIT：进程已进入 exit()，即便状态还未变为 SZOMB 也不再接收信号。
+    const PROC_FLAG_INEXIT: u32 = 4;
+    let pgrpid = u32::try_from(group.as_raw()).map_err(|_| "终端进程组标识无效")?;
+    let members = pids_by_type(ProcFilter::ByProgramGroup { pgrpid })
+        .map_err(|e| format!("终端进程组成员查询失败：{e}"))?;
+    for pid in members {
+        let raw = i32::try_from(pid).map_err(|_| "终端子进程标识无效")?;
+        // XNU 的 PROC_PIDTBSDINFO 用 arg=1 才查询僵尸；覆盖正在退出到僵尸之间的内核过渡态。
+        match pidinfo::<BSDInfo>(raw, 1) {
+            Ok(info)
+                if info.pbi_pgid != pgrpid
+                    || info.pbi_status == nix::libc::SZOMB
+                    || info.pbi_flags & PROC_FLAG_INEXIT != 0 => {}
+            Ok(_) => return Ok(false),
+            Err(error) => {
+                let remaining = pids_by_type(ProcFilter::ByProgramGroup { pgrpid })
+                    .map_err(|e| format!("终端进程组复查失败：{e}"))?;
+                if remaining.contains(&pid) {
+                    return Err(format!("终端子进程状态无法确认：{error}"));
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if !self.reaped
+            && let Err(error) = self.reap()
+        {
+            eprintln!("{error}");
+        }
+    }
+}

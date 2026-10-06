@@ -1,6 +1,6 @@
 //! 历史以完整消息保存，供应商续轮所需的内容随原消息一起保留。
 
-use crate::Error;
+use crate::{Audio, Error, Image, Media, Video, media::MediaRef};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +41,14 @@ pub struct ToolResult {
     pub output: Value,
     /// 标记业务执行失败；取消和基础设施故障使用运行终态表达。
     pub is_error: bool,
+    /// 有序媒体观察，发送时使用原生内容块，不混入 JSON 正文；兼容读取旧 images 字段。
+    #[serde(
+        default,
+        alias = "images",
+        deserialize_with = "crate::media::deserialize_media",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub media: Vec<Media>,
 }
 
 /// 有序的模型内容；推理内容只保留服务商实际提供的部分。
@@ -49,12 +57,36 @@ pub struct ToolResult {
 pub enum ContentPart {
     /// 用户可见文本。
     Text(String),
+    /// 用户提供的视觉输入；工具图片附着对应 ToolResult。
+    Image(Image),
+    /// 用户提供的音频输入。
+    Audio(Audio),
+    /// 用户提供的视频输入。
+    Video(Video),
     /// 模型实际返回的推理文本。
     Reasoning(String),
     /// 完整工具调用。
     ToolCall(ToolCall),
     /// 对应某次调用的执行结果。
     ToolResult(ToolResult),
+}
+
+impl ContentPart {
+    pub(crate) fn media(&self) -> impl Iterator<Item = MediaRef<'_>> {
+        let direct = match self {
+            Self::Image(value) => Some(MediaRef::Image(value)),
+            Self::Audio(value) => Some(MediaRef::Audio(value)),
+            Self::Video(value) => Some(MediaRef::Video(value)),
+            _ => None,
+        };
+        let attachments = match self {
+            Self::ToolResult(result) => result.media.as_slice(),
+            _ => &[],
+        };
+        direct
+            .into_iter()
+            .chain(attachments.iter().map(Media::as_ref))
+    }
 }
 
 /// 适配器拥有的续轮数据；绑定协议及模型，禁止跨协议静默丢弃。
@@ -206,7 +238,13 @@ pub fn validate_history(messages: &[Message]) -> Result<(), Error> {
                     if pending.remove(&result.call_id).as_deref() != Some(&result.name) {
                         return Err(Error::Config("工具结果与调用不匹配".into()));
                     }
+                    for media in &result.media {
+                        media.validate()?;
+                    }
                 }
+                (Role::User, ContentPart::Image(image)) => image.validate()?,
+                (Role::User, ContentPart::Audio(audio)) => audio.validate()?,
+                (Role::User, ContentPart::Video(video)) => video.validate()?,
                 (Role::System | Role::User | Role::Assistant, ContentPart::Text(_))
                 | (Role::Assistant, ContentPart::Reasoning(_)) => {}
                 _ => return Err(Error::Config("消息角色与内容不匹配".into())),

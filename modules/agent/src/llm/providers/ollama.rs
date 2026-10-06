@@ -3,7 +3,13 @@ use crate::ToolCall;
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     let mut messages = Vec::new();
+    let mut image_messages = Vec::new();
+    let mut result_index = 0;
     for message in &request.messages {
+        if message.role != Role::Tool {
+            messages.append(&mut image_messages);
+            result_index = 0;
+        }
         if let Some(raw) = native(config, message)? {
             messages.push(raw);
             continue;
@@ -16,6 +22,15 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
             }
         } else {
             let mut raw = json!({"role":match message.role{Role::System=>"system",Role::User=>"user",_=>"assistant"},"content":message.text_content()});
+            let images: Vec<_> = message
+                .content
+                .iter()
+                .flat_map(ContentPart::media)
+                .map(|item| media::encode(Protocol::Ollama, item))
+                .collect::<Result<Vec<_>, _>>()?;
+            if !images.is_empty() {
+                raw["images"] = json!(images);
+            }
             let calls: Vec<_> = message
                 .tool_calls()
                 .map(|call| json!({"function":{"name":call.name,"arguments":call.arguments}}))
@@ -36,7 +51,23 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
             }
             messages.push(raw);
         }
+        if message.role == Role::Tool {
+            for part in &message.content {
+                if let ContentPart::ToolResult(result) = part {
+                    result_index += 1;
+                    if !result.media.is_empty() {
+                        let images = result
+                            .media
+                            .iter()
+                            .map(|item| media::encode(Protocol::Ollama, item.as_ref()))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        image_messages.push(json!({"role":"user","content":format!("本轮第 {result_index} 个工具结果（{}）的图片",result.name),"images":images}));
+                    }
+                }
+            }
+        }
     }
+    messages.append(&mut image_messages);
     let mut body =
         json!({"model":config.model,"messages":messages,"stream":config.capabilities.streaming});
     if !request.tools.is_empty() {

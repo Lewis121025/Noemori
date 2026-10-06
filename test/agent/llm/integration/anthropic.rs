@@ -37,6 +37,7 @@ async fn anthropic_stream_requires_closed_blocks_and_retains_thinking_signature(
         name: "double".into(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     }]));
     generate(&model, second, context()).await.unwrap();
     server.finish().await;

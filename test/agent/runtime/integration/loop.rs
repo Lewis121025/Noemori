@@ -1,3 +1,4 @@
+mod media;
 #[path = "../../support/model.rs"]
 mod support;
 

@@ -19,6 +19,7 @@ fn history_requires_exact_call_result_pairing() {
         name: "count".into(),
         output: json!(1),
         is_error: false,
+        media: Vec::new(),
     };
     let history = vec![user, assistant, Message::tool_results(vec![result.clone()])];
     validate_history(&history).unwrap();

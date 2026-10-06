@@ -10,6 +10,12 @@ pub struct Capabilities {
     pub tools: bool,
     /// HTTP 适配器是否请求原生流；关闭后以一个完成事件返回整个响应。
     pub streaming: bool,
+    /// 是否允许图像输入；必须由调用方明确声明，不能根据模型名猜测。
+    pub vision: bool,
+    /// 是否允许音频输入；协议自身的格式和来源限制仍由适配器校验。
+    pub audio: bool,
+    /// 是否允许视频输入；不能由视觉图片能力推断。
+    pub video: bool,
 }
 
 /// 按消费推进的模型事件流；成功时恰好包含一个末尾的完成事件。

@@ -18,7 +18,7 @@ impl HttpModel {
     /// 创建模型和连接池；不执行网络请求。
     ///
     /// # 错误
-    /// 模型、URL、超时或响应上限无效时返回配置错误。
+    /// 模型、URL、超时或请求/响应上限无效时返回配置错误。
     pub fn new(config: ModelConfig) -> Result<Self, Error> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -44,8 +44,13 @@ impl HttpModel {
                 "模型端点必须是 HTTP(S) URL，认证通过请求头提供".into(),
             ));
         }
-        if config.model.trim().is_empty() || config.max_response_bytes == 0 {
-            return Err(Error::Config("模型名和响应字节上限不能为空".into()));
+        if config.model.trim().is_empty()
+            || config.max_response_bytes == 0
+            || config.max_request_bytes == 0
+        {
+            return Err(Error::Config(
+                "模型名不能为空，请求和响应字节上限必须大于零".into(),
+            ));
         }
         ExecutionContext::new(crate::CancellationToken::new(), config.request_timeout)?;
         Ok(Self {
@@ -59,12 +64,23 @@ impl HttpModel {
         request: &ModelRequest,
         context: &ExecutionContext,
     ) -> Result<reqwest::Response, Error> {
+        request.validate_inline_budget(self.config.max_request_bytes)?;
         let body = providers::request(&self.config, request)?;
+        let body = serde_json::to_vec(&body)
+            .map_err(|e| Error::Protocol(format!("请求序列化失败：{e}")))?;
+        if body.len() > self.config.max_request_bytes {
+            return Err(Error::Config(format!(
+                "完整 JSON 请求体为 {} 字节，超过 {} 字节预算；请减少历史/附件或使用远端文件引用",
+                body.len(),
+                self.config.max_request_bytes
+            )));
+        }
         let mut builder = self
             .client
             .post(endpoint(&self.config)?)
             .headers(self.config.headers.clone())
-            .json(&body);
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
         if self.config.protocol == Protocol::Anthropic
             && !self.config.headers.contains_key("anthropic-version")
         {

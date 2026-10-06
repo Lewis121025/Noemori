@@ -63,8 +63,11 @@ impl ModelResponse {
         let mut ids = BTreeSet::new();
         for part in &self.message.content {
             match part {
-                ContentPart::ToolResult(_) => {
-                    return Err(Error::Protocol("模型响应不能包含工具结果".into()));
+                ContentPart::ToolResult(_)
+                | ContentPart::Image(_)
+                | ContentPart::Audio(_)
+                | ContentPart::Video(_) => {
+                    return Err(Error::Protocol("模型响应不能包含工具结果或输入媒体".into()));
                 }
                 ContentPart::ToolCall(call)
                     if call.id.is_empty() || call.name.is_empty() || !ids.insert(&call.id) =>
@@ -80,7 +83,10 @@ impl ModelResponse {
         let has_content = self.message.content.iter().any(|part| match part {
             ContentPart::Text(text) | ContentPart::Reasoning(text) => !text.is_empty(),
             ContentPart::ToolCall(_) => true,
-            ContentPart::ToolResult(_) => false,
+            ContentPart::ToolResult(_)
+            | ContentPart::Image(_)
+            | ContentPart::Audio(_)
+            | ContentPart::Video(_) => false,
         });
         if !has_content
             && matches!(

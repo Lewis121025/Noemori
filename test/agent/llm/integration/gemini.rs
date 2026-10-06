@@ -23,6 +23,7 @@ async fn gemini_stream_retains_thought_signature_and_function_id() {
         name: "double".into(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     }]));
     generate(&model, second, context()).await.unwrap();
     server.finish().await;
@@ -54,6 +55,7 @@ async fn gemini_native_call_ids_are_not_classified_by_a_magic_prefix() {
         name: "double".into(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     }]));
     generate(&model, second, context()).await.unwrap();
     server.finish().await;

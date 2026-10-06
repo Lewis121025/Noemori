@@ -18,7 +18,10 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
                 parts.push(match part {
                     ContentPart::Text(text)=>json!({"type":"text","text":text}),
                     ContentPart::ToolCall(call)=>json!({"type":"tool_use","id":call.id,"name":call.name,"input":call.arguments}),
-                    ContentPart::ToolResult(result)=>json!({"type":"tool_result","tool_use_id":result.call_id,"content":tool_json(result).to_string(),"is_error":result.is_error}),
+                    ContentPart::ToolResult(result)=>tool_result(result)?,
+                    ContentPart::Image(image)=>media::encode(config.protocol, MediaRef::Image(image))?,
+                    ContentPart::Audio(audio)=>media::encode(config.protocol, MediaRef::Audio(audio))?,
+                    ContentPart::Video(video)=>media::encode(config.protocol, MediaRef::Video(video))?,
                     ContentPart::Reasoning(_)=>return Err(Error::Unsupported("Anthropic 推理续轮需要原始签名".into())),
                 });
             }
@@ -41,6 +44,25 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         body["anthropic_version"] = json!("vertex-2023-10-16");
     }
     Ok(body)
+}
+
+fn tool_result(result: &crate::ToolResult) -> Result<Value, Error> {
+    let content = if result.media.is_empty() {
+        json!(result.output.to_string())
+    } else {
+        let mut parts = vec![json!({"type":"text","text":result.output.to_string()})];
+        parts.extend(
+            result
+                .media
+                .iter()
+                .map(|item| media::encode(Protocol::Anthropic, item.as_ref()))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        json!(parts)
+    };
+    Ok(
+        json!({"type":"tool_result","tool_use_id":result.call_id,"content":content,"is_error":result.is_error}),
+    )
 }
 
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {

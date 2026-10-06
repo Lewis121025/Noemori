@@ -104,6 +104,7 @@ async fn bedrock_tool_arguments_and_result_keep_the_native_call_id() {
         name: "double".into(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     }]));
     generate(&model, next, context()).await.unwrap();
     server.finish().await;

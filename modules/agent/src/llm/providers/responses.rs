@@ -5,12 +5,12 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     let mut input = Vec::new();
     for message in &request.messages {
         if let Some(raw) = native(config, message)? {
-            input.extend(
-                raw.as_array()
-                    .ok_or_else(|| Error::Protocol("Responses 续轮数据必须是输出项数组".into()))?
-                    .iter()
-                    .cloned(),
-            );
+            for item in raw
+                .as_array()
+                .ok_or_else(|| Error::Protocol("Responses 续轮数据必须是输出项数组".into()))?
+            {
+                input.push(input_item(item)?);
+            }
             continue;
         }
         for part in &message.content {
@@ -23,7 +23,17 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
                     input.push(json!({"role": role, "content": text}));
                 }
                 ContentPart::ToolCall(call) => input.push(json!({"type":"function_call","call_id":call.id,"name":call.name,"arguments":call.arguments.to_string()})),
-                ContentPart::ToolResult(result) => input.push(json!({"type":"function_call_output","call_id":result.call_id,"output":tool_json(result).to_string()})),
+                ContentPart::ToolResult(result) => {
+                    let output = if result.media.is_empty() { json!(tool_json(result).to_string()) } else {
+                        let mut parts = vec![json!({"type":"input_text","text":tool_json(result).to_string()})];
+                        parts.extend(result.media.iter().map(|item| media::encode(Protocol::OpenAiResponses, item.as_ref())).collect::<Result<Vec<_>, _>>()?);
+                        json!(parts)
+                    };
+                    input.push(json!({"type":"function_call_output","call_id":result.call_id,"output":output}));
+                }
+                ContentPart::Image(image) => input.push(json!({"role":"user","content":[media::encode(config.protocol, MediaRef::Image(image))?]})),
+                ContentPart::Audio(audio) => input.push(json!({"role":"user","content":[media::encode(config.protocol, MediaRef::Audio(audio))?]})),
+                ContentPart::Video(video) => input.push(json!({"role":"user","content":[media::encode(config.protocol, MediaRef::Video(video))?]})),
                 ContentPart::Reasoning(_) => return Err(Error::Unsupported("Responses 推理续轮需要原生输出项".into())),
             }
         }
@@ -34,6 +44,51 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     }
     common_options(&mut body, request, "max_output_tokens");
     Ok(body)
+}
+
+/// 普通回复转成输入文本，省略生成元数据；推理项保持原样以满足签名续轮契约。
+fn input_item(item: &Value) -> Result<Value, Error> {
+    match string(item, "type")? {
+        "message" => {
+            let mut content = Vec::new();
+            for part in array(item, "content")? {
+                let text = match string(part, "type")? {
+                    "output_text" => string(part, "text")?,
+                    "refusal" => string(part, "refusal")?,
+                    other => {
+                        return Err(Error::Unsupported(format!("Responses 内容类型：{other}")));
+                    }
+                };
+                content.push(json!({"type":"input_text", "text":text}));
+            }
+            let mut message = json!({"role":"assistant", "content":content});
+            // 阶段标记区分过程说明与最终回答，是续轮语义而非生成状态。
+            if let Some(phase) = item.get("phase") {
+                message["phase"] = phase.clone();
+            }
+            Ok(message)
+        }
+        "function_call" => {
+            let mut call = item.clone();
+            call.as_object_mut()
+                .ok_or_else(|| Error::Protocol("Responses 工具调用必须是对象".into()))?
+                .retain(|key, _| {
+                    matches!(
+                        key.as_str(),
+                        "type"
+                            | "call_id"
+                            | "name"
+                            | "arguments"
+                            | "namespace"
+                            | "async"
+                            | "caller"
+                    )
+                });
+            Ok(call)
+        }
+        "reasoning" => Ok(item.clone()),
+        other => Err(Error::Unsupported(format!("Responses 输出项：{other}"))),
+    }
 }
 
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {

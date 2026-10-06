@@ -1,8 +1,10 @@
 packages:
+  - modules/agent/web-runtime
   - modules/notes/packages/desktop
   - modules/notes/packages/vault-node
 
 allowBuilds:
+  '@napi-rs/canvas': true
   electron: true
   esbuild: true
 
@@ -10,3 +12,4 @@ minimumReleaseAgeExclude:
   - '@mermaid-js/parser@2.0.1'
   - '@zip.js/zip.js@2.23.0'
   - mermaid@12.1.0
+  - pdfjs-dist@6.4.299

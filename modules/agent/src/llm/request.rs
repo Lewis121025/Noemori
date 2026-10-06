@@ -1,5 +1,5 @@
 use super::Capabilities;
-use crate::{Error, Message, tool::ToolDefinition, validate_history};
+use crate::{ContentPart, Error, Message, media::MediaRef, tool::ToolDefinition, validate_history};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -44,6 +44,18 @@ impl ModelRequest {
     /// 非有限数、非法预算、重复工具或不支持的工具请求被明确拒绝。
     pub fn validate(&self, capabilities: Capabilities) -> Result<(), Error> {
         validate_history(&self.messages)?;
+        for media in self.media() {
+            let (allowed, capability, content) = match media {
+                MediaRef::Image(_) => (capabilities.vision, "视觉", "图像"),
+                MediaRef::Audio(_) => (capabilities.audio, "音频", "音频"),
+                MediaRef::Video(_) => (capabilities.video, "视频", "视频"),
+            };
+            if !allowed {
+                return Err(Error::Unsupported(format!(
+                    "所选模型未声明{capability}能力，不能发送{content}"
+                )));
+            }
+        }
         if self
             .options
             .temperature
@@ -65,6 +77,24 @@ impl ModelRequest {
             if !names.insert(&tool.name) {
                 return Err(Error::Config("工具名称重复".into()));
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn media(&self) -> impl Iterator<Item = MediaRef<'_>> {
+        self.messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .flat_map(ContentPart::media)
+    }
+
+    /// 在 Base64 分配前拒绝必然超限的附件，完整 JSON 的预算在 HTTP 边界再次核验。
+    pub(crate) fn validate_inline_budget(&self, limit: usize) -> Result<(), Error> {
+        let mut remaining = limit;
+        for media in self.media() {
+            let encoded = media.inline_size().div_ceil(3).checked_mul(4);
+            remaining = encoded.and_then(|size| remaining.checked_sub(size))
+                .ok_or_else(|| Error::Config(format!("媒体经 Base64 编码后超过请求体 {limit} 字节预算；请减少附件或使用 URL/供应商文件引用")))?;
         }
         Ok(())
     }

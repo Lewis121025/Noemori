@@ -4,12 +4,13 @@ mod anthropic;
 mod bedrock;
 mod chat;
 mod gemini;
+mod media;
 mod ollama;
 mod responses;
 mod wire;
 
 use super::{FinishReason, ModelConfig, ModelEvent, ModelRequest, ModelResponse, Protocol, Usage};
-use crate::{ContentPart, Error, Message, ProviderData, Role};
+use crate::{ContentPart, Error, Message, ProviderData, Role, media::MediaRef};
 use serde_json::{Value, json};
 pub(super) use wire::Decoder;
 
@@ -118,7 +119,9 @@ fn native(config: &ModelConfig, message: &Message) -> Result<Option<Value>, Erro
         None => Ok(None),
         Some(data) if data.protocol == config.protocol.key() && data.model == config.model => {
             let payload = match config.protocol {
-                Protocol::OpenAiChat | Protocol::Ollama => assistant_payload(data.payload.clone())?,
+                Protocol::OpenAiChat | Protocol::Ollama => {
+                    assistant_input(config.protocol, data.payload.clone())?
+                }
                 _ => data.payload.clone(),
             };
             Ok(Some(payload))
@@ -127,6 +130,46 @@ fn native(config: &ModelConfig, message: &Message) -> Result<Option<Value>, Erro
             "历史含其他协议或模型的续轮数据，请显式转换历史".into(),
         )),
     }
+}
+
+/// 只在发送边界投影原生消息；完整载荷留在历史中，签名与工具参数不做递归裁剪。
+fn assistant_input(protocol: Protocol, payload: Value) -> Result<Value, Error> {
+    let mut payload = assistant_payload(payload)?;
+    let object = payload
+        .as_object_mut()
+        .ok_or_else(|| Error::Protocol("模型消息必须是对象".into()))?;
+    let fields: &[&str] = match protocol {
+        Protocol::OpenAiChat => &[
+            "role",
+            "content",
+            "refusal",
+            "tool_calls",
+            "reasoning_content",
+            "reasoning",
+            "reasoning_details",
+        ],
+        Protocol::Ollama => &["role", "content", "thinking", "tool_calls"],
+        _ => return Err(Error::Protocol("该协议不使用 assistant 消息对象".into())),
+    };
+    object.retain(|key, _| fields.contains(&key.as_str()));
+    if let Some(calls) = object
+        .get_mut("tool_calls")
+        .filter(|calls| !calls.is_null())
+    {
+        let calls = calls
+            .as_array_mut()
+            .ok_or_else(|| Error::Protocol("工具调用必须是数组".into()))?;
+        for call in calls {
+            let call = call
+                .as_object_mut()
+                .ok_or_else(|| Error::Protocol("工具调用必须是对象".into()))?;
+            call.retain(|key, _| {
+                key == "function"
+                    || (protocol == Protocol::OpenAiChat && matches!(key.as_str(), "id" | "type"))
+            });
+        }
+    }
+    Ok(payload)
 }
 
 /// 保存和回放使用同一角色约束，防止原生载荷与统一消息角色相矛盾。

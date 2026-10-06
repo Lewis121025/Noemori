@@ -57,6 +57,7 @@ async fn chat_stream_assembles_split_tool_arguments_and_keeps_reasoning() {
         name: call.name.clone(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     };
     let mut second = request();
     second.messages.push(first.message);
@@ -106,6 +107,7 @@ async fn responses_stream_preserves_encrypted_reasoning_items() {
         name: "double".into(),
         output: json!(4),
         is_error: false,
+        media: Vec::new(),
     }]));
     generate(&model, second, context()).await.unwrap();
     server.finish().await;

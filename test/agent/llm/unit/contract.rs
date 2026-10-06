@@ -16,6 +16,9 @@ fn capabilities() -> Capabilities {
     Capabilities {
         tools: true,
         streaming: true,
+        vision: false,
+        audio: false,
+        video: false,
     }
 }
 
@@ -103,6 +106,7 @@ async fn direct_generation_rejects_call_ids_already_present_in_history() {
             name: "test".into(),
             output: json!("done"),
             is_error: false,
+            media: Vec::new(),
         }]));
     let model = ScriptedModel::new(vec![vec![calls(&[("call-1", "test", json!({}))])]]);
     let context = ExecutionContext::new(CancellationToken::new(), Duration::from_secs(10)).unwrap();

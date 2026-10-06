@@ -3,6 +3,8 @@
 mod contract;
 mod definition;
 mod registry;
+pub mod terminal;
+pub mod web;
 
 pub use contract::{Tool, ToolContext, ToolError};
 pub use definition::ToolDefinition;

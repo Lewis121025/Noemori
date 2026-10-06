@@ -1,15 +1,17 @@
-use crate::ExecutionContext;
+use crate::{AgentSession, ExecutionContext, Media};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 
-/// 工具执行上下文；工具自行启动的工作也必须遵守取消信号和截止时间。
+/// 工具执行上下文；本轮工作遵守运行边界，跨轮工作必须登记到会话资源所有者。
 #[derive(Clone, Debug)]
 pub struct ToolContext {
     /// 本次调用的唯一关联标识，供工具日志和外部操作记录使用。
     pub call_id: String,
-    /// 工具及其自行启动的工作必须共同遵守的取消和截止时间。
+    /// 本轮调用的取消和截止时间；已经登记到会话的跨轮资源由会话负责清理。
     pub execution: ExecutionContext,
+    /// 宿主确定的资源归属；模型不得自行指定或切换会话。
+    pub session: AgentSession,
 }
 
 /// 工具业务失败可交给模型纠正，基础设施失败则终止运行。
@@ -35,9 +37,16 @@ pub trait Tool: Send + Sync + 'static {
     fn name(&self) -> &str;
     /// 描述工具的用途和调用前置条件。
     fn description(&self) -> &str;
+    /// 从完整结果中取得有序媒体观察；默认无附件，媒体与对应结果共同提交。
+    ///
+    /// `output` 是已成功执行的结果；返回图片、音频或视频，不改变其 JSON 表达。
+    /// 若 Output 存有媒体字段，必须使用 serde(skip) 排除，以免字节或引用重复进入工具 JSON。
+    fn media(&self, _output: &Self::Output) -> Vec<Media> {
+        Vec::new()
+    }
     /// 执行已校验的参数；返回结果或明确分类的工具失败。
     ///
-    /// 实现必须响应上下文中的取消信号，不得把外部任务脱离运行生命周期。
+    /// 实现必须响应上下文中的取消信号；跨轮任务只能由显式会话接管生命周期。
     /// `args` 已通过 Schema 和反序列化校验，`context` 提供调用归属及运行边界。
     ///
     /// # 错误

@@ -1,16 +1,21 @@
 use super::{Agent, AgentEvent, AgentStream, RunInput, RunStatus, state::RunState};
 use crate::{
-    Error, ExecutionContext, ToolCall,
+    AgentSession, Error, ExecutionContext, ToolCall,
     llm::{FinishReason, Model, ModelEvent, ModelRequest, checked_stream},
     tool::ToolRegistry,
 };
 use futures::{Stream, StreamExt};
 use std::sync::Arc;
 
-pub(super) fn drive(agent: Agent, input: RunInput, context: ExecutionContext) -> AgentStream {
+pub(super) fn drive(
+    agent: Agent,
+    input: RunInput,
+    context: ExecutionContext,
+    lease: crate::session::RunLease,
+) -> AgentStream {
     Box::pin(async_stream::stream! {
         // 流被丢弃时取消子任务；调用方的父信号不受影响。
-        let _cancel_guard = context.cancellation.clone().drop_guard();
+        let _lease = lease;
         let mut state = RunState::new(input.messages);
         let mut retries = 0;
         let status = 'running: loop {
@@ -50,7 +55,7 @@ pub(super) fn drive(agent: Agent, input: RunInput, context: ExecutionContext) ->
             };
             if let Some(status) = termination(&response.finish_reason) { break status; }
             let calls: Vec<_> = response.message.tool_calls().cloned().collect();
-            let mut tools = Box::pin(tool_batch(&mut state, &agent.tools, &calls, context.clone()));
+            let mut tools = Box::pin(tool_batch(&mut state, &agent.tools, &calls, context.clone(), &input.session));
             while let Some(event) = tools.next().await {
                 match event {
                     Ok(event) => yield event,
@@ -90,13 +95,14 @@ fn tool_batch<'a>(
     tools: &'a ToolRegistry,
     calls: &'a [ToolCall],
     context: ExecutionContext,
+    session: &'a AgentSession,
 ) -> impl Stream<Item = Result<AgentEvent, Error>> + Send + 'a {
     async_stream::try_stream! {
         for call in calls {
             context.check()?;
             state.pending_mut()?.attempted_tool_ids.push(call.id.clone());
             yield AgentEvent::ToolStarted(call.clone());
-            let result = tools.execute(call, context.clone()).await?;
+            let result = tools.execute_in_session(call, context.clone(), session).await?;
             state.pending_mut()?.tool_results.push(result.clone());
             yield AgentEvent::ToolFinished(result);
         }
