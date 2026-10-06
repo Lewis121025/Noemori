@@ -10,7 +10,7 @@ import { _electron as electron } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("统一工作台：侧栏搜索、模式、分栏与目录状态形成连续操作路径", async (t) => {
+test("统一工作台：侧栏搜索、文内工具、分栏与目录状态形成连续操作路径", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-workbench-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -74,21 +74,21 @@ test("统一工作台：侧栏搜索、模式、分栏与目录状态形成连�
     expect(await page.locator(".pane-column button").count()).toBe(0);
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).waitFor();
-    expect(await sidebar.isVisible()).toBe(false);
+    await expect.poll(() => sidebar.isVisible()).toBe(false);
     expect(await page.locator(".content-space button:visible").count()).toBe(0);
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
     await controls.getByRole("toolbar", { name: "编辑工具栏", exact: true }).waitFor();
     await controls.getByRole("button", { name: "文内查找", exact: true }).click();
-    await sidebar.getByRole("searchbox", { name: "查找", exact: true }).fill("工作台");
-    await sidebar.getByRole("button", { name: "下一处", exact: true }).click();
+    await controls.getByRole("searchbox", { name: "查找", exact: true }).fill("工作台");
+    await controls.getByRole("button", { name: "下一处", exact: true }).click();
     expect(await page.locator(".main .search-panel").count()).toBe(0);
-    await sidebar.getByRole("button", { name: "关闭查找", exact: true }).click();
+    await controls.getByRole("button", { name: "关闭查找", exact: true }).click();
     await page.getByRole("button", { name: "搜索", exact: true }).click();
     await page.getByRole("searchbox", { name: "搜索文件和全文", exact: true }).fill("苹果");
     await page.locator(".search-content .hit").waitFor();
     await page.locator(".search-content .hit").click();
     await expect.poll(() => controls.locator(".document-name").textContent()).toBe("乙.md");
-    await page.getByRole("button", { name: "文件", exact: true }).click();
+    await sidebarComponent(page, "目录");
     await documentTools(page);
     await openSplit(page);
     await page.locator("dialog.picker[open]").getByRole("combobox").fill("甲");
@@ -97,12 +97,12 @@ test("统一工作台：侧栏搜索、模式、分栏与目录状态形成连�
     await expect.poll(() => controls.locator(".document-name").textContent()).toBe("甲.md");
     const pane = page.locator(".pane-column.active");
     await sidebarComponent(page, "目录");
-    await controls
-      .locator(".outline-sidebar")
+    const outline = sidebar.locator(".sidebar-document:not([hidden]) .outline-sidebar");
+    await outline
       .getByRole("button", { name: "章节20", exact: true })
       .click();
     await expect
-      .poll(() => controls.locator('.outline-sidebar [aria-current="location"]').textContent())
+      .poll(() => outline.locator('[aria-current="location"]').textContent())
       .toBe("章节20");
     await documentTools(page);
     for (const width of [640, 860, 1100, 1440]) {
@@ -110,9 +110,9 @@ test("统一工作台：侧栏搜索、模式、分栏与目录状态形成连�
       const toolbar = controls.getByRole("toolbar", { name: "编辑工具栏", exact: true });
       await toolbar.scrollIntoViewIfNeeded();
       const box = (await toolbar.boundingBox())!;
-      const side = (await sidebar.boundingBox())!;
-      expect(box.x).toBeGreaterThanOrEqual(side.x);
-      expect(box.x + box.width).toBeLessThanOrEqual(side.x + side.width + 1);
+      const header = (await page.locator(".window-toolbar").boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(header.y);
+      expect(box.y + box.height).toBeLessThanOrEqual(header.y + header.height);
       expect(
         await page.locator(".pane-column [role=toolbar], .pane-column .outline-sidebar").count(),
       ).toBe(0);
