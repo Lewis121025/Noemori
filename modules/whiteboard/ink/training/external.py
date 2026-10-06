@@ -32,6 +32,9 @@ def _validate(directory: Path, dataset: str) -> None:
     elif dataset == "shape-tremor-invariance-v1":
         from ..dataset.tremor.package import validate_dataset
         validate_dataset(directory)
+    elif dataset == "shape-motion-invariance-v1":
+        from ..dataset.motion.package import validate_dataset
+        validate_dataset(directory)
     else:
         raise ValueError("外部包未经来源专用验证器支持，拒绝接受监督标签")
 
@@ -50,7 +53,7 @@ def load_external_packages(directories: list[Path]) -> dict:
         _validate(directory, dataset)
         if manifest.get("classes") != list(LABELS):
             raise ValueError("外部数据包类别顺序不符")
-        paired = dataset in ("shape-detail-invariance-v1", "shape-tremor-invariance-v1")
+        paired = dataset in ("shape-detail-invariance-v1", "shape-tremor-invariance-v1", "shape-motion-invariance-v1")
         if paired:
             native_sources[str(directory)] = manifest["renderer"]["binary"]
         counts = Counter()
@@ -67,6 +70,7 @@ def load_external_packages(directories: list[Path]) -> dict:
                     seen.add(identity)
                     # 同一个QuickDraw原key在不同发布版本中仍是同一个来源，版本名不能隔离泄漏。
                     domain = ("quickdraw" if dataset in ("quickdraw-real-shapes-v1", "shape-boundary-review-v1")
+                              else "synthetic_motion" if dataset == "shape-motion-invariance-v1"
                               else "synthetic_detail" if paired else dataset)
                     group = (domain, row["group_id"])
                     if groups.setdefault(group, split) != split:

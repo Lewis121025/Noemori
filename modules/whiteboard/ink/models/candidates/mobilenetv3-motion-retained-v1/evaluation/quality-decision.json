@@ -1,0 +1,320 @@
+{
+  "eligible_for_native_verification": false,
+  "checks": [
+    {
+      "name": "selected_validation_legacy_retention",
+      "passes": true
+    },
+    {
+      "name": "handwriting-negatives-v2-final/raw_character_candidates",
+      "before": 50,
+      "after": 51,
+      "criterion": "<=",
+      "passes": false
+    },
+    {
+      "name": "chinese-handwriting-negatives-v1/raw_character_candidates",
+      "before": 0,
+      "after": 0,
+      "criterion": "<=",
+      "passes": true
+    },
+    {
+      "name": "new_motion_raw_macro_f1",
+      "before": 0.918583718418228,
+      "after": 0.9924535347838558,
+      "criterion": ">",
+      "passes": true
+    },
+    {
+      "name": "new_motion_correct",
+      "before": 1489,
+      "after": 1491,
+      "passes": true,
+      "criterion": ">"
+    },
+    {
+      "name": "new_motion_5pct_correct",
+      "before": 652,
+      "after": 654,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "new_real_correct",
+      "before": 26,
+      "after": 25,
+      "passes": false,
+      "criterion": ">="
+    },
+    {
+      "name": "new_real_wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "detail/correct",
+      "before": 1021,
+      "after": 1020,
+      "passes": false,
+      "criterion": ">="
+    },
+    {
+      "name": "detail/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "legacy/classification-v3-final/correct",
+      "before": 234,
+      "after": 234,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "legacy/classification-v3-final/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "legacy/gesture-classification-v1/correct",
+      "before": 121,
+      "after": 121,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "legacy/gesture-classification-v1/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "arrow_order/correct",
+      "before": 120,
+      "after": 120,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "arrow_order/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "tremor/correct",
+      "before": 633,
+      "after": 631,
+      "passes": false,
+      "criterion": ">="
+    },
+    {
+      "name": "tremor/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "stationary/correct",
+      "before": 336,
+      "after": 336,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "stationary/wrong",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "mmg_arrow_correct",
+      "before": 4,
+      "after": 4,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "old_tremor_5pct_correct",
+      "before": 188,
+      "after": 188,
+      "passes": true,
+      "criterion": ">="
+    },
+    {
+      "name": "character_negativenegative_accepted",
+      "before": 1,
+      "after": 1,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "legacy/classification-v3-finalnegative_accepted",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "legacy/gesture-classification-v1negative_accepted",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "motion_negative/negative_accepted",
+      "before": 0,
+      "after": 0,
+      "passes": true,
+      "criterion": "<="
+    },
+    {
+      "name": "additional_pause/size=40/per_axis_amplitude=2.5/frozen_baseline_parity",
+      "passes": true,
+      "evidence": {
+        "baseline_top1_mismatches_with_frozen_run": 0,
+        "max_baseline_confidence_delta": 0.0
+      }
+    },
+    {
+      "name": "additional_pause/size=40/per_axis_amplitude=2.5/old_correct_retained",
+      "passes": true,
+      "evidence": {
+        "previous_correct_repairs": 9,
+        "retained_correct_repairs_same_class": 9,
+        "lost_previous_correct_classifier": 0
+      }
+    },
+    {
+      "name": "additional_pause/size=40/per_axis_amplitude=2.5/novel_wrong_candidates",
+      "passes": false,
+      "count": 1
+    },
+    {
+      "name": "temporal_pause/6px/0.015/frozen_baseline_parity",
+      "passes": true,
+      "evidence": {
+        "baseline_top1_mismatches_with_frozen_run": 0,
+        "max_baseline_confidence_delta": 0.0
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.015/old_correct_retained",
+      "passes": false,
+      "evidence": {
+        "previous_correct_repairs": 219,
+        "retained_correct_repairs_same_class": 217,
+        "lost_previous_correct_classifier": 2
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.015/novel_wrong_candidates",
+      "passes": false,
+      "count": 2
+    },
+    {
+      "name": "temporal_pause/6px/0.03/frozen_baseline_parity",
+      "passes": true,
+      "evidence": {
+        "baseline_top1_mismatches_with_frozen_run": 0,
+        "max_baseline_confidence_delta": 0.0
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.03/old_correct_retained",
+      "passes": false,
+      "evidence": {
+        "previous_correct_repairs": 211,
+        "retained_correct_repairs_same_class": 210,
+        "lost_previous_correct_classifier": 1
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.03/novel_wrong_candidates",
+      "passes": false,
+      "count": 1
+    },
+    {
+      "name": "temporal_pause/6px/0.05/frozen_baseline_parity",
+      "passes": true,
+      "evidence": {
+        "baseline_top1_mismatches_with_frozen_run": 0,
+        "max_baseline_confidence_delta": 0.0
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.05/old_correct_retained",
+      "passes": true,
+      "evidence": {
+        "previous_correct_repairs": 159,
+        "retained_correct_repairs_same_class": 159,
+        "lost_previous_correct_classifier": 0
+      }
+    },
+    {
+      "name": "temporal_pause/6px/0.05/novel_wrong_candidates",
+      "passes": true,
+      "count": 0
+    },
+    {
+      "name": "reconstructed_pause/size=40/max_displacement=2.5/frozen_baseline_parity",
+      "passes": true,
+      "evidence": {
+        "baseline_top1_mismatches_with_frozen_run": 0,
+        "max_baseline_confidence_delta": 0.0
+      }
+    },
+    {
+      "name": "reconstructed_pause/size=40/max_displacement=2.5/old_correct_retained",
+      "passes": true,
+      "evidence": {
+        "previous_correct_repairs": 112,
+        "retained_correct_repairs_same_class": 112,
+        "lost_previous_correct_classifier": 0
+      }
+    },
+    {
+      "name": "reconstructed_pause/size=40/max_displacement=2.5/novel_wrong_candidates",
+      "passes": true,
+      "count": 0
+    }
+  ],
+  "frozen_protocol": {
+    "schema_version": 1,
+    "frozen_before_candidate_export": true,
+    "model_selection": "仅逐来源逐类别val分数加旧来源召回约束；test不决定epoch。",
+    "criteria": {
+      "selected_validation_passes_legacy_retention": true,
+      "new_motion_raw_macro_f1": "candidate > baseline",
+      "new_motion_positive_correct_repairs": "candidate > baseline",
+      "new_motion_5pct_correct_repairs": "candidate >= baseline",
+      "new_real_visual_correct_repairs": "candidate >= baseline",
+      "new_real_visual_wrong_repairs": "candidate <= baseline",
+      "legacy_positive_groups": "每个来源族correct >= baseline，wrong <= baseline；箭头单独检查。",
+      "old_tremor_5pct_correct_repairs": "candidate >= baseline",
+      "negative_groups": "每个字符/不支持形状来源族accepted <= baseline",
+      "fixed_pause_snapshots": "旧预测须与冻结记录一致；不丢已有正确类别且不新增高置信错误类别。",
+      "onnx_parity": "Top-1全部一致，概率最大误差 <= 0.001",
+      "native_runtime": "若拟发布则实际NativeInk绑定、四项Rust集成测试与模型哈希校验通过",
+      "complete_character_raw_candidates": "完整Pendigits+Kuzushiji字符来源包及中文数字包：0.5以上的非other候选数，各包candidate <= baseline；多笔只作分类检查。"
+    },
+    "limits": [
+      "本轮新增motion为合成独立母图；新QuickDraw监督为AI视觉复核，不是真人设备/人工意图金标。",
+      "旧来源测试只作为回归，不称为新的未见测试。",
+      "停笔固定快照保留检查不冒充完整原始观测几何回放。"
+    ]
+  },
+  "selection": "权重在test评价之前按val固定；验收结果不回流训练。"
+}

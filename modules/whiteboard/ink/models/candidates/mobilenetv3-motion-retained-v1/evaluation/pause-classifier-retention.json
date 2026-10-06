@@ -1,0 +1,61 @@
+{
+  "groups": {
+    "additional_pause/size=40/per_axis_amplitude=2.5": {
+      "samples": 112,
+      "no_snapshot": 0,
+      "previous_correct_repairs": 9,
+      "retained_correct_repairs_same_class": 9,
+      "lost_previous_correct_classifier": 0,
+      "novel_high_confidence_wrong_class": 1,
+      "baseline_top1_mismatches_with_frozen_run": 0,
+      "max_baseline_confidence_delta": 0.0
+    },
+    "temporal_pause/6px/0.015": {
+      "samples": 224,
+      "no_snapshot": 5,
+      "previous_correct_repairs": 219,
+      "retained_correct_repairs_same_class": 217,
+      "lost_previous_correct_classifier": 2,
+      "novel_high_confidence_wrong_class": 2,
+      "baseline_top1_mismatches_with_frozen_run": 0,
+      "max_baseline_confidence_delta": 0.0
+    },
+    "temporal_pause/6px/0.03": {
+      "samples": 224,
+      "no_snapshot": 7,
+      "previous_correct_repairs": 211,
+      "retained_correct_repairs_same_class": 210,
+      "lost_previous_correct_classifier": 1,
+      "novel_high_confidence_wrong_class": 1,
+      "baseline_top1_mismatches_with_frozen_run": 0,
+      "max_baseline_confidence_delta": 0.0
+    },
+    "temporal_pause/6px/0.05": {
+      "samples": 224,
+      "no_snapshot": 20,
+      "previous_correct_repairs": 159,
+      "retained_correct_repairs_same_class": 159,
+      "lost_previous_correct_classifier": 0,
+      "novel_high_confidence_wrong_class": 0,
+      "baseline_top1_mismatches_with_frozen_run": 0,
+      "max_baseline_confidence_delta": 0.0
+    },
+    "reconstructed_pause/size=40/max_displacement=2.5": {
+      "samples": 112,
+      "no_snapshot": 0,
+      "previous_correct_repairs": 112,
+      "retained_correct_repairs_same_class": 112,
+      "lost_previous_correct_classifier": 0,
+      "novel_high_confidence_wrong_class": 0,
+      "baseline_top1_mismatches_with_frozen_run": 0,
+      "max_baseline_confidence_delta": 0.0
+    }
+  },
+  "protocol": "固定上一轮当前输入状态机的停笔快照，重新以同一产品栅格器渲染，对比旧/新CPU FP32权重；先核验旧预测与冻结记录一致。",
+  "limitations": [
+    "部分旧诊断不再保留完整原始观测，本组不能声称新类别的几何修复结果。",
+    "已有正确修复的同类别和0.5分数保留，可证明相同几何门槛下的旧正确行为保留。",
+    "没有快照的32例此前未触发推理，权重变更不影响该输入状态。",
+    "额外小图探测仍有此前两个错误修复，不用本组调整训练或阈值。"
+  ]
+}

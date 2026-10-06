@@ -1,0 +1,25 @@
+{
+  "python_unit": {
+    "passed": 141
+  },
+  "python_integration": {
+    "passed": 72
+  },
+  "whiteboard_after_remote_sync": {
+    "files_passed": 14,
+    "passed": 136
+  },
+  "training_source_fingerprints_match_after_remote_sync": true,
+  "training_completed": true,
+  "renderer_sha256": "e536c5b051adb13810aacc0fcfc2309cffa02398e8bab35f81e5a86191e1f6d2",
+  "selected_validation": {
+    "source_class_macro_f1": 0.9719984886806748,
+    "source_class_pairs": 45,
+    "legacy_recall_tolerance": 0.02,
+    "passes_legacy_retention": true,
+    "legacy_regressions": [],
+    "worst_excess_drop": 0.0
+  },
+  "selected_epoch": 8,
+  "candidate_native_runtime": "未切换默认权重；本候选未通过产品质量门槛，未进行默认模型的原生部署验收。"
+}
