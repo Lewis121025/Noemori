@@ -104,7 +104,7 @@ export function perimeterAdvance(
 }
 
 /** 点到有限线段距离；零长度线段按端点处理。 */
-function segmentDistance(p: FitPoint, a: FitPoint, b: FitPoint): number {
+export function segmentDistance(p: FitPoint, a: FitPoint, b: FitPoint): number {
   const dx = b.x - a.x,
     dy = b.y - a.y;
   const length = dx * dx + dy * dy;
