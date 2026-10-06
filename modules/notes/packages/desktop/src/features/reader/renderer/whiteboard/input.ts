@@ -16,8 +16,11 @@ import {
   type InkBounds,
 } from "../../shared/whiteboard/geometry";
 import { fitShape } from "../../shared/whiteboard/fitting";
+import { advancePause, preparePause, type PauseRegion } from "../../shared/whiteboard/pause";
+import { InkSmoother } from "../../shared/whiteboard/smoothing";
 import {
   RECOGNITION_POINT_LIMIT,
+  HOLD_RADIUS_CSS_PX,
   parseShapePrediction,
   type ShapePrediction,
 } from "../../shared/whiteboard/recognition";
@@ -28,8 +31,9 @@ type Gesture =
       kind: "ink";
       points: InkPoint[];
       preview: InkPoint[] | null;
-      /** 计时与结果失效共用的静止区域基准，不能由界面另取最后采样。 */
-      pauseAt: InkPoint;
+      smoother: InkSmoother;
+      /** 计时、观测归并与结果失效共用同一个静止区域。 */
+      pause: PauseRegion;
       held: boolean;
       request: number;
     }
@@ -96,6 +100,12 @@ export class WhiteboardInput {
   get points(): readonly InkPoint[] {
     return this.gesture?.kind === "ink" ? (this.gesture.preview ?? this.gesture.points) : [];
   }
+  /** 当前实际显示的轨迹；自由笔迹保留真实笔尖，停笔修复预览优先显示。 */
+  get displayPoints(): readonly InkPoint[] {
+    return this.gesture?.kind === "ink"
+      ? (this.gesture.preview ?? this.gesture.smoother.points)
+      : [];
+  }
   /** 已通过分类与拟合门槛的临时预览，抬笔前仍未进入文档。 */
   get corrected(): boolean {
     return this.gesture?.kind === "ink" && this.gesture.preview !== null;
@@ -145,11 +155,13 @@ export class WhiteboardInput {
    * 开始写画、拖动选择或平移；先校验新输入，再结束此前事务。
    * @param point 有限屏幕坐标与 [0, 1] 压力。
    * @param pan 是否仅移动相机；平移不受内容坐标范围限制。
+   * @param time 可选真实事件采样时刻，单位毫秒；缺失时保留原始几何，不猜测频率。
    * @throws 输入无效、内容坐标越界或此前事务无法提交时保留原状态并抛错。
    */
-  begin(point: InkPoint, pan = false): void {
+  begin(point: InkPoint, pan = false, time?: number): void {
     validateSample(point);
     const world = pan ? null : this.world(point);
+    const smoother = world ? new InkSmoother(world, this.camera.scale, time) : null;
     this.finish();
     const bounds = this.selectionBounds;
     if (world === null) this.gesture = { kind: "pan", start: point, view: this.camera };
@@ -161,7 +173,8 @@ export class WhiteboardInput {
         kind: "ink",
         points: [world],
         preview: null,
-        pauseAt: world,
+        smoother: smoother!,
+        pause: { center: world, enclosing: world, start: 0, reset: 0 },
         held: false,
         request: 0,
       };
@@ -173,10 +186,11 @@ export class WhiteboardInput {
    * 追加屏幕采样或更新拖动；无活动手势时不修改内容。
    * @param point 有限屏幕坐标与 [0, 1] 压力。
    * @param terminal 保留抬笔末点，不受移动采样阈值影响。
+   * @param time 真实事件毫秒时刻；倒退或非法时间拒绝本次采样，原始输入不修改。
    * @returns 写画越过静止区域时为 true，界面据此重启停笔计时；平移、拖动或微抖返回 false。
    * @throws 非法采样或坐标越界时拒绝本次更新，保留此前有效输入。
    */
-  update(point: InkPoint, terminal = false): boolean {
+  update(point: InkPoint, terminal = false, time?: number): boolean {
     validateSample(point);
     const active = this.gesture;
     if (!active) return false;
@@ -192,29 +206,29 @@ export class WhiteboardInput {
     const world = this.world(point);
     let restartHold = false;
     if (active.kind === "ink") {
-      let previewCancelled = false;
-      if (
-        Math.hypot(world.x - active.pauseAt.x, world.y - active.pauseAt.y) * this.camera.scale >
-        3
-      ) {
-        previewCancelled = active.preview !== null;
-        active.request++;
-        active.preview = null;
-        active.pauseAt = world;
-        active.held = false;
-        restartHold = true;
-      }
+      active.smoother.checkTime(time);
+      const radius = HOLD_RADIUS_CSS_PX / this.camera.scale;
+      const outside =
+        Math.hypot(world.x - active.pause.center.x, world.y - active.pause.center.y) > radius;
       const last = active.points.at(-1)!;
       const distance = Math.hypot(world.x - last.x, world.y - last.y);
       if (
         terminal
           ? distance === 0 && world.pressure === last.pressure
-          : distance * this.camera.scale < 0.35
-      ) {
-        if (previewCancelled) this.changed(false);
-        return restartHold;
-      }
+          : distance * this.camera.scale < 0.35 && !outside
+      )
+        return false;
+      // 越界观测即使间距很小也必须保留，静止区域索引和原始笔迹才能共享真实采样。
       active.points.push(world);
+      active.smoother.push(world, time, terminal);
+      const pause = advancePause(active.smoother.motion, active.pause, radius);
+      if (pause.reset !== active.pause.reset) {
+        active.request++;
+        active.preview = null;
+        active.held = false;
+        restartHold = true;
+      }
+      active.pause = pause;
     } else {
       active.dx = world.x - active.start.x;
       active.dy = world.y - active.start.y;
@@ -246,13 +260,21 @@ export class WhiteboardInput {
       16
     )
       return false;
-    const snapshot = active.points.map((p) => ({ ...p }));
+    const observations = active.points.map((p) => ({ ...p }));
+    const prepared = preparePause(
+      active.smoother.snapshot(),
+      active.pause,
+      HOLD_RADIUS_CSS_PX / this.camera.scale,
+      active.smoother.motion,
+    );
+    const snapshot = prepared.points;
+    active.pause = prepared.pause;
     active.held = true;
     const request = ++active.request;
     try {
       const prediction = parseShapePrediction(await this.recognize(snapshot));
       if (this.gesture !== active || active.request !== request) return false;
-      active.preview = fitShape(snapshot, prediction, this.camera.scale);
+      active.preview = fitShape(snapshot, prediction, this.camera.scale, observations);
       if (!active.preview) return false;
       this.changed(false);
       return true;
@@ -265,10 +287,11 @@ export class WhiteboardInput {
   /**
    * 抬笔或离开文档时结束事务；一次涂划删除、选择移动或落笔只占一次撤销。
    * @param terminal 真实抬笔事件的屏幕采样；失焦或保存门禁不提供虚构坐标。
+   * @param time 抬笔事件的真实毫秒时刻；无真实事件时不补时间或坐标。
    * @throws 原始输入超出文件契约时不提交，调用方应展示错误。
    */
-  finish(terminal?: InkPoint): void {
-    if (terminal) this.update(terminal, true);
+  finish(terminal?: InkPoint, time?: number): void {
+    if (terminal) this.update(terminal, true, time);
     const active = this.gesture;
     if (!active) return;
     let edited = false;
@@ -276,13 +299,23 @@ export class WhiteboardInput {
       const erased = active.preview
         ? []
         : erasedStrokes(active.points, this.history.document.strokes, this.camera.scale);
+      const points = active.preview ?? active.smoother.points;
+      const changedGeometry =
+        points.length !== active.points.length ||
+        points.some(
+          (point, i) =>
+            point.x !== active.points[i]!.x ||
+            point.y !== active.points[i]!.y ||
+            point.pressure !== active.points[i]!.pressure,
+        );
       edited =
         erased.length > 0
           ? this.history.remove(new Set(erased))
           : this.history.add({
               id: crypto.randomUUID(),
               width: 2,
-              points: active.preview ?? active.points,
+              points,
+              ...(changedGeometry ? { source: active.points } : {}),
             });
     } else if (active.kind === "move")
       edited = this.history.move(this.selected, active.dx, active.dy);

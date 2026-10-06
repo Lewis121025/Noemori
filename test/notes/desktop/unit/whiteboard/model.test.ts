@@ -17,10 +17,37 @@ const stroke: InkStroke = {
 };
 
 describe("白板文件与事务", () => {
+  it("平滑轨迹与原始观测可独立无损保存，旧版读取保留几何，移动与撤销同步两份坐标", () => {
+    const source = [...stroke.points, { x: 52, y: 24, pressure: 0.5 }];
+    const board = parseWhiteboard(JSON.stringify({ version: 2, strokes: [{ ...stroke, source }] }));
+    expect(board.version).toBe(2);
+    expect(board.strokes[0]!.source).toEqual(source);
+    expect(parseWhiteboard(serializeWhiteboard(board))).toEqual(board);
+    const old = parseWhiteboard(JSON.stringify({ version: 1, strokes: [stroke] }));
+    expect(old.strokes).toEqual([stroke]);
+    expect(old.version).toBe(2);
+    const history = new WhiteboardHistory(board);
+    history.move(new Set(["a"]), 4, 7);
+    expect(history.document.strokes[0]!.points[0]).toEqual({ ...stroke.points[0], x: 14.25, y: 4 });
+    expect(history.document.strokes[0]!.source?.at(-1)).toEqual({ x: 56, y: 31, pressure: 0.5 });
+    history.undo();
+    expect(history.document).toEqual(board);
+    expect(() =>
+      parseWhiteboard(JSON.stringify({ version: 1, strokes: [{ ...stroke, source }] })),
+    ).toThrow();
+    expect(() =>
+      parseWhiteboard(
+        JSON.stringify({
+          version: 2,
+          strokes: [{ ...stroke, source: [{ x: NaN, y: 0, pressure: 0.5 }] }],
+        }),
+      ),
+    ).toThrow();
+  });
   it("保留原始坐标和压力，拒绝无效版本、重复身份及非有限坐标", () => {
     const board = { ...emptyWhiteboard(), strokes: [stroke] };
     expect(parseWhiteboard(serializeWhiteboard(board))).toEqual(board);
-    expect(() => parseWhiteboard('{"version":2,"strokes":[]}')).toThrow();
+    expect(() => parseWhiteboard('{"version":3,"strokes":[]}')).toThrow();
     expect(() =>
       parseWhiteboard(JSON.stringify({ ...board, strokes: [stroke, stroke] })),
     ).toThrow();

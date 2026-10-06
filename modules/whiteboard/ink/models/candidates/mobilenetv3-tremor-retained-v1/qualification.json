@@ -1,0 +1,2049 @@
+{
+  "state": "qualified_for_live_stabilization_and_single_stroke_pause_repair_with_limits",
+  "baseline_commit": "82f2859183f64a0dcb6374013d56a2d55346abba",
+  "scope": "真实事件时间下的实时自由笔迹防抖，以及持按停笔450ms后的静态轮廓识别与几何修复。",
+  "model": {
+    "architecture": "mobilenetv3_large_100.ra_in1k",
+    "parameters": 4212280,
+    "precision": "fp32",
+    "bytes": 17135980,
+    "sha256": "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a",
+    "selected_epoch": 6,
+    "completed_epochs": 8,
+    "export_parity": {
+      "samples": 320,
+      "top1_mismatches": 0,
+      "probability_atol": 0.001,
+      "max_logit_abs_error": 0.000118255615234375,
+      "max_probability_abs_error": 2.2917985916137695e-05
+    },
+    "native_parity": {
+      "samples": 96,
+      "class_counts": {
+        "line": 12,
+        "circle": 12,
+        "ellipse": 12,
+        "arc": 12,
+        "rectangle": 12,
+        "triangle": 12,
+        "arrow": 12,
+        "other": 12
+      },
+      "top1_mismatches": 0,
+      "max_probability_abs_error": 1.3893332473369213e-07,
+      "native_raster_and_inference_ms": {
+        "p50": 26.58204599999999,
+        "p95": 29.297696000000087,
+        "max": 167.77280900000005
+      },
+      "scope": "当前Linux服务器上的实际NativeInk绑定与Rust栅格化/ORT FP32，不是目标Apple设备或完整UI延迟。"
+    },
+    "default_model": {
+      "bytes": 17135980,
+      "sha256": "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a"
+    }
+  },
+  "training": {
+    "run": {
+      "bytes": 375234,
+      "sha256": "b17d7fc5ea34fec6a8641c8d13ddccffc6000db1bde592e0235fe459bc15df58"
+    },
+    "checkpoint": {
+      "bytes": 17365263,
+      "sha256": "316e7669d970ff82516085eabdf42d4f2233d0c3ce1c11eb8bf3b78948bdafc3"
+    },
+    "status": {
+      "bytes": 48960,
+      "sha256": "606a303d8ffbe911d162abbb8a40a388e84ca9186cf44be5bd2ebabc22fc4e81"
+    },
+    "selection": {
+      "source_class_macro_f1": 0.9715217400393868,
+      "source_class_pairs": 35,
+      "legacy_recall_tolerance": 0.02,
+      "passes_legacy_retention": true,
+      "legacy_regressions": [],
+      "worst_excess_drop": 0.0
+    },
+    "mixed_test_macro_f1": 0.9824589410586544,
+    "training_counts": {
+      "line": 3424,
+      "circle": 4129,
+      "ellipse": 7760,
+      "arc": 5491,
+      "rectangle": 12459,
+      "triangle": 8316,
+      "arrow": 3406,
+      "other": 69220
+    },
+    "initialization": {
+      "checkpoint": "/data/pxy/Nous/.artifacts/whiteboard/runs/mobilenetv3-contour-consistent-v1/best.pt",
+      "file": {
+        "bytes": 17371663,
+        "sha256": "71e8a77b07c2e5adb0b659622cacb4b3419803f46d1d66c9c8f67f6721c87f88"
+      },
+      "dataset_manifest_sha256": "f493b4fd316b894608e816fd6ef308292c40a5eaec15ebd7831f97072a4f4105"
+    },
+    "teacher_checkpoint": {
+      "bytes": 17371663,
+      "sha256": "71e8a77b07c2e5adb0b659622cacb4b3419803f46d1d66c9c8f67f6721c87f88"
+    },
+    "data_manifest": {
+      "bytes": 3921,
+      "sha256": "eb88a2b2391692431196c05f1122fe2862af4937cba52f6736fe689510d05c16"
+    },
+    "new_data_counts": {
+      "analytic_parents": 1120,
+      "materialized_views": 6720,
+      "clean_reference_images": 1120,
+      "real_handwritten_drawings": 0,
+      "splits": {
+        "train": 5376,
+        "val": 672,
+        "test": 672,
+        "review": 0
+      },
+      "by_split_label": {
+        "train": {
+          "line": 768,
+          "circle": 768,
+          "ellipse": 768,
+          "arc": 768,
+          "rectangle": 768,
+          "triangle": 768,
+          "arrow": 768
+        },
+        "val": {
+          "line": 96,
+          "circle": 96,
+          "ellipse": 96,
+          "arc": 96,
+          "rectangle": 96,
+          "triangle": 96,
+          "arrow": 96
+        },
+        "test": {
+          "line": 96,
+          "circle": 96,
+          "ellipse": 96,
+          "arc": 96,
+          "rectangle": 96,
+          "triangle": 96,
+          "arrow": 96
+        },
+        "review": {}
+      },
+      "accepted_parents": {
+        "train": 896,
+        "val": 112,
+        "test": 112
+      },
+      "unique_supervised_pixels": 6720
+    },
+    "source_packages": [
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/hds-real-shapes-v1",
+        "dataset": "hds-real-shapes-v1",
+        "manifest": {
+          "bytes": 8975,
+          "sha256": "c9a0c6323a16d465e7b807931013d42804ffc0f24d740f5d592544da1ca93394"
+        },
+        "source_counts": {
+          "records": 27292,
+          "by_source_label": {
+            "ellipse": 6454,
+            "rectangle": 6956,
+            "triangle": 6595,
+            "other": 7287
+          },
+          "splits": {
+            "train": 15815,
+            "val": 2803,
+            "test": 1056,
+            "review": 7618
+          },
+          "by_split_label": {
+            "train": {
+              "line": 0,
+              "circle": 0,
+              "ellipse": 4770,
+              "arc": 0,
+              "rectangle": 5737,
+              "triangle": 5308,
+              "arrow": 0,
+              "other": 0
+            },
+            "val": {
+              "line": 0,
+              "circle": 0,
+              "ellipse": 1019,
+              "arc": 0,
+              "rectangle": 860,
+              "triangle": 924,
+              "arrow": 0,
+              "other": 0
+            },
+            "test": {
+              "line": 0,
+              "circle": 0,
+              "ellipse": 334,
+              "arc": 0,
+              "rectangle": 359,
+              "triangle": 363,
+              "arrow": 0,
+              "other": 0
+            },
+            "review": {
+              "line": 0,
+              "circle": 0,
+              "ellipse": 0,
+              "arc": 0,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            }
+          },
+          "by_annotation_status": {
+            "accepted": 19674,
+            "ambiguous": 331,
+            "pending_review": 7281,
+            "excluded_empty": 6
+          },
+          "source_writer_ids": 37,
+          "assigned_writers": {
+            "train": [
+              "aly",
+              "drt",
+              "elu",
+              "frt",
+              "if1",
+              "if2",
+              "if3",
+              "if5",
+              "if8",
+              "ilb",
+              "im1",
+              "lrt",
+              "lt1",
+              "nld",
+              "u02",
+              "u03",
+              "u04",
+              "u05",
+              "u06",
+              "u07",
+              "u08",
+              "u09",
+              "u10",
+              "u11",
+              "u12",
+              "u13",
+              "u14",
+              "vly"
+            ],
+            "val": [
+              "crt",
+              "il1",
+              "lts",
+              "mrt",
+              "nae"
+            ],
+            "test": [
+              "u01",
+              "u17",
+              "u18",
+              "u19"
+            ]
+          },
+          "derivation_kinds": {
+            "source_mixture_original_or_stretched_unresolved": 20005,
+            "normalized_real_no_stretch_reported": 7287
+          },
+          "independent_original_drawing_count": null,
+          "unknown_original_or_stretched_records": 20005
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "ellipse",
+            "source": "hds/human_annotation",
+            "count": 334
+          },
+          {
+            "split": "test",
+            "label": "rectangle",
+            "source": "hds/human_annotation",
+            "count": 359
+          },
+          {
+            "split": "test",
+            "label": "triangle",
+            "source": "hds/human_annotation",
+            "count": 363
+          },
+          {
+            "split": "train",
+            "label": "ellipse",
+            "source": "hds/human_annotation",
+            "count": 4770
+          },
+          {
+            "split": "train",
+            "label": "rectangle",
+            "source": "hds/human_annotation",
+            "count": 5737
+          },
+          {
+            "split": "train",
+            "label": "triangle",
+            "source": "hds/human_annotation",
+            "count": 5308
+          },
+          {
+            "split": "val",
+            "label": "ellipse",
+            "source": "hds/human_annotation",
+            "count": 1019
+          },
+          {
+            "split": "val",
+            "label": "rectangle",
+            "source": "hds/human_annotation",
+            "count": 860
+          },
+          {
+            "split": "val",
+            "label": "triangle",
+            "source": "hds/human_annotation",
+            "count": 924
+          }
+        ],
+        "limitations": [
+          "20005条几何图含原图及横向拉伸变体；上游未给逐条对应，独立原始手绘数量未知。",
+          "37是来源用户ID数量，无法额外核实为37个自然人；按作者推荐用户隔离。",
+          "仅有70px栅格；224px只是等比预处理，不增加原始细节或恢复真实矢量。",
+          "circle/arc真实正例仍未由本包提供，近圆边界仍需独立复核。",
+          "author other不等于Noemori other，7287条保留真实原标签但不自动训练。",
+          "本包没有AI视觉复核标签；人工来源和规则映射不得记为新的人工七类标注。"
+        ]
+      },
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/quickdraw-real-shapes-v1",
+        "dataset": "quickdraw-real-shapes-v1",
+        "manifest": {
+          "bytes": 9082,
+          "sha256": "7ba8c15edfafbf7ef08e4e09856931a4df24d0ba294935bab032c11988343c6f"
+        },
+        "source_counts": {
+          "records": 8478,
+          "splits": {
+            "train": 3905,
+            "val": 279,
+            "test": 279,
+            "review": 4015
+          },
+          "by_split_label": {
+            "train": {
+              "line": 0,
+              "circle": 1130,
+              "ellipse": 0,
+              "arc": 2775,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            },
+            "val": {
+              "line": 2,
+              "circle": 53,
+              "ellipse": 93,
+              "arc": 131,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            },
+            "test": {
+              "line": 5,
+              "circle": 54,
+              "ellipse": 85,
+              "arc": 135,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            },
+            "review": {
+              "line": 0,
+              "circle": 0,
+              "ellipse": 0,
+              "arc": 0,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            }
+          },
+          "annotation_kinds": {
+            "derived_real": 3905,
+            "dataset_protocol": 3613,
+            "ai_visual_review": 960
+          },
+          "distinct_original_keys": 5865,
+          "accepted_distinct_keys": {
+            "train": {
+              "line": 0,
+              "circle": 1130,
+              "ellipse": 0,
+              "arc": 1702,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            },
+            "val": {
+              "line": 2,
+              "circle": 53,
+              "ellipse": 93,
+              "arc": 131,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            },
+            "test": {
+              "line": 5,
+              "circle": 54,
+              "ellipse": 85,
+              "arc": 135,
+              "rectangle": 0,
+              "triangle": 0,
+              "arrow": 0,
+              "other": 0
+            }
+          },
+          "by_extraction_kind": {
+            "whole_drawing": 3156,
+            "complete_source_stroke": 5322
+          }
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "arc",
+            "source": "quickdraw/ai_visual_review",
+            "count": 135
+          },
+          {
+            "split": "test",
+            "label": "circle",
+            "source": "quickdraw/ai_visual_review",
+            "count": 54
+          },
+          {
+            "split": "test",
+            "label": "ellipse",
+            "source": "quickdraw/ai_visual_review",
+            "count": 85
+          },
+          {
+            "split": "test",
+            "label": "line",
+            "source": "quickdraw/ai_visual_review",
+            "count": 5
+          },
+          {
+            "split": "train",
+            "label": "arc",
+            "source": "quickdraw/derived_real",
+            "count": 2775
+          },
+          {
+            "split": "train",
+            "label": "circle",
+            "source": "quickdraw/derived_real",
+            "count": 1130
+          },
+          {
+            "split": "val",
+            "label": "arc",
+            "source": "quickdraw/ai_visual_review",
+            "count": 131
+          },
+          {
+            "split": "val",
+            "label": "circle",
+            "source": "quickdraw/ai_visual_review",
+            "count": 53
+          },
+          {
+            "split": "val",
+            "label": "ellipse",
+            "source": "quickdraw/ai_visual_review",
+            "count": 93
+          },
+          {
+            "split": "val",
+            "label": "line",
+            "source": "quickdraw/ai_visual_review",
+            "count": 2
+          }
+        ],
+        "limitations": [
+          "word是提示词，recognized是旧游戏判断，均非真值；未按recognized筛选。",
+          "训练规则会偏向较规整笔迹，必须用未按规则筛选的独立视觉val/test评估。",
+          "rainbow是完整真实单笔提取，不是单独采集的圆弧；所有派生与原key同组。",
+          "没有作者ID，不宣称按作者隔离；前缀采样也不保证人群代表性。"
+        ]
+      },
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/handwriting-negatives-v2-final",
+        "dataset": "whiteboard-handwriting-negatives-v1",
+        "manifest": {
+          "bytes": 7200,
+          "sha256": "bf11d0ccc734c830aff51e3c8dcd06f3710c23f46daa67edc5ca0e6b13e48ddb"
+        },
+        "source_counts": {
+          "records": 75427,
+          "supervised": 71839,
+          "by_split_source": {
+            "train": {
+              "pendigits": 4747,
+              "character_trajectories": 1566,
+              "kuzushiji_kanji": 50885
+            },
+            "val": {
+              "pendigits": 1188,
+              "character_trajectories": 0,
+              "kuzushiji_kanji": 5404
+            },
+            "test": {
+              "pendigits": 2771,
+              "character_trajectories": 0,
+              "kuzushiji_kanji": 5278
+            },
+            "review": {
+              "pendigits": 2286,
+              "character_trajectories": 1292,
+              "kuzushiji_kanji": 10
+            }
+          },
+          "groups": {
+            "train": 3077,
+            "val": 377,
+            "test": 378,
+            "review": 55
+          }
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "other",
+            "source": "kuzushiji_kanji/mapped_source_character",
+            "count": 5278
+          },
+          {
+            "split": "test",
+            "label": "other",
+            "source": "pendigits/mapped_source_character",
+            "count": 2771
+          },
+          {
+            "split": "train",
+            "label": "other",
+            "source": "character_trajectories/mapped_source_character",
+            "count": 1566
+          },
+          {
+            "split": "train",
+            "label": "other",
+            "source": "kuzushiji_kanji/mapped_source_character",
+            "count": 50885
+          },
+          {
+            "split": "train",
+            "label": "other",
+            "source": "pendigits/mapped_source_character",
+            "count": 4747
+          },
+          {
+            "split": "val",
+            "label": "other",
+            "source": "kuzushiji_kanji/mapped_source_character",
+            "count": 5404
+          },
+          {
+            "split": "val",
+            "label": "other",
+            "source": "pendigits/mapped_source_character",
+            "count": 1188
+          }
+        ],
+        "limitations": [
+          "字符来源有人工字符类别，但本包映射为other不等于每图经过人工几何审核。近原语字符类别被隔离。",
+          "Pendigits使用原UNIPEN坐标，保留多笔画；不同官方队列的局部作者编号不能合并。",
+          "Character Trajectories只有一位匿名作者，全部训练使用；坐标是还原轴单位后积分平滑速度所得。",
+          "Kanji是历史日文汉字的离线栅格，缺少作者和书页身份；测试隔离的是源字类，不能声称作者隔离。",
+          "本包没有现代中文、Noemori真实设备采集或全面未知图形拒绝能力的证明。",
+          "训练增强和静态渲染不计为新增真实原样本，白板单笔修复表现仍需原轨迹与几何拟合评估。"
+        ]
+      },
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/chinese-handwriting-negatives-v1",
+        "dataset": "chinese-handwriting-negatives-v1",
+        "manifest": {
+          "bytes": 6835,
+          "sha256": "1b187218d29b1eff6ad13c4abecb71093afd902ec4ad36baaa8be61f6b00817f"
+        },
+        "source_counts": {
+          "source_images": 15000,
+          "normalized_views": 15000,
+          "source_writer_ids": 100,
+          "source_page_ids": 1000,
+          "splits": {
+            "train": 4800,
+            "val": 600,
+            "test": 600,
+            "review": 9000
+          },
+          "by_split_character": {
+            "train": {
+              "百": 800,
+              "万": 800,
+              "亿": 800,
+              "零": 800,
+              "五": 800,
+              "六": 800
+            },
+            "val": {
+              "百": 100,
+              "万": 100,
+              "亿": 100,
+              "零": 100,
+              "五": 100,
+              "六": 100
+            },
+            "test": {
+              "百": 100,
+              "万": 100,
+              "亿": 100,
+              "零": 100,
+              "五": 100,
+              "六": 100
+            },
+            "review": {
+              "九": 1000,
+              "十": 1000,
+              "千": 1000,
+              "一": 1000,
+              "二": 1000,
+              "三": 1000,
+              "四": 1000,
+              "七": 1000,
+              "八": 1000
+            }
+          },
+          "statuses": {
+            "ambiguous_character": 8898,
+            "accepted": 6000,
+            "excluded_image_quality": 102
+          },
+          "assigned_writers": {
+            "train": [
+              "001",
+              "003",
+              "004",
+              "005",
+              "006",
+              "007",
+              "008",
+              "010",
+              "011",
+              "012",
+              "013",
+              "015",
+              "016",
+              "017",
+              "018",
+              "019",
+              "020",
+              "021",
+              "022",
+              "023",
+              "024",
+              "027",
+              "028",
+              "029",
+              "032",
+              "033",
+              "034",
+              "036",
+              "037",
+              "038",
+              "040",
+              "041",
+              "042",
+              "044",
+              "046",
+              "048",
+              "050",
+              "051",
+              "052",
+              "053",
+              "056",
+              "058",
+              "059",
+              "060",
+              "062",
+              "063",
+              "064",
+              "065",
+              "066",
+              "067",
+              "068",
+              "069",
+              "070",
+              "071",
+              "072",
+              "073",
+              "074",
+              "075",
+              "077",
+              "078",
+              "080",
+              "081",
+              "082",
+              "084",
+              "085",
+              "086",
+              "087",
+              "088",
+              "089",
+              "090",
+              "091",
+              "092",
+              "093",
+              "094",
+              "095",
+              "096",
+              "097",
+              "098",
+              "099",
+              "100"
+            ],
+            "val": [
+              "002",
+              "025",
+              "026",
+              "030",
+              "031",
+              "039",
+              "043",
+              "047",
+              "049",
+              "057"
+            ],
+            "test": [
+              "009",
+              "014",
+              "035",
+              "045",
+              "054",
+              "055",
+              "061",
+              "076",
+              "079",
+              "083"
+            ]
+          }
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "other",
+            "source": "chinese_numbers/mapped_source_character",
+            "count": 600
+          },
+          {
+            "split": "train",
+            "label": "other",
+            "source": "chinese_numbers/mapped_source_character",
+            "count": 4800
+          },
+          {
+            "split": "val",
+            "label": "other",
+            "source": "chinese_numbers/mapped_source_character",
+            "count": 600
+          }
+        ],
+        "limitations": [
+          "仅零五六百万亿六个复杂字类作负例，不能代表通用现代中文分布。",
+          "一二三四七八九十千整体隔离，包括低笔画、框形与近原语歧义；未知个例不强行标注。",
+          "源Raw Dataset已是64px裁剪处理栅格，不是原扫描纸页或白板实采轨迹。",
+          "官方README报告100名参与者，归档100个suite；附带示例MATLAB代码N_stu=50，保留版本差异。",
+          "JPEG文件和224RGB视图为同一来源图，不按视图增加真实原图或作者数量。"
+        ]
+      },
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/shape-detail-invariance-v1",
+        "dataset": "shape-detail-invariance-v1",
+        "manifest": {
+          "bytes": 5538,
+          "sha256": "56abf9abffdb4b9aafedbeea47699988170375873e26e26df1ac6b8232d4035d"
+        },
+        "source_counts": {
+          "analytic_parents": 1120,
+          "materialized_views": 10240,
+          "real_handwritten_drawings": 0,
+          "by_split_label": {
+            "train": {
+              "line": 1024,
+              "circle": 1280,
+              "ellipse": 1280,
+              "arc": 1024,
+              "rectangle": 1280,
+              "triangle": 1280,
+              "arrow": 1024
+            },
+            "val": {
+              "line": 128,
+              "circle": 160,
+              "ellipse": 160,
+              "arc": 128,
+              "rectangle": 160,
+              "triangle": 160,
+              "arrow": 128
+            },
+            "test": {
+              "line": 128,
+              "circle": 160,
+              "ellipse": 160,
+              "arc": 128,
+              "rectangle": 160,
+              "triangle": 160,
+              "arrow": 128
+            },
+            "review": {}
+          },
+          "splits": {
+            "train": 8192,
+            "val": 1024,
+            "test": 1024,
+            "review": 0
+          },
+          "assigned_parent_splits": {
+            "train": 896,
+            "val": 112,
+            "test": 112
+          },
+          "accepted_parents": {
+            "train": 896,
+            "val": 112,
+            "test": 112
+          },
+          "variants": {
+            "clean": 1120,
+            "jitter": 3360,
+            "retrace": 2240,
+            "tail": 2240,
+            "gap": 1280
+          },
+          "accepted_variant_kinds": {
+            "train": {
+              "clean": 896,
+              "jitter": 2688,
+              "retrace": 1792,
+              "tail": 1792,
+              "gap": 1024
+            },
+            "val": {
+              "clean": 112,
+              "jitter": 336,
+              "retrace": 224,
+              "tail": 224,
+              "gap": 128
+            },
+            "test": {
+              "clean": 112,
+              "jitter": 336,
+              "retrace": 224,
+              "tail": 224,
+              "gap": 128
+            }
+          },
+          "unique_supervised_pixels": 9653
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "arc",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "test",
+            "label": "arrow",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "test",
+            "label": "circle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "test",
+            "label": "ellipse",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "test",
+            "label": "line",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "test",
+            "label": "rectangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "test",
+            "label": "triangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "train",
+            "label": "arc",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1024
+          },
+          {
+            "split": "train",
+            "label": "arrow",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1024
+          },
+          {
+            "split": "train",
+            "label": "circle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1280
+          },
+          {
+            "split": "train",
+            "label": "ellipse",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1280
+          },
+          {
+            "split": "train",
+            "label": "line",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1024
+          },
+          {
+            "split": "train",
+            "label": "rectangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1280
+          },
+          {
+            "split": "train",
+            "label": "triangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 1280
+          },
+          {
+            "split": "val",
+            "label": "arc",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "val",
+            "label": "arrow",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "val",
+            "label": "circle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "val",
+            "label": "ellipse",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "val",
+            "label": "line",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 128
+          },
+          {
+            "split": "val",
+            "label": "rectangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          },
+          {
+            "split": "val",
+            "label": "triangle",
+            "source": "synthetic_detail/synthetic_geometry",
+            "count": 160
+          }
+        ],
+        "limitations": [
+          "已知解析目标的合成扰动协议，不是新增真实手写或真实用户意图证据。",
+          "视图数量不等于独立母图数量；同轮廓回描可与clean像素相同，仍用于路径鲁棒性验证。",
+          "合成circle经过归一化可能像素等价，所有跨划分等价或旧保留冲突均隔离。",
+          "七类单轮廓，不涵盖复合场景、超长尾巴、重度缺口或任意涂鸦拒绝。"
+        ]
+      },
+      {
+        "directory": "/data/pxy/Nous/.artifacts/whiteboard/shape-tremor-invariance-v1",
+        "dataset": "shape-tremor-invariance-v1",
+        "manifest": {
+          "bytes": 3921,
+          "sha256": "eb88a2b2391692431196c05f1122fe2862af4937cba52f6736fe689510d05c16"
+        },
+        "source_counts": {
+          "analytic_parents": 1120,
+          "materialized_views": 6720,
+          "clean_reference_images": 1120,
+          "real_handwritten_drawings": 0,
+          "splits": {
+            "train": 5376,
+            "val": 672,
+            "test": 672,
+            "review": 0
+          },
+          "by_split_label": {
+            "train": {
+              "line": 768,
+              "circle": 768,
+              "ellipse": 768,
+              "arc": 768,
+              "rectangle": 768,
+              "triangle": 768,
+              "arrow": 768
+            },
+            "val": {
+              "line": 96,
+              "circle": 96,
+              "ellipse": 96,
+              "arc": 96,
+              "rectangle": 96,
+              "triangle": 96,
+              "arrow": 96
+            },
+            "test": {
+              "line": 96,
+              "circle": 96,
+              "ellipse": 96,
+              "arc": 96,
+              "rectangle": 96,
+              "triangle": 96,
+              "arrow": 96
+            },
+            "review": {}
+          },
+          "accepted_parents": {
+            "train": 896,
+            "val": 112,
+            "test": 112
+          },
+          "unique_supervised_pixels": 6720
+        },
+        "accepted": [
+          {
+            "split": "test",
+            "label": "arc",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "arrow",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "circle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "ellipse",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "line",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "rectangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "test",
+            "label": "triangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "train",
+            "label": "arc",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "arrow",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "circle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "ellipse",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "line",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "rectangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "train",
+            "label": "triangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 768
+          },
+          {
+            "split": "val",
+            "label": "arc",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "arrow",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "circle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "ellipse",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "line",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "rectangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          },
+          {
+            "split": "val",
+            "label": "triangle",
+            "source": "synthetic_tremor/synthetic_geometry",
+            "count": 96
+          }
+        ],
+        "limitations": [
+          "时间相关正弦扰动的合成几何协议，不是真实设备采集或真实用户意图金标。",
+          "角点处额外采样保证原始遍历完整，观测间隔并非严格固定。",
+          "恒定沿轨迹速度及固定基频不能覆盖个体手抖、停顿、压力变化和复合场景。",
+          "同母图六视图非六个独立手绘；测试母图沿用原包，不能称为全新独立测试集。"
+        ]
+      }
+    ],
+    "lineage": "新包沿用detail的1120个解析母图及原划分；每图六个定时扰动视图，clean参考直接复用原包。112个测试母图与此前detail测试母图相同，不是新真人或独立金标。",
+    "augmentation_protocol": "60/120/240Hz、60/180/420 CSSpx/s、6/9/12Hz时间正弦及二次谐波、1.5%/3%/5%尺寸径向位移；包含真实角点额外采样。"
+  },
+  "implementation": {
+    "modules/notes/packages/desktop/src/features/reader/shared/whiteboard/smoothing.ts": {
+      "bytes": 11492,
+      "sha256": "705ca243270d2817f5f2d6b7aeb960bb0ef7202357ae3bbacb99e607b61b8a97"
+    },
+    "modules/notes/packages/desktop/src/features/reader/shared/whiteboard/pause.ts": {
+      "bytes": 8339,
+      "sha256": "32cede76c8d4789069cc60628568aad5775d11cfbfc632834963db85e14f2599"
+    },
+    "modules/notes/packages/desktop/src/features/reader/shared/whiteboard/model.ts": {
+      "bytes": 9059,
+      "sha256": "67450b40a7e9b283a71b5dbb1c72ce89c6762bb1b4836a19d153de229ab58157"
+    },
+    "modules/notes/packages/desktop/src/features/reader/shared/whiteboard/geometry.ts": {
+      "bytes": 8624,
+      "sha256": "42110b1a22872af2b9d818afdd4135ff074a974028bab3cfac1794f18bec1035"
+    },
+    "modules/notes/packages/desktop/src/features/reader/renderer/whiteboard/input.ts": {
+      "bytes": 14939,
+      "sha256": "3f0b57908b8cdfc819e11ff7c521d4b0903c5768cfc7403172f2dca1d0ebc411"
+    },
+    "modules/notes/packages/desktop/src/features/reader/renderer/whiteboard/WhiteboardEditor.svelte": {
+      "bytes": 13608,
+      "sha256": "a3c0cf11ce0654e53e2e8a1e58dde99ee9ff8607596baaf8897040eed03aa81c"
+    },
+    "modules/whiteboard/ink/runtime/src/lib.rs": {
+      "bytes": 7485,
+      "sha256": "08e8717c31ce326e314736ebc953eabcbbfafb771fc72f076e61ca0c03b78703"
+    },
+    "modules/notes/packages/desktop/scripts/prepare-ink.mjs": {
+      "bytes": 670,
+      "sha256": "5d903642addb93dd2c722ca6b91bf2102fcbec47b8eca2fcd61efbe95df24ef4"
+    }
+  },
+  "contracts": {
+    "sampling": "保留通过现有输入采样门槛的原始观测；使用PointerEvent及coalesced event真实timeStamp，未知/相同时刻或>100ms缺采样时保留原几何，不推测频率。",
+    "stabilization": "屏幕局部坐标中的自适应方向滤波；横向2.5Hz，沿向3Hz+0.04×平滑速度，速度导数1Hz，方向0.5Hz。最大滤波落后min(8px,6%笔迹跨度)，8px以内小笔画直接通过。",
+    "intent": "笔尖使用真实末点，保护明确直边角点及一致曲率的无噪声线/圆弧；压力保持对应原观测。完整折返与重复整圈仍按原顺序/覆盖契约校验。",
+    "pause": "运动观测只追加，供静止区域索引与450ms计时使用；静态正反向快照减少相位拖尾，归并稳定重复观测后送模型。",
+    "geometry_gates": {
+      "confidence": 0.5,
+      "max_normalized_distance": 0.075,
+      "rms_normalized_distance": 0.028,
+      "minimum_extent_css_px": 16,
+      "original_observation_max_error_required": true
+    },
+    "lifecycle": "静止预览不入历史；继续运动淘汰旧请求并取消预览，抬笔提交一次历史；迟到结果和卸载仍受请求号与手势身份保护。",
+    "persistence": "白板格式2：points统一供显示、命中、导出和持久化；source可选保存修复/平滑前原始观测。版本1无损读入2，不推测旧笔迹平滑；两个数组共享总点数上限且移动/撤销同步。旧应用不能读取新保存的格式2。"
+  },
+  "browser_verification": {
+    "report": {
+      "version": 2,
+      "strokes": 1,
+      "rawPoints": 122,
+      "displayPoints": 122,
+      "rawRms": 4.230831078188903,
+      "displayRms": 2.074125835867084,
+      "first": {
+        "x": 10,
+        "y": 100,
+        "pressure": 0.5
+      },
+      "last": {
+        "x": 210,
+        "y": 100,
+        "pressure": 0.5
+      },
+      "hasSource": true
+    },
+    "undo": true,
+    "redo": true,
+    "reopen": true,
+    "scope": "真实Svelte白板组件的Chromium自动化合成回放，非真人或设备测试",
+    "input": {
+      "duration_s": 2,
+      "speed_css_px_s": 100,
+      "jitter_amplitude_css_px": 6,
+      "jitter_frequency_hz": 6
+    },
+    "rms_reduction": 0.5097592417339059
+  },
+  "classification_on_raw_temporal_test": {
+    "baseline": {
+      "samples": 672,
+      "correct": 468,
+      "macro_f1_seven_supported_classes": 0.7637773059083999,
+      "per_class_f1": {
+        "line": 0.7950310559006211,
+        "circle": 0.8048780487804879,
+        "ellipse": 0.7860696517412935,
+        "arc": 0.7816091954022989,
+        "rectangle": 0.8504672897196262,
+        "triangle": 0.6753246753246753,
+        "arrow": 0.6530612244897959
+      },
+      "confusion": [
+        [
+          64,
+          0,
+          4,
+          0,
+          3,
+          4,
+          2,
+          19
+        ],
+        [
+          0,
+          66,
+          21,
+          7,
+          2,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          2,
+          79,
+          2,
+          7,
+          0,
+          0,
+          6
+        ],
+        [
+          1,
+          0,
+          0,
+          68,
+          1,
+          0,
+          0,
+          26
+        ],
+        [
+          0,
+          0,
+          1,
+          1,
+          91,
+          0,
+          0,
+          3
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          11,
+          52,
+          1,
+          32
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          3,
+          2,
+          48,
+          43
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "onnx_sha256": "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c",
+      "cpu_inference_ms": {
+        "samples": 8641,
+        "p50": 3.2135294750332832,
+        "p95": 4.37153410166502
+      }
+    },
+    "candidate": {
+      "samples": 672,
+      "correct": 659,
+      "macro_f1_seven_supported_classes": 0.9849251040347035,
+      "per_class_f1": {
+        "line": 0.9947643979057592,
+        "circle": 0.9896907216494846,
+        "ellipse": 0.9789473684210527,
+        "arc": 0.9621621621621622,
+        "rectangle": 0.9844559585492227,
+        "triangle": 0.9947643979057592,
+        "arrow": 0.9896907216494846
+      },
+      "confusion": [
+        [
+          95,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          96,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          2,
+          93,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          89,
+          0,
+          0,
+          1,
+          6
+        ],
+        [
+          0,
+          0,
+          1,
+          0,
+          95,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          1,
+          95,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          96,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "onnx_sha256": "40cbdc3675aa9a1c46092e23312db9936e0807d1a47dca700056380280f7df7a",
+      "cpu_inference_ms": {
+        "samples": 8641,
+        "p50": 3.181622363626957,
+        "p95": 4.294347018003464
+      }
+    }
+  },
+  "repair_evaluation": {
+    "records": 5592,
+    "protocol": "旧/新输入状态机×旧/新FP32 ONNX四组比较；有时间戳的样本按实际采样时间输入，其余保留无时间戳契约；6px停笔组仅按真实450ms计时触发，不强制hold。",
+    "groups": {
+      "detail/clean": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/jitter/0.005": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/jitter/0.015": {
+        "samples": 112,
+        "before": 109,
+        "frontendOnly": 109,
+        "modelOnly": 110,
+        "after": 110,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 1,
+        "lost": 0
+      },
+      "detail/jitter/0.03": {
+        "samples": 112,
+        "before": 103,
+        "frontendOnly": 103,
+        "modelOnly": 111,
+        "after": 111,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 8,
+        "lost": 0
+      },
+      "detail/retrace/0": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/retrace/0.002": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/tail/0.02": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/tail/0.05": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/gap/0.01": {
+        "samples": 64,
+        "before": 64,
+        "frontendOnly": 64,
+        "modelOnly": 64,
+        "after": 64,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "detail/gap/0.02": {
+        "samples": 64,
+        "before": 64,
+        "frontendOnly": 64,
+        "modelOnly": 64,
+        "after": 64,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/line": {
+        "samples": 45,
+        "before": 45,
+        "frontendOnly": 45,
+        "modelOnly": 45,
+        "after": 45,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/circle": {
+        "samples": 48,
+        "before": 48,
+        "frontendOnly": 48,
+        "modelOnly": 48,
+        "after": 48,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/ellipse": {
+        "samples": 48,
+        "before": 48,
+        "frontendOnly": 48,
+        "modelOnly": 48,
+        "after": 48,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/arc": {
+        "samples": 51,
+        "before": 51,
+        "frontendOnly": 51,
+        "modelOnly": 51,
+        "after": 51,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/triangle": {
+        "samples": 42,
+        "before": 42,
+        "frontendOnly": 42,
+        "modelOnly": 42,
+        "after": 42,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/classification-v3-final/other": {
+        "samples": 33,
+        "before": 0,
+        "frontendOnly": 0,
+        "modelOnly": 0,
+        "after": 0,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/gesture-classification-v1/other": {
+        "samples": 120,
+        "before": 0,
+        "frontendOnly": 0,
+        "modelOnly": 0,
+        "after": 0,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/gesture-classification-v1/line": {
+        "samples": 119,
+        "before": 117,
+        "frontendOnly": 117,
+        "modelOnly": 117,
+        "after": 117,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "legacy/gesture-classification-v1/arrow": {
+        "samples": 5,
+        "before": 4,
+        "frontendOnly": 4,
+        "modelOnly": 4,
+        "after": 4,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "source_character_negative/pendigits": {
+        "samples": 2033,
+        "before": 0,
+        "frontendOnly": 0,
+        "modelOnly": 0,
+        "after": 0,
+        "wrongBefore": 1,
+        "wrongFrontendOnly": 1,
+        "wrongModelOnly": 1,
+        "wrongAfter": 1,
+        "gained": 0,
+        "lost": 0
+      },
+      "fresh_native/leaf_finish": {
+        "samples": 24,
+        "before": 24,
+        "frontendOnly": 24,
+        "modelOnly": 24,
+        "after": 24,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "fresh_native/tip_finish": {
+        "samples": 24,
+        "before": 24,
+        "frontendOnly": 24,
+        "modelOnly": 24,
+        "after": 24,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "fresh_native/shaft_in_middle": {
+        "samples": 24,
+        "before": 24,
+        "frontendOnly": 24,
+        "modelOnly": 24,
+        "after": 24,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "fresh_native/tip_start_finish": {
+        "samples": 24,
+        "before": 24,
+        "frontendOnly": 24,
+        "modelOnly": 24,
+        "after": 24,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "fresh_native/closed_tree_walk": {
+        "samples": 24,
+        "before": 24,
+        "frontendOnly": 24,
+        "modelOnly": 24,
+        "after": 24,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "pause_native/size=40/jitter=1": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "pause_native/size=100/jitter=2.5": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "pause_native/size=240/jitter=2.5": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      "temporal_tremor/0.015": {
+        "samples": 224,
+        "before": 218,
+        "frontendOnly": 224,
+        "modelOnly": 223,
+        "after": 224,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 6,
+        "lost": 0
+      },
+      "temporal_tremor/0.03": {
+        "samples": 224,
+        "before": 138,
+        "frontendOnly": 210,
+        "modelOnly": 216,
+        "after": 221,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 85,
+        "lost": 2
+      },
+      "temporal_tremor/0.05": {
+        "samples": 224,
+        "before": 56,
+        "frontendOnly": 170,
+        "modelOnly": 106,
+        "after": 188,
+        "wrongBefore": 11,
+        "wrongFrontendOnly": 1,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 132,
+        "lost": 0
+      },
+      "temporal_pause/6px/0.015": {
+        "samples": 224,
+        "before": 0,
+        "frontendOnly": 219,
+        "modelOnly": 0,
+        "after": 219,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 219,
+        "lost": 0
+      },
+      "temporal_pause/6px/0.03": {
+        "samples": 224,
+        "before": 0,
+        "frontendOnly": 197,
+        "modelOnly": 0,
+        "after": 211,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 211,
+        "lost": 0
+      },
+      "temporal_pause/6px/0.05": {
+        "samples": 224,
+        "before": 0,
+        "frontendOnly": 146,
+        "modelOnly": 0,
+        "after": 159,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 1,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 159,
+        "lost": 0
+      },
+      "additional_pause/size=40/per_axis_amplitude=2.5": {
+        "samples": 112,
+        "before": 9,
+        "frontendOnly": 9,
+        "modelOnly": 9,
+        "after": 9,
+        "wrongBefore": 2,
+        "wrongFrontendOnly": 2,
+        "wrongModelOnly": 2,
+        "wrongAfter": 2,
+        "gained": 0,
+        "lost": 0
+      },
+      "reconstructed_pause/size=40/max_displacement=2.5": {
+        "samples": 112,
+        "before": 112,
+        "frontendOnly": 112,
+        "modelOnly": 112,
+        "after": 112,
+        "wrongBefore": 0,
+        "wrongFrontendOnly": 0,
+        "wrongModelOnly": 0,
+        "wrongAfter": 0,
+        "gained": 0,
+        "lost": 0
+      }
+    },
+    "test_freeze": "模型仅按既有val来源均衡分数及旧来源保留约束选择epoch6；实现冻结后评价test，未据结果修改模型、滤波参数、置信度或几何门槛。",
+    "lost_temporal_views": 2,
+    "lost_behavior": "两个3%抖动椭圆被判为圆后未通过几何门槛，保留自由笔迹，未接受错误类别。",
+    "additional_pause_probe": "额外探测中两轴各2.5px对应径向上界3.536px；保留其旧/新9个正确、2个错误结果，不与旧径向上界2.5px协议混用。另将既有40px/1px视图的终点扰动按2.5倍重建径向有界协议，旧/新均112/112。",
+    "performance": {
+      "updates": 5598816,
+      "mean_update_ms": 0.0011482882030783494
+    }
+  },
+  "verification": {
+    "frontend_targeted": {
+      "files": 16,
+      "tests_passed": 212,
+      "whiteboard_tests": 136
+    },
+    "dataset_and_reader_tests_passed": 16,
+    "rust_runtime_tests_passed": 4,
+    "desktop_check": "svelte-check 0 errors,0 warnings；tsc --noEmit通过",
+    "eslint": "本轮6个生产TS/Svelte文件通过。额外单独检查部署准备脚本时，既有ESLint配置没有声明Node URL全局，出现3处no-undef；本轮仅更新权重SHA，脚本实际执行及权重校验通过。",
+    "prettier": "所有修改TS/Svelte及部署准备脚本通过",
+    "renderer_build": "Vite生产渲染构建通过，25.47s；存在既有大包提示",
+    "native_binding_build": "release构建通过；既有vault dead_code提示",
+    "desktop_regression": {
+      "files_passed": 169,
+      "files_failed": 8,
+      "tests_passed": 1492,
+      "tests_failed": 66,
+      "failed_scope": "既有macOS导出事务门禁及未安装macOS Pandoc随包资源；当前Linux环境无法完成这些导出验证。"
+    },
+    "full_desktop_distribution_build": "未完成；当前Linux环境既有Pandoc准备脚本仅支持macOS arm64。"
+  },
+  "reports": {
+    "records.jsonl": {
+      "bytes": 6181088,
+      "sha256": "6d85691d19ddc52c7ca0bcbbe37af9cd94eec6f1e35ae5835032386300dbc712"
+    },
+    "summary.json": {
+      "bytes": 11316,
+      "sha256": "2270024858add71ce09755b30107ab19908ce5112fbecf8abd584e3a2de04946"
+    },
+    "classification-summary.json": {
+      "bytes": 2950,
+      "sha256": "c40c7b23348a467ffbbd266f28e3c2b212f941c960f53e1d2d231616550fc5a0"
+    },
+    "raw-classification.jsonl": {
+      "bytes": 136933,
+      "sha256": "2bfb3916a95bc1ae4599c78ac20b17c38d69a3a21ae5b34306d7395e257c0709"
+    },
+    "browser-verification.json": {
+      "bytes": 664,
+      "sha256": "c198e25406398fb543986e8a7bff8f933a998385f3ef242146b0daa86691c66d"
+    },
+    "browser-freehand.png": {
+      "bytes": 67730,
+      "sha256": "3b1ed059fed43574513c75420458ceb9ed163f62643c53bcee2e90dca3b11683"
+    },
+    "native-smoke.json": {
+      "bytes": 32669,
+      "sha256": "658456f1e60b85eae3d884ed56da435491b475beba30f87fb316854421717b9b"
+    },
+    "additional-pause/records.jsonl": {
+      "bytes": 123908,
+      "sha256": "7d90d76c28a4df5ca98f4940934a362fc318ba62bd11469ace3199791e79d574"
+    },
+    "additional-pause/summary.json": {
+      "bytes": 1145,
+      "sha256": "7ef039c2635f5d0143be723d15da4523f43b0e6d8cc0e8b6ea878a63e3c703bd"
+    }
+  },
+  "limits": [
+    "合成扰动共用112个既有保留解析母图，不是672个独立真人样本。",
+    "Pendigits负例由来源字符标签映射，不是逐图用户几何意图金标。",
+    "历史数据缺少真实时间戳，本协议不虚构设备采样频率。",
+    "暂停后模型看到重建静态轮廓，拟合仍检查完整原始观测的最大偏差。",
+    "additional_pause组的两个轴各为2.5px，径向上界为3.536px，不能与先前径向上界2.5px的停笔报告混用。该额外探测保留原始结果，不用于调整模型或门槛。",
+    "这些数据是合成时间扰动及公共数据来源协议，不代表真人/Noemori设备意图金标。",
+    "6720个新视图不是6720个独立母图；1120个原母图、896/112/112划分保持不变。",
+    "MMG可用于单笔端到端修复的真实箭头只有5个，仍4/5。",
+    "2033个单路径Pendigits字符来源负例仍有1个弧线被接受；并非逐图几何意图金标。",
+    "5%时间强抖动组仍有36/224个未正确修复，不保证任意抖动或任意图形有效。",
+    "实时滤波需要真实采样时间，不对既有文件补造稳定笔迹。",
+    "性能是当前Linux服务器结果，包含原生栅格化和推理，不含450ms停笔等待、完整IPC/渲染，不是目标Apple设备性能。"
+  ]
+}

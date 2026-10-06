@@ -141,6 +141,25 @@ it("重复停笔不会重复推理；单点和平移不会触发", async () => {
   await held;
 });
 
+it("静止观测仅归并识别快照，修复失败与继续绘制均保留完整原始笔迹", async () => {
+  const recognize = vi.fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>(async () => ({
+    label: "other",
+    confidence: 0.99,
+  }));
+  const board = new WhiteboardInput(emptyWhiteboard(), () => {}, recognize);
+  draw(board);
+  for (let i = 1; i <= 80; i++)
+    board.update(p(96 + 1.7 * Math.sin(i * 1.3), samples.at(-1)!.y + 1.7 * Math.sin(i * 1.7)));
+  const raw = [...board.points];
+  expect(await board.hold()).toBe(false);
+  expect(recognize.mock.calls[0]![0].length).toBeLessThan(raw.length);
+  expect(board.points).toEqual(raw);
+  board.update(p(140, 20));
+  expect(board.points.slice(0, raw.length)).toEqual(raw);
+  board.finish();
+  expect(board.document.strokes[0]!.points.slice(0, raw.length)).toEqual(raw);
+});
+
 it("取消预览的移动即使低于采样间距，也必须立即通知画面恢复原笔迹", async () => {
   const changed = vi.fn();
   const board = new WhiteboardInput(emptyWhiteboard(), changed, async () => prediction);

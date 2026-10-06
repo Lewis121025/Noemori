@@ -17,6 +17,8 @@ export type ShapeLabel = (typeof SHAPE_LABELS)[number];
 export type ShapePrediction = { label: ShapeLabel; confidence: number };
 /** 一次推理只接受一个连续笔迹，限制后台栅格化与 IPC 的输入开销。 */
 export const RECOGNITION_POINT_LIMIT = 8192;
+/** 停笔静止区域的屏幕半径；输入计时与拟合去抖共用，单位为CSS像素。 */
+export const HOLD_RADIUS_CSS_PX = 3;
 
 /** 校验跨进程的完整采样副本；非法数量、坐标或压力抛错，不截断输入。 */
 export function parseRecognitionPoints(value: unknown): InkPoint[] {

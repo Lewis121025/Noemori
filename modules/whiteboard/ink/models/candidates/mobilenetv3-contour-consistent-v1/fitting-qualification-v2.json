@@ -1,0 +1,335 @@
+{
+  "state": "passed_for_existing_single_continuous_stroke_repair",
+  "baseline_commit": "37a2872ba7cb860e1bb6233e02a742698567f103",
+  "model_sha256": "a60b874423a03f24f727bf2bd8c38010f2ea4dbc5e66e57c7d085f4109c8cf8c",
+  "fitting_after_sha256": "dc1af84020a521a1d8694058c8eb072d70acd3c92548032940c82fb96e40e177",
+  "fitting_math_after_sha256": "02905d2ba24976ae37a02837c4640cd82efbf4fd24e17d914a970a54da8a33fe",
+  "change": "三角形以最大面积凸边界三点生成候选，箭头按五个顺序角点生成候选并校验额外折返；最终双向轮廓误差门槛保持原判据。",
+  "selection": "仅使用val和独立参数化回归用例开发；实现冻结后检查保留test，未据test调门槛或修改模型。",
+  "validation": {
+    "samples": 1024,
+    "baseline_failed": 17,
+    "current_failed": 0,
+    "scope": "已知正确类别的合成几何验证，不能当作模型分类结果。"
+  },
+  "retained_test_groups": {
+    "detail/clean": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/jitter/0.005": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/jitter/0.015": {
+      "samples": 112,
+      "acceptedBefore": 109,
+      "acceptedAfter": 109,
+      "correctBefore": 109,
+      "correctAfter": 109,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/jitter/0.03": {
+      "samples": 112,
+      "acceptedBefore": 87,
+      "acceptedAfter": 101,
+      "correctBefore": 87,
+      "correctAfter": 101,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 14,
+      "lost": 0,
+      "oracleBefore": 95,
+      "oracleAfter": 111
+    },
+    "detail/retrace/0": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/retrace/0.002": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/tail/0.02": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/tail/0.05": {
+      "samples": 112,
+      "acceptedBefore": 112,
+      "acceptedAfter": 112,
+      "correctBefore": 112,
+      "correctAfter": 112,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 112,
+      "oracleAfter": 112
+    },
+    "detail/gap/0.01": {
+      "samples": 64,
+      "acceptedBefore": 64,
+      "acceptedAfter": 64,
+      "correctBefore": 64,
+      "correctAfter": 64,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 64,
+      "oracleAfter": 64
+    },
+    "detail/gap/0.02": {
+      "samples": 64,
+      "acceptedBefore": 64,
+      "acceptedAfter": 64,
+      "correctBefore": 64,
+      "correctAfter": 64,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0,
+      "oracleBefore": 64,
+      "oracleAfter": 64
+    },
+    "legacy/classification-v3-final/line": {
+      "samples": 45,
+      "acceptedBefore": 45,
+      "acceptedAfter": 45,
+      "correctBefore": 45,
+      "correctAfter": 45,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/circle": {
+      "samples": 48,
+      "acceptedBefore": 48,
+      "acceptedAfter": 48,
+      "correctBefore": 48,
+      "correctAfter": 48,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/ellipse": {
+      "samples": 48,
+      "acceptedBefore": 48,
+      "acceptedAfter": 48,
+      "correctBefore": 48,
+      "correctAfter": 48,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/arc": {
+      "samples": 51,
+      "acceptedBefore": 51,
+      "acceptedAfter": 51,
+      "correctBefore": 51,
+      "correctAfter": 51,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/triangle": {
+      "samples": 42,
+      "acceptedBefore": 42,
+      "acceptedAfter": 42,
+      "correctBefore": 42,
+      "correctAfter": 42,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/classification-v3-final/other": {
+      "samples": 33,
+      "acceptedBefore": 0,
+      "acceptedAfter": 0,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/other": {
+      "samples": 120,
+      "acceptedBefore": 0,
+      "acceptedAfter": 0,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/line": {
+      "samples": 119,
+      "acceptedBefore": 117,
+      "acceptedAfter": 117,
+      "correctBefore": 117,
+      "correctAfter": 117,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "legacy/gesture-classification-v1/arrow": {
+      "samples": 5,
+      "acceptedBefore": 2,
+      "acceptedAfter": 2,
+      "correctBefore": 2,
+      "correctAfter": 2,
+      "wrongClassBefore": 0,
+      "wrongClassAfter": 0,
+      "gained": 0,
+      "lost": 0
+    },
+    "source_character_negative/pendigits": {
+      "samples": 2033,
+      "acceptedBefore": 1,
+      "acceptedAfter": 1,
+      "correctBefore": 0,
+      "correctAfter": 0,
+      "wrongClassBefore": 1,
+      "wrongClassAfter": 1,
+      "gained": 0,
+      "lost": 0
+    }
+  },
+  "remaining_strong_jitter_failures": {
+    "classification": 9,
+    "confidence": 1,
+    "geometry": 1
+  },
+  "native_binding_smoke": {
+    "samples": 32,
+    "correct_before": 12,
+    "correct_after": 26,
+    "wrong_class_after": 0,
+    "scope": "32个强抖动合成三角形/箭头，经实际NativeInk绑定和编辑器fitShape调用。"
+  },
+  "performance": {
+    "triangle": {
+      "before": {
+        "count": 100,
+        "p50_ms": 1.384585000007064,
+        "p95_ms": 2.394103999991785
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 1.370985000001383,
+        "p95_ms": 2.3853759999910835
+      }
+    },
+    "arrow": {
+      "before": {
+        "count": 100,
+        "p50_ms": 0.9358560000109719,
+        "p95_ms": 1.941594999996596
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 0.9421149999980116,
+        "p95_ms": 1.9560369999962859
+      }
+    },
+    "circle_rejected_as_triangle": {
+      "before": {
+        "count": 100,
+        "p50_ms": 0.07449199999973644,
+        "p95_ms": 0.08477100000891369
+      },
+      "after": {
+        "count": 100,
+        "p50_ms": 3.6079980000067735,
+        "p95_ms": 4.6321159999934025
+      }
+    }
+  },
+  "tests": {
+    "whiteboard_typescript": 75,
+    "desktop_typecheck": "0 errors,0 warnings",
+    "eslint": "passed",
+    "desktop_renderer_build": "passed; 24.54 seconds",
+    "desktop_full_build": "Linux下现有Pandoc准备脚本只支持macOS arm64；本轮不宣称完整发行构建通过。"
+  },
+  "reports": {
+    "summary": {
+      "bytes": 15686,
+      "sha256": "42da2d34447753c8766260f08f5f5a827026bbebb372592efbe09fe93d344b3d"
+    },
+    "records": {
+      "bytes": 952273,
+      "sha256": "567cfbc2202f45b5f8f5d246cdd27a18fca1f730d2cf8393174c4ca01c168f44"
+    }
+  },
+  "limits": [
+    "保留测试集在实现冻结后检查，未据此调整算法或门槛。",
+    "合成扰动与来源字符标签不代表真实设备几何人工真值。",
+    "MMG和数字只检查当前连续单笔契约，不拼接多笔。",
+    "分类使用此前冻结模型的保存预测，32例额外使用当前实际NativeInk绑定验证。",
+    "拟合性能为本机服务器实测，不代表用户设备完整交互延迟。",
+    "单笔MMG箭头只有5例，实际修复仍为2/5；不宣称真实箭头通用性解决。",
+    "2033例单笔数字来源样本中已有1个arc候选通过，两版相同；来源字符类别不是逐图用户几何意图真值。",
+    "模型权重与停笔触发保持既有契约，本轮增益来自候选几何提取。",
+    "圆误分类为三角形的拒绝路径p50从0.074ms增至3.608ms；正常三角形/箭头样本拟合耗时相近。"
+  ]
+}

@@ -36,7 +36,7 @@ def write_json(path: Path, value: dict) -> None:
 def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
                   workers: int, seed: int, pin_memory: bool, supplement: dict | None = None,
                   gestures: dict | None = None, native_images: Path | None = None,
-                  external: dict | None = None, retention: bool = False) -> dict:
+                  external: dict | None = None, retention: bool = False, contour: bool = False) -> dict:
     """建立三个独立加载器；仅训练启用增强，真实补充必须由复核入口提供。"""
     loaders, datasets = {}, {}
     for split in ("train", "val", "test"):
@@ -63,7 +63,10 @@ def build_loaders(dataset: Path, mean: tuple, std: tuple, batch_size: int,
         datasets, exclusions = merge_external(datasets, external, reserved)
         external["exclusions"] = exclusions
     for split, data in datasets.items():
-        if split == "train" and retention:
+        if split == "train" and contour:
+            from .contour import ContourDataset
+            data = ContourDataset(data.records, mean, std, data.sources, external.get("references", {}) if external else {})
+        elif split == "train" and retention:
             data = RetentionDataset(data.records, data.transform, data.sources)
         if split == "train" and len(data) < batch_size:
             raise ValueError("训练集不足一个完整批次，请降低 batch-size")
@@ -143,7 +146,7 @@ def configure(args) -> tuple:
             external = load_external_native(args.external_native, external)
     loaders = build_loaders(args.dataset, mean, std, args.batch_size, args.workers,
                             args.seed, device.type == "cuda", supplement, gestures, args.native_images, external,
-                            bool(getattr(args, "retain_checkpoint", None)))
+                            bool(getattr(args, "retain_checkpoint", None)), bool(getattr(args, "contour_training", False)))
     teacher, retention_metadata = None, None
     if getattr(args, "retain_checkpoint", None):
         from .inference import load_classifier
@@ -187,6 +190,11 @@ def configure(args) -> tuple:
                            "manifest_sha256": hashlib.sha256((args.native_images / "manifest.json").read_bytes()).hexdigest()}
                           if args.native_images else None),
         "sampling": "class_then_source_balanced_with_replacement",
+        "contour_training": ({"views": ["original", "same_parent_reference", "coarse_64"],
+                              "auxiliary_classification_weight": .25, "feature_agreement_weight": .05,
+                              "weight": args.contour_weight,
+                              "batch_norm": "frozen_statistics_trainable_affine", "deployment_views": 1}
+                             if getattr(args, "contour_training", False) else None),
         "drop_last_training": True, "drop_last_evaluation": False,
         "augmentation": "expanded_canvas_rotation_then_proportional_resize_and_affine",
         "limitations": ["合成保留测试集不代表真实手写准确率。", "QuickDraw 未复核提示标签不参与训练或模型选择。",
@@ -234,7 +242,9 @@ def fit(model, loaders, device, args, metadata, teacher=None) -> dict:
     best_epoch = 0
     for epoch in range(1, args.epochs + 1):
         started = time.monotonic()
-        train = run_epoch(model, loaders["train"], device, optimizer, teacher=teacher)
+        train = run_epoch(model, loaders["train"], device, optimizer, teacher=teacher,
+                          contour=metadata.get("contour_training") is not None,
+                          contour_weight=metadata["contour_training"]["weight"] if metadata.get("contour_training") else 1.)
         normalization = None
         if guarded:
             validation, normalization = calibrated_validation(model, loaders, device, args, metadata)
@@ -335,6 +345,8 @@ def main() -> None:
     parser.add_argument("--external-native", type=Path)
     parser.add_argument("--retain-checkpoint", type=Path)
     parser.add_argument("--initialize", type=Path)
+    parser.add_argument("--contour-training", action="store_true")
+    parser.add_argument("--contour-weight", type=float, default=1.)
     args = parser.parse_args()
     if (args.reviewed_negatives is None) != (args.heldout_review is None):
         parser.error("真实负例复核包与固定盲审对照包必须同时提供")
@@ -344,6 +356,8 @@ def main() -> None:
         parser.error("训练轮数、批量和学习率必须为正，随机种子与进程数须在有效范围")
     if args.external_native and not args.external_datasets:
         parser.error("外部端侧视图必须同时提供其来源数据包")
+    if not math.isfinite(args.contour_weight) or args.contour_weight < 0:
+        parser.error("轮廓一致性权重必须为非负有限数")
     model, loaders, device, metadata, teacher = configure(args)
     args.output.mkdir(parents=True)
     write_json(args.output / "run.json", metadata)

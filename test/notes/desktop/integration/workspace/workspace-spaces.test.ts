@@ -483,7 +483,7 @@ describe("资料管理与读写空间", () => {
     });
     const created = disk.get("白板.noemoriboard");
     expect(created).toBeDefined();
-    expect(JSON.parse(new TextDecoder().decode(created))).toEqual({ version: 1, strokes: [] });
+    expect(JSON.parse(new TextDecoder().decode(created))).toEqual({ version: 2, strokes: [] });
   });
 });
 

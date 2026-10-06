@@ -72,7 +72,7 @@
   });
   const pending = $derived.by(() => {
     void frame;
-    return strokePath(input?.points ?? []);
+    return strokePath(input?.displayPoints ?? []);
   });
   const corrected = $derived.by(() => {
     void frame;
@@ -109,6 +109,7 @@
       input?.begin(
         point(event),
         readOnly || space || event.button === 1 || event.pointerType === "touch",
+        event.timeStamp,
       ),
     );
     if (started) {
@@ -125,7 +126,8 @@
     let restartHold = false;
     const accepted = attempt(() => {
       for (const sample of observed)
-        restartHold = (input?.update(point(sample)) ?? false) || restartHold;
+        restartHold =
+          (input?.update(point(sample), false, sample.timeStamp) ?? false) || restartHold;
     });
     if (!accepted) {
       stopHold();
@@ -147,7 +149,12 @@
   function finish(event?: PointerEvent): void {
     if (event && event.pointerId !== pointer) return;
     stopHold();
-    attempt(() => input?.finish(event?.type === "pointerup" ? point(event) : undefined));
+    attempt(() =>
+      input?.finish(
+        event?.type === "pointerup" ? point(event) : undefined,
+        event?.type === "pointerup" ? event.timeStamp : undefined,
+      ),
+    );
     const captured = pointer;
     pointer = null;
     if (captured !== null && host.hasPointerCapture(captured)) host.releasePointerCapture(captured);
