@@ -2,37 +2,37 @@ import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 import {
   HOLD_RADIUS_CSS_PX,
   RECOGNITION_POINT_LIMIT,
+  type ShapeFit,
   type ShapeLabel,
-  type ShapePrediction,
-  type ShapeCandidate,
-  type OvalEvidence,
 } from "./recognition";
 import { fitArrow } from "./fitting-arrow";
+import { cornerContour, contourCrossings, regularStar } from "./fitting-corners";
 import { stabilizeTrace } from "./stabilization";
 import {
   distance,
   angleAdvance,
-  contourHull,
-  fitAgrees,
   contourDeviation,
   observationsAgree,
   leastSquares,
   principalLine,
+  contourHull,
+  segmentDistance,
   perimeterAdvance,
   resample,
   traceAdvance,
   type FitPoint,
 } from "./fitting-math";
 
-/** 单路径验证集上的联合门槛；多数模型候选还必须通过完整几何约束与双向轮廓检查。 */
-const MIN_SHAPE_SCORE = 0.5;
+export type { ShapeFit } from "./recognition";
 
-/** 已验证的规范轮廓及最终几何类型；模型标签只选择拟合族，不能替代轮廓证据。 */
-export type ShapeFit = { label: Exclude<ShapeLabel, "other">; points: InkPoint[] };
-
-/** 拟合候选仍使用无量纲坐标，全部候选共用同一覆盖与原始观测校验。 */
-type NormalizedShapeFit = { label: ShapeFit["label"]; points: FitPoint[] };
-
+/** 所有几何族使用同一原始观测与归一化框架，角点结构允许有界边弯曲。 */
+type Candidate = {
+  label: ShapeLabel;
+  points: FitPoint[];
+  parameters: number;
+  curvedSides?: boolean;
+  sourceCorners?: boolean;
+};
 function line(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   const fit = principalLine(points);
   if (!fit) return null;
@@ -85,10 +85,7 @@ function circle(
   return result;
 }
 
-function ellipse(
-  points: readonly FitPoint[],
-  trace: readonly FitPoint[],
-): { points: FitPoint[]; axisDifference: number } | null {
+function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
   if (!closed(points)) return null;
   const fit = leastSquares(
     points.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y]),
@@ -123,58 +120,7 @@ function ellipse(
     return { x: cx + x * dx - y * dy, y: cy + x * dy + y * dx };
   });
   result[result.length - 1] = result[0]!;
-  return { points: result, axisDifference: major - minor };
-}
-
-function oval(
-  points: readonly FitPoint[],
-  trace: readonly FitPoint[],
-  radius: number,
-  preferred: "circle" | "ellipse",
-  evidence?: OvalEvidence,
-  source: readonly FitPoint[] = points,
-  observations?: readonly FitPoint[],
-): NormalizedShapeFit[] {
-  const round = circle(points, false, trace);
-  const elongated = ellipse(points, trace);
-  const candidates: NormalizedShapeFit[] = [];
-  if (round) candidates.push({ label: "circle", points: round });
-  if (elongated) candidates.push({ label: "ellipse", points: elongated.points });
-  const agrees = (fitted: readonly FitPoint[]) =>
-    fitAgrees(source, fitted) && (!observations || observationsAgree(observations, fitted));
-  const roundAgrees = round !== null && agrees(round);
-  if (preferred === "circle" && roundAgrees)
-    return candidates.filter((candidate) => candidate.label === "circle");
-  if (!evidence) return candidates.filter((candidate) => candidate.label === preferred);
-  // 模型与有效椭圆一致时，未通过完整校验的圆不能阻断原来正确的修复。
-  if (preferred === "ellipse" && elongated && agrees(elongated.points) && !roundAgrees)
-    return candidates.filter((candidate) => candidate.label === "ellipse");
-  // 长短轴差落在两轴的位置不确定性内时，圆是同一几何的更简单表示。
-  if (elongated && elongated.axisDifference <= 2 * radius && roundAgrees)
-    return candidates.filter((candidate) => candidate.label === "circle");
-  // 以8个有效整体观测的启发式惩罚比较3参数圆与5参数椭圆，不把192个相关点当独立观测。
-  // 误差以既有位置不确定性为底噪；更多自由度或仅略小的残差不足以推翻强模型先验。
-  const score = (candidate: NormalizedShapeFit) => {
-    const error = contourDeviation(source, candidate.points);
-    if (!error) return Infinity;
-    const label = candidate.label === "circle" ? "circle" : "ellipse";
-    const parameters = label === "circle" ? 3 : 5;
-    return (
-      8 * Math.log(error.rms ** 2 + radius ** 2) +
-      parameters * Math.log(8) -
-      2 * Math.log(Math.max(evidence[label], 1e-12))
-    );
-  };
-  // 备选子类型须占圆/椭圆合计概率至少20%，不让几何推翻模型几乎排除的类型。
-  const mass = evidence.circle + evidence.ellipse;
-  const credible = candidates.filter(
-    (candidate) =>
-      candidate.label === preferred ||
-      evidence[candidate.label === "circle" ? "circle" : "ellipse"] / mass >= 0.2,
-  );
-  const ordered = credible.sort((a, b) => score(a) - score(b));
-  // 几何校验失败时保留笔迹；不能靠逐个尝试把拒绝的强圆先验悄悄变成椭圆。
-  return ordered.slice(0, 1);
+  return result;
 }
 
 function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
@@ -187,13 +133,31 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
       dx = Math.cos(angle),
       dy = Math.sin(angle);
     const local = points.map((p) => ({ x: p.x * dx + p.y * dy, y: -p.x * dy + p.y * dx }));
-    const left = Math.min(...local.map((p) => p.x)),
+    let left = Math.min(...local.map((p) => p.x)),
       right = Math.max(...local.map((p) => p.x));
-    const top = Math.min(...local.map((p) => p.y)),
+    let top = Math.min(...local.map((p) => p.y)),
       bottom = Math.max(...local.map((p) => p.y));
     const current = (right - left) * (bottom - top);
     if (current >= area || Math.min(right - left, bottom - top) < 0.08) continue;
     area = current;
+    // 外包极值只确定初始方向；四条边的位置由各自观测均值估计，手抖峰值不扩大矩形。
+    const sides: number[][] = [[], [], [], []];
+    for (const point of local) {
+      const errors = [
+        Math.abs(point.x - left),
+        Math.abs(point.x - right),
+        Math.abs(point.y - top),
+        Math.abs(point.y - bottom),
+      ];
+      const side = errors.indexOf(Math.min(...errors));
+      sides[side]!.push(side < 2 ? point.x : point.y);
+    }
+    if (sides.some((side) => side.length < 3)) continue;
+    const bounds = sides.map((side) => side.reduce((sum, value) => sum + value, 0) / side.length);
+    left = bounds[0]!;
+    right = bounds[1]!;
+    top = bounds[2]!;
+    bottom = bounds[3]!;
     result = [
       [left, top],
       [right, top],
@@ -205,110 +169,78 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
   return result;
 }
 
-function triangle(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
-  if (!closed(points)) return null;
-  // 顶点属于可见边界，不属于访问顺序；回描不能制造额外的几何角点。
-  const hull = contourHull(points);
-  if (hull.length < 3) return null;
-  let area = 0,
-    vertices: FitPoint[] = [];
-  // 已由模型选定三角形族；最大面积三点保留主体角点，边上细小凸起不增加边数。
-  // 凸包至多包含192个重采样点，后续仍用原始轮廓拒绝矩形、缺边与额外笔画。
-  for (let i = 0; i < hull.length - 2; i++) {
-    const a = hull[i]!;
-    for (let j = i + 1; j < hull.length - 1; j++) {
-      const b = hull[j]!;
-      for (let k = j + 1; k < hull.length; k++) {
-        const c = hull[k]!;
-        const current = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
-        if (current > area) {
-          area = current;
-          vertices = [a, b, c];
-        }
-      }
-    }
-  }
-  if (area < 0.08) return null;
-  const result = [...vertices, vertices[0]!];
-  const advance = perimeterAdvance(trace, result);
-  return advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI) ? null : result;
-}
-
-/**
- * 分类提供拟合族和形状先验；圆与椭圆共享闭合曲线族，最终类型须符合静态整体轮廓。
- * @param points 一个连续笔迹的已校验世界坐标，可归并已确认静止的末点观测。
- * @param prediction 静态模型候选；分数仅作入口门槛，不能代替几何证据。
- * @param scale 屏幕缩放，用于最小尺寸与有界顺序去抖半径。
- * @param observations 归并前的全部原始观测；逐点验证既有最大偏差，防止隐藏额外笔画。
- * @returns 最终几何类型和可存入原有笔迹格式的规范轮廓；低置信度、退化或校验失败返回 null。
- */
-export function fitShape(
-  points: readonly InkPoint[],
-  prediction: ShapePrediction,
-  scale: number,
-  observations?: readonly InkPoint[],
-): ShapeFit | null {
-  const refinement = prediction.refinement;
-  // 单头模型缺少第二份子类型证据，保留直接标签；合计概率只解决族内分票。
-  const original = fitCandidate(points, prediction, scale, observations, !refinement);
-  if (!refinement) return original;
-  const supported = (candidate: ShapeCandidate, label: ShapeLabel) =>
-    candidate.label === label ||
-    ((label === "circle" || label === "ellipse") &&
-      candidate.oval &&
-      candidate.oval[label] / (candidate.oval.circle + candidate.oval.ellipse) >= 0.2);
-  if (original) {
-    // 合计概率只能证明拟合族；原单类未准入时，新增子类型须由至少一个头明确选中。
-    if (original.label === prediction.label) return original;
-    if (
-      supported(refinement, original.label) &&
-      (prediction.confidence >= MIN_SHAPE_SCORE || refinement.label === original.label)
-    )
-      return original;
-    // 跨子类型修复须同时符合两头证据；原模型直接类型的有效拟合始终保留。
-    return fitCandidate(points, prediction, scale, observations, true);
-  }
-  // 原模型明确拒绝未知输入时，较弱的改进候选不足以推翻该拒绝。
+/** 角点只提供结构候选；简单闭合边界须完整绕行一周，自交轮廓交给访问步长约束。 */
+function polygonCandidate(
+  contour: FitPoint[],
+  trace: readonly FitPoint[],
+  isClosed: boolean,
+): Candidate | null {
+  if (contourCrossings(contour) !== 0) return null;
   if (
-    prediction.label === "other" &&
-    prediction.confidence >= MIN_SHAPE_SCORE &&
-    refinement.confidence <= prediction.confidence
+    !isClosed &&
+    contour.some((point, i) => contour.slice(i + 2).some((other) => distance(point, other) < 0.04))
   )
     return null;
-  const family = (label: ShapeLabel) =>
-    label === "circle" || label === "ellipse" ? "oval" : label;
-  // 原候选已完成族概率准入与全部几何判定；相关的新头不能靠加分重试同族拒绝。
-  if (family(prediction.label) === family(refinement.label)) return null;
-  const refined = fitCandidate(points, refinement, scale, observations);
-  // 新修复的最终类型须至少被一个头选中；两个头均未确认的子类型应保留自由笔迹。
-  return refined && (refined.label === prediction.label || refined.label === refinement.label)
-    ? refined
-    : null;
+  if (isClosed) {
+    const advance = perimeterAdvance(trace, contour);
+    if (advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI)) return null;
+    const area =
+      Math.abs(
+        contour
+          .slice(1)
+          .reduce((sum, point, i) => sum + contour[i]!.x * point.y - contour[i]!.y * point.x, 0),
+      ) / 2;
+    if (area < 0.025) return null;
+  }
+  const count = contour.length - 1;
+  return {
+    label: isClosed ? (count === 3 ? "triangle" : "polygon") : "polyline",
+    points: contour,
+    parameters: (contour.length - (isClosed ? 1 : 0)) * 2,
+    curvedSides: isClosed,
+  };
 }
 
-/** 每个候选独立通过原有入口、覆盖和完整观测校验；改进头不能绕过任何几何门槛。 */
-function fitCandidate(
+/** 世界坐标只在入口归一化一次，所有候选共用同一静态轮廓、顺序证据与原始观测。 */
+type FitFrame = {
+  source: FitPoint[];
+  observed: FitPoint[];
+  sampled: FitPoint[];
+  trace: FitPoint[];
+  radius: number;
+  isClosed: boolean;
+  corners: FitPoint[] | null;
+  cx: number;
+  cy: number;
+  size: number;
+  pressure: number;
+};
+function validPoint(point: InkPoint): boolean {
+  return (
+    [point.x, point.y, point.pressure].every(Number.isFinite) &&
+    Math.abs(point.x) <= BOARD_COORDINATE_LIMIT &&
+    Math.abs(point.y) <= BOARD_COORDINATE_LIMIT &&
+    point.pressure >= 0 &&
+    point.pressure <= 1
+  );
+}
+
+/** 有限坐标、尺寸、缩放与观测先形成封闭输入契约；任何退化返回null。 */
+function prepareFit(
   points: readonly InkPoint[],
-  prediction: ShapeCandidate,
   scale: number,
   observations?: readonly InkPoint[],
-  predictedSubtypeOnly = false,
-): ShapeFit | null {
-  const familyConfidence = prediction.oval
-    ? prediction.oval.circle + prediction.oval.ellipse
-    : prediction.confidence;
+): FitFrame | null {
   if (
     points.length < 2 ||
     points.length > RECOGNITION_POINT_LIMIT ||
-    (observations !== undefined &&
-      (observations.length < 2 || observations.length > RECOGNITION_POINT_LIMIT)) ||
-    prediction.label === "other" ||
-    !Number.isFinite(prediction.confidence) ||
-    !Number.isFinite(familyConfidence) ||
-    familyConfidence < MIN_SHAPE_SCORE ||
-    prediction.confidence > 1 ||
+    !points.every(validPoint) ||
     !Number.isFinite(scale) ||
-    scale <= 0
+    scale <= 0 ||
+    (observations &&
+      (observations.length < 2 ||
+        observations.length > RECOGNITION_POINT_LIMIT ||
+        !observations.every(validPoint)))
   )
     return null;
   const xs = points.map((p) => p.x),
@@ -318,48 +250,155 @@ function fitCandidate(
     top = Math.min(...ys),
     bottom = Math.max(...ys);
   const size = Math.max(right - left, bottom - top);
-  if (!Number.isFinite(size) || size * scale < 16) return null;
+  if (!Number.isFinite(size * scale) || size * scale < 16) return null;
   const cx = (left + right) / 2,
     cy = (top + bottom) / 2;
-  const normalized = points.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
-  // 参数估计保留移动轨迹的统计信息；仅顺序校验使用有界去抖，最终验证仍覆盖完整几何。
-  // 顺序去抖限制为3 CSS像素和尺寸的2.5%，停笔观测归并由输入状态机独立负责。
-  const radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
-  const sampled = resample(normalized, 192);
-  const trace = resample(stabilizeTrace(sampled, radius), 192);
+  const normalize = (p: InkPoint) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size });
+  const source = points.map(normalize),
+    observed = observations ? observations.map(normalize) : source;
+  const sampled = resample(source, 192),
+    radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
   if (sampled.length === 0) return null;
-  const fitters = {
-    line,
-    arc: (p: readonly FitPoint[], t: readonly FitPoint[]) => circle(p, true, t),
-    rectangle,
-    triangle,
-    arrow: fitArrow,
-  };
-  const observed = observations?.map((p) => ({ x: (p.x - cx) / size, y: (p.y - cy) / size }));
-  let candidates: NormalizedShapeFit[];
-  if (prediction.label === "circle" || prediction.label === "ellipse") {
-    candidates = predictedSubtypeOnly
-      ? oval(sampled, trace, radius, prediction.label, undefined, normalized, observed)
-      : oval(sampled, trace, radius, prediction.label, prediction.oval, normalized, observed);
-  } else {
-    const points = fitters[prediction.label](sampled, trace);
-    candidates = points ? [{ label: prediction.label, points }] : [];
-  }
-  const fitted = candidates.find(
-    (candidate) =>
-      fitAgrees(normalized, candidate.points) &&
-      (!observed || observationsAgree(observed, candidate.points)),
-  );
-  if (!fitted) return null;
+  const trace = resample(stabilizeTrace(sampled, radius), 192);
+  const isClosed = closed(sampled),
+    corners = cornerContour(sampled, isClosed);
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
-  const result = fitted.points.map((p) => ({ x: cx + p.x * size, y: cy + p.y * size, pressure }));
-  return result.every(
-    (p) =>
-      Number.isFinite(p.x) &&
-      Number.isFinite(p.y) &&
-      Math.abs(p.x) <= BOARD_COORDINATE_LIMIT &&
-      Math.abs(p.y) <= BOARD_COORDINATE_LIMIT,
-  )
-    ? { label: fitted.label, points: result }
-    : null;
+  return { source, observed, sampled, trace, radius, isClosed, corners, cx, cy, size, pressure };
+}
+
+/** 各族独立产生候选，结构推导不提前禁止其它有效拟合。 */
+function fitCandidates(frame: FitFrame): Candidate[] {
+  const { sampled, trace, isClosed, corners } = frame;
+  const candidates: Candidate[] = [];
+  const add = (
+    label: ShapeLabel,
+    fitted: FitPoint[] | null,
+    parameters: number,
+    curvedSides = false,
+  ) => {
+    if (fitted) candidates.push({ label, points: fitted, parameters, curvedSides });
+  };
+  add("line", line(sampled, trace), 4);
+  if (isClosed) {
+    // 所有几何族先独立拟合，再校验结构与残差；不让不可靠角点提前排除有效曲线。
+    add("circle", circle(sampled, false, trace), 3);
+    const elongated = ellipse(sampled, trace);
+    if (elongated) add("ellipse", elongated, 5);
+    add("rectangle", rectangle(sampled), 5);
+    // 凸边界提供不受局部回描和采样往返影响的整体角点；完整原始轨迹仍验证绕行与覆盖。
+    const hull = contourHull(sampled);
+    if (hull.length >= 3) {
+      const outline = resample([...hull, hull[0]!], 192);
+      const boundary = cornerContour(outline, true);
+      const supports =
+        boundary &&
+        (!corners ||
+          corners
+            .slice(0, -1)
+            .every((point) =>
+              boundary.slice(1).some((end, i) => segmentDistance(point, boundary[i]!, end) <= 0.04),
+            ));
+      if (boundary && supports) {
+        const polygon = polygonCandidate(boundary, trace, true);
+        if (polygon) candidates.push(polygon);
+      }
+    }
+    if (corners) {
+      const polygon = polygonCandidate(corners, trace, true);
+      if (polygon) candidates.push({ ...polygon, sourceCorners: true });
+      if (contourCrossings(corners) > 0) {
+        const count = corners.length - 1;
+        for (let step = 2; step < count / 2; step++) {
+          const star = regularStar(corners, step);
+          if (!star) continue;
+          const sweep = angleAdvance(
+            trace.map((p) => Math.atan2(p.y - star.center.y, p.x - star.center.x)),
+          );
+          if (sweep !== null && Math.abs(Math.abs(sweep) - step * 2 * Math.PI) <= 0.4)
+            candidates.push({
+              label: "star",
+              points: star.points,
+              parameters: 6,
+              curvedSides: true,
+            });
+        }
+      }
+    }
+  } else {
+    add("arc", circle(sampled, true, trace), 5);
+    if (corners) {
+      const polyline = polygonCandidate(corners, trace, false);
+      if (polyline) candidates.push(polyline);
+    }
+  }
+  if (corners || !isClosed || angleAdvance(trace.map((p) => Math.atan2(p.y, p.x))) === null)
+    add("arrow", fitArrow(sampled, trace), 7, true);
+  return candidates;
+}
+
+/** 完整覆盖和原始观测先验收，再以结构和自由度选择几何；不使用训练概率。 */
+function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | null {
+  const { source, observed, radius } = frame;
+  const eligible = candidates.flatMap((candidate) => {
+    const error = contourDeviation(source, candidate.points);
+    const maximum = candidate.curvedSides ? 0.12 : 0.075,
+      rms = candidate.curvedSides ? 0.055 : 0.028;
+    if (
+      !error ||
+      error.maximum > maximum ||
+      error.rms > rms ||
+      !observationsAgree(observed, candidate.points, maximum)
+    )
+      return [];
+    return [{ ...candidate, error }];
+  });
+  if (eligible.length === 0) return null;
+  const noise = Math.max(
+    Number.EPSILON,
+    radius ** 2 + Math.min(...eligible.map((candidate) => candidate.error.rms ** 2)),
+  );
+  // 原轨迹中集中的转向证明真实角点，边弯曲不消除这个结构证据；凸包自身不能制造角点身份。
+  const straightBoundary = eligible.some(
+    (candidate) =>
+      (candidate.label === "polygon" || candidate.label === "triangle") &&
+      (candidate.sourceCorners || candidate.error.rms <= radius),
+  );
+  const ranked = eligible
+    .filter(
+      (candidate) =>
+        !straightBoundary || (candidate.label !== "circle" && candidate.label !== "ellipse"),
+    )
+    .map((candidate) => ({
+      ...candidate,
+      score: 8 * Math.log(candidate.error.rms ** 2 + noise) + candidate.parameters * Math.log(8),
+    }))
+    .sort((a, b) => a.score - b.score);
+  // 已通过直线覆盖与往返约束时，微弯曲属于修直的范围；不能用更多参数把它留成圆弧。
+  const selected = eligible.find((candidate) => candidate.label === "line") ?? ranked[0];
+  if (!selected) return null;
+  return selected;
+}
+
+/**
+ * 直接从轨迹的闭合、局部曲率、边段、绕数与残差决定规范几何，不读取分类标签或模型分数。
+ * @param points 连续笔迹的世界坐标；停笔静止观测可事先归并，但不能隐藏原始观测。
+ * @param scale 屏幕缩放，用于最小尺寸和位置不确定性，不依赖画布位置或设备采样频率。
+ * @param observations 归并前全部原始观测；最终逐点验证，防止把附加笔画误删成规则图形。
+ * @returns 最简单的可信规范轮廓；自由曲线、退化、超界、过量回描或结构不明确返回 null。
+ */
+export function repairShape(
+  points: readonly InkPoint[],
+  scale: number,
+  observations?: readonly InkPoint[],
+): ShapeFit | null {
+  const frame = prepareFit(points, scale, observations);
+  if (!frame) return null;
+  const selected = chooseCandidate(fitCandidates(frame), frame);
+  if (!selected) return null;
+  const result = selected.points.map((p) => ({
+    x: frame.cx + p.x * frame.size,
+    y: frame.cy + p.y * frame.size,
+    pressure: frame.pressure,
+  }));
+  return result.every(validPoint) ? { label: selected.label, points: result } : null;
 }

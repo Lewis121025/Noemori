@@ -15,14 +15,14 @@ import {
   type BoardViewport,
   type InkBounds,
 } from "../../shared/whiteboard/geometry";
-import { fitShape, type ShapeFit } from "../../shared/whiteboard/fitting";
+import { type ShapeFit } from "../../shared/whiteboard/fitting";
 import { advancePause, preparePause, type PauseRegion } from "../../shared/whiteboard/pause";
 import { InkSmoother } from "../../shared/whiteboard/smoothing";
 import {
   RECOGNITION_POINT_LIMIT,
   HOLD_RADIUS_CSS_PX,
-  parseShapePrediction,
-  type ShapePrediction,
+  parseShapeFit,
+  type ShapeRepair,
 } from "../../shared/whiteboard/recognition";
 
 /** 当前指针事务；原始输入与修正预览分离，请求号负责淘汰继续绘制后的结果。 */
@@ -64,13 +64,13 @@ export class WhiteboardInput {
   /**
    * @param document 已读取的白板；构造时重新校验并建立不可变快照。
    * @param changed 同步画面通知；true 表示已提交内容事务，需要保存。回调应不抛错。
-   * @param recognize 可选后台静态分类入口；缺失时保留原笔迹，推理失败向上传播。
+   * @param repair 后台几何计算入口；缺失时保留原笔迹，计算失败向上传播。
    * @throws 初始文档违反格式契约时拒绝创建输入会话。
    */
   constructor(
     document: WhiteboardDocument,
     private readonly changed: (contentChanged: boolean) => void,
-    private readonly recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>,
+    private readonly repair?: ShapeRepair,
   ) {
     this.history = new WhiteboardHistory(document);
   }
@@ -245,15 +245,15 @@ export class WhiteboardInput {
   }
 
   /**
-   * 停笔时分类当前这一笔，拟合通过才更新预览；不要求圈住已有内容。
+   * 停笔时规范当前这一笔，拟合通过才更新预览；不要求圈住已有内容。
    * @returns 是否展示了修正；抬笔、移动、取消或换文档后的迟到结果返回 false。
-   * @throws 当前有效请求的推理或协议错误向上传播，原始采样始终保留。
+   * @throws 当前有效请求的计算或协议错误向上传播，原始采样始终保留。
    */
   async hold(): Promise<boolean> {
     const active = this.gesture;
     if (
       active?.kind !== "ink" ||
-      !this.recognize ||
+      !this.repair ||
       active.held ||
       active.points.length < 2 ||
       active.points.length > RECOGNITION_POINT_LIMIT
@@ -279,9 +279,11 @@ export class WhiteboardInput {
     active.held = true;
     const request = ++active.request;
     try {
-      const prediction = parseShapePrediction(await this.recognize(snapshot));
+      const preview = parseShapeFit(
+        await this.repair({ points: snapshot, observations, scale: this.camera.scale }),
+      );
       if (this.gesture !== active || active.request !== request) return false;
-      active.preview = fitShape(snapshot, prediction, this.camera.scale, observations);
+      active.preview = preview;
       if (!active.preview) return false;
       this.changed(false);
       return true;

@@ -5,7 +5,12 @@ import WhiteboardEditor from "@reader/renderer/whiteboard/WhiteboardEditor.svelt
 import type { WhiteboardEditorApi } from "@reader/renderer/editor/editor-api";
 import { emptyWhiteboard, parseWhiteboard } from "@reader/shared/whiteboard/model";
 import type { InkPoint } from "@reader/shared/whiteboard/model";
-import type { ShapePrediction } from "@reader/shared/whiteboard/recognition";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
+import type {
+  ShapeFit,
+  ShapeRepair,
+  ShapeRepairRequest,
+} from "@reader/shared/whiteboard/recognition";
 
 let component: ReturnType<typeof mount> | undefined;
 const registered: { api: WhiteboardEditorApi | null } = { api: null };
@@ -29,11 +34,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function start(
-  recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>,
-  readOnly = false,
-  board = emptyWhiteboard(),
-) {
+async function start(recognize?: ShapeRepair, readOnly = false, board = emptyWhiteboard()) {
   component = mount(WhiteboardEditor, {
     target: document.body,
     props: {
@@ -44,7 +45,7 @@ async function start(
       register: (api: WhiteboardEditorApi | null) => {
         registered.api = api;
       },
-      ...(recognize ? { recognize } : {}),
+      ...(recognize ? { repair: recognize } : {}),
     },
   });
   flushSync();
@@ -196,10 +197,9 @@ it("合并事件作为唯一真实采样，父事件的不同坐标不会额外�
 
 it("阅读模式只平移白板，不落笔也不显示编辑工具", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize, true);
   expect(host.querySelector('[aria-label="白板编辑工具栏"]')).toBeNull();
   pointer(host, "pointerdown", 10, 20);
@@ -214,10 +214,9 @@ it("阅读模式只平移白板，不落笔也不显示编辑工具", async () =
 
 it("一笔直线停顿 450ms 后预览修复，抬笔保存修正且撤销恢复空白", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 30);
   for (let i = 1; i <= 20; i++) pointer(host, "pointermove", 10 + i * 5, 30 + Math.sin(i) * 0.6);
@@ -237,10 +236,10 @@ it("一笔直线停顿 450ms 后预览修复，抬笔保存修正且撤销恢复
   expect(saved().strokes).toHaveLength(0);
 });
 
-it("停笔后抬笔不会等待推理，迟到结果与卸载后的错误都不污染文档", async () => {
+it("停笔后抬笔不会等待计算，迟到结果与卸载后的错误都不污染文档", async () => {
   vi.useFakeTimers();
-  let resolve!: (value: ShapePrediction) => void;
-  const task = new Promise<ShapePrediction>((yes) => {
+  let resolve!: (value: ShapeFit) => void;
+  const task = new Promise<ShapeFit>((yes) => {
     resolve = yes;
   });
   const host = await start(() => task);
@@ -249,7 +248,13 @@ it("停笔后抬笔不会等待推理，迟到结果与卸载后的错误都不�
   await vi.advanceTimersByTimeAsync(450);
   pointer(host, "pointerup", 110, 25);
   const original = saved();
-  resolve({ label: "line", confidence: 0.99 });
+  resolve({
+    label: "line",
+    points: [
+      { x: 10, y: 30, pressure: 0.5 },
+      { x: 110, y: 30, pressure: 0.5 },
+    ],
+  });
   await Promise.resolve();
   flushSync();
   expect(saved()).toEqual(original);
@@ -259,10 +264,10 @@ it("停笔后抬笔不会等待推理，迟到结果与卸载后的错误都不�
 it.each([
   [2.5, -0.9],
   [-2.5, 0.9],
-])("停笔范围内从 %s 抖到 %s 不会丢弃推理结果后停止重试", async (before, after) => {
+])("停笔范围内从 %s 抖到 %s 不会丢弃计算结果后停止重试", async (before, after) => {
   vi.useFakeTimers();
-  let resolve!: (value: ShapePrediction) => void;
-  const task = new Promise<ShapePrediction>((yes) => {
+  let resolve!: (value: ShapeFit) => void;
+  const task = new Promise<ShapeFit>((yes) => {
     resolve = yes;
   });
   const recognize = vi.fn(() => task);
@@ -274,7 +279,13 @@ it.each([
   expect(recognize).toHaveBeenCalledTimes(1);
   // 两个采样都在同一个停笔区域内，相对最后采样的距离却超过 3px。
   pointer(host, "pointermove", 110 + after, 30);
-  resolve({ label: "line", confidence: 0.99 });
+  resolve({
+    label: "line",
+    points: [
+      { x: 10, y: 30, pressure: 0.5 },
+      { x: 110, y: 30, pressure: 0.5 },
+    ],
+  });
   await Promise.resolve();
   flushSync();
   expect(host.querySelector(".pending.corrected")).not.toBeNull();
@@ -284,20 +295,17 @@ it.each([
   expect(saved().strokes[0]!.points).toHaveLength(2);
 });
 
-it("离开静止区域后丢弃旧推理，即使相对最后采样不到 3px，也会重新计时", async () => {
+it("离开静止区域后丢弃旧计算，即使相对最后采样不到 3px，也会重新计时", async () => {
   vi.useFakeTimers();
-  let first!: (value: ShapePrediction) => void;
-  let second!: (value: ShapePrediction) => void;
-  const initial = new Promise<ShapePrediction>((yes) => {
+  let first!: (value: ShapeFit) => void;
+  let second!: (value: ShapeFit) => void;
+  const initial = new Promise<ShapeFit>((yes) => {
     first = yes;
   });
-  const next = new Promise<ShapePrediction>((yes) => {
+  const next = new Promise<ShapeFit>((yes) => {
     second = yes;
   });
-  const recognize = vi
-    .fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>()
-    .mockReturnValueOnce(initial)
-    .mockReturnValueOnce(next);
+  const recognize = vi.fn<ShapeRepair>().mockReturnValueOnce(initial).mockReturnValueOnce(next);
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 30);
   for (let i = 1; i <= 20; i++) pointer(host, "pointermove", 10 + i * 5, 30);
@@ -305,7 +313,13 @@ it("离开静止区域后丢弃旧推理，即使相对最后采样不到 3px，
   await vi.advanceTimersByTimeAsync(450);
   expect(recognize).toHaveBeenCalledTimes(1);
   pointer(host, "pointermove", 114, 30);
-  first({ label: "line", confidence: 0.99 });
+  first({
+    label: "line",
+    points: [
+      { x: 10, y: 30, pressure: 0.5 },
+      { x: 110, y: 30, pressure: 0.5 },
+    ],
+  });
   await Promise.resolve();
   flushSync();
   expect(host.querySelector(".pending.corrected")).toBeNull();
@@ -313,37 +327,42 @@ it("离开静止区域后丢弃旧推理，即使相对最后采样不到 3px，
   expect(recognize).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1);
   expect(recognize).toHaveBeenCalledTimes(2);
-  second({ label: "line", confidence: 0.99 });
+  second({
+    label: "line",
+    points: [
+      { x: 10, y: 30, pressure: 0.5 },
+      { x: 110, y: 30, pressure: 0.5 },
+    ],
+  });
   await Promise.resolve();
   flushSync();
   expect(host.querySelector(".pending.corrected")).not.toBeNull();
 });
 
-it("推理失败提示不会被微抖或抬笔清空，下一次落笔才清除旧错误", async () => {
+it("计算失败提示不会被微抖或抬笔清空，下一次落笔才清除旧错误", async () => {
   vi.useFakeTimers();
   const host = await start(async () => {
-    throw new Error("权重未加载");
+    throw new Error("后台计算失败");
   });
   pointer(host, "pointerdown", 10, 30);
   pointer(host, "pointermove", 110, 30);
   await vi.advanceTimersByTimeAsync(450);
   flushSync();
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("后台计算失败");
   pointer(host, "pointermove", 110.1, 30);
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("后台计算失败");
   pointer(host, "pointerup", 110.1, 30, 0);
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("权重未加载");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("后台计算失败");
   expect(saved().strokes).toHaveLength(1);
   pointer(host, "pointerdown", 200, 30);
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 
-it("移动会重置停笔计时；平移和取消不触发分类", async () => {
+it("移动会重置停笔计时；平移和取消不触发修复", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 20);
   pointer(host, "pointermove", 50, 20);
@@ -363,10 +382,9 @@ it("移动会重置停笔计时；平移和取消不触发分类", async () => {
 
 it("持续停笔微抖不应因静止区域中心偏在边缘而永远重置计时", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>(async () => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 30);
   for (let i = 1; i <= 96; i++) pointer(host, "pointermove", 10 + (40 * i) / 96, 30);
@@ -382,17 +400,16 @@ it("持续停笔微抖不应因静止区域中心偏在边缘而永远重置计�
   flushSync();
   expect(recognize).toHaveBeenCalledTimes(1);
   expect(host.querySelector(".pending.corrected")).not.toBeNull();
-  const observed = recognize.mock.calls[0]![0];
+  const observed = recognize.mock.calls[0]![0].points;
   expect(observed.length).toBeLessThan(105);
   expect(Math.hypot(observed.at(-1)!.x - 50, observed.at(-1)!.y - 30)).toBeLessThan(0.8);
 });
 
-it("真实时间下的大幅停笔抖动不应反复取消推理，继续绘制仍会取消预览", async () => {
+it("真实时间下的大幅停笔抖动不应反复取消计算，继续绘制仍会取消预览", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 30, 0.5, 0);
   for (let i = 1; i <= 120; i++) {
@@ -418,12 +435,11 @@ it("真实时间下的大幅停笔抖动不应反复取消推理，继续绘制�
   expect(host.querySelector(".pending.corrected")).toBeNull();
 });
 
-it("连续缓慢绘制超过停笔时间仍不推理，真正停下后才触发", async () => {
+it("连续缓慢绘制超过停笔时间仍不计算，真正停下后才触发", async () => {
   vi.useFakeTimers();
-  const recognize = vi.fn(async (): Promise<ShapePrediction> => ({
-    label: "line",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const host = await start(recognize);
   pointer(host, "pointerdown", 10, 30);
   for (let i = 1; i <= 240; i++) {
@@ -441,7 +457,9 @@ it.each(["circle", "ellipse", "rectangle"] as const)(
   "%s 在持续二维停笔抖动中只修复一次，预览保持稳定",
   async (label) => {
     vi.useFakeTimers();
-    const recognize = vi.fn(async (): Promise<ShapePrediction> => ({ label, confidence: 0.99 }));
+    const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+      repairShape(request.points, request.scale, request.observations),
+    );
     const host = await start(recognize);
     const points =
       label === "rectangle"

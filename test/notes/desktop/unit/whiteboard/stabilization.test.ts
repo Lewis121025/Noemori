@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitShape } from "@reader/shared/whiteboard/fitting";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
 import { stabilizeTrace } from "@reader/shared/whiteboard/stabilization";
 import type { InkPoint } from "@reader/shared/whiteboard/model";
 
@@ -26,7 +26,7 @@ describe("停笔微抖与拟合候选", () => {
     );
     const points = pauseJitter(source);
     const original = structuredClone(points);
-    const result = fitShape(points, { label: "line", confidence: 0.99 }, 1)!.points;
+    const result = repairShape(points, 1)!.points;
     expect(result).toHaveLength(2);
     expect(Math.hypot(result[0]!.x, result[0]!.y)).toBeLessThan(1);
     expect(
@@ -40,29 +40,23 @@ describe("停笔微抖与拟合候选", () => {
       [p(0, 0), p(40, 0), p(0, 0), p(40, 0)],
       pauseJitter([p(0, 0), p(40, 0), p(0, 0), p(40, 0)]),
     ])
-      expect(fitShape(points, { label: "line", confidence: 0.99 }, 1)).toBeNull();
+      expect(repairShape(points, 1)).toBeNull();
     const circle = Array.from({ length: 257 }, (_, i) =>
       p(20 * Math.cos((4 * Math.PI * i) / 256), 20 * Math.sin((4 * Math.PI * i) / 256)),
     );
-    expect(fitShape(pauseJitter(circle), { label: "circle", confidence: 0.99 }, 1)).toBeNull();
+    expect(repairShape(pauseJitter(circle), 1)).toBeNull();
   });
 
   it.each([0.1, 8])("去抖半径按屏幕像素换算，缩放%s不改变相同可见笔迹的修复", (scale) => {
     const source = Array.from({ length: 97 }, (_, i) => p((40 * i) / (96 * scale), 0));
-    const result = fitShape(
-      pauseJitter(source, 1 / scale),
-      { label: "line", confidence: 0.99 },
-      scale,
-    )!.points;
+    const result = repairShape(pauseJitter(source, 1 / scale), scale)!.points;
     expect(result).toHaveLength(2);
     expect(Math.hypot(result[1]!.x * scale - 40, result[1]!.y * scale)).toBeLessThan(1.5);
   });
 
   it.each([48, 192])("停笔采样增至%s个时，有界微抖仍不能当作大范围往返", (count) => {
     const source = Array.from({ length: 97 }, (_, i) => p((40 * i) / 96, 0));
-    expect(
-      fitShape(pauseJitter(source, 1, count), { label: "line", confidence: 0.99 }, 1)?.points,
-    ).toHaveLength(2);
+    expect(repairShape(pauseJitter(source, 1, count), 1)?.points).toHaveLength(2);
   });
 
   it("有序去抖保留明确角点与共线反向访问，不修改输入或端点", () => {

@@ -1,9 +1,0 @@
-{
-  "records": 600,
-  "accepted": 202,
-  "old_pixel_groups": 159060,
-  "old_keys": 8185,
-  "reused_original_keys": [],
-  "cross_split_old_pixel_conflicts": [],
-  "scope": "既有v3/v4/全部外部源及native缓存；不读取模型输出，来源key和精确RGB像素核验。"
-}

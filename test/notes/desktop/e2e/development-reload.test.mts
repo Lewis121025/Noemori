@@ -25,7 +25,7 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-test("开发进程更新 preload 与主进程后，页面加载完整识别接口并调用新 IPC", async (t) => {
+test("开发进程更新 preload 与主进程后，页面加载完整几何修复接口并调用新 IPC", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-development-reload-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const main = join(root, "src/main/index.ts");
@@ -50,11 +50,11 @@ test("开发进程更新 preload 与主进程后，页面加载完整识别接�
   const invocation = packageJson.scripts.dev.split("&&").at(-1)!.trim().split(/\s+/);
   if (invocation.shift() !== "electron-vite") throw new Error("开发启动入口已改变，需要更新旅程");
 
-  const mainSource = (label: "line" | "circle") => `
+  const mainSource = (offset: number) => `
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
 app.whenReady().then(() => {
-  ipcMain.handle("reader.whiteboard.recognize", () => ({ label: "${label}", confidence: 1 }));
+  ipcMain.handle("reader.whiteboard.repair", (_event, request) => ({ label: "line", points: request.points.map(point => ({...point, x: point.x + ${offset}})) }));
   const window = new BrowserWindow({ webPreferences: {
     preload: join(__dirname, "../preload/index.cjs"),
     sandbox: true, contextIsolation: true, nodeIntegration: false
@@ -66,10 +66,10 @@ app.on("window-all-closed", () => app.quit());
   const preloadSource = (complete: boolean) => `
 import { contextBridge } from "electron";
 import { createReaderApi } from ${JSON.stringify(join(desktop, "src/features/reader/preload/api.ts"))};
-${complete ? "const reader = createReaderApi();" : "const { whiteboardRecognize, ...reader } = createReaderApi();"}
+${complete ? "const reader = createReaderApi();" : "const { whiteboardRepair, ...reader } = createReaderApi();"}
 contextBridge.exposeInMainWorld("noemori", { reader });
 `;
-  // 独立应用只提供识别 IPC；桥接直接使用生产实现，测试不改动工作区源码。
+  // 独立应用只提供几何修复 IPC；桥接直接使用生产实现，测试不改动工作区源码。
   await Promise.all([
     symlink(join(desktop, "node_modules"), join(root, "node_modules"), "junction"),
     writeFile(
@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld("noemori", { reader });
       join(root, "electron.vite.config.mjs"),
       'export default { main: {}, preload: { build: { rollupOptions: { output: { format: "cjs" } } } }, renderer: {} };',
     ),
-    writeFile(main, mainSource("line")),
+    writeFile(main, mainSource(0)),
     writeFile(preload, preloadSource(false)),
     writeFile(
       join(renderer, "index.html"),
@@ -92,7 +92,7 @@ contextBridge.exposeInMainWorld("noemori", { reader });
     ),
     writeFile(
       join(renderer, "index.ts"),
-      'document.getElementById("bridge")!.textContent = typeof window.noemori.reader.whiteboardRecognize;',
+      'document.getElementById("bridge")!.textContent = typeof window.noemori.reader.whiteboardRepair;',
     ),
   ]);
   const port = await availablePort();
@@ -148,15 +148,23 @@ contextBridge.exposeInMainWorld("noemori", { reader });
       .poll(() => page.locator("#bridge").textContent(), { timeout: 10000 })
       .toBe("function");
     expect(
-      await page.evaluate((value) => window.noemori.reader.whiteboardRecognize(value), points),
-    ).toEqual({ label: "line", confidence: 1 });
+      await page.evaluate((value) => window.noemori.reader.whiteboardRepair(value), {
+        points,
+        observations: points,
+        scale: 1,
+      }),
+    ).toEqual({ label: "line", points });
 
-    await writeFile(main, mainSource("circle"));
+    await writeFile(main, mainSource(10));
     await expect.poll(() => browser?.isConnected(), { timeout: 10000 }).toBe(false);
     page = await connect();
     expect(
-      await page.evaluate((value) => window.noemori.reader.whiteboardRecognize(value), points),
-    ).toEqual({ label: "circle", confidence: 1 });
+      await page.evaluate((value) => window.noemori.reader.whiteboardRepair(value), {
+        points,
+        observations: points,
+        scale: 1,
+      }),
+    ).toEqual({ label: "line", points: points.map((point) => ({ ...point, x: point.x + 10 })) });
   } catch (cause) {
     throw new Error(`开发更新旅程失败：\n${output}`, { cause });
   } finally {

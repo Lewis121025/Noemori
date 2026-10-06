@@ -310,8 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { NativeInk, NativeRuntime, NativeControl } = nativeBinding
+const { NativeRuntime, NativeControl } = nativeBinding
 
-module.exports.NativeInk = NativeInk
 module.exports.NativeRuntime = NativeRuntime
 module.exports.NativeControl = NativeControl

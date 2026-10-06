@@ -6,8 +6,8 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "install-electron && node scripts/prepare-pandoc.mjs && node scripts/prepare-ink.mjs && electron-vite dev --watch",
-    "build": "install-electron && node scripts/prepare-pandoc.mjs && node scripts/prepare-ink.mjs && electron-vite build",
+    "dev": "install-electron && node scripts/prepare-pandoc.mjs && electron-vite dev --watch",
+    "build": "install-electron && node scripts/prepare-pandoc.mjs && electron-vite build",
     "preview": "electron-vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.web.json && tsc -p tsconfig.node.json --noEmit",
     "lint": "eslint src --max-warnings 0 && prettier --check src",

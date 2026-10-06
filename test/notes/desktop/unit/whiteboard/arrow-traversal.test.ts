@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitShape } from "@reader/shared/whiteboard/fitting";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
 import type { InkPoint } from "@reader/shared/whiteboard/model";
 
 const nodes = [
@@ -42,11 +42,7 @@ describe("单笔箭头的轮廓与分支遍历", () => {
     ];
     for (const indices of routes)
       for (const order of [indices, [...indices].reverse()]) {
-        const fitted = fitShape(
-          route(order, rotation),
-          { label: "arrow", confidence: 0.99 },
-          1,
-        )!.points;
+        const fitted = repairShape(route(order, rotation), 1)!.points;
         expect(fitted, order.join("→")).toHaveLength(5);
         for (const node of nodes) {
           const x = node.x * Math.cos(rotation) - node.y * Math.sin(rotation),
@@ -64,6 +60,6 @@ describe("单笔箭头的轮廓与分支遍历", () => {
       [0, 1, 2, 1, 2, 1, 2, 1, 3],
       [0, 1, 3, 1, 3, 1, 3, 1, 2],
     ])
-      expect(fitShape(route(indices, 0), { label: "arrow", confidence: 0.99 }, 1)).toBeNull();
+      expect(repairShape(route(indices, 0), 1)).toBeNull();
   });
 });

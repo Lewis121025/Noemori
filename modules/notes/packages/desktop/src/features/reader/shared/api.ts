@@ -10,8 +10,7 @@ import type { SessionDocuments, ViewModes } from "./session";
 import type { FileTreeState } from "./file-browser";
 import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./entry-batch";
 import type { ExportRequest, ExportProgress, ExportPlan, ExportResult } from "./export";
-import type { InkPoint } from "./whiteboard/model";
-import type { ShapePrediction } from "./whiteboard/recognition";
+import type { ShapeRepair } from "./whiteboard/recognition";
 import type { WebPageApi } from "./webpage";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
@@ -358,8 +357,8 @@ export type VaultEntry = {
 export type ReaderApi = {
   /** 隔离网页的布局与浏览控制；不会向网站提供应用或笔记库访问能力。 */
   webPages: WebPageApi;
-  /** 停笔时分类一个连续笔迹；错误通过 Promise 拒绝，不修改文档。 */
-  whiteboardRecognize: (points: readonly InkPoint[]) => Promise<ShapePrediction>;
+  /** 停笔时计算规范几何；静态与原始观测共同校验，错误通过Promise拒绝。 */
+  whiteboardRepair: ShapeRepair;
   /** 全栏保存门禁之后生成并提交整批导出；取消与失败具有明确结果。 */
   exportRun: (
     request: ExportRequest,

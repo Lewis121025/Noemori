@@ -12,7 +12,7 @@ import {
   parseExportRequest,
 } from "../shared/export";
 import { parseFileSnapshot, parseDraftReply } from "../shared/editor-recovery";
-import { parseRecognitionPoints, parseShapePrediction } from "../shared/whiteboard/recognition";
+import { parseShapeRepairRequest, parseShapeFit } from "../shared/whiteboard/recognition";
 import {
   parseBookmarks,
   parseEmptyReply,
@@ -61,9 +61,9 @@ export function createReaderApi(): ReaderApi {
     }
   }
   return {
-    whiteboardRecognize: async (points) =>
-      parseShapePrediction(
-        await ipcRenderer.invoke("reader.whiteboard.recognize", parseRecognitionPoints(points)),
+    whiteboardRepair: async (request) =>
+      parseShapeFit(
+        await ipcRenderer.invoke("reader.whiteboard.repair", parseShapeRepairRequest(request)),
       ),
     exportRun: async (request, onProgress, onPlan) => {
       if (exporting !== null) throw new Error("已有导出任务正在执行");

@@ -195,16 +195,15 @@ function contourDistance(point: FitPoint, contour: readonly FitPoint[]): number 
  * 原始位置观测逐点检查最大误差，不把停笔时的微抖来回按几何弧长重复加权。
  * @param source 全部原始观测，使用静态轨迹的同一中心和尺寸归一化。
  * @param fitted 已通过完整覆盖与 RMS 检查的候选轮廓。
- * @returns 所有观测都在既有最大偏差内时为 true；非法坐标或退化轮廓返回 false。
+ * @param maximum 结构族允许的无量纲位置偏差，默认使用平滑曲线与直线的严格约束。
+ * @returns 所有观测都在对应最大偏差内时为 true；非法坐标或退化轮廓返回 false。
  */
 export function observationsAgree(
   source: readonly FitPoint[],
   fitted: readonly FitPoint[],
+  maximum = MAX_CONTOUR_DEVIATION,
 ): boolean {
-  return (
-    source.length > 0 &&
-    source.every((point) => contourDistance(point, fitted) <= MAX_CONTOUR_DEVIATION)
-  );
+  return source.length > 0 && source.every((point) => contourDistance(point, fitted) <= maximum);
 }
 
 /** 双向轮廓的最大和RMS误差；统一用于候选比较与覆盖门槛，退化轮廓返回 null。 */
@@ -222,10 +221,4 @@ export function contourDeviation(
         rms: Math.sqrt(deviations.reduce((sum, d) => sum + d * d, 0) / deviations.length),
       }
     : null;
-}
-
-/** 拟合与静态几何轨迹双向比较，避免残缺圆、U 形轮廓被补全成完整图形。 */
-export function fitAgrees(source: readonly FitPoint[], fitted: readonly FitPoint[]): boolean {
-  const error = contourDeviation(source, fitted);
-  return error !== null && error.maximum <= MAX_CONTOUR_DEVIATION && error.rms <= 0.028;
 }

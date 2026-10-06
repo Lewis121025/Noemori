@@ -1,7 +1,8 @@
 import { expect, it, vi } from "vitest";
 import { WhiteboardInput } from "@reader/renderer/whiteboard/input";
 import { emptyWhiteboard, type InkPoint } from "@reader/shared/whiteboard/model";
-import type { ShapePrediction } from "@reader/shared/whiteboard/recognition";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
+import type { ShapeFit, ShapeRepairRequest } from "@reader/shared/whiteboard/recognition";
 
 const p = (x: number, y = 0): InkPoint => ({ x, y, pressure: 0.5 });
 const samples = Array.from({ length: 25 }, (_, i) => p(i * 4, Math.sin(i) * 0.6));
@@ -10,36 +11,23 @@ function draw(board: WhiteboardInput) {
   for (const point of samples.slice(1)) board.update(point);
 }
 function deferred() {
-  let resolve!: (value: ShapePrediction) => void;
+  let resolve!: (value: ShapeFit) => void;
   let reject!: (cause: Error) => void;
-  const promise = new Promise<ShapePrediction>((yes, no) => {
+  const promise = new Promise<ShapeFit>((yes, no) => {
     resolve = yes;
     reject = no;
   });
   return { promise, resolve, reject };
 }
-const prediction = { label: "line", confidence: 0.99 } satisfies ShapePrediction;
+const prediction = repairShape(samples, 1)!;
 
 it.each([
-  { ratio: 0.72, predicted: "circle", expected: "ellipse" },
-  { ratio: 1, predicted: "ellipse", expected: "circle" },
-] as const)("停笔保存最终几何轮廓，模型标签$predicted与最终类型$expected分离", async (test) => {
-  const recognize = vi.fn(async () => ({
-    label: test.predicted,
-    confidence: 0.8,
-    oval: {
-      circle: test.predicted === "circle" ? 0.8 : 0.2,
-      ellipse: test.predicted === "ellipse" ? 0.8 : 0.2,
-    },
-    refinement: {
-      label: test.expected,
-      confidence: 0.8,
-      oval: {
-        circle: test.expected === "circle" ? 0.8 : 0.2,
-        ellipse: test.expected === "ellipse" ? 0.8 : 0.2,
-      },
-    },
-  }));
+  { ratio: 0.72, expected: "ellipse" },
+  { ratio: 1, expected: "circle" },
+] as const)("停笔保存规范$expected轮廓并完整撤销重做", async (test) => {
+  const recognize = vi.fn(async (request: ShapeRepairRequest) =>
+    repairShape(request.points, request.scale, request.observations),
+  );
   const board = new WhiteboardInput(emptyWhiteboard(), vi.fn(), recognize);
   const points = Array.from({ length: 193 }, (_, i) =>
     p(
@@ -67,7 +55,7 @@ it("停笔识别直线无需画圈，预览不占历史，抬笔一次提交并�
   const board = new WhiteboardInput(emptyWhiteboard(), changed, recognize);
   draw(board);
   expect(await board.hold()).toBe(true);
-  expect(recognize).toHaveBeenCalledWith(samples);
+  expect(recognize).toHaveBeenCalledWith({ points: samples, observations: samples, scale: 1 });
   expect(board.corrected).toBe(true);
   expect(board.points).toHaveLength(2);
   expect(board.document.strokes).toHaveLength(0);
@@ -126,29 +114,24 @@ it("继续绘制恢复完整原始采样，新的停笔可重新识别；微小�
   expect(await board.hold()).toBe(true);
 });
 
-it("分类低置信度、不匹配与推理失败都保留原笔迹；有效错误传播，过期错误丢弃", async () => {
-  for (const predicted of [
-    { ...prediction, confidence: 0.49 },
-    { label: "circle", confidence: 0.99 } satisfies ShapePrediction,
-  ]) {
-    const board = new WhiteboardInput(
-      emptyWhiteboard(),
-      () => {},
-      async () => predicted,
-    );
-    draw(board);
-    expect(await board.hold()).toBe(false);
-    expect(board.points).toEqual(samples);
-  }
+it("几何拒绝与计算失败保留原笔迹；有效错误传播，过期错误丢弃", async () => {
+  const rejected = new WhiteboardInput(
+    emptyWhiteboard(),
+    () => {},
+    async () => null,
+  );
+  draw(rejected);
+  expect(await rejected.hold()).toBe(false);
+  expect(rejected.points).toEqual(samples);
   const failed = new WhiteboardInput(
     emptyWhiteboard(),
     () => {},
     async () => {
-      throw new Error("推理失败");
+      throw new Error("计算失败");
     },
   );
   draw(failed);
-  await expect(failed.hold()).rejects.toThrow("推理失败");
+  await expect(failed.hold()).rejects.toThrow("计算失败");
   expect(failed.points).toEqual(samples);
   const pending = deferred();
   const board = new WhiteboardInput(
@@ -163,7 +146,7 @@ it("分类低置信度、不匹配与推理失败都保留原笔迹；有效错�
   expect(await held).toBe(false);
 });
 
-it("重复停笔不会重复推理；单点和平移不会触发", async () => {
+it("重复停笔不会重复计算；单点和平移不会触发", async () => {
   const pending = deferred(),
     recognize = vi.fn(() => pending.promise);
   const board = new WhiteboardInput(emptyWhiteboard(), () => {}, recognize);
@@ -183,17 +166,14 @@ it("重复停笔不会重复推理；单点和平移不会触发", async () => {
 });
 
 it("静止观测仅归并识别快照，修复失败与继续绘制均保留完整原始笔迹", async () => {
-  const recognize = vi.fn<(points: readonly InkPoint[]) => Promise<ShapePrediction>>(async () => ({
-    label: "other",
-    confidence: 0.99,
-  }));
+  const recognize = vi.fn(async (_request: ShapeRepairRequest) => null);
   const board = new WhiteboardInput(emptyWhiteboard(), () => {}, recognize);
   draw(board);
   for (let i = 1; i <= 80; i++)
     board.update(p(96 + 1.7 * Math.sin(i * 1.3), samples.at(-1)!.y + 1.7 * Math.sin(i * 1.7)));
   const raw = [...board.points];
   expect(await board.hold()).toBe(false);
-  expect(recognize.mock.calls[0]![0].length).toBeLessThan(raw.length);
+  expect(recognize.mock.calls[0]![0].points.length).toBeLessThan(raw.length);
   expect(board.points).toEqual(raw);
   board.update(p(140, 20));
   expect(board.points.slice(0, raw.length)).toEqual(raw);

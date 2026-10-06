@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { fitShape } from "@reader/shared/whiteboard/fitting";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "@reader/shared/whiteboard/model";
 import { angleAdvance, traceAdvance } from "@reader/shared/whiteboard/fitting-math";
 import {
   parseRecognitionPoints,
-  parseShapePrediction,
+  parseShapeFit,
   type ShapeLabel,
 } from "@reader/shared/whiteboard/recognition";
 
 const p = (x: number, y: number): InkPoint => ({ x, y, pressure: 0.6 });
-const fit = (points: InkPoint[], label: ShapeLabel, scale = 1) =>
-  fitShape(points, { label, confidence: 0.99 }, scale)?.points ?? null;
+const fit = (points: InkPoint[], label: ShapeLabel, scale = 1) => {
+  const result = repairShape(points, scale);
+  return result?.label === label ? result.points : null;
+};
 const contour = (rx: number, ry: number, sweep = Math.PI * 2, rotation = 0) =>
   Array.from({ length: 129 }, (_, i) => {
     const angle = (i * sweep) / 128;
@@ -57,18 +59,17 @@ function noisyPolygon(vertices: InkPoint[], phase: number, rotation: number): In
   });
 }
 
-describe("分类后的几何拟合与拒绝条件", () => {
+describe("轨迹结构的几何拟合与拒绝条件", () => {
   it("停笔归并不能隐藏超出最大偏差的观测，原始抖动不再按往返弧长重复加权", () => {
     const staticLine = [p(0, 0), p(40, 0)];
-    const prediction = { label: "line", confidence: 0.99 } as const;
     const observations = [
       ...staticLine,
       ...Array.from({ length: 200 }, (_, i) => p(40, 2.9 * Math.sin(i * 1.7))),
     ];
-    expect(fitShape(staticLine, prediction, 1, observations)?.points).toHaveLength(2);
-    expect(fitShape(staticLine, prediction, 1, [...observations, p(40, 3.1)])).toBeNull();
-    expect(fitShape(staticLine, prediction, 1, [...observations, p(1000, 0)])).toBeNull();
-    expect(fitShape(staticLine, prediction, 1, [...observations, p(NaN, 0)])).toBeNull();
+    expect(repairShape(staticLine, 1, observations)?.points).toHaveLength(2);
+    expect(repairShape(staticLine, 1, [...observations, p(40, 3.1)])).toBeNull();
+    expect(repairShape(staticLine, 1, [...observations, p(1000, 0)])).toBeNull();
+    expect(repairShape(staticLine, 1, [...observations, p(NaN, 0)])).toBeNull();
   });
   it("局部回描预算按净推进计算，方向翻转和圆周跨接缝不改变判据", () => {
     expect(traceAdvance([0.6, -0.125, 0.525])).toBeCloseTo(1);
@@ -101,18 +102,7 @@ describe("分类后的几何拟合与拒绝条件", () => {
     expect(result.at(-1)).toEqual(result[0]);
     const radii = result.map((point) => Math.hypot(point.x - 700, point.y + 350));
     expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.1);
-    expect(
-      fitShape(
-        contour(100, 50),
-        {
-          label: "circle",
-          confidence: 0.8,
-          oval: { circle: 0.8, ellipse: 0.2 },
-          refinement: { label: "ellipse", confidence: 0.8, oval: { circle: 0.2, ellipse: 0.8 } },
-        },
-        1,
-      )?.label,
-    ).toBe("ellipse");
+    expect(repairShape(contour(100, 50), 1)?.label).toBe("ellipse");
     expect(fit(contour(80, 80, Math.PI), "circle")).toBeNull();
     expect(fit(contour(80, 80, Math.PI * 4), "circle")).toBeNull();
   });
@@ -188,30 +178,24 @@ describe("分类后的几何拟合与拒绝条件", () => {
     );
     expect(fit(edge, "circle")).toBeNull();
   });
-  it("低置信度和 other 保留原笔迹，严格拒绝跨进程非法采样或分类结果", () => {
+  it("非法输入与修复协议严格拒绝，不存在模型分数门槛", () => {
     const points = [p(0, 0), p(100, 0)];
-    expect(fitShape(points, { label: "line", confidence: 0.49 }, 1)).toBeNull();
-    expect(fit(points, "other")).toBeNull();
+    expect(repairShape(points, 1)?.label).toBe("line");
     for (const value of [
-      null,
       {},
-      { label: "square", confidence: 1 },
-      { label: "line", confidence: NaN },
+      { label: "square", points },
+      { label: "line", points: [p(NaN, 0), p(1, 0)] },
     ])
-      expect(() => parseShapePrediction(value)).toThrow();
+      expect(() => parseShapeFit(value)).toThrow();
+    expect(parseShapeFit(null)).toBeNull();
     expect(() => parseRecognitionPoints([p(0, 0), p(Infinity, 1)])).toThrow();
     expect(() => parseRecognitionPoints(Array.from({ length: 8193 }, () => p(1, 2)))).toThrow();
-    expect(parseShapePrediction({ label: "line", confidence: 0.99 })).toEqual({
-      label: "line",
-      confidence: 0.99,
-    });
+    expect(parseShapeFit({ label: "line", points })).toEqual({ label: "line", points });
   });
-
-  it("模型多数候选还需匹配几何，规则近方形不依赖模型分数达到0.95", () => {
-    const points = polygon([p(0, 0), p(250, 0), p(250, 240), p(0, 240), p(0, 0)]);
-    expect(fitShape(points, { label: "rectangle", confidence: 0.55 }, 1)?.points).toHaveLength(5);
-    expect(fitShape(points, { label: "line", confidence: 0.55 }, 1)).toBeNull();
-    expect(fitShape(points, { label: "rectangle", confidence: 0.49 }, 1)).toBeNull();
+  it("规则四边形从几何恢复直角，不依赖分类类别", () => {
+    expect(
+      repairShape(polygon([p(0, 0), p(250, 0), p(250, 240), p(0, 240), p(0, 0)]), 1)?.label,
+    ).toBe("rectangle");
   });
 
   it("局部回描保持完整轮廓时可修复，不能把大范围折返或重复整圈当成局部误差", () => {

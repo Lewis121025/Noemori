@@ -9,7 +9,7 @@
   } from "../../shared/whiteboard/model";
   import { strokePath } from "../../shared/whiteboard/geometry";
   import { WhiteboardInput } from "./input";
-  import type { ShapePrediction } from "../../shared/whiteboard/recognition";
+  import type { ShapeRepair } from "../../shared/whiteboard/recognition";
 
   let {
     board,
@@ -18,7 +18,7 @@
     onDirty,
     readOnly = false,
     registerToolbar,
-    recognize,
+    repair,
   }: {
     board: WhiteboardDocument;
     epoch: number;
@@ -28,7 +28,7 @@
     readOnly?: boolean;
     /** 工具栏占据分栏顶部，画布使用剩余高度，不覆盖笔迹。 */
     registerToolbar?: (toolbar: Snippet | null) => void;
-    recognize?: (points: readonly InkPoint[]) => Promise<ShapePrediction>;
+    repair?: ShapeRepair;
   } = $props();
   $effect(() => {
     const register = registerToolbar;
@@ -40,7 +40,7 @@
   let input = $state.raw<WhiteboardInput | null>(null);
   let frame = $state(0);
   let error = $state("");
-  // 推理错误属于这次落笔，不能被成功的微抖采样或抬笔提交清空。
+  // 计算错误属于这次落笔，不能被成功的微抖采样或抬笔提交清空。
   let recognitionError = $state("");
   let pointer: number | null = null;
   let space = $state(false);
@@ -202,7 +202,7 @@
           frame += 1;
           if (edited) changed();
         },
-        recognize,
+        repair,
       );
       input = session;
       pointer = null;

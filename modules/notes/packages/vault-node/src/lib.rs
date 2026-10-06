@@ -1,4 +1,4 @@
-//! Node-API 薄绑定：适配资料库运行时与独立图形分类，不在此层编排业务。
+//! Node-API 薄绑定：适配资料库运行时，不在此层编排业务。
 
 pub mod attachments;
 pub mod bookmarks;
@@ -6,7 +6,6 @@ pub mod entries;
 pub mod entry_batch;
 pub mod export;
 pub mod files;
-pub mod ink;
 pub mod links;
 pub mod metadata;
 mod runtime;

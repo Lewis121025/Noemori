@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { InkSmoother } from "@reader/shared/whiteboard/smoothing";
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "@reader/shared/whiteboard/model";
-import { fitShape } from "@reader/shared/whiteboard/fitting";
+import { repairShape } from "@reader/shared/whiteboard/fitting";
 
 const p = (x: number, y = 0): InkPoint => ({ x, y, pressure: 0.5 });
 const rms = (points: readonly InkPoint[]) =>
@@ -48,7 +48,7 @@ it.each([60, 180, 420])("%s像素每秒的连续圆弧保留曲率，静态双�
     filter.push(raw[i]!, (((1000 * i) / count) * 2 * Math.PI * radius) / speed);
   const errors = filter.snapshot().map((point) => Math.abs(Math.hypot(point.x, point.y) - radius));
   expect(Math.max(...errors)).toBeLessThan(3);
-  expect(fitShape(filter.snapshot(), { label: "circle", confidence: 0.99 }, 1, raw)).not.toBeNull();
+  expect(repairShape(filter.snapshot(), 1, raw)).not.toBeNull();
 });
 
 it("明确直角和完整折返保留转向，短笔画不被低通滤波抹掉", () => {
@@ -74,9 +74,7 @@ it("明确直角和完整折返保留转向，短笔画不被低通滤波抹掉"
   for (let i = 1; i < retraced.length; i++) reversal.push(retraced[i]!, i * 16);
   expect(reversal.snapshot()[40]).toEqual(p(160));
   expect(reversal.snapshot()[80]).toEqual(p(0));
-  expect(
-    fitShape(reversal.snapshot(), { label: "line", confidence: 0.99 }, 1, retraced),
-  ).toBeNull();
+  expect(repairShape(reversal.snapshot(), 1, retraced)).toBeNull();
 });
 
 it("缺失、同时刻和长间隔采样不伪造频率，非法或倒退时间不修改有效状态", () => {
