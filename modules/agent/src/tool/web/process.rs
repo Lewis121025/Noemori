@@ -13,7 +13,7 @@ struct ManagedProcess {
 
 /// 两种进程的职责不同：辅助程序只计算，浏览器的操作系统子进程由宿主管理。
 #[derive(Clone, Copy)]
-pub(super) enum ProcessRole {
+pub(crate) enum ProcessRole {
     /// 只负责计算和转发，操作系统进程由宿主分配。
     Node,
     /// 独立的浏览器进程组，辅助程序退出后仍由宿主持有。
@@ -31,7 +31,7 @@ impl ProcessRole {
 
 /// 一次读取独占的进程、诊断任务与临时目录，按资源依赖的逆序释放。
 #[derive(Default)]
-pub(super) struct Resources {
+pub(crate) struct Resources {
     children: Vec<ManagedProcess>,
     readers: Vec<JoinHandle<Result<(), String>>>,
     profiles: Vec<tempfile::TempDir>,
@@ -56,14 +56,37 @@ impl ManagedProcess {
                 Err(error) => return Err(format!("辅助程序退出状态读取失败：{error}")),
             }
         }
-        self.child
-            .start_kill()
-            .or_else(|error| if stopped(&error) { Ok(()) } else { Err(error) })
-            .map_err(|error| format!("{}进程组终止失败：{error}", self.role.name()))
+        match self.child.start_kill() {
+            Ok(()) => Ok(()),
+            Err(error) if stopped(&error) => Ok(()),
+            Err(error) => {
+                // Node 不拥有浏览器子进程；macOS 在检查与发信号之间退出时可能返回 EPERM。
+                // 只有确实回收到这个子进程时才接受该竞态，仍存活的进程继续报告原始错误。
+                if matches!(self.role, ProcessRole::Node)
+                    && matches!(self.child.try_wait(), Ok(Some(_)))
+                {
+                    self.reaped = true;
+                    Ok(())
+                } else {
+                    Err(format!("{}进程组终止失败：{error}", self.role.name()))
+                }
+            }
+        }
     }
 }
 
 impl Resources {
+    /// 为宿主拥有的运行资源分配私有目录，最终回收与进程使用同一所有者。
+    pub fn directory(&mut self, prefix: &str) -> Result<std::path::PathBuf, String> {
+        let directory = tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir()
+            .map_err(|error| format!("运行目录创建失败：{error}"))?;
+        let path = directory.path().to_owned();
+        self.profiles.push(directory);
+        Ok(path)
+    }
+
     /// 启动后立即持有进程组，返回本次读取内的资源位置；启动失败返回明确原因。
     pub fn spawn(
         &mut self,
@@ -117,6 +140,16 @@ impl Resources {
         executable: &OsStr,
         proxy_url: &str,
     ) -> Result<(u32, String), String> {
+        self.browser_window(executable, proxy_url, true).await
+    }
+
+    /// 创建宿主独占的浏览器窗口；交互会话可保留窗口供人工接管，网络出口仍受控。
+    pub async fn browser_window(
+        &mut self,
+        executable: &OsStr,
+        proxy_url: &str,
+        headless: bool,
+    ) -> Result<(u32, String), String> {
         let proxy = reqwest::Url::parse(proxy_url).map_err(|_| "浏览器网络出口地址无效")?;
         if proxy.scheme() != "http"
             || proxy.host_str() != Some("127.0.0.1")
@@ -136,7 +169,6 @@ impl Resources {
             // 固定实验配置，与当前 Playwright 的运行前提一致，避免实验改变请求拦截行为。
             command
                 .args([
-                    "--headless=new",
                     // 远程调试默认暴露 webdriver；通过浏览器自身选项减少该自动化信号。
                     "--disable-blink-features=AutomationControlled",
                     "--remote-debugging-port=0",
@@ -164,6 +196,9 @@ impl Resources {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped());
+            if headless {
+                command.arg("--headless=new");
+            }
         })?;
         let pid = self.child(index).id().ok_or("浏览器没有进程标识")?;
         let stderr = self

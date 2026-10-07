@@ -1,33 +1,49 @@
-use super::{Tool, ToolContext, ToolDefinition, ToolError};
+use super::{Tool, ToolConcurrency, ToolContext, ToolDefinition, ToolError};
 use crate::{AgentSession, Error, ExecutionContext, Media, ToolCall, ToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// 在异构注册表内统一调用入口，具体参数和返回值仍由各工具的类型契约约束。
-#[async_trait]
 trait ErasedTool: Send + Sync {
-    async fn call(
-        &self,
-        args: Value,
-        context: ToolContext,
-    ) -> Result<(Value, Vec<Media>), ToolError>;
+    fn prepare(&self, args: Value) -> Result<Box<dyn Invocation + '_>, ToolError>;
+}
+
+/// 调度与执行共用一次反序列化后的参数；拥有参数直到执行结束或取消。
+#[async_trait]
+trait Invocation: Send {
+    fn concurrency(&self) -> ToolConcurrency;
+    async fn call(self: Box<Self>, context: ToolContext) -> Result<(Value, Vec<Media>), ToolError>;
 }
 
 /// 在 JSON 边界完成序列化转换，使工具实现保留强类型参数和返回值。
 struct TypedTool<T>(T);
 
-#[async_trait]
 impl<T: Tool> ErasedTool for TypedTool<T> {
-    async fn call(
-        &self,
-        args: Value,
-        context: ToolContext,
-    ) -> Result<(Value, Vec<Media>), ToolError> {
+    fn prepare(&self, args: Value) -> Result<Box<dyn Invocation + '_>, ToolError> {
         let args = serde_json::from_value(args)
             .map_err(|error| ToolError::Execution(error.to_string()))?;
-        let output = self.0.execute(args, context).await?;
-        let media = self.0.media(&output);
+        Ok(Box::new(TypedInvocation {
+            tool: &self.0,
+            args,
+        }))
+    }
+}
+
+struct TypedInvocation<'a, T: Tool> {
+    tool: &'a T,
+    args: T::Args,
+}
+
+#[async_trait]
+impl<T: Tool> Invocation for TypedInvocation<'_, T> {
+    fn concurrency(&self) -> ToolConcurrency {
+        self.tool.concurrency(&self.args)
+    }
+
+    async fn call(self: Box<Self>, context: ToolContext) -> Result<(Value, Vec<Media>), ToolError> {
+        let output = self.tool.execute(self.args, context).await?;
+        let media = self.tool.media(&output);
         for attachment in &media {
             attachment
                 .validate()
@@ -53,6 +69,18 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// 只准备当前将要调度的调用；非法参数作为顺序调用的错误观察返回。
+    pub(crate) fn prepare<'a>(&'a self, call: &'a ToolCall) -> PreparedCall<'a> {
+        let invocation = match self.entries.get(&call.name) {
+            None => Err(ToolError::Execution(format!("未知工具：{}", call.name))),
+            Some(entry) => match entry.validator.validate(&call.arguments) {
+                Err(error) => Err(ToolError::Execution(format!("参数不符合 Schema：{error}"))),
+                Ok(()) => entry.tool.prepare(call.arguments.clone()),
+            },
+        };
+        PreparedCall { call, invocation }
+    }
+
     /// 创建空工具集合。
     pub fn new() -> Self {
         Self::default()
@@ -126,27 +154,46 @@ impl ToolRegistry {
         context: ExecutionContext,
         session: &AgentSession,
     ) -> Result<ToolResult, Error> {
+        context.check()?;
+        self.prepare(call).execute(context, session).await
+    }
+}
+
+/// 不可变的已准备调用；序列化边界只经过一次，调度无法替换执行参数。
+pub(crate) struct PreparedCall<'a> {
+    pub(crate) call: &'a ToolCall,
+    invocation: Result<Box<dyn Invocation + 'a>, ToolError>,
+}
+
+impl PreparedCall<'_> {
+    pub(crate) fn concurrency(&self) -> ToolConcurrency {
+        self.invocation
+            .as_ref()
+            .map_or(ToolConcurrency::Sequential, |invocation| {
+                invocation.concurrency()
+            })
+    }
+
+    pub(crate) async fn execute(
+        self,
+        context: ExecutionContext,
+        session: &AgentSession,
+    ) -> Result<ToolResult, Error> {
         let context = ExecutionContext {
             cancellation: context.cancellation.child_token(),
             deadline: context.deadline,
         };
         let _lease = session.register(context.cancellation.clone())?;
         context.check()?;
-        let result = match self.entries.get(&call.name) {
-            None => Err(ToolError::Execution(format!("未知工具：{}", call.name))),
-            Some(entry) => {
-                if let Err(error) = entry.validator.validate(&call.arguments) {
-                    Err(ToolError::Execution(format!("参数不符合 Schema：{error}")))
-                } else {
-                    let tool_context = ToolContext {
-                        call_id: call.id.clone(),
-                        execution: context.clone(),
-                        session: session.clone(),
-                    };
-                    context
-                        .wait(entry.tool.call(call.arguments.clone(), tool_context))
-                        .await?
-                }
+        let result = match self.invocation {
+            Err(error) => Err(error),
+            Ok(invocation) => {
+                let tool_context = ToolContext {
+                    call_id: self.call.id.clone(),
+                    execution: context.clone(),
+                    session: session.clone(),
+                };
+                context.wait(invocation.call(tool_context)).await?
             }
         };
         let (output, media, is_error) = match result {
@@ -157,8 +204,8 @@ impl ToolRegistry {
             }
         };
         Ok(ToolResult {
-            call_id: call.id.clone(),
-            name: call.name.clone(),
+            call_id: self.call.id.clone(),
+            name: self.call.name.clone(),
             output,
             is_error,
             media,

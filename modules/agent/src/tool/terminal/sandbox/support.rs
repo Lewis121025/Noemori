@@ -6,16 +6,87 @@ use std::{
 
 static ROOT: Mutex<Weak<Root>> = Mutex::new(Weak::new());
 
-/// 同一宿主的沙箱都排除此目录；最后一个工具和后台进程释放后自动删除。
-pub(super) struct Root {
+/// 同一宿主的沙箱仅可读取其中的 bin；最后一个工具和后台进程释放后自动删除。
+pub(in crate::tool::terminal) struct Root {
     directory: Option<tempfile::TempDir>,
     path: PathBuf,
     launchers: Mutex<BTreeMap<PathBuf, PathBuf>>,
 }
 
 impl Root {
-    pub(super) fn path(&self) -> &Path {
+    pub(in crate::tool::terminal) fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub(super) fn bin(&self) -> PathBuf {
+        self.path.join("bin")
+    }
+
+    pub(super) fn acquire() -> Result<Arc<Self>, String> {
+        let mut cached = ROOT.lock().expect("沙箱目录锁被污染");
+        if let Some(root) = cached.upgrade() {
+            return Ok(root);
+        }
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("noemori-sandbox-");
+        // macOS 的用户临时目录很长；短的系统临时根为具名 Unix IPC 留出地址预算。
+        #[cfg(target_os = "macos")]
+        let directory = builder.tempdir_in("/private/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let directory = builder.tempdir();
+        let directory = directory.map_err(|e| format!("沙箱运行目录创建失败：{e}"))?;
+        let path = directory
+            .path()
+            .canonicalize()
+            .map_err(|e| format!("沙箱运行目录解析失败：{e}"))?;
+        let root = Arc::new(Self {
+            directory: Some(directory),
+            path,
+            launchers: Mutex::new(BTreeMap::new()),
+        });
+        root.install_ripgrep()?;
+        *cached = Arc::downgrade(&root);
+        Ok(root)
+    }
+
+    fn install_ripgrep(&self) -> Result<(), String> {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = self.bin();
+        let executable = bin.join("rg");
+        let install = || -> std::io::Result<()> {
+            std::fs::create_dir(&bin)?;
+            std::fs::write(&executable, include_bytes!(concat!(env!("OUT_DIR"), "/rg")))?;
+            std::fs::write(
+                bin.join("LICENSE-ripgrep"),
+                include_bytes!(concat!(env!("OUT_DIR"), "/LICENSE-ripgrep")),
+            )?;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o500))?;
+            Ok(())
+        };
+        install().map_err(|e| format!("内置 ripgrep 准备失败：{e}"))?;
+        // 在发布可复用资源之前确认目标架构、动态依赖和执行权限均可用。
+        let output = std::process::Command::new(&executable)
+            .arg("--version")
+            .env_clear()
+            .output()
+            .map_err(|e| format!("内置 ripgrep 无法执行：{e}"))?;
+        let expected = format!(
+            "ripgrep {}",
+            include_str!(concat!(env!("OUT_DIR"), "/VERSION"))
+        );
+        let actual = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success()
+            || !actual
+                .lines()
+                .next()
+                .is_some_and(|line| line == expected || line.starts_with(&format!("{expected} ")))
+        {
+            return Err(format!(
+                "内置 ripgrep 校验失败：{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -26,7 +97,7 @@ pub(super) struct Support {
 }
 
 impl Support {
-    pub(super) fn new(launcher: Option<PathBuf>) -> Result<Arc<Self>, String> {
+    pub(super) fn new(launcher: Option<PathBuf>, root: Arc<Root>) -> Result<Arc<Self>, String> {
         let launcher = match launcher {
             Some(path) => path,
             None => default_launcher()?,
@@ -35,27 +106,6 @@ impl Support {
         if !launcher.is_file() {
             return Err("沙箱启动器必须是可执行文件".into());
         }
-        let mut cached = ROOT.lock().expect("沙箱目录锁被污染");
-        let root = match cached.upgrade() {
-            Some(root) => root,
-            None => {
-                let directory = tempfile::Builder::new()
-                    .prefix("noemori-sandbox-")
-                    .tempdir()
-                    .map_err(|e| format!("沙箱运行目录创建失败：{e}"))?;
-                let path = directory
-                    .path()
-                    .canonicalize()
-                    .map_err(|e| format!("沙箱运行目录解析失败：{e}"))?;
-                let root = Arc::new(Root {
-                    directory: Some(directory),
-                    path,
-                    launchers: Mutex::new(BTreeMap::new()),
-                });
-                *cached = Arc::downgrade(&root);
-                root
-            }
-        };
         let target = {
             let mut launchers = root.launchers.lock().expect("沙箱启动器锁被污染");
             if let Some(path) = launchers.get(&launcher) {

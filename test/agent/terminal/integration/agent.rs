@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+mod concurrency;
 #[path = "../../support/model.rs"]
 mod support;
 

@@ -8,6 +8,7 @@ import type {
 import { parseReaderCommand } from "../features/reader/shared/commands";
 import type { ReadingFont } from "../features/reader/shared/reading-font";
 import type { ReadingPalette } from "../features/reader/shared/reading-palette";
+import type { AgentApi } from "../features/agent/shared/api";
 
 /** 应用外观；system 随操作系统切换，显式选择同时作用于窗口与正文。 */
 export type Appearance = "system" | "light" | "dark";
@@ -73,4 +74,5 @@ export type AppApi = {
 export type NoemoriApi = {
   app: AppApi;
   reader: ReaderApi;
+  agent: AgentApi;
 };

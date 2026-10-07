@@ -10,12 +10,14 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test ../../../test/agent/web/unit/runtime.test.mjs ../../../test/agent/web/integration/runtime.test.mjs ../../../test/agent/web/integration/network.test.mjs ../../../test/agent/web/integration/challenge.test.mjs",
-    "test:e2e": "node --test ../../../test/agent/web/e2e/web.test.mjs"
+    "test:e2e": "node --test ../../../test/agent/web/e2e/web.test.mjs",
+    "test:browser": "pnpm build && node --test ../../../test/agent/browser/unit/*.test.mjs ../../../test/agent/browser/integration/*.test.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",
     "@napi-rs/canvas": "1.0.10",
     "jsdom": "30.1.0",
+    "mime": "4.1.0",
     "pdfjs-dist": "6.4.299",
     "playwright-core": "1.63.0",
     "turndown": "7.2.2",

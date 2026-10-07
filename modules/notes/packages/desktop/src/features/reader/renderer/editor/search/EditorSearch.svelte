@@ -240,12 +240,7 @@
       >
     </div>
   {/if}
-  <div
-    class="search-status"
-    id={statusId}
-    role="status"
-    aria-atomic="true"
-  >
+  <div class="search-status" id={statusId} role="status" aria-atomic="true">
     {status}
   </div>
 </form>

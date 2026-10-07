@@ -10,7 +10,7 @@ pub struct PendingTurn {
     pub response: Option<ModelResponse>,
     /// 完整响应到达前的增量；不能直接当作后续请求历史。
     pub deltas: Vec<ModelEvent>,
-    /// 已经收到的工具观察，包含业务错误，不会因本轮后续失败丢弃。
+    /// 按模型调用顺序保留已收到的工具观察，包含业务错误，不会因本轮后续失败丢弃。
     pub tool_results: Vec<ToolResult>,
     /// 已进入执行阶段的调用，未返回结果的调用可能已经产生外部副作用。
     pub attempted_tool_ids: Vec<String>,

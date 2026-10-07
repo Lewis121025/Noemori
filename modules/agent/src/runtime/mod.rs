@@ -1,6 +1,8 @@
 //! 自定义 ReAct 状态推进与异步驱动，共享流式和汇总运行路径。
 
 mod agent;
+mod browser_history;
+mod dispatch;
 mod event;
 mod report;
 mod runner;

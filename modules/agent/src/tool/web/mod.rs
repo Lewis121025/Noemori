@@ -1,8 +1,8 @@
 //! 自有 Web 工具；搜索与读取共享执行边界，浏览器及 PDF 工作隔离在辅助进程。
 
 mod io;
-mod network;
-mod process;
+pub(crate) mod network;
+pub(crate) mod process;
 pub mod search;
 mod worker;
 

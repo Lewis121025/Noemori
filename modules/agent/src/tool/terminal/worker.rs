@@ -2,9 +2,9 @@
 
 use super::{
     backend::{OwnedChild, Started},
-    contract::TerminalStatus,
+    contract::{TerminalStatus, TerminalStream},
     io::{Reader, TextDecoder, Writer},
-    process::{Interrupt, Process, State},
+    process::{Control, Process, State},
 };
 use nix::{errno::Errno, sys::signal::Signal};
 use std::{future::Future, sync::Arc, time::Duration};
@@ -26,7 +26,7 @@ pub(super) fn run(
     process: Arc<Process>,
     started: Started,
     writer: Arc<Mutex<Option<Writer>>>,
-    controls: mpsc::Receiver<Interrupt>,
+    controls: mpsc::Receiver<Control>,
     expires: Option<Instant>,
 ) -> impl Future<Output = ()> + Send {
     // 守卫在创建 future 时就生效，覆盖观察任务一次都未获得调度便被取消的情况。
@@ -40,17 +40,18 @@ pub(super) fn run(
 }
 
 impl Worker {
-    async fn complete(mut self, mut controls: mpsc::Receiver<Interrupt>, expires: Option<Instant>) {
+    async fn complete(mut self, mut controls: mpsc::Receiver<Control>, expires: Option<Instant>) {
         let Self {
             process,
             started,
             writer,
             readers,
         } = &mut self;
-        for reader in started.readers.drain(..) {
-            readers.spawn(read_output(reader, process.state.clone(), process.tty));
+        for (stream, reader) in started.readers.drain(..) {
+            readers.spawn(read_output(reader, process.state.clone(), stream));
         }
         let outcome = observe(&mut started.child, process, &mut controls, readers, expires).await;
+        started.launch.cancel_network();
         process.input_closed.cancel();
         writer.lock().await.take();
         let mut errors = Vec::new();
@@ -65,6 +66,12 @@ impl Worker {
             errors.push(error);
         }
         errors.extend(drain_output(readers).await);
+        if let Err(error) = process.state.flush_log().await {
+            errors.push(error);
+        }
+        if let Err(error) = started.launch.close_network().await {
+            errors.push(error);
+        }
         if let Err(error) = started.launch.cleanup() {
             errors.push(error);
         }
@@ -132,7 +139,7 @@ async fn drain_output(readers: &mut JoinSet<Result<(), String>>) -> Vec<String> 
 async fn observe(
     child: &mut OwnedChild,
     process: &Process,
-    controls: &mut mpsc::Receiver<Interrupt>,
+    controls: &mut mpsc::Receiver<Control>,
     readers: &mut JoinSet<Result<(), String>>,
     expires: Option<Instant>,
 ) -> Result<(TerminalStatus, Option<i32>, Option<String>), String> {
@@ -162,8 +169,12 @@ async fn observe(
             }
             if termination.is_some() {
                 process.input_closed.cancel();
-                child.signal(Signal::SIGTERM)?;
-                kill_at = Some(Instant::now() + Duration::from_millis(500));
+                if process.stop_immediately {
+                    child.signal(Signal::SIGKILL)?;
+                } else {
+                    child.signal(Signal::SIGTERM)?;
+                    kill_at = Some(Instant::now() + Duration::from_millis(500));
+                }
             }
         }
         if kill_at.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -184,11 +195,19 @@ async fn observe(
                 result.map_err(|e| format!("终端输出任务失败：{e}"))??;
             }
             Some(control) = controls.recv() => {
-                if !control.reply.is_closed() {
-                    let result = if termination.is_none() { child.signal(Signal::SIGINT) } else { Err("终端正在停止".into()) };
-                    // 接收方取消等待时，已发送的中断仍然有效，不重复发送信号。
-                    let _ = control.reply.send(result);
-                }
+                let (reply, result) = match control {
+                    Control::Interrupt { reply } if !reply.is_closed() => {
+                        let result = if termination.is_none() { child.signal(Signal::SIGINT) } else { Err("终端正在停止".into()) };
+                        (reply, result)
+                    }
+                    Control::Resize { size, reply } if !reply.is_closed() => {
+                        let result = if termination.is_none() { child.resize(size) } else { Err("终端正在停止".into()) };
+                        (reply, result)
+                    }
+                    _ => continue,
+                };
+                // 接收方取消等待时，已执行的控制操作仍然有效，不重复发送。
+                let _ = reply.send(result);
             }
         }
     }
@@ -201,18 +220,33 @@ async fn wait_deadline(deadline: Option<Instant>) {
     }
 }
 
-async fn read_output(mut reader: Reader, state: Arc<State>, tty: bool) -> Result<(), String> {
+async fn read_output(
+    mut reader: Reader,
+    state: Arc<State>,
+    stream: TerminalStream,
+) -> Result<(), String> {
     let mut bytes = [0; 8192];
     let mut decoder = TextDecoder::new();
     loop {
         let count = match reader.read(&mut bytes).await {
             Ok(count) => count,
             // Linux PTY 在最后一个 slave 关闭后以 EIO 表示 EOF。
-            Err(error) if tty && error.raw_os_error() == Some(Errno::EIO as i32) => 0,
+            Err(error)
+                if stream == TerminalStream::Terminal
+                    && error.raw_os_error() == Some(Errno::EIO as i32) =>
+            {
+                0
+            }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(format!("终端输出读取失败：{error}")),
         };
-        state.push(&decoder.decode(&bytes[..count], count == 0));
+        state
+            .push(
+                stream,
+                &bytes[..count],
+                &decoder.decode(&bytes[..count], count == 0),
+            )
+            .await?;
         if count == 0 {
             return Ok(());
         }

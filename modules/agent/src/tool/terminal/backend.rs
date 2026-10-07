@@ -1,7 +1,9 @@
 //! 只负责操作系统资源；所有子进程在首次 await 前就拥有清理守卫。
 
+use super::contract::{TerminalSize, TerminalStream};
 use super::io::{Reader, Writer};
 use super::sandbox::{Launch, Policy};
+use super::shell::{Initialization, Invocation};
 use nix::{
     errno::Errno,
     sys::signal::{Signal, kill, killpg},
@@ -26,27 +28,39 @@ pub(super) struct OwnedChild {
 /// 完成同步启动的资源包；移交后台任务前任意失败都会释放其进程守卫。
 pub(super) struct Started {
     pub(super) child: OwnedChild,
-    pub(super) readers: Vec<Reader>,
+    pub(super) readers: Vec<(TerminalStream, Reader)>,
     pub(super) writer: Option<Writer>,
     pub(super) launch: Launch,
 }
 
+/// 管道和 PTY 使用互斥配置，避免出现“非 PTY 却带终端尺寸”的内部状态。
+#[derive(Clone, Copy)]
+pub(super) enum IoMode {
+    Pipe { stdin: bool },
+    Pty(TerminalSize),
+}
+
 pub(super) fn spawn(
-    shell: &Path,
+    shell: Invocation<'_>,
     cwd: &Path,
-    cmd: &str,
-    tty: bool,
+    mode: IoMode,
     policy: &Policy,
+    network: Option<&super::network::ProcessNetwork>,
 ) -> Result<Started, String> {
-    if tty {
-        spawn_pty(shell, cwd, cmd, policy)
-    } else {
-        spawn_pipe(shell, cwd, cmd, policy)
+    match mode {
+        IoMode::Pty(size) => spawn_pty(shell, cwd, size, policy, network),
+        IoMode::Pipe { stdin } => spawn_pipe(shell, cwd, stdin, policy, network),
     }
 }
 
-fn spawn_pipe(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<Started, String> {
-    let launch = Launch::new(policy, shell, cwd, cmd, None)?;
+fn spawn_pipe(
+    shell: Invocation<'_>,
+    cwd: &Path,
+    stdin: bool,
+    policy: &Policy,
+    network: Option<&super::network::ProcessNetwork>,
+) -> Result<Started, String> {
+    let launch = Launch::new(policy, shell, cwd, None, network)?;
     let mut command = Command::new(&launch.program);
     command.args(&launch.args);
     if let Some(environment) = &launch.environment {
@@ -55,31 +69,45 @@ fn spawn_pipe(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<St
     let mut child = command
         .current_dir(cwd)
         .process_group(0)
-        .stdin(Stdio::null())
+        .stdin(if stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("终端命令启动失败：{e}"))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    let input = child.stdin.take();
     let child = OwnedChild::new(child, None)?;
+    let writer = input.map(|input| Writer::new(input.into())).transpose()?;
     let readers = vec![
-        Reader::new(stdout.ok_or("终端缺少 stdout")?.into())?,
-        Reader::new(stderr.ok_or("终端缺少 stderr")?.into())?,
+        (
+            TerminalStream::Stdout,
+            Reader::new(stdout.ok_or("终端缺少 stdout")?.into())?,
+        ),
+        (
+            TerminalStream::Stderr,
+            Reader::new(stderr.ok_or("终端缺少 stderr")?.into())?,
+        ),
     ];
     Ok(Started {
         child,
         readers,
-        writer: None,
+        writer,
         launch,
     })
 }
 
-fn spawn_pty(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<Started, String> {
+fn spawn_pty(
+    shell: Invocation<'_>,
+    cwd: &Path,
+    size: TerminalSize,
+    policy: &Policy,
+    network: Option<&super::network::ProcessNetwork>,
+) -> Result<Started, String> {
     let (master, slave) =
         pty_process::blocking::open().map_err(|e| format!("PTY 分配失败：{e}"))?;
     master
-        .resize(pty_process::Size::new(24, 120))
+        .resize(pty_process::Size::new(size.rows, size.columns))
         .map_err(|e| format!("PTY 尺寸设置失败：{e}"))?;
     let reader = Reader::new(
         master
@@ -94,26 +122,52 @@ fn spawn_pty(shell: &Path, cwd: &Path, cmd: &str, policy: &Policy) -> Result<Sta
             .map_err(|e| format!("PTY 输入句柄创建失败：{e}"))?,
     )?;
     let tty = nix::unistd::ttyname(&slave).map_err(|e| format!("PTY 路径读取失败：{e}"))?;
-    let launch = Launch::new(policy, shell, cwd, cmd, Some(&tty))?;
+    let launch = Launch::new(policy, shell, cwd, Some(&tty), network)?;
     let mut command = pty_process::blocking::Command::new(&launch.program).args(&launch.args);
     if let Some(environment) = &launch.environment {
         command = command.env_clear().envs(environment);
     }
-    let child = command
+    let capture = matches!(shell.initialization, Initialization::Capture { .. });
+    if capture {
+        // 控制终端用于初始化，序列化使用独立 stdout；启动诊断不能混入可执行快照。
+        command = command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    }
+    let mut child = command
         .current_dir(cwd)
         .env("TERM", "xterm-256color")
         .spawn(slave)
         .map_err(|e| format!("PTY 命令启动失败：{e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
     let child = OwnedChild::new(child, Some(master))?;
+    let mut readers = vec![(TerminalStream::Terminal, reader)];
+    if capture {
+        readers.push((
+            TerminalStream::Stdout,
+            Reader::new(stdout.ok_or("环境采集缺少 stdout")?.into())?,
+        ));
+        readers.push((
+            TerminalStream::Stderr,
+            Reader::new(stderr.ok_or("环境采集缺少 stderr")?.into())?,
+        ));
+    }
     Ok(Started {
         child,
-        readers: vec![reader],
+        readers,
         writer: Some(writer),
         launch,
     })
 }
 
 impl OwnedChild {
+    pub(super) fn resize(&self, size: TerminalSize) -> Result<(), String> {
+        self.master
+            .as_ref()
+            .ok_or("普通管道不支持终端尺寸调整")?
+            .resize(pty_process::Size::new(size.rows, size.columns))
+            .map_err(|e| format!("PTY 尺寸调整失败：{e}"))
+    }
+
     fn new(mut child: Child, master: Option<Pty>) -> Result<Self, String> {
         let pid = i32::try_from(child.id()).ok().filter(|id| *id > 0);
         match pid {
@@ -146,7 +200,10 @@ impl OwnedChild {
         if self.reaped {
             return Ok(());
         }
-        let foreground = self.foreground_group().and_then(|foreground| {
+        let foreground = self.foreground_group();
+        // 先向组长组发信号；强制回收不能先杀前台任务，给交互 shell 留下继续执行的窗口。
+        let group = send_signal(self.pid, signal);
+        let foreground = foreground.and_then(|foreground| {
             if let Some(group) = foreground.filter(|group| *group != self.pid) {
                 send_signal(group, signal)
             } else {
@@ -154,7 +211,6 @@ impl OwnedChild {
             }
         });
         // 任一路径失败都必须继续清理其他目标；前台查询失败不能阻断组长回收。
-        let group = send_signal(self.pid, signal);
         let child = self.signal_child(signal, group.is_ok());
         let errors: Vec<_> = [foreground, group, child]
             .into_iter()

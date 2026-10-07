@@ -535,7 +535,10 @@
         ondrop={(event) => void drop(event, "")}>全部文件</button
       >
       <div class="breadcrumbs" aria-label="当前文件夹">
-        {#each currentDirectory.split("/").filter(Boolean) as name, index (currentDirectory.split("/").slice(0, index + 1).join("/"))}
+        {#each currentDirectory.split("/").filter(Boolean) as name, index (currentDirectory
+          .split("/")
+          .slice(0, index + 1)
+          .join("/"))}
           <span aria-hidden="true">/</span>
           <button
             type="button"

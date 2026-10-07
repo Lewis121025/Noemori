@@ -1,8 +1,7 @@
-use super::{Agent, AgentEvent, AgentStream, RunInput, RunStatus, state::RunState};
+use super::{Agent, AgentEvent, AgentStream, RunInput, RunStatus, dispatch, state::RunState};
 use crate::{
-    AgentSession, Error, ExecutionContext, ToolCall,
+    Error, ExecutionContext,
     llm::{FinishReason, Model, ModelEvent, ModelRequest, checked_stream},
-    tool::ToolRegistry,
 };
 use futures::{Stream, StreamExt};
 use std::sync::Arc;
@@ -24,7 +23,7 @@ pub(super) fn drive(
             state.begin_model();
             yield AgentEvent::ModelStarted { call: state.model_calls };
             let request = ModelRequest {
-                messages: state.history.clone(), tools: agent.tools.definitions(), options: input.generation.clone(),
+                messages: super::browser_history::for_model(&state.history), tools: agent.tools.definitions(), options: input.generation.clone(),
             };
             let mut stream = Box::pin(model_turn(&mut state, agent.model.clone(), request, context.clone()));
             let mut failure = None;
@@ -55,7 +54,7 @@ pub(super) fn drive(
             };
             if let Some(status) = termination(&response.finish_reason) { break status; }
             let calls: Vec<_> = response.message.tool_calls().cloned().collect();
-            let mut tools = Box::pin(tool_batch(&mut state, &agent.tools, &calls, context.clone(), &input.session));
+            let mut tools = Box::pin(dispatch::batch(&mut state, &agent.tools, &calls, context.clone(), &input.session, agent.options.max_parallel_tools));
             while let Some(event) = tools.next().await {
                 match event {
                     Ok(event) => yield event,
@@ -86,25 +85,6 @@ fn model_turn(
                 delta => state.delta(delta.clone())?,
             }
             yield event;
-        }
-    }
-}
-
-fn tool_batch<'a>(
-    state: &'a mut RunState,
-    tools: &'a ToolRegistry,
-    calls: &'a [ToolCall],
-    context: ExecutionContext,
-    session: &'a AgentSession,
-) -> impl Stream<Item = Result<AgentEvent, Error>> + Send + 'a {
-    async_stream::try_stream! {
-        for call in calls {
-            context.check()?;
-            state.pending_mut()?.attempted_tool_ids.push(call.id.clone());
-            yield AgentEvent::ToolStarted(call.clone());
-            let result = tools.execute_in_session(call, context.clone(), session).await?;
-            state.pending_mut()?.tool_results.push(result.clone());
-            yield AgentEvent::ToolFinished(result);
         }
     }
 }

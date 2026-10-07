@@ -8,6 +8,40 @@ permissions:
   contents: read
 
 jobs:
+  terminal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: modules/agent -> target
+      - name: Prepare Linux sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap zsh
+          # 仅在一次性的 CI 虚拟机中允许创建沙箱；沙箱内部继续禁止嵌套用户命名空间。
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --version
+      - run: node --use-env-proxy modules/agent/scripts/prepare-ripgrep.mjs
+      - run: cargo fmt --manifest-path modules/agent/Cargo.toml --check
+      - run: cargo clippy --manifest-path modules/agent/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo build --manifest-path modules/agent/Cargo.toml --locked --bin noemori-terminal-sandbox --example terminal
+      - run: node --test test/agent/terminal/integration/bundle.test.mjs
+      - run: cargo test --manifest-path modules/agent/Cargo.toml --locked --test contracts --test runtime --test terminal --test terminal_agent --test terminal_contracts --test terminal_sandbox
+      - run: cargo test --manifest-path modules/agent/Cargo.toml --locked --lib tool::terminal
+      - run: cargo test --manifest-path modules/agent/Cargo.toml --locked --test terminal_stress -- --ignored --test-threads=1 --nocapture
+
   verify:
     strategy:
       fail-fast: false
@@ -33,12 +67,19 @@ jobs:
             modules/notes -> target
             modules/agent -> target
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @noemori/agent-web-runtime exec playwright-core install --with-deps chromium
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm test:rust
       - run: pnpm lint:rust
       - run: pnpm build
+      - name: Browser use desktop journey (macOS)
+        if: runner.os == 'macOS'
+        run: pnpm test:browser:desktop
+      - name: Browser use desktop journey (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm test:browser:desktop
       - run: pnpm --filter @noemori/desktop test:core
       - if: runner.os == 'macOS'
         run: pnpm --filter @noemori/desktop test:preview

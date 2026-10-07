@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
 import { createAppApiMock } from "../../fixtures/app-api-mock";
+import { createAgentApiMock } from "../../fixtures/agent-api-mock";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 import { emptyReaderSession } from "@reader/shared/session";
 import type {
@@ -128,7 +129,7 @@ beforeEach(() => {
       return () => {};
     },
   });
-  window.noemori = { app: appApi, reader: api };
+  window.noemori = { app: appApi, reader: api, agent: createAgentApiMock() };
 });
 
 afterEach(async () => {

@@ -6,6 +6,8 @@
 
 mod context;
 mod error;
+#[cfg(unix)]
+pub mod host;
 mod image;
 pub mod llm;
 mod media;

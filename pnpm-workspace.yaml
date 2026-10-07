@@ -1,5 +1,6 @@
 packages:
   - modules/agent/web-runtime
+  - modules/agent/node
   - modules/notes/packages/desktop
   - modules/notes/packages/vault-node
 

@@ -19,7 +19,7 @@ pub enum AgentEvent {
     },
     /// 即将执行完整工具调用。
     ToolStarted(ToolCall),
-    /// 已获得工具执行结果，包括可恢复的错误观察。
+    /// 按实际完成顺序发出工具结果；并发时顺序可与调用不同，历史仍按模型调用顺序保存。
     ToolFinished(ToolResult),
     /// 唯一运行终态；之后不会再有事件。
     Finished(Box<RunReport>),

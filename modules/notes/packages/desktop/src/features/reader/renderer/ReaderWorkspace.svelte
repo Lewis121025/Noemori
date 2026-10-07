@@ -71,9 +71,7 @@
   const selectedEntry = $derived(
     SIDEBAR_COMPONENTS.find((entry) => entry.id === selectedComponent),
   );
-  const sidebarPanel = $derived(
-    selectedEntry?.kind === "panel" ? selectedEntry.id : "outline",
-  );
+  const sidebarPanel = $derived(selectedEntry?.kind === "panel" ? selectedEntry.id : "outline");
   const space = $derived(spaces.space);
   let readingSpace: HTMLDivElement | undefined = $state();
   const changingSpace = $derived(spaces.changing);
@@ -216,11 +214,7 @@
         workspace.navigation.insertWebPage();
         break;
       case "new-folder":
-        void entryDialog?.open(
-          "directory",
-          null,
-          creationDirectory(),
-        );
+        void entryDialog?.open("directory", null, creationDirectory());
         break;
       case "save":
         workspace.requestSave();

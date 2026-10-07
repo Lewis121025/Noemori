@@ -11,7 +11,7 @@ use std::net::IpAddr;
 
 /// 系统代理的最小运行配置，认证只传给网络出口，不进入模型观察。
 #[derive(Serialize)]
-pub(super) struct BrowserProxy {
+pub(crate) struct BrowserProxy {
     server: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     username: Option<String>,
@@ -21,7 +21,7 @@ pub(super) struct BrowserProxy {
 
 /// 按目标 `url` 匹配系统代理和绕过规则，返回可供下载及浏览器共用的配置。
 /// 无匹配代理时返回 `None`；地址或认证编码无效时返回不含凭据的错误。
-pub(super) fn proxy_for(url: &str) -> Result<Option<BrowserProxy>, String> {
+pub(crate) fn proxy_for(url: &str) -> Result<Option<BrowserProxy>, String> {
     let uri = url
         .parse::<http::Uri>()
         .map_err(|_| "URL 不能转换为 HTTP 地址")?;

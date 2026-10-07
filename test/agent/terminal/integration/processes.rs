@@ -10,6 +10,15 @@ use noemori_agent::{
 use serde_json::{Value, json};
 use std::time::Duration;
 
+#[path = "interaction.rs"]
+mod interaction_tests;
+#[path = "output.rs"]
+mod output_tests;
+#[path = "shell.rs"]
+mod shell_tests;
+#[path = "streaming.rs"]
+mod streaming_tests;
+
 fn tools() -> ToolRegistry {
     let mut tools = ToolRegistry::new();
     tools

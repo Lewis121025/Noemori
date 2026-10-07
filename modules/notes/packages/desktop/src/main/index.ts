@@ -6,6 +6,8 @@ import { registerIpc } from "./ipc";
 import type { WindowSession } from "./session";
 import { installApplicationMenu, updateHistoryMenu } from "./menu";
 import { VAULT_MEDIA_SCHEME, createVaultMediaHandler } from "./vault-media";
+import { AgentService } from "../features/agent/main/service";
+import { registerAgentIpc } from "../features/agent/main/ipc";
 
 // 特权协议必须在 ready 之前注册；stream 让 <audio>/<video> 可以按区间拖动进度。
 protocol.registerSchemesAsPrivileged([
@@ -20,6 +22,8 @@ const closeGate: CloseGate = createCloseGate();
 let core: CoreClient | null = null;
 let storedWindow: WindowSession | null = null;
 let quitState: "running" | "stopping" | "stopped" = "running";
+let agent: AgentService | null = null;
+const closingAgents = new Set<Promise<void>>();
 
 // 桌面测试显式启用后台窗口；创建前决定可见性，避免先弹出再隐藏而抢走用户焦点。
 const hiddenTestWindow = process.env["NOEMORI_TEST_WINDOW"] === "hidden";
@@ -99,9 +103,29 @@ function createWindow(client: CoreClient): void {
   }
 
   mainWindow.webContents.on("did-start-navigation", (_event, _url, inPlace, isMainFrame) => {
-    if (isMainFrame && !inPlace) updateHistoryMenu();
+    if (isMainFrame && !inPlace) {
+      updateHistoryMenu();
+      agent?.detach();
+    }
   });
-  mainWindow.webContents.on("render-process-gone", () => updateHistoryMenu());
+  mainWindow.webContents.on("render-process-gone", () => {
+    updateHistoryMenu();
+    agent?.detach();
+  });
+  const owner = mainWindow;
+  const service = new AgentService(
+    join(app.getPath("userData"), "agent"),
+    join(
+      __dirname,
+      "agent",
+      process.platform === "win32" ? "noemori-terminal-sandbox.exe" : "noemori-terminal-sandbox",
+    ),
+    (id) => {
+      if (mainWindow === owner && !owner.webContents.isDestroyed())
+        owner.webContents.send("agent.changed", id);
+    },
+  );
+  agent = service;
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
     void mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
@@ -127,6 +151,16 @@ function createWindow(client: CoreClient): void {
     }
   });
   mainWindow.on("closed", () => {
+    if (agent === service) agent = null;
+    const closing = service.shutdown();
+    closingAgents.add(closing);
+    void closing.then(
+      () => closingAgents.delete(closing),
+      (error: unknown) => {
+        closingAgents.delete(closing);
+        console.error("Agent 会话关闭失败", error);
+      },
+    );
     mainWindow = null;
     updateHistoryMenu();
   });
@@ -140,6 +174,10 @@ app.whenReady().then(async () => {
   });
   core = client;
   registerIpc(() => mainWindow, closeGate, client);
+  registerAgentIpc(
+    () => mainWindow,
+    () => agent,
+  );
   // 库根边界由内核 entryPath 校验；协议层只额外限制为音视频类型。
   protocol.handle(
     VAULT_MEDIA_SCHEME,
@@ -189,8 +227,7 @@ app.on("will-quit", (event) => {
   event.preventDefault();
   if (quitState === "stopping") return;
   quitState = "stopping";
-  void core
-    .shutdown()
+  void Promise.all([core.shutdown(), agent?.shutdown(), ...closingAgents])
     .catch((error: unknown) => {
       dialog.showErrorBox("内核未正常关闭", error instanceof Error ? error.message : String(error));
     })

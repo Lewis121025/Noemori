@@ -5,6 +5,7 @@
   import AppearanceOptions from "./AppearanceOptions.svelte";
   import ReadingFontOptions from "./ReadingFontOptions.svelte";
   import ReadingPaletteOptions from "./ReadingPaletteOptions.svelte";
+  import AgentPanel from "../features/agent/renderer/AgentPanel.svelte";
   import {
     DEFAULT_READING_PALETTE,
     type ReadingPalette,
@@ -14,6 +15,11 @@
 
   const { app, reader: readerApi } = window.noemori;
   let reader: ReaderWorkspace | undefined = $state();
+  let showAgent = $state(false);
+  function openAgent(event: MouseEvent): void {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.closest("dialog")?.close();
+    showAgent = true;
+  }
   let readingPalette = $state<ReadingPalette>(DEFAULT_READING_PALETTE);
   let historyContext = $state(0);
   let publishedHistory: HistoryAvailability | null = null;
@@ -72,6 +78,7 @@
 
 <ReaderWorkspace api={readerApi} palette={readingPalette} bind:this={reader}>
   {#snippet applicationMenu()}
+    <button onclick={openAgent}>工作区助手</button>
     <AppearanceOptions api={app} />
     <ReadingPaletteOptions api={app} onApply={(palette) => (readingPalette = palette)} />
     <ReadingFontOptions
@@ -82,3 +89,4 @@
     />
   {/snippet}
 </ReaderWorkspace>
+{#if showAgent}<AgentPanel api={window.noemori.agent} close={() => (showAgent = false)} />{/if}

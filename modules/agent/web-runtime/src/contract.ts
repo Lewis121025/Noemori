@@ -7,7 +7,13 @@ export type Limits = {
 };
 
 /** 已由宿主解析的代理；认证仅走进程输入，不写入日志或模型结果。 */
-export type Proxy = { server: string; username?: string; password?: string };
+export type Proxy = {
+  server: string;
+  username?: string;
+  password?: string;
+  /** 系统代理可能按域名路由；仅宿主解析器设置，匿名读取的固定代理继续使用已校验 IP。 */
+  resolve_hostname?: boolean;
+};
 
 /** Rust 和辅助进程之间的完整输入，图像或 PDF 字节不使用公共临时文件传递。 */
 export type WorkerInput = {

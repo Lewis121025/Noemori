@@ -13,6 +13,8 @@ pub type AgentStream = Pin<Box<dyn Stream<Item = AgentEvent> + Send>>;
 /// 运行策略；每次模型请求都计入预算，包括重试。
 #[derive(Clone, Debug)]
 pub struct RunOptions {
+    /// 相邻且被宿主工具声明可并行的调用上限，范围为 1..=64；顺序工具始终形成屏障。
+    pub max_parallel_tools: usize,
     /// 整个运行允许调度的请求数，包含初次请求和重试；零表示不调度。
     pub max_model_calls: usize,
     /// 同一轮尚未产生事件时允许的重试次数，成功响应后重新计算。
@@ -26,6 +28,7 @@ pub struct RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
+            max_parallel_tools: 4,
             max_model_calls: 8,
             max_retries: 2,
             timeout: Duration::from_secs(300),
@@ -76,13 +79,16 @@ impl Agent {
     /// 返回不持有对话历史的 Agent，具体输入由后续的 run 或 stream 提供。
     ///
     /// # 错误
-    /// 非法超时或模型不支持已注册工具时返回错误。
+    /// 超时、并发上限非法或模型不支持已注册工具时返回错误。
     pub fn new(
         model: Arc<dyn Model>,
         tools: ToolRegistry,
         options: RunOptions,
     ) -> Result<Self, Error> {
         ExecutionContext::new(CancellationToken::new(), options.timeout)?;
+        if !(1..=64).contains(&options.max_parallel_tools) {
+            return Err(Error::Config("工具并发上限必须为 1..=64".into()));
+        }
         if !tools.definitions().is_empty() && !model.capabilities().tools {
             return Err(Error::Unsupported(
                 "Agent 注册了工具，但模型未声明工具能力".into(),

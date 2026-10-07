@@ -19,6 +19,10 @@ vi.mock("../../../../../modules/notes/packages/desktop/src/main/core-client", ()
   },
 }));
 vi.mock("../../../../../modules/notes/packages/desktop/src/main/ipc", () => ({ registerIpc: register }));
+vi.mock("../../../../../modules/notes/packages/desktop/src/features/agent/main/ipc", () => ({ registerAgentIpc: vi.fn() }));
+vi.mock("../../../../../modules/notes/packages/desktop/src/features/agent/main/service", () => ({
+  AgentService: class { detach = vi.fn(); shutdown = vi.fn(async () => {}); },
+}));
 vi.mock("electron", async () => {
   const { EventEmitter } = await import("node:events");
   class Window extends EventEmitter {

@@ -11,8 +11,9 @@ fn schema() -> jsonschema::Validator {
 fn arguments(action: &str) -> Value {
     match action {
         "exec" => json!({"action":"exec","cmd":"true"}),
-        "interact" => json!({"action":"interact","session_id":"owned-process"}),
+        "interact" | "write" => json!({"action":action,"session_id":"owned-process"}),
         "stop" => json!({"action":"stop","session_id":"owned-process"}),
+        "read" | "read_bytes" | "release" => json!({"action":action,"session_id":"owned-process"}),
         _ => panic!("未知测试操作"),
     }
 }
@@ -25,6 +26,10 @@ fn declared_numeric_boundaries_match_execution_validation() {
         ("interact", "yield_time_ms", 0, 300_000),
         ("exec", "max_output_chars", 256, 120_000),
         ("interact", "max_output_chars", 256, 120_000),
+        ("read", "max_output_chars", 256, 120_000),
+        ("read_bytes", "max_output_bytes", 1, 120_000),
+        ("write", "yield_time_ms", 0, 300_000),
+        ("write", "max_output_chars", 256, 120_000),
         ("exec", "timeout_ms", 1, 86_400_000),
     ] {
         let cases = [(min, true), (max, true), (max + 1, false)]
@@ -49,6 +54,10 @@ fn text_budgets_count_unicode_characters_and_reject_invalid_commands() {
         ("interact", "input", 0, 16_384),
         ("interact", "session_id", 1, 64),
         ("stop", "session_id", 1, 64),
+        ("read", "session_id", 1, 64),
+        ("read_bytes", "session_id", 1, 64),
+        ("write", "session_id", 1, 64),
+        ("release", "session_id", 1, 64),
     ] {
         for (length, accepted) in [(0, min == 0), (max, true), (max + 1, false)] {
             let mut input = arguments(action);

@@ -25,6 +25,16 @@ pub enum ToolError {
     Infrastructure(String),
 }
 
+/// 宿主工具对同一模型响应内调用的调度约束；默认顺序执行，模型不能自行声明安全性。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolConcurrency {
+    /// 等待此前调用结束，并阻止后续调用越过此屏障。
+    #[default]
+    Sequential,
+    /// 允许与相邻的同类调用重叠；实现必须保证不存在顺序依赖或冲突的外部副作用。
+    Concurrent,
+}
+
 /// 调用方注入的异步工具；注册表负责 Schema 校验及参数反序列化。
 #[async_trait]
 pub trait Tool: Send + Sync + 'static {
@@ -37,6 +47,13 @@ pub trait Tool: Send + Sync + 'static {
     fn name(&self) -> &str;
     /// 描述工具的用途和调用前置条件。
     fn description(&self) -> &str;
+    /// 返回此组参数的调度约束；默认保留调用顺序，声明并发是宿主实现的行为保证。
+    ///
+    /// `args` 来自模型参数，不能仅凭模型的“安全”声明就放开有副作用的操作。
+    /// 此方法只能检查参数及已知配置，不能执行外部操作或改变工具状态。
+    fn concurrency(&self, _args: &Self::Args) -> ToolConcurrency {
+        ToolConcurrency::Sequential
+    }
     /// 从完整结果中取得有序媒体观察；默认无附件，媒体与对应结果共同提交。
     ///
     /// `output` 是已成功执行的结果；返回图片、音频或视频，不改变其 JSON 表达。

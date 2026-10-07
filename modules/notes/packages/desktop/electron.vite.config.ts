@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import type { Plugin } from "vite";
@@ -7,6 +8,7 @@ import { viteStaticCopy } from "vite-plugin-static-copy";
 
 const mathjaxWoffDir = resolve("node_modules/@mathjax/mathjax-newcm-font/chtml/woff2");
 const mathjaxWoffPublic = "mathjax-fonts/woff2";
+const require = createRequire(import.meta.url);
 
 /**
  * 把 NewCM woff2 以原始文件名挂到固定 URL。
@@ -60,6 +62,16 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin(),
       {
+        name: "bundled-agent",
+        writeBundle() {
+          cpSync(
+            join(require.resolve("@noemori/agent-node/package.json"), "../runtime"),
+            resolve("out/main/agent"),
+            { recursive: true },
+          );
+        },
+      },
+      {
         name: "bundled-pandoc",
         writeBundle() {
           cpSync(resolve(".cache/pandoc-3.12/bundle"), resolve("out/main/pandoc"), {
@@ -77,7 +89,7 @@ export default defineConfig({
       },
     },
     resolve: {
-      external: ["@noemori/vault-node"],
+      external: ["@noemori/vault-node", "@noemori/agent-node"],
     },
   },
   preload: {

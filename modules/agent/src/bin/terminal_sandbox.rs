@@ -1,5 +1,9 @@
 //! 独立、单线程的启动前导；关闭继承句柄后才执行系统沙箱，不能在宿主内修改描述符。
 
+#[cfg(target_os = "linux")]
+#[path = "../tool/terminal/network/linux.rs"]
+mod network;
+
 #[cfg(unix)]
 fn main() {
     if let Err(error) = execute() {
@@ -13,6 +17,14 @@ fn execute() -> Result<(), String> {
     use std::os::unix::process::CommandExt;
     let mut args = std::env::args_os().skip(1);
     let first = args.next().ok_or("沙箱启动器缺少系统隔离程序")?;
+    #[cfg(target_os = "linux")]
+    if first == "--network-init" {
+        return network::initialize(args);
+    }
+    #[cfg(target_os = "linux")]
+    if first == "--network-relay" {
+        return network::relay(args);
+    }
     let deny_network = first == "--deny-network";
     let program = if deny_network {
         args.next().ok_or("沙箱启动器缺少系统隔离程序")?

@@ -19,6 +19,11 @@ struct Runs {
 struct Inner {
     runs: Mutex<Runs>,
     terminals: Manager,
+    browser: crate::tool::browser::Manager,
+    #[cfg(unix)]
+    approvals: crate::tool::terminal::SessionApprovals,
+    #[cfg(unix)]
+    networks: Arc<crate::tool::terminal::NetworkSession>,
 }
 
 /// 显式的对话资源所有者；克隆共享资源，不保存消息历史，也不向模型暴露身份。
@@ -42,6 +47,27 @@ impl AgentSession {
         Self::default()
     }
 
+    /// 使用宿主指定的终端磁盘预算创建会话，None 可用于持续流式消费的大输出任务。
+    ///
+    /// 预算适用于此会话全部终端，模型不能通过命令参数扩大它。
+    /// # 错误
+    /// 任一预算为零时返回配置错误；不启动进程或创建日志。
+    #[cfg(unix)]
+    pub fn with_terminal_log_limits(
+        limits: crate::tool::terminal::TerminalLogLimits,
+    ) -> Result<Self, Error> {
+        if limits.process_bytes == Some(0) || limits.session_bytes == Some(0) {
+            return Err(Error::Config("终端日志预算必须大于零或不设上限".into()));
+        }
+        Ok(Self(Arc::new(Inner {
+            runs: Mutex::new(Runs::default()),
+            terminals: Manager::new(limits),
+            browser: Default::default(),
+            approvals: Default::default(),
+            networks: Default::default(),
+        })))
+    }
+
     /// 返回会话是否已经关闭；关闭后不可重新启动运行。
     pub fn is_closed(&self) -> bool {
         self.0.runs.lock().expect("会话锁被污染").closed
@@ -60,15 +86,49 @@ impl AgentSession {
                 token.cancel();
             }
         }
-        self.0
-            .terminals
-            .close()
-            .await
-            .map_err(Error::ToolInfrastructure)
+        #[cfg(unix)]
+        self.0.approvals.close();
+        #[cfg(unix)]
+        self.0.networks.close();
+        let (terminal, browser) = tokio::join!(self.0.terminals.close(), self.0.browser.close());
+        let errors: Vec<_> = [terminal, browser]
+            .into_iter()
+            .filter_map(Result::err)
+            .collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::ToolInfrastructure(errors.join("；")))
+        }
     }
 
     pub(crate) fn terminals(&self) -> &Manager {
         &self.0.terminals
+    }
+
+    pub(crate) fn browser(&self) -> &crate::tool::browser::Manager {
+        &self.0.browser
+    }
+
+    /// 读取会话浏览器状态与迟到回执；不会启动浏览器或消费任何观察。
+    pub fn browser_snapshot(&self) -> crate::tool::browser::BrowserSnapshot {
+        self.0.browser.snapshot()
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn approvals(&self) -> &crate::tool::terminal::SessionApprovals {
+        &self.0.approvals
+    }
+
+    /// 返回宿主会话的稳定身份，供终端目标审批与桌面会话关联；克隆保持相同身份。
+    #[cfg(unix)]
+    pub fn id(&self) -> &str {
+        self.0.networks.id()
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn networks(&self) -> &Arc<crate::tool::terminal::NetworkSession> {
+        &self.0.networks
     }
 
     pub(crate) fn register(&self, token: CancellationToken) -> Result<RunLease, Error> {

@@ -6,6 +6,7 @@ import type { AppApi } from "../../../../../modules/notes/packages/desktop/src/s
 import type { ReaderApi } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 import { createAppApiMock } from "../../fixtures/app-api-mock";
+import { createAgentApiMock } from "../../fixtures/agent-api-mock";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -66,7 +67,7 @@ beforeEach(() => {
     }),
   });
   const appApi: AppApi = createAppApiMock();
-  window.noemori = { app: appApi, reader: api };
+  window.noemori = { app: appApi, reader: api, agent: createAgentApiMock() };
 });
 
 afterEach(async () => {

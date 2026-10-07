@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { createReaderApi } from "../features/reader/preload/api";
+import { createAgentApi } from "../features/agent/preload/api";
 import type { Appearance, AppApi, NoemoriApi } from "../shared/api";
 import { parseAppCommand } from "../shared/api";
 import type { ReadingFont } from "../features/reader/shared/reading-font";
@@ -40,5 +41,5 @@ const app: AppApi = {
   closeAfterFlush: () => ipcRenderer.invoke("app.closeAfterFlush") as Promise<void>,
   closeBlocked: () => ipcRenderer.invoke("app.closeBlocked") as Promise<void>,
 };
-const api: NoemoriApi = { app, reader: createReaderApi() };
+const api: NoemoriApi = { app, reader: createReaderApi(), agent: createAgentApi() };
 contextBridge.exposeInMainWorld("noemori", api);

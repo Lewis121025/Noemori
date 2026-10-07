@@ -1,3 +1,5 @@
+mod browser_history;
+mod concurrency;
 mod media;
 #[path = "../../support/model.rs"]
 mod support;

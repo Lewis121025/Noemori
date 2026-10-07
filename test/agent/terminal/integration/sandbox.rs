@@ -4,11 +4,27 @@ use noemori_agent::{
     AgentSession, CancellationToken, ExecutionContext, ToolCall, ToolResult,
     tool::{
         ToolRegistry,
-        terminal::{NetworkAccess, SandboxConfig, SandboxMode, TerminalTool},
+        terminal::{NetworkAccess, SandboxConfig, SandboxMode, TerminalTool, WorkspaceAccess},
     },
 };
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
+
+#[path = "environment.rs"]
+mod environment_tests;
+
+#[path = "approval.rs"]
+mod approval_tests;
+
+#[path = "network.rs"]
+mod network_tests;
+
+#[path = "listeners.rs"]
+mod listener_tests;
+
+#[cfg(target_os = "macos")]
+#[path = "unix_sockets.rs"]
+mod unix_socket_tests;
 
 fn tools(workspace: &Path, config: SandboxConfig) -> ToolRegistry {
     let mut tools = ToolRegistry::new();
@@ -19,6 +35,17 @@ fn tools(workspace: &Path, config: SandboxConfig) -> ToolRegistry {
         )
         .unwrap();
     tools
+}
+
+fn sandbox_temporary_parent() -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        "/private/tmp".into()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::temp_dir()
+    }
 }
 
 async fn call(tools: &ToolRegistry, session: &AgentSession, arguments: Value) -> ToolResult {
@@ -72,6 +99,152 @@ async fn ready(
     })
     .await
     .expect("沙箱命令未在期限内就绪")
+}
+
+#[tokio::test]
+async fn bundled_rg_searches_without_host_tools_and_preserves_search_exit_codes() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace with spaces");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(workspace.join(".git")).unwrap();
+    std::fs::write(workspace.join(".gitignore"), "ignored.txt\n").unwrap();
+    std::fs::write(workspace.join("note.txt"), "first\nneedle 中文\n").unwrap();
+    std::fs::write(workspace.join("ignored.txt"), "needle ignored\n").unwrap();
+    std::fs::write(workspace.join(".hidden"), "needle hidden\n").unwrap();
+    std::fs::write(root.path().join("secret"), "outside-secret\n").unwrap();
+    std::os::unix::fs::symlink(root.path().join("secret"), workspace.join("escape")).unwrap();
+    let tools = tools(&workspace, SandboxConfig::default());
+    let session = AgentSession::new();
+    for tty in [false, true] {
+        let version = exec(&tools, &session, "rg --version", tty).await;
+        assert_eq!(version["exit_code"], 0, "{version:?}");
+        assert!(
+            version["output"]
+                .as_str()
+                .unwrap()
+                .starts_with("ripgrep 15.2.0")
+        );
+        let found = exec(
+            &tools,
+            &session,
+            "rg --color never --no-heading -n needle",
+            tty,
+        )
+        .await;
+        assert_eq!(found["exit_code"], 0, "{found:?}");
+        assert_eq!(
+            found["output"].as_str().unwrap().replace('\r', ""),
+            "note.txt:2:needle 中文\n"
+        );
+        let absent = exec(&tools, &session, "rg missing note.txt", tty).await;
+        assert_eq!(absent["exit_code"], 1, "{absent:?}");
+        for command in [
+            "rg '[' note.txt",
+            "rg outside-secret ../secret",
+            "rg outside-secret escape",
+        ] {
+            let failed = exec(&tools, &session, command, tty).await;
+            assert_eq!(failed["exit_code"], 2, "{failed:?}");
+            assert!(
+                !failed["output"]
+                    .as_str()
+                    .unwrap()
+                    .contains("outside-secret")
+            );
+        }
+    }
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn bundled_rg_cannot_be_replaced_even_when_workspace_contains_runtime_directory() {
+    let workspace = sandbox_temporary_parent();
+    let tools = tools(&workspace, SandboxConfig::default());
+    let session = AgentSession::new();
+    let located = exec(&tools, &session, "command -v rg", false).await;
+    assert_eq!(located["exit_code"], 0, "{located:?}");
+    let path = located["output"].as_str().unwrap().trim();
+    assert!(
+        path.starts_with(workspace.canonicalize().unwrap().to_str().unwrap()),
+        "{path}"
+    );
+    for command in [
+        "printf replaced > \"$(command -v rg)\"",
+        "rm \"$(command -v rg)\"",
+        "mv \"${PATH%%:*}\" \"$HOME/stolen\"",
+    ] {
+        let denied = exec(&tools, &session, command, false).await;
+        assert_ne!(denied["exit_code"], 0, "{denied:?}");
+    }
+    let version = exec(&tools, &session, "rg --version", false).await;
+    assert_eq!(version["exit_code"], 0, "{version:?}");
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn unrestricted_terminal_also_prefers_bundled_rg() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(
+            TerminalTool::configured(workspace.path(), "/bin/sh", SandboxMode::Disabled).unwrap(),
+        )
+        .unwrap();
+    let session = AgentSession::new();
+    let located = exec(&tools, &session, "command -v rg", false).await;
+    assert_eq!(located["exit_code"], 0, "{located:?}");
+    assert!(
+        located["output"]
+            .as_str()
+            .unwrap()
+            .contains("noemori-sandbox-"),
+        "{located:?}"
+    );
+    let version = exec(&tools, &session, "rg --version", false).await;
+    assert_eq!(version["exit_code"], 0, "{version:?}");
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn read_only_workspace_allows_search_and_private_scratch_but_rejects_project_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("note.txt"), "original\n").unwrap();
+    std::os::unix::fs::symlink(root.path().join("note.txt"), root.path().join("alias")).unwrap();
+    let tools = tools(
+        root.path(),
+        SandboxConfig {
+            workspace_access: WorkspaceAccess::ReadOnly,
+            ..Default::default()
+        },
+    );
+    let session = AgentSession::new();
+    for tty in [false, true] {
+        let found = exec(&tools, &session, "rg original note.txt", tty).await;
+        assert_eq!(found["exit_code"], 0, "{found:?}");
+        for command in [
+            "printf changed > note.txt",
+            "printf changed > alias",
+            "touch created",
+            "rm -f note.txt",
+            "mv -f note.txt renamed",
+        ] {
+            let denied = exec(&tools, &session, command, tty).await;
+            assert_ne!(denied["exit_code"], 0, "{denied:?}");
+        }
+        let scratch = exec(
+            &tools,
+            &session,
+            "printf scratch > \"$HOME/test\"; cat \"$HOME/test\"",
+            tty,
+        )
+        .await;
+        assert_eq!(scratch["output"], "scratch");
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("note.txt")).unwrap(),
+        "original\n"
+    );
+    session.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -166,7 +339,7 @@ async fn model_cannot_change_policy_or_reuse_a_process_with_different_permission
         json!({"action":"exec","cmd":"sleep 30","yield_time_ms":0}),
     )
     .await;
-    for action in ["interact", "stop"] {
+    for action in ["interact", "stop", "read", "release"] {
         let result = call(
             &restricted,
             &session,
@@ -270,12 +443,14 @@ async fn inherited_host_file_descriptors_cannot_bypass_the_sandbox() {
 
 #[tokio::test]
 async fn private_home_is_isolated_even_when_workspace_contains_the_host_temp_directory() {
-    let tools = tools(&std::env::temp_dir(), SandboxConfig::default());
+    let workspace = sandbox_temporary_parent();
+    let tools = tools(&workspace, SandboxConfig::default());
     let session = AgentSession::new();
     let first=call(&tools,&session,json!({"action":"exec","cmd":"printf command-private > \"$HOME/secret\"; printf '%s\\n' \"$HOME\"; sleep 30","yield_time_ms":100})).await;
     let first = ready(&tools, &session, first.output, |text| text.ends_with('\n')).await;
     let home = first["output"].as_str().unwrap().trim();
     assert!(Path::new(home).is_dir());
+    assert!(Path::new(home).starts_with(workspace.canonicalize().unwrap()));
     assert_ne!(Some(home), std::env::var("HOME").ok().as_deref());
     let command = format!("cat '{home}/secret'");
     let denied = exec(&tools, &session, &command, false).await;

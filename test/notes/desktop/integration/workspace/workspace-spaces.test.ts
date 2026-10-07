@@ -9,6 +9,7 @@ import type {
 import type { ReaderApi, VaultEntry } from "@reader/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 import { createAppApiMock } from "../../fixtures/app-api-mock";
+import { createAgentApiMock } from "../../fixtures/agent-api-mock";
 
 const encode = (value: string) => new TextEncoder().encode(value);
 let component: ReturnType<typeof mount> | undefined;
@@ -77,7 +78,7 @@ beforeEach(() => {
       return () => {};
     },
   });
-  window.noemori = { app, reader: api };
+  window.noemori = { app, reader: api, agent: createAgentApiMock() };
 });
 afterEach(async () => {
   if (component !== undefined) await unmount(component);

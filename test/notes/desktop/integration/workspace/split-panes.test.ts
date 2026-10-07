@@ -10,6 +10,7 @@ import type { FileSnapshot, ReaderApi, WriteResult } from "@reader/shared/api";
 import type { SessionDocuments } from "@reader/shared/session";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 import { createAppApiMock } from "../../fixtures/app-api-mock";
+import { createAgentApiMock } from "../../fixtures/agent-api-mock";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -134,7 +135,7 @@ beforeEach(() => {
       return () => {};
     },
   });
-  window.noemori = { app: appApi, reader: api };
+  window.noemori = { app: appApi, reader: api, agent: createAgentApiMock() };
 });
 
 afterEach(async () => {

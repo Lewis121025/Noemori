@@ -7,6 +7,7 @@ publish = false
 description = "Noemori 自定义模型接入、Agent 循环与工具契约"
 
 [workspace]
+members = ["node"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -26,7 +27,12 @@ eventsource-stream = "0.2.3"
 encoding_rs = "0.8"
 futures = "0.3.34"
 http = "1"
-hyper-util = { version = "0.1", features = ["client-proxy-system"] }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", features = ["client-proxy-system", "tokio"] }
+ipnet = "2"
+httparse = "1"
+percent-encoding = "2"
 imagesize = "0.15.0"
 jsonschema = { version = "0.58.2", default-features = false }
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
@@ -35,17 +41,25 @@ schemars = "1.2.2"
 scraper = "0.27.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+sha2 = "0.11"
+shlex = "2.0.1"
+subtle = "2.6"
 thiserror = "2.0.21"
-tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt", "process", "io-util", "net", "signal"] }
-tokio-util = "0.7.19"
+tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt", "process", "io-util", "net", "signal", "fs"] }
+tokio-util = { version = "0.7.19", features = ["rt"] }
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
+tree-sitter = "0.27.0"
+tree-sitter-bash = "0.25.1"
 close_fds = "0.3.2"
-nix = { version = "0.31.3", features = ["signal", "process", "term", "fs"] }
+nix = { version = "0.31.3", features = ["signal", "process", "term", "fs", "poll", "socket"] }
 pty-process = "0.5.3"
 rustix = { version = "1.1.5", features = ["process", "fs", "termios"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+rustls-platform-verifier = "0.7.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libproc = "0.14.11"
@@ -55,6 +69,7 @@ seccompiler = "0.5.0"
 
 [dev-dependencies]
 aws-smithy-types = "1"
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
 tokio = { version = "1.53.1", features = ["full", "test-util"] }
 
 [[test]]
@@ -108,3 +123,19 @@ path = "src/bin/terminal_sandbox.rs"
 [[test]]
 name = "terminal_sandbox"
 path = "../../test/agent/terminal/integration/sandbox.rs"
+
+[[test]]
+name = "terminal_stress"
+path = "../../test/agent/terminal/performance/stress.rs"
+
+[[test]]
+name = "host"
+path = "../../test/agent/host/integration/session.rs"
+
+[[test]]
+name = "browser"
+path = "../../test/agent/browser/integration/session.rs"
+
+[[example]]
+name = "terminal-probe"
+path = "../../test/agent/terminal/support/probe.rs"
