@@ -61,10 +61,10 @@ export function createReaderApi(): ReaderApi {
     }
   }
   return {
-    whiteboardRepair: async (request) =>
-      parseShapeFit(
-        await ipcRenderer.invoke("reader.whiteboard.repair", parseShapeRepairRequest(request)),
-      ),
+    whiteboardRepair: async (request) => {
+      const input = parseShapeRepairRequest(request);
+      return parseShapeFit(await ipcRenderer.invoke("reader.whiteboard.repair", input), input);
+    },
     exportRun: async (request, onProgress, onPlan) => {
       if (exporting !== null) throw new Error("已有导出任务正在执行");
       const input = parseExportRequest(request);

@@ -1,7 +1,9 @@
+import { repairContext } from "../../shared/whiteboard/repair-context";
 import {
   BOARD_COORDINATE_LIMIT,
   WhiteboardHistory,
   type InkPoint,
+  type InkStroke,
   type WhiteboardDocument,
 } from "../../shared/whiteboard/model";
 import {
@@ -23,6 +25,7 @@ import {
   HOLD_RADIUS_CSS_PX,
   parseShapeFit,
   type ShapeRepair,
+  type ShapeRepairRequest,
 } from "../../shared/whiteboard/recognition";
 
 /** 当前指针事务；原始输入与修正预览分离，请求号负责淘汰继续绘制后的结果。 */
@@ -108,12 +111,23 @@ export class WhiteboardInput {
       ? (this.gesture.preview?.points ?? this.gesture.smoother.points)
       : [];
   }
-  /** 已通过分类与拟合门槛的临时预览，抬笔前仍未进入文档。 */
+  /** 邻近修复只覆盖显示，不在抬笔前改变文档、保存内容或历史。 */
+  get displayStrokes(): readonly InkStroke[] {
+    const replacements =
+      this.gesture?.kind === "ink" ? this.gesture.preview?.replacements : undefined;
+    if (!replacements?.length) return this.document.strokes;
+    const map = new Map(replacements.map((item) => [item.id, item.points]));
+    return this.document.strokes.map((stroke) => {
+      const points = map.get(stroke.id);
+      return points ? { ...stroke, points } : stroke;
+    });
+  }
+  /** 已通过完整几何校验的临时预览，抬笔前仍未进入文档。 */
   get corrected(): boolean {
     return this.gesture?.kind === "ink" && this.gesture.preview !== null;
   }
 
-  /** 规范预览的最终几何类型；模型只选择拟合族，未修复时返回 null。 */
+  /** 规范预览的最终几何类型；由几何结构与拟合决定，未修复时返回 null。 */
   get correctedLabel(): ShapeFit["label"] | null {
     return this.gesture?.kind === "ink" ? (this.gesture.preview?.label ?? null) : null;
   }
@@ -245,7 +259,7 @@ export class WhiteboardInput {
   }
 
   /**
-   * 停笔时规范当前这一笔，拟合通过才更新预览；不要求圈住已有内容。
+   * 停笔时规范当前笔迹及有结构证据的邻近笔迹，拟合通过才更新整组预览。
    * @returns 是否展示了修正；抬笔、移动、取消或换文档后的迟到结果返回 false。
    * @throws 当前有效请求的计算或协议错误向上传播，原始采样始终保留。
    */
@@ -278,10 +292,15 @@ export class WhiteboardInput {
     active.pause = prepared.pause;
     active.held = true;
     const request = ++active.request;
+    const context = repairContext(snapshot, observations, this.document.strokes, this.camera.scale);
+    const input: ShapeRepairRequest = {
+      points: snapshot,
+      observations,
+      scale: this.camera.scale,
+      ...(context.length ? { context } : {}),
+    };
     try {
-      const preview = parseShapeFit(
-        await this.repair({ points: snapshot, observations, scale: this.camera.scale }),
-      );
+      const preview = parseShapeFit(await this.repair(input), input);
       if (this.gesture !== active || active.request !== request) return false;
       active.preview = preview;
       if (!active.preview) return false;
@@ -320,12 +339,15 @@ export class WhiteboardInput {
       edited =
         erased.length > 0
           ? this.history.remove(new Set(erased))
-          : this.history.add({
-              id: crypto.randomUUID(),
-              width: 2,
-              points,
-              ...(changedGeometry ? { source: active.points } : {}),
-            });
+          : this.history.addWithReplacements(
+              {
+                id: crypto.randomUUID(),
+                width: 2,
+                points,
+                ...(changedGeometry ? { source: active.points } : {}),
+              },
+              active.preview?.replacements ?? [],
+            );
     } else if (active.kind === "move")
       edited = this.history.move(this.selected, active.dx, active.dy);
     // 只有成功提交后才能清除临时输入；失败后重试仍应检查同一个事务。

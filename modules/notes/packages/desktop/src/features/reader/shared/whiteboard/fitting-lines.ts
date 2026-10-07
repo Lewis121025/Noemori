@@ -94,7 +94,7 @@ export function refineRectangle(
  * @param uncertainty 归一化位置不确定性。
  * @returns 保持边数与顺序的交点轮廓；支撑不足、近平行或数值退化返回null。
  */
-export function refinePolyline(
+function refinePolylineStep(
   points: readonly FitPoint[],
   contour: readonly FitPoint[],
   uncertainty: number,
@@ -137,4 +137,28 @@ export function refinePolyline(
   return result.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
     ? result
     : null;
+}
+
+/**
+ * 对全部边段做有界ICP迭代，每轮重新归属观测并以鲁棒TLS求交点。
+ * @param points 有限归一化采样，顺序与全部观测由调用方验证。
+ * @param contour 真实角点提供的拓扑初值；首尾同点表示闭合。
+ * @param uncertainty 归一化定位预算。
+ * @returns 原边数的联合稳定轮廓；任一步退化返回null，不伪造角点。
+ * @throws 数值错误传播。
+ */
+export function refinePolyline(
+  points: readonly FitPoint[],
+  contour: readonly FitPoint[],
+  uncertainty: number,
+): FitPoint[] | null {
+  let current = [...contour];
+  for (let step = 0; step < 6; step++) {
+    const refined = refinePolylineStep(points, current, uncertainty);
+    if (!refined) return null;
+    const movement = Math.max(...refined.map((point, i) => distance(point, current[i]!)));
+    current = refined;
+    if (movement < 1e-6) break;
+  }
+  return current;
 }

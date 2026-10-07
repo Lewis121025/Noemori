@@ -56,7 +56,7 @@
   });
   const strokes = $derived.by(() => {
     void frame;
-    return input?.document.strokes ?? [];
+    return input?.displayStrokes ?? [];
   });
   const selected = $derived.by(() => {
     void frame;

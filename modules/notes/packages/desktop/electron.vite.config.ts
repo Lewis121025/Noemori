@@ -84,6 +84,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "whiteboard-worker": resolve("src/features/reader/main/whiteboard-worker.ts"),
           "export-worker": resolve("src/features/reader/main/export/worker.ts"),
         },
       },

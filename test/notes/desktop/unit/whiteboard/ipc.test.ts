@@ -1,3 +1,4 @@
+import { repairScene } from "@reader/shared/whiteboard/fitting-scene";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
 import { registerWhiteboardIpc } from "@reader/main/whiteboard-ipc";
@@ -21,7 +22,10 @@ const points = [
 const request = { points, observations: points, scale: 1 };
 beforeEach(() => {
   port.handlers.clear();
-  registerWhiteboardIpc(() => ({ webContents: contents }) as unknown as BrowserWindow);
+  registerWhiteboardIpc(
+    () => ({ webContents: contents }) as unknown as BrowserWindow,
+    async (request) => repairScene(request),
+  );
 });
 const invoke = async (value: unknown, sender = contents, senderFrame: object = frame) =>
   port.handlers.get("reader.whiteboard.repair")!({ sender, senderFrame }, value);

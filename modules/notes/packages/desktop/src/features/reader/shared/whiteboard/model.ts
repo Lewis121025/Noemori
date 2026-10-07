@@ -10,6 +10,9 @@ export type InkStroke = {
   readonly source?: readonly InkPoint[];
 };
 
+/** 联动事务只替换规范几何，身份、笔宽和完整原始观测保持可追溯。 */
+export type InkReplacement = { readonly id: string; readonly points: readonly InkPoint[] };
+
 /** 独立白板文件的唯一内容；视口、选择与临时修正预览不属于文档历史。 */
 export type WhiteboardDocument = { readonly version: 2; readonly strokes: readonly InkStroke[] };
 
@@ -185,6 +188,32 @@ export class WhiteboardHistory {
     if (this.current.strokes.some((item) => item.id === stroke.id))
       throw new Error("白板笔迹身份重复");
     return this.commit([...this.current.strokes, readStroke(stroke)]);
+  }
+
+  /**
+   * 将新落笔与相关旧笔迹的修复原子提交，一次撤销恢复整组。
+   * @param stroke 未占用身份的新落笔。
+   * @param replacements 既有身份的新规范几何，不得重复或引用失效身份。
+   * @returns 成功提交返回true。
+   * @throws 任一身份、点列或容量无效时整组拒绝，保留文档与历史。
+   */
+  addWithReplacements(stroke: InkStroke, replacements: readonly InkReplacement[]): boolean {
+    if (this.current.strokes.some((item) => item.id === stroke.id))
+      throw new Error("白板笔迹身份重复");
+    const replacementMap = new Map<string, readonly InkPoint[]>();
+    for (const replacement of replacements) {
+      if (
+        replacementMap.has(replacement.id) ||
+        !this.current.strokes.some((item) => item.id === replacement.id)
+      )
+        throw new Error("白板联动身份无效");
+      replacementMap.set(replacement.id, replacement.points);
+    }
+    const strokes = this.current.strokes.map((item) => {
+      const points = replacementMap.get(item.id);
+      return points ? readStroke({ ...item, points, source: item.source ?? item.points }) : item;
+    });
+    return this.commit([...strokes, readStroke(stroke)]);
   }
 
   /** 删除 ids 指定的笔迹；实际删除返回 true，空集合或失效身份返回 false 且不产生历史。 */

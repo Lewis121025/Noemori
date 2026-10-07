@@ -1,3 +1,12 @@
+import { straightEvidence } from "./fitting-straight-evidence";
+import { convexLineContour } from "./fitting-convex-lines";
+import { noiseScale, residualNoise } from "./fitting-noise";
+import { fitFilletPolygons } from "./fitting-fillet";
+import { fitBlockArrows } from "./fitting-block-arrow";
+import { fitBranchedArrows } from "./fitting-branched-arrows";
+import { fitRoundedPolygons } from "./fitting-rounded-polygon";
+import { fitSymbols } from "./fitting-symbols";
+import { fitSectors } from "./fitting-sectors";
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 import {
   HOLD_RADIUS_CSS_PX,
@@ -7,6 +16,10 @@ import {
 } from "./recognition";
 import { fitArrow } from "./fitting-arrow";
 import { fitFreeCurve } from "./fitting-curves";
+import { fitPolygonConstraints } from "./fitting-polygon-constraints";
+import { fitRoundedContours } from "./fitting-rounded";
+import { fitEllipseArc } from "./fitting-ellipse-arc";
+import { fitFunctionalCurves } from "./fitting-functional";
 import {
   circleContour,
   ellipseContour,
@@ -14,7 +27,13 @@ import {
   fitEllipseGeometry,
 } from "./fitting-conics";
 import { fitLineGeometry, refinePolyline, refineRectangle } from "./fitting-lines";
-import { cornerContour, contourCrossings, regularStar } from "./fitting-corners";
+import {
+  cornerContour,
+  contourCrossings,
+  curveCornerIndices,
+  credibleCornerIndices,
+  regularStar,
+} from "./fitting-corners";
 import { stabilizeTrace } from "./stabilization";
 import {
   distance,
@@ -40,6 +59,8 @@ type Candidate = {
   curvedSides?: boolean;
   /** 角点身份来自优化前的完整轮廓，优化位置不能追认原本不成立的结构证据。 */
   sourceCorners?: FitPoint[];
+  /** 圆锥族用自己的精确角参数验证绕行；最近多边形投影在短轴附近可能跳边。 */
+  closedTurns?: number;
 };
 function line(
   points: readonly FitPoint[],
@@ -57,7 +78,14 @@ function line(
   };
   const result = [project(points[0]!), project(points.at(-1)!)];
   // 横向于主轴的手抖不能当成涂划；只有主轴上的往返才消耗净推进比例。
-  const advance = traceAdvance(trace.slice(1).map((p, i) => along(p) - along(trace[i]!)));
+  const noise = residualNoise(
+    points.map((p) => -(p.x - fit.center.x) * dy + (p.y - fit.center.y) * dx),
+  );
+  const order = stabilizeTrace(
+    trace,
+    Math.max(uncertainty, Math.min(MAX_CONTOUR_DEVIATION, noise * 3)),
+  );
+  const advance = traceAdvance(order.slice(1).map((p, i) => along(p) - along(order[i]!)));
   return advance === null ? null : result;
 }
 
@@ -65,6 +93,8 @@ function closed(points: readonly FitPoint[]): boolean {
   return distance(points[0]!, points.at(-1)!) <= 0.12;
 }
 
+/** 参数轮廓的绕行证据与渲染来自同一几何。 */
+type TraversedContour = { points: FitPoint[]; closedTurns?: number };
 function circle(
   points: readonly FitPoint[],
   arc: boolean,
@@ -72,7 +102,7 @@ function circle(
   uncertainty: number,
   observations: readonly FitPoint[],
   contour: readonly FitPoint[],
-): FitPoint[] | null {
+): TraversedContour | null {
   if (!arc && !closed(points)) return null;
   const fitted = fitCircleGeometry(points, uncertainty, observations, contour);
   if (!fitted) return null;
@@ -88,8 +118,9 @@ function circle(
       : Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4
   )
     return null;
+  const closedTurns = sweep / (2 * Math.PI);
   if (!arc) sweep = Math.sign(sweep) * Math.PI * 2;
-  return circleContour(fitted, angles[0]!, sweep);
+  return { points: circleContour(fitted, angles[0]!, sweep), ...(!arc ? { closedTurns } : {}) };
 }
 
 function ellipse(
@@ -98,7 +129,7 @@ function ellipse(
   uncertainty: number,
   observations: readonly FitPoint[],
   contour: readonly FitPoint[],
-): FitPoint[] | null {
+): TraversedContour | null {
   if (!closed(points)) return null;
   const fit = fitEllipseGeometry(points, uncertainty, observations, contour);
   if (!fit) return null;
@@ -115,7 +146,10 @@ function ellipse(
   const start = angleAt(points[0]!);
   const sweep = angleAdvance(trace.map(angleAt));
   if (sweep === null || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
-  return ellipseContour(fit, start, Math.sign(sweep) * 2 * Math.PI);
+  return {
+    points: ellipseContour(fit, start, Math.sign(sweep) * 2 * Math.PI),
+    closedTurns: sweep / (2 * Math.PI),
+  };
 }
 
 function rectangle(points: readonly FitPoint[], uncertainty: number): FitPoint[] | null {
@@ -254,96 +288,204 @@ function prepareFit(
   const sampled = resample(source, 192),
     radius = Math.min(HOLD_RADIUS_CSS_PX / (size * scale), 0.025);
   if (sampled.length === 0) return null;
-  const trace = resample(stabilizeTrace(sampled, radius), 192);
   const isClosed = closed(sampled),
+    noise = noiseScale(sampled, isClosed);
+  // 轨迹顺序去抖使用实测三倍噪声尺度；全部原始观测仍约束实际图形，完整重描不能被折叠。
+  const trace = resample(
+      stabilizeTrace(sampled, Math.max(radius, Math.min(0.045, noise * 3))),
+      192,
+    ),
     corners = cornerContour(sampled, isClosed);
   const pressure = points.reduce((sum, p) => sum + p.pressure, 0) / points.length;
   return { source, observed, sampled, trace, radius, isClosed, corners, cx, cy, size, pressure };
 }
 
+function addPolygonCandidate(
+  frame: FitFrame,
+  candidates: Candidate[],
+  contour: FitPoint[],
+  sourceCorners: boolean,
+): void {
+  const { sampled, trace, isClosed, radius } = frame;
+  const original = polygonCandidate(contour, trace, isClosed);
+  if (!original) return;
+  const refined = refinePolyline(sampled, contour, radius);
+  for (const outline of refined ? [contour, refined] : [contour]) {
+    const candidate = polygonCandidate(outline, trace, isClosed);
+    if (candidate)
+      candidates.push(
+        sourceCorners && original ? { ...candidate, sourceCorners: contour } : candidate,
+      );
+  }
+}
+
+/** 空间简化和切线转向各自形成完整假设，合并角点集合会把噪声峰变成额外边。 */
+function addCornerCandidates(frame: FitFrame, candidates: Candidate[], corners: FitPoint[]): void {
+  const { sampled, trace, observed, radius } = frame;
+  addPolygonCandidate(frame, candidates, corners, true);
+  candidates.push(...fitBlockArrows(sampled, corners, observed, radius));
+  const crossings = contourCrossings(corners);
+  if (crossings === 0) {
+    for (const fitted of fitPolygonConstraints(sampled, corners, radius, observed, trace))
+      candidates.push({ ...fitted, curvedSides: true, sourceCorners: corners });
+    return;
+  }
+  const count = corners.length - 1;
+  for (let step = 2; step < count / 2; step++) {
+    const star = regularStar(corners, step);
+    if (!star) continue;
+    const sweep = angleAdvance(
+      trace.map((p) => Math.atan2(p.y - star.center.y, p.x - star.center.x)),
+    );
+    if (sweep !== null && Math.abs(Math.abs(sweep) - step * 2 * Math.PI) <= 0.4)
+      candidates.push({ label: "star", points: star.points, parameters: 6, curvedSides: true });
+  }
+}
+/** 直边候选不把包络位置当成原角点身份，所有证据仍来自完整静态输入。 */
+function closedPolygons(frame: FitFrame, candidates: Candidate[]): void {
+  const { sampled, isClosed, corners, radius, source } = frame;
+  // 凸边界提供不受局部回描和采样往返影响的整体角点；完整原始轨迹仍验证绕行与覆盖。
+  const credible = credibleCornerIndices(sampled, true).map((i) => sampled[i]!);
+  const hull = contourHull(sampled);
+  if (hull.length >= 3) {
+    const outline = resample([...hull, hull[0]!], 192);
+    const boundary = cornerContour(outline, true);
+    const supportedBoundary = boundary ? refinePolyline(sampled, boundary, radius) : null;
+    const supports =
+      supportedBoundary &&
+      credible.every((point) =>
+        supportedBoundary
+          .slice(1)
+          .some(
+            (end, i) =>
+              segmentDistance(point, supportedBoundary[i]!, end) <=
+              Math.max(0.04, noiseScale(sampled, true) * 3),
+          ),
+      );
+    if (supportedBoundary && supports) {
+      addPolygonCandidate(frame, candidates, supportedBoundary, false);
+    }
+  }
+  const linearHull = convexLineContour(sampled, radius, noiseScale(sampled, true));
+  if (linearHull) addPolygonCandidate(frame, candidates, linearHull, false);
+  if (corners) addCornerCandidates(frame, candidates, corners);
+  // 空间简化可跳过噪声谷中的接缝；原转向峰保留为独立轮廓，仍接受同一全观测校验。
+  const turns = curveCornerIndices(sampled.slice(0, -1), true).map((i) => sampled[i]!);
+  if (turns.length >= 3 && turns.length <= 24)
+    addCornerCandidates(frame, candidates, [...turns, turns[0]!]);
+  const detailCorners = cornerContour(resample(source, 384), isClosed);
+  if (detailCorners && isClosed) addCornerCandidates(frame, candidates, detailCorners);
+}
+/** 只有尖角与每条长直边均有实测支持，才能证明C1族不适用，避免穷举阻碍停笔预览。 */
+function provedLinearBoundary(candidate: Candidate | null, frame: FitFrame): boolean {
+  if (
+    !candidate ||
+    !frame.corners ||
+    frame.corners.length < 4 ||
+    candidate.points.length < 4 ||
+    candidate.points.length > 11
+  )
+    return false;
+  const corners = frame.corners.slice(0, -1),
+    noise = noiseScale(frame.sampled, true),
+    error = contourDeviation(frame.source, candidate.points);
+  if (
+    !error ||
+    error.rms > 0.012 ||
+    corners.some(
+      (p, i) => distance(p, corners[(i + 1) % corners.length]!) < Math.max(0.08, noise * 6),
+    )
+  )
+    return false;
+  const evidence = resample(frame.source, 384);
+  return candidate.points
+    .slice(1)
+    .every((point, i) => straightEvidence(evidence, candidate.points[i]!, point));
+}
 /** 各族独立产生候选，结构推导不提前禁止其它有效拟合。 */
 function fitCandidates(frame: FitFrame): Candidate[] {
   const { sampled, trace, isClosed, corners, radius, observed, source } = frame;
   const candidates: Candidate[] = [];
-  const addPolygon = (contour: FitPoint[], sourceCorners: boolean) => {
-    const original = polygonCandidate(contour, trace, isClosed);
-    if (!original) return;
-    const refined = refinePolyline(sampled, contour, radius);
-    for (const outline of refined ? [contour, refined] : [contour]) {
-      const candidate = polygonCandidate(outline, trace, isClosed);
-      if (candidate)
-        candidates.push(
-          sourceCorners && original ? { ...candidate, sourceCorners: contour } : candidate,
-        );
-    }
-  };
   const add = (
     label: ShapeLabel,
     fitted: FitPoint[] | null,
     parameters: number,
     curvedSides = false,
+    closedTurns?: number,
   ) => {
-    if (fitted) candidates.push({ label, points: fitted, parameters, curvedSides });
+    if (fitted)
+      candidates.push({
+        label,
+        points: fitted,
+        parameters,
+        curvedSides,
+        ...(closedTurns === undefined ? {} : { closedTurns }),
+      });
   };
   add("line", line(sampled, trace, radius), 4);
+  // 已成立的直线拥有既有优先级，提前验收避免无意义地搜索更高自由度的曲线。
+  if (chooseCandidate(candidates, frame)?.label === "line") return candidates;
+  add("arrow", fitArrow(sampled, trace), 7, true);
+  if (chooseCandidate(candidates, frame)?.label === "arrow") return candidates;
+
   if (isClosed) {
-    // 所有几何族先独立拟合，再校验结构与残差；不让不可靠角点提前排除有效曲线。
-    add("circle", circle(sampled, false, trace, radius, observed, source), 3);
+    candidates.push(...fitSectors(sampled, radius), ...fitSymbols(sampled, radius));
+    const rectangular = rectangle(sampled, radius);
+    add("rectangle", rectangular, 5);
+    closedPolygons(frame, candidates);
+    if (provedLinearBoundary(chooseCandidate(candidates, frame), frame)) return candidates;
+    candidates.push(
+      ...fitRoundedPolygons(sampled, observed, radius),
+      ...fitFilletPolygons(sampled, observed, radius),
+    );
+    // 未有直边与尖角的正证据时，各C1族独立拟合，不凭低质量角点提前排除。
+    const circular = circle(sampled, false, trace, radius, observed, source);
+    add("circle", circular?.points ?? null, 3, false, circular?.closedTurns);
     const elongated = ellipse(sampled, trace, radius, observed, source);
-    if (elongated) add("ellipse", elongated, 5);
-    add("rectangle", rectangle(sampled, radius), 5);
-    // 凸边界提供不受局部回描和采样往返影响的整体角点；完整原始轨迹仍验证绕行与覆盖。
-    const hull = contourHull(sampled);
-    if (hull.length >= 3) {
-      const outline = resample([...hull, hull[0]!], 192);
-      const boundary = cornerContour(outline, true);
-      const supports =
-        boundary &&
-        (!corners ||
-          corners
-            .slice(0, -1)
-            .every((point) =>
-              boundary.slice(1).some((end, i) => segmentDistance(point, boundary[i]!, end) <= 0.04),
-            ));
-      if (boundary && supports) {
-        addPolygon(boundary, false);
-      }
-    }
-    if (corners) {
-      addPolygon(corners, true);
-      if (contourCrossings(corners) > 0) {
-        const count = corners.length - 1;
-        for (let step = 2; step < count / 2; step++) {
-          const star = regularStar(corners, step);
-          if (!star) continue;
-          const sweep = angleAdvance(
-            trace.map((p) => Math.atan2(p.y - star.center.y, p.x - star.center.x)),
-          );
-          if (sweep !== null && Math.abs(Math.abs(sweep) - step * 2 * Math.PI) <= 0.4)
-            candidates.push({
-              label: "star",
-              points: star.points,
-              parameters: 6,
-              curvedSides: true,
-            });
-        }
-      }
-    }
+    if (elongated) add("ellipse", elongated.points, 5, false, elongated.closedTurns);
+    if (rectangular)
+      candidates.push(...fitRoundedContours(sampled, trace, observed, rectangular, radius));
   } else {
-    add("arc", circle(sampled, true, trace, radius, observed, source), 5);
+    add("arc", circle(sampled, true, trace, radius, observed, source)?.points ?? null, 5);
+    add("elliptical-arc", fitEllipseArc(sampled, trace, observed, source, radius), 7);
+    candidates.push(...fitFunctionalCurves(sampled, trace, observed, source, radius));
     if (corners) {
-      addPolygon(corners, true);
+      addPolygonCandidate(frame, candidates, corners, true);
     }
   }
   if (corners || !isClosed || angleAdvance(trace.map((p) => Math.atan2(p.y, p.x))) === null)
     add("arrow", fitArrow(sampled, trace), 7, true);
+  const branched = fitBranchedArrows(
+    [{ index: 0, points: source, observations: observed }],
+    0,
+    radius,
+  );
+  if (branched)
+    candidates.push({
+      label: "arrow",
+      points: branched.paths.get(0)!,
+      parameters: branched.parameters,
+      curvedSides: true,
+    });
   return candidates;
 }
 
 /** 完整覆盖和原始观测先验收，再以结构和自由度选择几何；不使用训练概率。 */
 function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | null {
-  const { source, observed, radius } = frame;
+  const { source, observed, radius, trace } = frame;
+  const reliable = frame.isClosed
+      ? credibleCornerIndices(frame.sampled, true).map((i) => frame.sampled[i]!)
+      : [],
+    positionBudget = Math.max(0.04, noiseScale(frame.sampled, frame.isClosed) * 3);
   const eligible = candidates.flatMap((candidate) => {
+    // 简单闭合几何必须完整绕行一次；距离目标相同不代表两次描画可合并成一圈。
+    if (
+      distance(candidate.points[0]!, candidate.points.at(-1)!) < 1e-8 &&
+      contourCrossings(candidate.points) === 0
+    ) {
+      const advance = candidate.closedTurns ?? perimeterAdvance(trace, candidate.points);
+      if (advance === null || Math.abs(Math.abs(advance) - 1) > 0.4 / (2 * Math.PI)) return [];
+    }
     const error = contourDeviation(source, candidate.points);
     const maximum = candidate.curvedSides ? 0.12 : MAX_CONTOUR_DEVIATION,
       rms = candidate.curvedSides ? 0.055 : 0.028;
@@ -358,6 +500,9 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
     const witness = cornerSource ? contourDeviation(source, cornerSource) : null;
     const cornersSupported =
       cornerSource !== undefined &&
+      cornerSource
+        .slice(0, -1)
+        .every((point) => reliable.some((other) => distance(point, other) <= positionBudget)) &&
       witness !== null &&
       witness.maximum <= maximum &&
       witness.rms <= rms &&
@@ -369,17 +514,28 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
     Number.EPSILON,
     radius ** 2 + Math.min(...eligible.map((candidate) => candidate.error.rms ** 2)),
   );
-  // 原轨迹中集中的转向证明真实角点，边弯曲不消除这个结构证据；凸包自身不能制造角点身份。
+  // 固定角点窗口可能跨越密集顶点；每条边的曲率置信区间都足够窄时，完整直边也证明非光滑边界。
+  const linearEvidence = frame.isClosed ? resample(source, 384) : [];
+  // 集中转向或完整直边证明真实多边形；高噪声下无法排除曲率，不属于直边的正证据。
   const straightBoundary = eligible.some(
     (candidate) =>
       (candidate.label === "polygon" || candidate.label === "triangle") &&
-      candidate.cornersSupported,
+      (candidate.cornersSupported ||
+        candidate.points
+          .slice(1)
+          .every((point, i) =>
+            straightEvidence(linearEvidence, candidate.points[i]!, point, true),
+          )),
   );
   // 已验证的三分支连接是拓扑证据；自由折线不能用额外顶点的较低残差抹掉连接点身份。
   const branched = eligible.some((candidate) => candidate.label === "arrow");
+  const smoothRounded =
+    eligible.some((candidate) => candidate.label === "rounded-polygon") &&
+    curveCornerIndices(frame.sampled.slice(0, -1), true).length === 0;
   const ranked = eligible
     .filter(
       (candidate) =>
+        (!smoothRounded || (candidate.label !== "polygon" && candidate.label !== "triangle")) &&
         (!straightBoundary || (candidate.label !== "circle" && candidate.label !== "ellipse")) &&
         (!branched || candidate.label !== "polyline"),
     )

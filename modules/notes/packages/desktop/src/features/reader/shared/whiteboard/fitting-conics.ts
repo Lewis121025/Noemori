@@ -342,11 +342,22 @@ function ellipseObservation(
 }
 
 /**
+ * 复合图形复用椭圆的精确有符号距离，不使用代数残差或多边形近似替代。
+ * @param point 有限归一化观测。
+ * @param ellipse 有限中心、major≥minor>0及方向。
+ * @returns 最近轮廓距离，内部为负；参数前置条件由联合拟合器校验。
+ */
+export function ellipseDistance(point: FitPoint, ellipse: EllipseGeometry): number {
+  return ellipseObservation(point, ellipse).residual;
+}
+
+/**
  * Halíř–Flusser稳定约束初始化，再以最近轮廓距离做Huber–LM椭圆拟合。
  * @param points 至少六个有限归一化观测。
  * @param uncertainty 归一化位置不确定性，不能代替完整观测的最终偏差检查。
  * @param observations 完整原始观测，仅约束最大偏差，避免停笔密集采样改变拟合权重。
  * @param contour 完整静态轨迹，反向覆盖与最终渲染使用同一轮廓。
+ * @param closed 是否拟合完整闭合边界；开放弧仅生成实际扫过的椭圆段。
  * @returns 有限椭圆参数；秩亏、退化或无有效椭圆返回null，数值库异常向上传播。
  */
 export function fitEllipseGeometry(
@@ -354,6 +365,7 @@ export function fitEllipseGeometry(
   uncertainty: number,
   observations: readonly FitPoint[] = points,
   contour: readonly FitPoint[] = points,
+  closed = true,
 ): EllipseGeometry | null {
   if (points.length < 6) return null;
   const initial = constrainedEllipse(points);
@@ -406,7 +418,8 @@ export function fitEllipseGeometry(
           ((point.x - ellipse.center.x) * dx + (point.y - ellipse.center.y) * dy) / ellipse.major,
         ),
       );
-      return ellipseContour(ellipse, angles[0]!, Math.sign(sweepAngles(angles)) * 2 * Math.PI);
+      const sweep = sweepAngles(angles);
+      return ellipseContour(ellipse, angles[0]!, closed ? Math.sign(sweep) * 2 * Math.PI : sweep);
     },
     approximation: (p) => {
       const a = Math.exp(p[2]!),

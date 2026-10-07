@@ -93,7 +93,7 @@ describe("不依赖分类模型的整体几何修复", () => {
   });
   it("自由曲线保形拟合，重复描圈和额外笔画仍须拒绝，原始观测不能被隐藏", () => {
     const curve = Array.from({ length: 193 }, (_, i) => p(i, 70 * Math.sin(i / 28)));
-    expect(repairShape(curve, 1)?.label).toBe("curve");
+    expect(repairShape(curve, 1)?.label).toBe("sine");
     const circle = oval(1);
     expect(repairShape([...circle, ...circle.slice(1)], 1)).toBeNull();
     expect(repairShape(circle, 1, [...circle, p(0, 0)])).toBeNull();

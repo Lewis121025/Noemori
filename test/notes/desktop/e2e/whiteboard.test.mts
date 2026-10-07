@@ -267,3 +267,146 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
     await app.close();
   }
 });
+
+test("多笔画停笔：线程联动预览、整组撤销、保存与重启", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "noemori-whiteboard-scene-"));
+  t.onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const vault = join(root, "vault"),
+    userData = join(root, "state");
+  await Promise.all([mkdir(vault), mkdir(userData)]);
+  const point = (x: number, y: number) => ({ x, y, pressure: 0.5 }),
+    edge = (a: ReturnType<typeof point>, b: ReturnType<typeof point>) =>
+      Array.from({ length: 49 }, (_, i) =>
+        point(
+          a.x + ((b.x - a.x) * i) / 48 + Math.sin(i * 1.3),
+          a.y + ((b.y - a.y) * i) / 48 + Math.sin(i * 1.7),
+        ),
+      ),
+    original = {
+      version: 2,
+      strokes: [
+        { id: "a", width: 2, points: edge(point(150, 150), point(450, 151)) },
+        { id: "b", width: 2, points: edge(point(450, 151), point(449, 330)) },
+        { id: "c", width: 2, points: edge(point(449, 330), point(148, 330)) },
+      ],
+    };
+  const path = join(vault, "Scene.noemoriboard");
+  await writeFile(path, JSON.stringify(original));
+  await writeFile(
+    join(userData, "session.json"),
+    JSON.stringify({
+      reader: {
+        vaultRoot: vault,
+        currentPath: "Scene.noemoriboard",
+        filesCollapsed: true,
+        leftWidth: 232,
+      },
+      appearance: "light",
+      window: null,
+    }),
+  );
+  const executable: unknown = require("electron");
+  if (typeof executable !== "string") throw new Error("缺少Electron");
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && entry[0] !== "ELECTRON_RENDERER_URL",
+    ),
+  );
+  const launch = () =>
+    electron.launch({
+      executablePath: executable,
+      args: [
+        fileURLToPath(new URL("out/main/index.js", desktop)),
+        `--user-data-dir=${userData}`,
+        "--no-sandbox",
+      ],
+      env,
+    });
+  let app = await launch();
+  const command = async (id: string) =>
+    app.evaluate(({ Menu }, action) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById(action);
+      if (!item?.enabled) throw new Error(`命令不可用：${action}`);
+      item.click();
+    }, id);
+  const saved = async () => JSON.parse(await readFile(path, "utf8")) as typeof original;
+  try {
+    let page = await app.firstWindow();
+    await page.getByRole("application", { name: "白板", exact: true }).waitFor();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
+    await documentTools(page);
+    await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
+    await expect
+      .poll(async () => (await page.locator(".whiteboard").boundingBox())?.width ?? 0)
+      .toBeGreaterThan(600);
+    const strokes = page.locator(".whiteboard [data-stroke-id]");
+    await expect.poll(() => strokes.count()).toBe(3);
+    await page.getByRole("button", { name: "查看全部", exact: true }).click();
+    await page.locator(".whiteboard").focus();
+    await page.waitForFunction(async () => {
+      const g = document.querySelector(".whiteboard .board-canvas > g") as SVGGElement | null;
+      if (!g) return false;
+      const first = g.getScreenCTM();
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const last = g.getScreenCTM(),
+        local = g.transform.baseVal.consolidate()?.matrix,
+        rect = g.ownerSVGElement?.getBoundingClientRect();
+      return (
+        first &&
+        last &&
+        local &&
+        rect &&
+        first.a === last.a &&
+        first.e === last.e &&
+        first.f === last.f &&
+        Math.abs(last.e - rect.left - local.e) < 0.1 &&
+        Math.abs(last.f - rect.top - local.f) < 0.1
+      );
+    });
+    const before = await strokes.evaluateAll((items) =>
+        items.map((item) => item.getAttribute("d")),
+      ),
+      matrix = await page.locator(".whiteboard .board-canvas > g").evaluate((element) => {
+        const matrix = (element as SVGGElement).getScreenCTM();
+        if (!matrix) throw new Error("缺少画布矩阵");
+        return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
+      });
+    await page.mouse.move(matrix.e + 148 * matrix.a, matrix.f + 330 * matrix.d);
+    await page.mouse.down();
+    for (let i = 1; i <= 48; i++) {
+      const x = 148 + (2 * i) / 48 + Math.sin(i * 1.7),
+        y = 330 - (180 * i) / 48;
+      await page.mouse.move(matrix.e + x * matrix.a, matrix.f + y * matrix.d);
+    }
+    await page.locator(".whiteboard .pending.corrected").waitFor({ timeout: 7000 });
+    expect(await saved()).toEqual(original);
+    expect(
+      await strokes.evaluateAll((items) => items.map((item) => item.getAttribute("d"))),
+    ).not.toEqual(before);
+    await page.mouse.up();
+    await expect.poll(async () => (await saved()).strokes.length, { timeout: 8000 }).toBe(4);
+    const repaired = await saved();
+    for (const stroke of repaired.strokes.slice(0, 3)) {
+      expect(stroke.points).toHaveLength(2);
+      expect(stroke).toHaveProperty("source");
+    }
+    await command("undo");
+    await expect.poll(() => strokes.count()).toBe(3);
+    await expect
+      .poll(async () => (await saved()).strokes, { timeout: 8000 })
+      .toEqual(original.strokes);
+    await command("redo");
+    await expect.poll(saved, { timeout: 8000 }).toEqual(repaired);
+    await app.close();
+    app = await launch();
+    page = await app.firstWindow();
+    await page.getByRole("application", { name: "白板", exact: true }).waitFor();
+    await expect.poll(() => page.locator(".whiteboard [data-stroke-id]").count()).toBe(4);
+    expect(await saved()).toEqual(repaired);
+    expect(await page.locator(".whiteboard .error").allTextContents()).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});

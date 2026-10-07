@@ -1,3 +1,4 @@
+import { pilotContour, noiseScale } from "./fitting-noise";
 import { curveCornerIndices } from "./fitting-corners";
 import { curveStructure, curveStructureAgrees } from "./fitting-curve-structure";
 import {
@@ -9,42 +10,6 @@ import {
 } from "./fitting-math";
 import { solveSpline, splineContour, splinePoint, type CubicSpline } from "./fitting-spline";
 
-function median(values: readonly number[]): number {
-  const ordered = [...values].sort((a, b) => a - b),
-    middle = Math.floor(ordered.length / 2);
-  return ordered.length % 2 ? ordered[middle]! : (ordered[middle - 1]! + ordered[middle]!) / 2;
-}
-
-/** 二次Savitzky–Golay导向只估计参数和噪声，真实采样仍参与求解与最大误差验收。 */
-function pilotContour(points: readonly FitPoint[], periodic: boolean, halfWindow = 4): FitPoint[] {
-  const denominator = (2 * halfWindow + 3) * (2 * halfWindow + 1) * (2 * halfWindow - 1),
-    weights = Array.from(
-      { length: 2 * halfWindow + 1 },
-      (_, i) =>
-        (3 * (3 * halfWindow ** 2 + 3 * halfWindow - 1 - 5 * (i - halfWindow) ** 2)) / denominator,
-    );
-  const at = (index: number): FitPoint => {
-    if (periodic) return points[(index + points.length) % points.length]!;
-    if (index < 0)
-      return { x: 2 * points[0]!.x - points[-index]!.x, y: 2 * points[0]!.y - points[-index]!.y };
-    if (index >= points.length) {
-      const mirrored = points[2 * (points.length - 1) - index]!,
-        last = points.at(-1)!;
-      return { x: 2 * last.x - mirrored.x, y: 2 * last.y - mirrored.y };
-    }
-    return points[index]!;
-  };
-  return points.map((_, i) =>
-    weights.reduce(
-      (sum, weight, j) => {
-        const point = at(i + j - halfWindow);
-        return { x: sum.x + weight * point.x, y: sum.y + weight * point.y };
-      },
-      { x: 0, y: 0 },
-    ),
-  );
-}
-
 function parameterize(points: readonly FitPoint[], periodic: boolean): number[] | null {
   const lengths = [0];
   for (let i = 1; i < points.length; i++)
@@ -52,31 +17,6 @@ function parameterize(points: readonly FitPoint[], periodic: boolean): number[] 
   const total = lengths.at(-1)! + (periodic ? distance(points.at(-1)!, points[0]!) : 0);
   if (total <= 1e-8 || lengths.some((t, i) => i > 0 && t <= lengths[i - 1]!)) return null;
   return lengths.map((value) => value / total);
-}
-
-function noiseScale(points: readonly FitPoint[], periodic: boolean): number {
-  // 估噪窗口宽于参数导向窗口，避免相关性抖动被导向本身跟随后低估噪声。
-  const halfWindow = Math.min(8, Math.floor((points.length - 1) / 4)),
-    pilot = pilotContour(points, periodic, halfWindow),
-    centralWeight =
-      (3 * (3 * halfWindow ** 2 + 3 * halfWindow - 1)) /
-      ((2 * halfWindow + 3) * (2 * halfWindow + 1) * (2 * halfWindow - 1));
-  const residuals = points.flatMap((point, i) => {
-    if (!periodic && (i < halfWindow || i >= points.length - halfWindow)) return [];
-    const before = pilot[(i - 1 + pilot.length) % pilot.length]!,
-      after = pilot[(i + 1) % pilot.length]!,
-      length = distance(before, after);
-    return length > 1e-8
-      ? [
-          Math.abs(
-            (point.x - pilot[i]!.x) * (after.y - before.y) -
-              (point.y - pilot[i]!.y) * (after.x - before.x),
-          ) / length,
-        ]
-      : [];
-  });
-  // 正态绝对残差的中位数恢复尺度，并补偿SG滤波中心权重；孤立尖角不抬高整条曲线噪声预算。
-  return residuals.length ? (median(residuals) * 1.4826) / Math.sqrt(1 - centralWeight) : 0;
 }
 
 /** 局部最近点Newton迭代受相邻参数中点限制，不允许在自交处跳到另一条分支。 */
@@ -189,7 +129,7 @@ function fitSections(
   uncertainty: number,
   tolerance: number,
 ): FitPoint[] | null {
-  const corners = curveCornerIndices(pilotContour(points, periodic), periodic);
+  const corners = curveCornerIndices(points, periodic);
   if (corners.length === 0) {
     const fit = fitSection(points, periodic, uncertainty);
     return fit ? splineContour(fit, tolerance) : null;

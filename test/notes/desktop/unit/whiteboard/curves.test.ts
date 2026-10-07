@@ -40,9 +40,16 @@ describe("停笔后的通用曲线拟合", () => {
     const source = samples(wave, noise),
       original = structuredClone(source),
       result = repairShape(source, 1);
-    expect(result?.label).toBe("curve");
-    expect(result!.points[0]).toEqual(source[0]);
-    expect(result!.points.at(-1)).toEqual(source.at(-1));
+    expect(result?.label).toBe("sine");
+    expect(
+      Math.hypot(result!.points[0]!.x - source[0]!.x, result!.points[0]!.y - source[0]!.y),
+    ).toBeLessThan(2);
+    expect(
+      Math.hypot(
+        result!.points.at(-1)!.x - source.at(-1)!.x,
+        result!.points.at(-1)!.y - source.at(-1)!.y,
+      ),
+    ).toBeLessThan(2);
     const error = contourDeviation(samples(wave), result!.points)!;
     expect(error.rms).toBeLessThan(noise === 0 ? 0.4 : noise * 0.55);
     expect(error.maximum).toBeLessThan(noise === 0 ? 1 : noise);
@@ -56,9 +63,16 @@ describe("停笔后的通用曲线拟合", () => {
       p(140 * Math.cos(1.5 * Math.PI * t), 55 * Math.sin(1.5 * Math.PI * t));
     const source = samples(shape, 3),
       result = repairShape(source, 1);
-    expect(result?.label).toBe("curve");
-    expect(result!.points[0]).toEqual(source[0]);
-    expect(result!.points.at(-1)).toEqual(source.at(-1));
+    expect(result?.label).toBe("elliptical-arc");
+    expect(
+      Math.hypot(result!.points[0]!.x - source[0]!.x, result!.points[0]!.y - source[0]!.y),
+    ).toBeLessThan(2);
+    expect(
+      Math.hypot(
+        result!.points.at(-1)!.x - source.at(-1)!.x,
+        result!.points.at(-1)!.y - source.at(-1)!.y,
+      ),
+    ).toBeLessThan(2);
     expect(contourDeviation(samples(shape), result!.points)!.rms).toBeLessThan(2);
   });
 
@@ -170,13 +184,13 @@ describe("停笔后的通用曲线拟合", () => {
       p(8_000_000 + point.x / scale, -7_000_000 + point.y / scale),
     );
     const result = repairShape(transformed, scale)!;
-    expect(result.label).toBe("curve");
+    expect(result.label).toBe("sine");
     const restored = result.points.map((point) =>
       p((point.x - 8_000_000) * scale, (point.y + 7_000_000) * scale),
     );
     expect(contourDeviation(base.points, restored)!.maximum).toBeLessThan(0.05);
     const reversed = repairShape([...source].reverse(), 1)!;
-    expect(reversed.label).toBe("curve");
+    expect(reversed.label).toBe("sine");
     expect(contourDeviation(base.points, reversed.points)!.maximum).toBeLessThan(0.1);
   });
 
@@ -187,7 +201,7 @@ describe("停笔后的通用曲线拟合", () => {
       Array.from({ length: i > 80 && i < 180 ? 9 : 1 }, () => point),
     );
     const result = repairShape(dense, 1)!;
-    expect(result.label).toBe("curve");
+    expect(result.label).toBe("sine");
     expect(contourDeviation(base.points, result.points)!.maximum).toBeLessThan(0.1);
     expect(repairShape(source, 1, [...source, p(160, 500)])).toBeNull();
     expect(repairShape(source, 1, [...source, p(NaN, 0)])).toBeNull();
@@ -238,7 +252,7 @@ describe("停笔后的通用曲线拟合", () => {
     for (const point of source.slice(1)) board.update(point);
     const accepted = [...board.points];
     expect(await board.hold()).toBe(true);
-    expect(board.correctedLabel).toBe("curve");
+    expect(board.correctedLabel).toBe("sine");
     const preview = [...board.points];
     board.finish();
     const stroke = board.document.strokes[0]!;

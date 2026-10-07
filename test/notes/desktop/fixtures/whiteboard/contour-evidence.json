@@ -481,7 +481,7 @@
   {
     "source": "quickdraw-real-shapes-v1",
     "sample_id": "71d5264a4c966c2fb7393cfc2450837c",
-    "expected": "arc",
+    "expected": "elliptical-arc",
     "points": [
       [410, 407],
       [412, 400],
