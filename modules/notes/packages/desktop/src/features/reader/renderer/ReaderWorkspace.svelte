@@ -43,7 +43,7 @@
     type CommandContext,
     type ReaderCommand,
   } from "../shared/commands";
-  import { isCompositionKey } from "./editor/composition";
+  import { isCompositionKey } from "../shared/composition";
   import { createSessionWrite } from "./session-write";
   import { READING_FONTS, type ReadingFont } from "../shared/reading-font";
   import { DEFAULT_READING_PALETTE, type ReadingPalette } from "../shared/reading-palette";
@@ -53,11 +53,15 @@
     api,
     applicationMenu,
     palette = DEFAULT_READING_PALETTE,
+    agentOpen = false,
+    onOpenAgent,
   }: {
     api: ReaderApi;
     applicationMenu: Snippet;
     /** 配色只影响样式变量，不重建文档或修改阅读位置。 */
     palette?: ReadingPalette;
+    agentOpen?: boolean;
+    onOpenAgent?: () => void;
   } = $props();
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
@@ -175,6 +179,7 @@
   /** 原生菜单和工作区快捷键共享动作；组词及模态操作期间不能跳转或提交。 */
   export function executeCommand(command: ReaderCommand): void {
     if (
+      agentOpen ||
       workspace.isComposing ||
       changingSpace ||
       workspace.switching ||
@@ -517,6 +522,7 @@
   }
 
   function onWorkspaceShortcut(event: KeyboardEvent): void {
+    if (agentOpen) return;
     if (event.defaultPrevented || isCompositionKey(event) || workspace.isComposing) return;
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     if (
@@ -559,6 +565,8 @@
 <div class="app" data-reading-palette={palette} use:interactionFeedback use:paletteMotion={palette}>
   <VaultOpening {workspace} />
   <WindowToolbar
+    {agentOpen}
+    {...onOpenAgent === undefined ? {} : { onOpenAgent }}
     bind:this={windowToolbar}
     {workspace}
     {filesCollapsed}
@@ -587,7 +595,7 @@
     preferences={applicationMenu}
     onOpenVault={openVault}
   />
-  <div class="panes">
+  <div class="panes" inert={agentOpen} aria-hidden={agentOpen}>
     <button
       class="files-scrim"
       hidden={filesCollapsed || !narrow}

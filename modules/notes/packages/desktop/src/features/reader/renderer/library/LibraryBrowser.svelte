@@ -16,7 +16,7 @@
   import FileMenu, { type FileMenuAction } from "./FileMenu.svelte";
   import type { Bookmark, VaultEntry } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
-  import { isCompositionKey } from "../editor/composition";
+  import { isCompositionKey } from "../../shared/composition";
   import {
     buildFileTree,
     findFileTreeNode,

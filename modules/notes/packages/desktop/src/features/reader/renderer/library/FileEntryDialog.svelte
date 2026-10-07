@@ -7,7 +7,7 @@
   import { tick } from "svelte";
   import type { VaultEntry } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
-  import { createCompositionGuard } from "../editor/composition";
+  import { createCompositionGuard } from "../../shared/composition";
   import { moveDestinations } from "./move-destinations";
   import MoveDestinationPicker from "./MoveDestinationPicker.svelte";
   import {

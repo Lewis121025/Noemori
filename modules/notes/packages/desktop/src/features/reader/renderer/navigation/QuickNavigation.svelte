@@ -9,7 +9,7 @@
   import type { SidebarEntry, SidebarPanel } from "./sidebar-components";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import { tick, type Snippet } from "svelte";
-  import { createCompositionGuard } from "../editor/composition";
+  import { createCompositionGuard } from "../../shared/composition";
   let {
     workspace,
     hidden,

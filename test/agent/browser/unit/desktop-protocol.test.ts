@@ -8,6 +8,7 @@ function snapshot(outcome = "not_executed") {
     revision: 3,
     closed: false,
     run: null,
+    turns: [],
     messages: [],
     terminals: [],
     approvals: [],

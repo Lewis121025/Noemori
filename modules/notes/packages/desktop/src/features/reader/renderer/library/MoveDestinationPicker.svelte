@@ -2,7 +2,7 @@
   import { onMount, untrack } from "svelte";
   import type { MoveDestination } from "./move-destinations";
   import { rankByFuzzy } from "../search/fuzzy";
-  import { isCompositionKey } from "../editor/composition";
+  import { isCompositionKey } from "../../shared/composition";
 
   let {
     destinations,

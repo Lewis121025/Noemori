@@ -310,6 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { NativeAgentSession } = nativeBinding
+const { NativeAgentSession, branchCheckpoint, relocateCheckpoint } = nativeBinding
 
 module.exports.NativeAgentSession = NativeAgentSession
+module.exports.branchCheckpoint = branchCheckpoint
+module.exports.relocateCheckpoint = relocateCheckpoint

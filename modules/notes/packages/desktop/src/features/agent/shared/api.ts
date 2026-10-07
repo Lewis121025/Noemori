@@ -1,3 +1,5 @@
+import type { ArticleConversationRequest, ArticleLocation } from "./article";
+import type { ModelSelection, ProviderCatalog, ProviderUpdate } from "./providers";
 /** Agent 的窗口协议只交付可见状态，认证材料由主进程单独持有。 */
 export type Protocol =
   | "openai-chat"
@@ -134,6 +136,27 @@ export type AgentBrowser = {
   }[];
   error: string | null;
 };
+/** 一轮用户任务的身份与终态；同一轮可以发起多次模型调用。 */
+export type AgentRun = {
+  id: string;
+  status:
+    | "running"
+    | "completed"
+    | "cancelled"
+    | "timed_out"
+    | "budget_exhausted"
+    | "truncated"
+    | "filtered"
+    | "failed";
+  error: string | null;
+  model_calls: number;
+};
+/** 可见轮次的消息范围为左闭右开区间，边界由原生历史提交时生成。 */
+export type AgentTurn = { run: AgentRun; message_start: number; message_end: number };
+/** 分支保留来源身份与名称；来源被删除也不丢失可读关系。 */
+export type ConversationOrigin = { conversationId: string; title: string; turnId: string | null };
+/** 分叉在确认名称后创建，null 表示复制当前完整历史。 */
+export type ConversationForkRequest = { title: string; afterTurnId: string | null };
 /** 对话快照可在窗口重载后重新读取。 */
 export type AgentSnapshot = {
   browser: AgentBrowser;
@@ -141,24 +164,34 @@ export type AgentSnapshot = {
   workspace: string;
   revision: number;
   closed: boolean;
-  run: {
-    id: string;
-    status:
-      | "running"
-      | "completed"
-      | "cancelled"
-      | "timed_out"
-      | "budget_exhausted"
-      | "truncated"
-      | "filtered"
-      | "failed";
-    error: string | null;
-    model_calls: number;
-  } | null;
+  run: AgentRun | null;
+  turns: AgentTurn[];
   messages: AgentMessage[];
   terminals: AgentTerminal[];
   approvals: AgentApproval[];
 };
+
+/** 会话列表只传摘要，完整消息按选中的会话读取。时间采用 Unix 毫秒。 */
+export type AgentConversationInfo = {
+  id: string;
+  title: string;
+  workspace: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  origin: ConversationOrigin | null;
+  article: ArticleLocation | null;
+  status: NonNullable<AgentSnapshot["run"]>["status"] | null;
+};
+/** 持久化对话与当前资源状态；草稿属于单条会话，保存失败必须明确展示。 */
+export type AgentConversation = AgentSnapshot &
+  Omit<AgentConversationInfo, "status"> & {
+    draft: string;
+    storageError: string | null;
+  };
+/** 单条损坏记录不会阻断其余会话；issues 保留恢复失败的文件及原因。 */
+export type AgentConversationList = { items: AgentConversationInfo[]; issues: string[] };
 /** 原始日志页，不消费模型的增量输出。 */
 export type TerminalPage = {
   process: TerminalInfo;
@@ -185,13 +218,30 @@ export type ApprovalReply = {
 export type AgentApi = {
   browserControl(id: string, resume: boolean): Promise<void>;
   settingsGet(): Promise<PublicModelSettings | null>;
-  settingsSet(settings: ModelSettingsUpdate): Promise<PublicModelSettings>;
-  create(): Promise<AgentSnapshot | null>;
-  list(): Promise<AgentSnapshot[]>;
-  snapshot(id: string): Promise<AgentSnapshot>;
+  providersGet(): Promise<ProviderCatalog>;
+  providersSave(settings: ProviderUpdate): Promise<ProviderCatalog>;
+  providersRemove(id: string): Promise<ProviderCatalog>;
+  modelSelect(selection: ModelSelection): Promise<ProviderCatalog>;
+  pickWorkspace(): Promise<string | null>;
+  create(workspace: string, title: string): Promise<AgentConversation>;
+  /** 加载已打开笔记库中的文章对话；无记录时不创建目录。 */
+  attachVault(root: string): Promise<void>;
+  createArticle(request: ArticleConversationRequest): Promise<AgentConversation>;
+  /** 文件操作完成后更新文章归属；删除入口或文章不会删除对话。 */
+  remapArticles(root: string, changes: { from: string; to: string | null }[]): Promise<void>;
+  fork(id: string, request: ConversationForkRequest): Promise<AgentConversation>;
+  list(): Promise<AgentConversationList>;
+  snapshot(id: string): Promise<AgentConversation>;
+  rename(id: string, title: string): Promise<void>;
+  archive(id: string, archived: boolean): Promise<void>;
+  remove(id: string): Promise<void>;
+  saveDraft(id: string, draft: string): Promise<void>;
+  flush(): Promise<void>;
   start(id: string, text: string): Promise<string>;
-  cancel(id: string): Promise<void>;
-  close(id: string): Promise<void>;
+  /** 中断指定运行，只有终态结算后兑现；迟到的旧运行编号会被拒绝。 */
+  cancel(id: string, runId: string): Promise<void>;
+  /** 明确继续最近未完成的任务，保留草稿；返回新运行编号。 */
+  resume(id: string, runId: string): Promise<string>;
   approve(id: string, approval: string, reply: ApprovalReply): Promise<void>;
   terminalRead(id: string, terminal: string, offset: string): Promise<TerminalPage>;
   terminalInput(id: string, terminal: string, data: Uint8Array): Promise<void>;

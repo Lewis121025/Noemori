@@ -23,7 +23,7 @@ pub(super) fn drive(
             state.begin_model();
             yield AgentEvent::ModelStarted { call: state.model_calls };
             let request = ModelRequest {
-                messages: super::browser_history::for_model(&state.history), tools: agent.tools.definitions(), options: input.generation.clone(),
+                messages: super::browser_history::for_model(&state.history, agent.model.capabilities().vision), tools: agent.tools.definitions(), options: input.generation.clone(),
             };
             let mut stream = Box::pin(model_turn(&mut state, agent.model.clone(), request, context.clone()));
             let mut failure = None;

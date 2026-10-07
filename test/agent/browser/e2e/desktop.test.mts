@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { expect, test } from "vitest";
 import { _electron as electron } from "playwright-core";
-import { openSettings } from "../../../notes/desktop/support/workspace-actions";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
@@ -141,25 +140,33 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
   await page.waitForLoadState("load");
   await page.evaluate(
     async (endpoint) =>
-      window.noemori.agent.settingsSet({
+      window.noemori.agent.providersSave({
+        id: null,
+        name: "浏览器测试供应商",
         protocol: "openai-chat",
-        model: "browser-fixture",
-        endpoint,
+        address: { type: "endpoint", url: endpoint },
         authentication: { type: "none" },
-        tools: true,
-        streaming: false,
-        vision: true,
-        audio: false,
-        video: false,
+        models: [
+          {
+            id: "browser-fixture",
+            tools: true,
+            streaming: false,
+            vision: true,
+            audio: false,
+            video: false,
+          },
+        ],
       }),
     `${origin}/model`,
   );
   await app.evaluate(({ dialog }, workspace) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, workspace);
-  await openSettings(page);
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
-  await page.getByRole("button", { name: "新会话", exact: true }).click();
+  await page.getByRole("button", { name: "＋ 新会话", exact: true }).click();
+  const creation = page.getByRole("dialog", { name: "新建对话", exact: true });
+  await creation.getByRole("button", { name: "选择文件夹…", exact: true }).click();
+  await creation.getByRole("button", { name: "创建对话", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Agent 用户任务" })
     .fill("在验收页面填写并保存姓名，再检查截图");
@@ -168,15 +175,27 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
   expect(await page.locator(".approval").textContent()).toContain(origin);
   await page.getByRole("button", { name: "此会话允许", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(async () => (await window.noemori.agent.list())[0]?.run?.status), {
-      timeout: 30000,
-    })
+    .poll(
+      () =>
+        page.evaluate(
+          async () =>
+            (await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id))
+              ?.run?.status,
+        ),
+      {
+        timeout: 30000,
+      },
+    )
     .toBe("completed");
   expect(failures).toEqual([]);
   expect({
     calls,
     sawImage,
-    browser: await page.evaluate(async () => (await window.noemori.agent.list())[0]?.browser),
+    browser: await page.evaluate(
+      async () =>
+        (await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id))
+          ?.browser,
+    ),
   }).toMatchObject({ calls: 6, sawImage: true });
   expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
     "浏览器验收页面",
@@ -195,7 +214,9 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
     .poll(
       () =>
         page.evaluate(async () => {
-          const session = (await window.noemori.agent.list())[0];
+          const session = await window.noemori.agent.snapshot(
+            (await window.noemori.agent.list()).items[0]!.id,
+          );
           return (
             session?.messages.filter((message) => message.role === "user").length === 2 &&
             session.run?.status === "completed"
@@ -212,7 +233,13 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
   await expect.poll(() => filledBeforeCancel, { timeout: 15000 }).toBe(true);
   await page.getByRole("button", { name: "停止生成", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(async () => (await window.noemori.agent.list())[0]?.run?.status))
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id))
+            ?.run?.status,
+      ),
+    )
     .toBe("cancelled");
   await expect
     .poll(() => page.getByRole("region", { name: "会话浏览器" }).textContent(), { timeout: 15000 })
@@ -230,9 +257,14 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
     "步骤 2：点击 · 未执行",
   );
   if (artifacts) await page.screenshot({ path: join(artifacts, "browser", "cancelled-batch.png") });
-  await page.getByRole("button", { name: "结束会话", exact: true }).click();
+  await page.getByRole("button", { name: "对话操作", exact: true }).click();
+  await page.getByRole("button", { name: "删除对话", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "删除对话", exact: true })
+    .getByRole("button", { name: "删除对话", exact: true })
+    .click();
   await expect
-    .poll(() => page.evaluate(async () => (await window.noemori.agent.list()).length))
+    .poll(() => page.evaluate(async () => (await window.noemori.agent.list()).items.length))
     .toBe(0);
   await app.close();
 }, 60000);

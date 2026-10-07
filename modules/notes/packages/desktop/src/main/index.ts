@@ -177,6 +177,7 @@ app.whenReady().then(async () => {
   registerAgentIpc(
     () => mainWindow,
     () => agent,
+    async () => (await client.call("readerSessionLoad")).vaultRoot,
   );
   // 库根边界由内核 entryPath 校验；协议层只额外限制为音视频类型。
   protocol.handle(

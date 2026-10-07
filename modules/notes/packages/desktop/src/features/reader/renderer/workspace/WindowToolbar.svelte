@@ -12,6 +12,8 @@
     onToggleSplit,
     documentTools,
     onPrepareDocumentAction,
+    agentOpen = false,
+    onOpenAgent,
   }: {
     workspace: ReaderWorkspaceController;
     filesCollapsed: boolean;
@@ -21,6 +23,8 @@
     onToggleSplit: () => void;
     documentTools: Snippet;
     onPrepareDocumentAction: () => void;
+    agentOpen?: boolean;
+    onOpenAgent?: () => void;
   } = $props();
   const mac = navigator.userAgent.includes("Mac");
   let sidebarToggle: HTMLButtonElement;
@@ -39,6 +43,7 @@
       aria-label="显示或隐藏文件栏"
       title={filesCollapsed ? "展开侧栏" : "收起侧栏"}
       aria-expanded={!filesCollapsed}
+      disabled={agentOpen}
       onclick={onToggleFiles}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -50,7 +55,7 @@
       type="button"
       aria-label="后退"
       title="后退"
-      disabled={busy || !documentVisible || !workspace.history.canBack}
+      disabled={busy || agentOpen || !documentVisible || !workspace.history.canBack}
       onclick={() => void workspace.navigateBack()}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -62,7 +67,7 @@
       type="button"
       aria-label="前进"
       title="前进"
-      disabled={busy || !documentVisible || !workspace.history.canForward}
+      disabled={busy || agentOpen || !documentVisible || !workspace.history.canForward}
       onclick={() => void workspace.navigateForward()}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -74,14 +79,14 @@
     class="window-document-tools"
     role="group"
     aria-label="当前文档工具"
-    hidden={!documentVisible}
+    hidden={!documentVisible || agentOpen}
     onpointerdown={onPrepareDocumentAction}
   >
     {@render documentTools()}
   </div>
   <div class="window-actions">
     <WorkspaceFeedback {workspace} />
-    {#if workspace.split}
+    {#if workspace.split && !agentOpen}
       <div class="pane-switch" role="group" aria-label="切换分栏">
         {#each workspace.panes as pane, index (pane.id)}
           <button
@@ -102,13 +107,26 @@
       aria-label={workspace.split ? "关闭双栏" : "在另一栏打开…"}
       title={workspace.split ? "保留当前栏，关闭双栏" : "在另一栏打开文档"}
       aria-pressed={workspace.split}
-      disabled={busy || !documentVisible}
+      disabled={busy || agentOpen || !documentVisible}
       onclick={onToggleSplit}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
         ><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" /></svg
       >
     </button>
+    {#if onOpenAgent}<button
+        class="reader-button agent-entry"
+        type="button"
+        aria-label="工作区助手"
+        aria-pressed={agentOpen}
+        title="工作区助手与对话管理"
+        onclick={onOpenAgent}
+        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3V6a2 2 0 0 1 1-2Z" /><path
+            d="M8 9h9M8 13h6"
+          /></svg
+        ><span>助手</span></button
+      >{/if}
   </div>
 </header>
 
@@ -136,6 +154,17 @@
     display: flex;
     align-items: center;
     gap: 5px;
+  }
+  .agent-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .agent-entry[aria-pressed="true"] {
+    background: var(--selected);
+    color: var(--accent);
   }
   .window-toolbar :global(button),
   .window-toolbar :global([popover]),

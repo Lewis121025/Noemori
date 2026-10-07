@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import type { EditorView } from "prosemirror-view";
-  import { createCompositionGuard } from "../composition";
+  import { createCompositionGuard } from "../../../shared/composition";
   import { linkSelectionKey } from "../links/link-editing";
   import { insertWebPage } from "./insert";
   import { dialogEnter, dialogExit, finishOnReducedMotion } from "../../transition-lifecycle";

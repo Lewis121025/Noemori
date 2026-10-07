@@ -8,6 +8,24 @@ use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+/// 更换连接后保留通用事实与工具关联，专有推理降为明确标注的文本，不复用旧签名。
+pub(super) fn portable_history(history: &mut [crate::Message]) {
+    for message in history {
+        message.provider_data = None;
+        for part in &mut message.content {
+            if let ContentPart::Reasoning(text) = part {
+                *part = ContentPart::Text(format!("此前模型的推理记录（非最终回答）：{text}"));
+            }
+        }
+        // 加密推理可能没有通用正文；保留消息占位，避免破坏已保存的轮次索引。
+        if message.content.is_empty() {
+            message.content.push(ContentPart::Text(
+                "此前模型返回了不可迁移的私有推理数据。".into(),
+            ));
+        }
+    }
+}
+
 /// 每轮终态与历史同锁提交；未消费或异常丢弃的运行也解除占用，不自动重放工具。
 pub(super) struct Guard {
     pub(super) state: Arc<State>,
@@ -24,12 +42,20 @@ impl Drop for Guard {
                 .as_ref()
                 .is_some_and(|active| active.id == self.id)
             {
+                let from = data.turns.last().map_or(0, |turn| turn.view.message_start);
+                data.pending_note = Some(super::progress::observed_note(
+                    &data.messages[from..],
+                    &data.calls.keys().cloned().collect::<Vec<_>>(),
+                ));
                 data.active.take();
+                data.calls.clear();
+                data.approvals.clear();
                 if let Some(run) = &mut data.run {
                     run.status = HostRunStatus::Failed;
                     run.error = Some("运行任务在交付终态前被释放，未确认的工具不得自动重试".into());
                 }
             }
+            super::turns::settle(&mut data);
             drop(data);
             self.state.notify();
         }
@@ -109,7 +135,7 @@ fn finish(state: &State, report: RunReport) {
     };
     let mut data = state.data.lock().expect("桌面会话锁被污染");
     data.history = report.history;
-    data.pending_note=report.pending_turn.map(|pending|format!("上次运行中断。下列工具可能已产生副作用，不能自动重放；后续应以实际工作区状态为准。已尝试调用：{:?}；已取得结果：{}",pending.attempted_tool_ids,serde_json::to_string(&pending.tool_results).unwrap_or_else(|error|format!("结果编码失败：{error}"))));
+    data.pending_note = report.pending_turn.map(super::progress::pending_note);
     if let Some(run) = &mut data.run {
         run.status = status;
         run.error = error;
@@ -118,6 +144,7 @@ fn finish(state: &State, report: RunReport) {
     data.active.take();
     data.calls.clear();
     data.approvals.clear();
+    super::turns::settle(&mut data);
     drop(data);
     state.notify();
 }

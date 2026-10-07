@@ -6,7 +6,7 @@
   import type { LinkKind } from "../../../shared/api";
   import { insertLink, selectedLink, removeLink, linkSelectionKey } from "./link-editing";
   import { rankFileCandidates, type LinkSuggestion } from "./suggestions/candidates";
-  import { createCompositionGuard, isCompositionKey } from "../composition";
+  import { createCompositionGuard, isCompositionKey } from "../../../shared/composition";
   import { dialogEnter, dialogExit, finishOnReducedMotion } from "../../transition-lifecycle";
 
   let { view, targets, onClose }: { view: EditorView; targets: string[]; onClose: () => void } =

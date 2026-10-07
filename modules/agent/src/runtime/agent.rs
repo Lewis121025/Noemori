@@ -110,7 +110,10 @@ impl Agent {
     /// 输入不合法在启动前返回；启动后的失败保留在最终运行报告中。
     pub fn stream(&self, input: RunInput) -> Result<AgentStream, Error> {
         ModelRequest {
-            messages: input.messages.clone(),
+            messages: super::browser_history::for_model(
+                &input.messages,
+                self.model.capabilities().vision,
+            ),
             tools: self.tools.definitions(),
             options: input.generation.clone(),
         }

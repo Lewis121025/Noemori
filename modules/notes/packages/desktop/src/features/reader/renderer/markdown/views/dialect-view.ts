@@ -13,7 +13,7 @@ import {
   type NodeView,
   type NodeViewConstructor,
 } from "prosemirror-view";
-import { createCompositionGuard, isCompositionKey } from "../../editor/composition";
+import { createCompositionGuard, isCompositionKey } from "../../../shared/composition";
 import { applyMarkdownHistory } from "../../editor/history";
 import { focusDocument } from "../../editor/read-only";
 import { SourceNodeView } from "./source-node-view";

@@ -57,16 +57,19 @@ pub struct NativeAgentSession {
     inner: DesktopSession,
 }
 
+// 构造与每轮覆盖共用预算，避免界面允许的 URL 编码扩展在续轮入口被不同上限拒绝。
+const MAX_CONFIGURATION_BYTES: usize = 1024 * 1024;
+
 #[napi]
 impl NativeAgentSession {
-    /// 解析宿主提供的冻结配置；不运行模型或 shell，通知合并为一个待交付状态变化。
+    /// 解析宿主目录、权限与初始模型；不运行模型或 shell，通知合并为一个待交付事件。
     #[napi(constructor)]
     pub fn new(
         env: Env,
         configuration: String,
         #[napi(ts_arg_type = "() => void")] changed: JsFunction,
     ) -> Result<Self> {
-        if configuration.len() > 1024 * 1024 {
+        if configuration.len() > MAX_CONFIGURATION_BYTES {
             return Err(Error::from_reason("Agent 配置超过 1 MiB 预算"));
         }
         let config: Options = serde_json::from_str(&configuration).map_err(to_napi)?;
@@ -121,10 +124,59 @@ impl NativeAgentSession {
         serde_json::to_string(&self.inner.snapshot()).map_err(to_napi)
     }
 
+    /// 中断明确的运行并等待终态；旧运行标识、超时或关闭错误会拒绝 Promise。
+    #[napi]
+    pub async fn interrupt(&self, run_id: String) -> Result<()> {
+        self.inner.interrupt(&run_id).await.map_err(to_napi)
+    }
+
+    /// 返回仅可信主进程可持久化的闭合历史，不包含认证或可复用的进程句柄。
+    #[napi]
+    pub fn checkpoint(&self) -> Result<String> {
+        serde_json::to_string(&self.inner.checkpoint().map_err(to_napi)?).map_err(to_napi)
+    }
+
+    /// 仅向新会话恢复相同工作区的记录；非法历史、版本不符或已使用的会话均拒绝。
+    #[napi]
+    pub fn restore(&self, checkpoint: String) -> Result<()> {
+        if checkpoint.len() > 64 * 1024 * 1024 {
+            return Err(Error::from_reason("对话记录超过 64 MiB，无法恢复"));
+        }
+        self.inner
+            .restore(decode_checkpoint(&checkpoint)?)
+            .map_err(to_napi)
+    }
+
     /// 启动一轮任务，返回宿主运行标识；实际进度通过快照读取。
     #[napi]
-    pub fn start(&self, text: String) -> Result<String> {
-        self.inner.start(text).map_err(to_napi)
+    pub fn start(&self, text: String, context: Option<String>) -> Result<String> {
+        match context {
+            Some(context) => self.inner.start_with_context(text, context),
+            None => self.inner.start(text),
+        }
+        .map_err(to_napi)
+    }
+
+    /// 每轮使用主进程最新模型配置，后台资源保持会话归属。
+    /// configuration 为不超过 1 MiB 的模型 JSON，binding 为可信主进程计算的连接指纹。
+    /// text 为本轮任务，context 为可选文章事实；返回运行标识，不自动重放旧任务。
+    /// 配置、历史或上下文无效，或会话关闭、正在运行时返回错误，不修改已有运行。
+    #[napi]
+    pub fn start_configured(
+        &self,
+        configuration: String,
+        binding: String,
+        text: String,
+        context: Option<String>,
+    ) -> Result<String> {
+        if configuration.len() > MAX_CONFIGURATION_BYTES {
+            return Err(Error::from_reason("模型配置超过 1 MiB"));
+        }
+        let settings: model::Settings = serde_json::from_str(&configuration).map_err(to_napi)?;
+        let model = settings.build().map_err(Error::from_reason)?;
+        self.inner
+            .start_configured(model, binding, text, context)
+            .map_err(to_napi)
     }
 
     /// 取消当前运行和审批，不自动重放命令。
@@ -247,4 +299,48 @@ impl NativeAgentSession {
 }
 fn to_napi(error: impl std::fmt::Display) -> Error {
     Error::from_reason(error.to_string())
+}
+
+// 解析器会在枚举错误中回显输入；检查点含供应商私有载荷，只交付故障阶段。
+fn decode_checkpoint(value: &str) -> Result<noemori_agent::host::HostCheckpoint> {
+    serde_json::from_str(value).map_err(|_| Error::from_reason("对话检查点格式无效"))
+}
+
+/// 在闭合轮次之后派生历史并交付安全投影；不启动资源，原检查点保持不变。
+/// checkpoint 为宿主私有 JSON，turn_id 省略时复制当前完整检查点；校验失败拒绝 Promise。
+#[napi]
+pub async fn branch_checkpoint(checkpoint: String, turn_id: Option<String>) -> Result<String> {
+    if checkpoint.len() > 64 * 1024 * 1024 {
+        return Err(Error::from_reason("对话记录超过 64 MiB，无法分叉"));
+    }
+    spawn_blocking(move || {
+        let original = decode_checkpoint(&checkpoint)?;
+        let branch = original.branch_after(turn_id.as_deref()).map_err(to_napi)?;
+        let view = branch.snapshot().map_err(to_napi)?;
+        serde_json::to_string(&serde_json::json!({
+            "checkpoint": serde_json::to_string(&branch).map_err(to_napi)?, "snapshot": view,
+        }))
+        .map_err(to_napi)
+    })
+    .await
+    .map_err(to_napi)?
+}
+
+/// 用户重新打开迁移后的笔记库时重绑静态历史；失败拒绝，不启动模型或工具。
+#[napi]
+pub async fn relocate_checkpoint(checkpoint: String, workspace: String) -> Result<String> {
+    if checkpoint.len() > 64 * 1024 * 1024 {
+        return Err(Error::from_reason("对话记录超过 64 MiB"));
+    }
+    spawn_blocking(move || {
+        let saved = decode_checkpoint(&checkpoint)?;
+        serde_json::to_string(
+            &saved
+                .relocate(std::path::Path::new(&workspace))
+                .map_err(to_napi)?,
+        )
+        .map_err(to_napi)
+    })
+    .await
+    .map_err(to_napi)?
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import type { VaultEntry } from "../../shared/api";
-  import { createCompositionGuard } from "../editor/composition";
+  import { createCompositionGuard } from "../../shared/composition";
   import { entryNameError, parentDirectory } from "./file-tree";
 
   let {

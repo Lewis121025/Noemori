@@ -9,7 +9,7 @@
     type EntryBatchResult,
   } from "../../shared/entry-batch";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
-  import { createCompositionGuard } from "../editor/composition";
+  import { createCompositionGuard } from "../../shared/composition";
   import { moveDestinations } from "./move-destinations";
   import { parentDirectory } from "./file-tree";
   import MoveDestinationPicker from "./MoveDestinationPicker.svelte";

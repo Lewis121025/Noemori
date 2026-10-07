@@ -8,7 +8,7 @@
     type FileTreeRow,
   } from "./file-tree";
   import { fileTreeWindow } from "./file-tree-window";
-  import { isCompositionKey } from "../editor/composition";
+  import { isCompositionKey } from "../../shared/composition";
 
   let {
     workspace,

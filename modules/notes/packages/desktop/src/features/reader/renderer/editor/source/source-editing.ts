@@ -1,7 +1,7 @@
 import { canUseEditingTools } from "../read-only";
 import { NodeSelection, Plugin, PluginKey, type Command } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
-import { isCompositionKey } from "../composition";
+import { isCompositionKey } from "../../../shared/composition";
 
 /** 源码编辑属于当前节点选区的临时状态，不写入文档或撤销历史。 */
 export const sourceEditingKey = new PluginKey<boolean>("sourceEditing");

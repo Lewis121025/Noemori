@@ -2,7 +2,7 @@
 import type { EditorView } from "prosemirror-view";
 import { Selection } from "prosemirror-state";
 import { sourceEditingKey } from "../../editor/source/source-editing";
-import { createCompositionGuard, isCompositionKey } from "../../editor/composition";
+import { createCompositionGuard, isCompositionKey } from "../../../shared/composition";
 import { applyMarkdownHistory } from "../../editor/history";
 
 /** 源码节点保存原文的 schema 属性。 */

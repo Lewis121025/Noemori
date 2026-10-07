@@ -4,7 +4,7 @@
   import type { VaultEntry } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import type { FileMenuAction } from "./FileMenu.svelte";
-  import { isCompositionKey } from "../editor/composition";
+  import { isCompositionKey } from "../../shared/composition";
   import LibraryPreview from "./LibraryPreview.svelte";
 
   let {

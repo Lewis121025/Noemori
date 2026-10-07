@@ -26,6 +26,8 @@ pub(super) struct Pending {
 }
 pub(super) struct Data {
     pub(super) history: Vec<Message>,
+    pub(super) model_binding: Option<String>,
+    pub(super) turns: Vec<super::turns::TurnCheckpoint>,
     pub(super) messages: Vec<HostMessage>,
     pub(super) run: Option<HostRunView>,
     pub(super) active: Option<Active>,
@@ -55,7 +57,7 @@ impl Drop for CallGuard {
 /// 可见状态与取消边界独立于 AgentSession，观察任务不延长会话资源所有权。
 pub(super) struct State {
     id: String,
-    workspace: PathBuf,
+    pub(super) workspace: PathBuf,
     pub(super) data: Mutex<Data>,
     pub(super) closed: CancellationToken,
     changed: Arc<dyn Fn() + Send + Sync>,
@@ -72,6 +74,8 @@ impl State {
             workspace,
             data: Mutex::new(Data {
                 history: vec![Message::text(Role::System, instructions)],
+                model_binding: None,
+                turns: Vec::new(),
                 messages: Vec::new(),
                 run: None,
                 active: None,
@@ -102,22 +106,8 @@ impl State {
             revision: data.revision,
             closed: self.closed.is_cancelled(),
             run: data.run.clone(),
-            messages: data
-                .messages
-                .iter()
-                .map(|message| {
-                    let mut visible = message.clone();
-                    for part in &mut visible.content {
-                        if let ContentPart::ToolResult(result) = part
-                            && result.name == "browser"
-                        {
-                            // 窗口协议目前只展示工具 JSON；截图保留在模型历史，避免每个 token 都向窗口复制图片字节。
-                            result.media.clear();
-                        }
-                    }
-                    visible
-                })
-                .collect(),
+            turns: super::turns::visible_turns(&data),
+            messages: visible_messages(&data.messages),
             terminals: data
                 .terminals
                 .values()
@@ -146,6 +136,22 @@ impl State {
             data.approvals.clear();
         }
         self.notify();
+    }
+    /// 在同一把锁中核对运行身份并发出取消，迟到请求不能作用于下一轮。
+    pub(super) fn interrupt(&self, expected: &str) -> Result<Option<watch::Receiver<bool>>, Error> {
+        self.ensure_open()?;
+        let mut data = self.data.lock().expect("桌面会话锁被污染");
+        if !data.run.as_ref().is_some_and(|run| run.id == expected) {
+            return Err(Error::Config("运行已变化，请刷新后重试".into()));
+        }
+        let done = data.active.as_ref().map(|active| {
+            active.cancellation.cancel();
+            active.done.clone()
+        });
+        data.approvals.clear();
+        drop(data);
+        self.notify();
+        Ok(done)
     }
     pub(super) fn active_completion(&self) -> Option<watch::Receiver<bool>> {
         self.data
@@ -302,4 +308,20 @@ impl State {
         drop(data);
         self.notify();
     }
+}
+
+
+/// 模型私有历史保留图片数据，界面投影不在每次状态变化时复制工具截图。
+pub(super) fn visible_messages(messages: &[HostMessage]) -> Vec<HostMessage> {
+    messages.iter().map(|message| {
+        let mut visible = message.clone();
+        for part in &mut visible.content {
+            if let ContentPart::ToolResult(result) = part
+                && result.name == "browser"
+            {
+                result.media.clear();
+            }
+        }
+        visible
+    }).collect()
 }

@@ -6,7 +6,7 @@
    * Esc 走原生 cancel，关闭时不执行任何动作；组词期间的 Enter 不提交。
    */
   import { onMount, tick, type Snippet } from "svelte";
-  import { createCompositionGuard } from "../editor/composition";
+  import { createCompositionGuard } from "../../shared/composition";
   import { dialogEnter, dialogExit, finishOnReducedMotion } from "../transition-lifecycle";
 
   let {

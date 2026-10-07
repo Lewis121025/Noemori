@@ -1,5 +1,7 @@
 import type {
   AgentApproval,
+  AgentRun,
+  AgentTurn,
   AgentMessage,
   AgentSnapshot,
   AgentTerminal,
@@ -8,6 +10,7 @@ import type {
   MessagePart,
   ModelSettingsUpdate,
   Protocol,
+  PublicModelSettings,
   TerminalInfo,
   TerminalPage,
 } from "./api";
@@ -181,31 +184,62 @@ function approval(value: unknown): AgentApproval {
   throw new Error("审批类型无效");
 }
 
-/** 从原生 JSON 恢复完整可见投影；未知状态明确报错，不伪装为完成。 */
+function parseRun(value: unknown): AgentRun {
+  const item = record(value);
+  const status = text(item, "status");
+  if (
+    status !== "running" &&
+    status !== "completed" &&
+    status !== "cancelled" &&
+    status !== "timed_out" &&
+    status !== "budget_exhausted" &&
+    status !== "truncated" &&
+    status !== "filtered" &&
+    status !== "failed"
+  )
+    throw new Error("Agent 运行状态无效");
+  return {
+    id: text(item, "id"),
+    status,
+    error: nullableText(item, "error"),
+    model_calls: integer(item, "model_calls"),
+  };
+}
+
+/** 从原生 JSON 恢复完整可见投影；未知状态或不闭合的轮次边界明确报错。 */
 export function parseSnapshot(serialized: string): AgentSnapshot {
   const item = record(JSON.parse(serialized));
-  let run: AgentSnapshot["run"] = null;
-  if (item["run"] !== null) {
-    const value = record(item["run"]);
-    const status = text(value, "status");
-    if (
-      status !== "running" &&
-      status !== "completed" &&
-      status !== "cancelled" &&
-      status !== "timed_out" &&
-      status !== "budget_exhausted" &&
-      status !== "truncated" &&
-      status !== "filtered" &&
-      status !== "failed"
-    )
-      throw new Error("Agent 运行状态无效");
-    run = {
-      id: text(value, "id"),
-      status,
-      error: nullableText(value, "error"),
-      model_calls: integer(value, "model_calls"),
+  const run = item["run"] === null ? null : parseRun(item["run"]);
+  const messages = array(item["messages"]).map(message);
+  let end: number | null = null;
+  const identities = new Set<string>();
+  const turns = array(item["turns"]).map((value): AgentTurn => {
+    const turn = record(value);
+    const result = {
+      run: parseRun(turn["run"]),
+      message_start: integer(turn, "message_start"),
+      message_end: integer(turn, "message_end"),
     };
-  }
+    if (
+      identities.has(result.run.id) ||
+      result.message_start >= result.message_end ||
+      result.message_end > messages.length ||
+      messages[result.message_start]?.role !== "user" ||
+      (end !== null && end !== result.message_start)
+    )
+      throw new Error("Agent 轮次边界无效");
+    identities.add(result.run.id);
+    end = result.message_end;
+    return result;
+  });
+  const last = turns.at(-1);
+  if (
+    last &&
+    (last.message_end !== messages.length ||
+      last.run.id !== run?.id ||
+      last.run.status !== run.status)
+  )
+    throw new Error("Agent 末轮与当前运行不一致");
   return {
     browser: parseBrowser(item["browser"]),
     id: text(item, "id"),
@@ -213,7 +247,8 @@ export function parseSnapshot(serialized: string): AgentSnapshot {
     revision: integer(item, "revision"),
     closed: boolean(item, "closed"),
     run,
-    messages: array(item["messages"]).map(message),
+    turns,
+    messages,
     terminals: array(item["terminals"]).map(terminal),
     approvals: array(item["approvals"]).map(approval),
   };
@@ -309,24 +344,75 @@ export function parseTerminalPage(serialized: string): TerminalPage {
   };
 }
 
-/** 认证采用明确类型，空值仅表示保留已有材料。 */
+/**
+ * 验证 IPC 与解密边界共用的认证契约，不接受空凭据或不能传给原生 JSON 的文本。
+ * @param value 未信任的认证对象；保留已有认证的 null 意图由配置更新入口处理。
+ * @returns 仅包含该认证类型所需字段的独立对象。
+ * @throws 类型、请求头名称、凭据内容或长度无效时拒绝。
+ */
 export function parseAuthentication(value: unknown): Authentication {
   const item = record(value);
   const type = text(item, "type");
   if (type === "none") return { type };
-  if (type === "bearer") return { type, value: text(item, "value") };
-  if (type === "header") return { type, name: text(item, "name"), value: text(item, "value") };
+  if (type === "bearer") return { type, value: authenticationText(item, "value") };
+  if (type === "header") {
+    const name = text(item, "name");
+    validateAuthenticationHeader(name);
+    return { type, name, value: authenticationText(item, "value") };
+  }
   if (type === "aws")
     return {
       type,
-      region: text(item, "region"),
-      access_key: text(item, "access_key"),
-      secret_key: text(item, "secret_key"),
-      session_token: nullableText(item, "session_token"),
+      region: authenticationText(item, "region"),
+      access_key: authenticationText(item, "access_key"),
+      secret_key: authenticationText(item, "secret_key"),
+      session_token:
+        item["session_token"] === null ? null : authenticationText(item, "session_token"),
     };
   throw new Error("请求认证类型无效");
 }
-function protocol(value: string): Protocol {
+
+function authenticationText(item: Record<string, unknown>, key: string): string {
+  const value = text(item, key);
+  if (!value.trim() || value.length > 32768 || /[\p{Control}\p{Surrogate}]/u.test(value))
+    throw new Error("认证材料不能为空、超长或含非法字符");
+  return value;
+}
+
+function validateAuthenticationHeader(name: string): void {
+  if (name.length > 8192 || !/^[!#$%&'*+.^_`|~\w-]+$/u.test(name))
+    throw new Error("认证请求头名称无效");
+}
+
+/**
+ * 公开目录只验证认证描述，不触碰系统密钥；不相关字段必须为空以防掩盖类型混用。
+ * @param value 磁盘或主进程提供的公开认证描述。
+ * @returns 经过类型、状态和字段约束检查的描述。
+ * @throws 描述类型、字段或配置状态互相矛盾时拒绝。
+ */
+export function parseAuthenticationDescription(
+  value: unknown,
+): PublicModelSettings["authentication"] {
+  const item = record(value),
+    type = text(item, "type");
+  if (type !== "none" && type !== "bearer" && type !== "header" && type !== "aws")
+    throw new Error("认证描述类型无效");
+  const configured = boolean(item, "configured"),
+    name = text(item, "name"),
+    region = text(item, "region");
+  if (
+    configured !== (type !== "none") ||
+    (type !== "header" && name !== "") ||
+    (type !== "aws" && region !== "")
+  )
+    throw new Error("认证描述与类型不一致");
+  if (type === "header") validateAuthenticationHeader(name);
+  if (type === "aws") authenticationText(item, "region");
+  return { type, configured, name, region };
+}
+
+/** 校验协议标识并返回原生支持的协议；未知标识抛出配置错误，不按品牌推断。 */
+export function parseProtocol(value: string): Protocol {
   if (
     value === "openai-chat" ||
     value === "openai-responses" ||
@@ -350,7 +436,7 @@ export function parseModelSettings(value: unknown): ModelSettingsUpdate {
   if (!["http:", "https:"].includes(url.protocol) || url.username !== "" || url.password !== "")
     throw new Error("模型接口必须是无内嵌凭据的 HTTP(S) 地址");
   return {
-    protocol: protocol(text(item, "protocol")),
+    protocol: parseProtocol(text(item, "protocol")),
     model,
     endpoint,
     authentication:

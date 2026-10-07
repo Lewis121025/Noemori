@@ -8,7 +8,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 /// 桌面会话的可见消息；供应商原生签名与认证信息不通过此投影交付界面。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HostMessage {
     /// 内容来源。
     pub role: Role,
@@ -17,7 +17,7 @@ pub struct HostMessage {
 }
 
 /// 运行状态保留取消、预算和基础设施失败的区别。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostRunStatus {
     /// 正在生成或执行工具。
@@ -39,7 +39,7 @@ pub enum HostRunStatus {
 }
 
 /// 最近一次运行的只读状态，终端可在该运行结束后继续存活。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HostRunView {
     /// 宿主生成的运行标识。
     pub id: String,
@@ -119,6 +119,8 @@ pub struct HostSnapshot {
     pub closed: bool,
     /// 最近运行。
     pub run: Option<HostRunView>,
+    /// 支持稳定身份与闭合历史边界的轮次；早期记录没有可推断的边界。
+    pub turns: Vec<super::HostTurn>,
     /// 所有已观察到的可见消息，未提交结果只用于显示。
     pub messages: Vec<HostMessage>,
     /// 此会话拥有的终端。

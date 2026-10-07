@@ -1,9 +1,12 @@
 //! 桌面宿主的会话边界：闭合历史、独立终端读取、人工审批与可等待的资源关闭。
 mod approvals;
+mod checkpoint;
 mod contract;
+mod progress;
 mod run;
 mod state;
 mod terminal;
+mod turns;
 
 use crate::{
     AgentSession, Error, ExecutionContext,
@@ -18,10 +21,12 @@ use crate::{
         },
     },
 };
+pub use checkpoint::HostCheckpoint;
 pub use contract::{
     HostApproval, HostApprovalReply, HostApprovalRequest, HostMessage, HostRunStatus, HostRunView,
     HostSnapshot, HostTerminal,
 };
+pub use turns::HostTurn;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -84,6 +89,7 @@ impl DesktopSessionOptions {
 
 struct Inner {
     agent: Agent,
+    run_options: RunOptions,
     tools: ToolRegistry,
     terminal: TerminalTool,
     browser: Option<BrowserTool>,
@@ -158,9 +164,12 @@ impl DesktopSession {
         } else {
             None
         };
-        let agent = Agent::new(model, tools.clone(), options.run)?;
+        let run_options = options.run;
+        let model_tools = if model.capabilities().tools { tools.clone() } else { ToolRegistry::new() };
+        let agent = Agent::new(model, model_tools, run_options.clone())?;
         let inner = Arc::new(Inner {
             agent,
+            run_options,
             tools,
             terminal,
             browser,
@@ -231,11 +240,66 @@ impl DesktopSession {
             .map_err(|error| Error::ToolInfrastructure(error.to_string()))
     }
 
+    /// 中断指定运行并等待历史与终态提交，返回后才能立即继续下一轮。
+    /// # 参数
+    /// run_id 必须来自本会话最近运行；同一已结束运行的重复中断幂等完成。
+    /// # 返回
+    /// 运行已结算后返回，不关闭独立后台终端或删除对话历史。
+    /// # 错误
+    /// 会话关闭、运行身份已改变、等待超时或结束通知缺失时拒绝，不伪报停止成功。
+    pub async fn interrupt(&self, run_id: &str) -> Result<(), Error> {
+        let state = &self.0.0.state;
+        let completion = state.interrupt(run_id)?;
+        let Some(mut completion) = completion else {
+            return Ok(());
+        };
+        ExecutionContext::new(state.closed.child_token(), Duration::from_secs(30))?
+            .wait(async {
+                while !*completion.borrow() {
+                    completion.changed().await.map_err(|_| {
+                        Error::ToolInfrastructure("中断运行缺少结束通知".into())
+                    })?;
+                }
+                Ok(())
+            })
+            .await?
+    }
+
     /// 启动一轮用户任务；运行已占用时拒绝，历史验证失败时不修改会话。
     /// # 错误
     /// 会话关闭、输入为空或超过 128 KiB、运行忙碌、历史或生成参数不合法时返回错误。
     pub fn start(&self, text: String) -> Result<String, Error> {
-        self.0.0.start(text)
+        self.0.0.start(text, None, None)
+    }
+
+    /// 在本轮模型输入中附加宿主读取的上下文，可见历史仍只显示用户实际输入。
+    /// context 是明文事实与来源说明，不提升为系统指令；超过 64 KiB 时拒绝启动。
+    pub fn start_with_context(&self, text: String, context: String) -> Result<String, Error> {
+        if context.len() > 64 * 1024 {
+            return Err(Error::Config("文章上下文超过 64 KiB".into()));
+        }
+        self.0.0.start(text, Some(context), None)
+    }
+
+    /// 用本轮最新模型启动任务，资源与权限仍属于原会话；同一轮持有自己的模型快照。
+    /// binding 标识供应商配置与模型，变化时把私有续轮数据转为通用历史。
+    /// 返回运行标识；运行占用、上下文超限或新模型不支持历史内容时拒绝，不修改历史。
+    pub fn start_configured(
+        &self,
+        model: Arc<dyn Model>,
+        binding: String,
+        text: String,
+        context: Option<String>,
+    ) -> Result<String, Error> {
+        if binding.is_empty()
+            || binding.len() > 16 * 1024
+            || context
+                .as_ref()
+                .is_some_and(|value| value.len() > 64 * 1024)
+        {
+            return Err(Error::Config("模型归属或文章上下文无效".into()));
+        }
+        self.0.0.start(text, context, Some((model, binding)))
     }
 
     /// 取消当前运行和审批等待；已登记的后台终端仍由会话持有，直到显式停止或关闭。
@@ -358,7 +422,12 @@ impl DesktopSession {
 }
 
 impl Inner {
-    fn start(self: &Arc<Self>, text: String) -> Result<String, Error> {
+    fn start(
+        self: &Arc<Self>,
+        text: String,
+        context: Option<String>,
+        configured: Option<(Arc<dyn Model>, String)>,
+    ) -> Result<String, Error> {
         if text.trim().is_empty() || text.len() > 128 * 1024 {
             return Err(Error::Config("用户输入必须非空且不超过 128 KiB".into()));
         }
@@ -367,9 +436,23 @@ impl Inner {
         if data.active.is_some() {
             return Err(Error::Config("此会话已有运行，请先停止或等待完成".into()));
         }
+        let history_start = data.history.len();
+        let message_start = data.messages.len();
+        let pending_note_before = data.pending_note.clone();
         let mut history = data.history.clone();
+        let (agent, binding) = if let Some((model, binding)) = configured {
+            if data.model_binding.as_ref() != Some(&binding) {
+                run::portable_history(&mut history);
+            }
+            (self.configured_agent(model)?, Some(binding))
+        } else {
+            (self.agent.clone(), data.model_binding.clone())
+        };
         if let Some(note) = &data.pending_note {
             history.push(crate::Message::text(crate::Role::User, note));
+        }
+        if let Some(context) = context {
+            history.push(crate::Message::text(crate::Role::User, context));
         }
         history.push(crate::Message::text(crate::Role::User, &text));
         let cancellation = self.state.closed.child_token();
@@ -379,7 +462,7 @@ impl Inner {
             generation: self.generation.clone(),
             cancellation: cancellation.clone(),
         };
-        let stream = self.agent.stream(input)?;
+        let stream = agent.stream(input)?;
         let id = uuid::Uuid::new_v4().to_string();
         let (done, waiting) = watch::channel(false);
         data.active = Some(state::Active {
@@ -389,6 +472,7 @@ impl Inner {
             draft: None,
         });
         data.history = history;
+        data.model_binding = binding;
         data.pending_note = None;
         data.messages.push(HostMessage {
             role: crate::Role::User,
@@ -400,6 +484,18 @@ impl Inner {
             error: None,
             model_calls: 0,
         });
+        let turn = turns::TurnCheckpoint {
+            view: HostTurn {
+                run: data.run.clone().expect("已设置运行"),
+                message_start,
+                message_end: data.messages.len(),
+            },
+            history_start,
+            history_end: data.history.len(),
+            pending_note_before,
+            pending_note_after: None,
+        };
+        data.turns.push(turn);
         drop(data);
         self.state.notify();
         let guard = run::Guard {
@@ -411,6 +507,17 @@ impl Inner {
         self.runtime
             .spawn(self.state.tasks.track_future(run::drive(stream, guard)));
         Ok(id)
+    }
+
+    fn configured_agent(&self, model: Arc<dyn Model>) -> Result<Agent, Error> {
+        let mut tools = ToolRegistry::new();
+        if model.capabilities().tools {
+            tools.register(self.terminal.clone())?;
+            if let Some(browser) = &self.browser {
+                tools.register(browser.clone().with_vision(model.capabilities().vision))?;
+            }
+        }
+        Agent::new(model, tools, self.run_options.clone())
     }
 
     fn request_close(self: &Arc<Self>) -> CloseWait {

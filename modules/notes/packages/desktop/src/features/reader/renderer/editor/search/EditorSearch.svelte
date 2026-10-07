@@ -6,7 +6,7 @@
   import { SearchQuery, setSearchState } from "prosemirror-search";
   import { findNextMatch, findPreviousMatch, searchMatches } from "./search-navigation";
   import { replaceSearch } from "./search-replace";
-  import { createCompositionGuard, isCompositionKey } from "../composition";
+  import { createCompositionGuard, isCompositionKey } from "../../../shared/composition";
   import { focusDocument } from "../read-only";
 
   let {

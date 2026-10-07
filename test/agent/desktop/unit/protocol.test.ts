@@ -11,6 +11,7 @@ function snapshot(process: object): string {
     revision: 1,
     closed: false,
     run: null,
+    turns: [],
     messages: [],
     approvals: [],
     browser: { status: "idle", tabs: [], receipts: [], error: null },
