@@ -6,6 +6,7 @@ import {
   type ShapeLabel,
 } from "./recognition";
 import { fitArrow } from "./fitting-arrow";
+import { fitFreeCurve } from "./fitting-curves";
 import {
   circleContour,
   ellipseContour,
@@ -398,7 +399,7 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
  * @param points 连续笔迹的世界坐标；停笔静止观测可事先归并，但不能隐藏原始观测。
  * @param scale 屏幕缩放，用于最小尺寸和位置不确定性，不依赖画布位置或设备采样频率。
  * @param observations 归并前全部原始观测；最终逐点验证，防止把附加笔画误删成规则图形。
- * @returns 最简单的可信规范轮廓；自由曲线、退化、超界、过量回描或结构不明确返回 null。
+ * @returns 最简单的可信规范几何或保形平滑曲线；退化、超界、过量回描或结构不明确返回 null。
  */
 export function repairShape(
   points: readonly InkPoint[],
@@ -407,12 +408,36 @@ export function repairShape(
 ): ShapeFit | null {
   const frame = prepareFit(points, scale, observations);
   if (!frame) return null;
-  const selected = chooseCandidate(fitCandidates(frame), frame);
+  // 自由曲线只接续未成立的规则几何，不能用较多自由度夺走已验证的图形身份。
+  const selected =
+    chooseCandidate(fitCandidates(frame), frame) ??
+    (() => {
+      const curve = fitFreeCurve(
+        frame.sampled,
+        frame.source,
+        frame.observed,
+        frame.radius,
+        Math.min(0.001, 0.25 / (frame.size * scale)),
+      );
+      return curve ? { label: "curve" as const, points: curve } : null;
+    })();
   if (!selected) return null;
   const result = selected.points.map((p) => ({
     x: frame.cx + p.x * frame.size,
     y: frame.cy + p.y * frame.size,
     pressure: frame.pressure,
   }));
+  if (
+    selected.label === "curve" &&
+    distance(selected.points[0]!, selected.points.at(-1)!) > 1e-10
+  ) {
+    // 开放样条的固定端点复用原世界坐标，归一化往返不能引入浮点漂移。
+    result[0] = { x: points[0]!.x, y: points[0]!.y, pressure: frame.pressure };
+    result[result.length - 1] = {
+      x: points.at(-1)!.x,
+      y: points.at(-1)!.y,
+      pressure: frame.pressure,
+    };
+  }
   return result.every(validPoint) ? { label: selected.label, points: result } : null;
 }

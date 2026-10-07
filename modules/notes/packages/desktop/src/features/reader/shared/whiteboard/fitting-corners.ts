@@ -38,6 +38,32 @@ function turnEvidence(
 }
 
 /**
+ * 提取自由曲线中的集中尖角，持续曲率不作为分段依据；不要求固定角点数量。
+ * @param points 192个等弧长有限采样，闭合时不含重复末点。
+ * @param closed 是否按周期邻域评价接缝。
+ * @returns 按原顺序的尖角索引；平滑轮廓返回空数组，不抛异常。
+ */
+export function curveCornerIndices(points: readonly FitPoint[], closed: boolean): number[] {
+  const evidence = points.map((_, i) => turnEvidence(points, i, closed));
+  const candidates = evidence.flatMap((entry, i) =>
+    entry.localized && entry.turn >= 0.7 && (closed || (i >= 8 && i < points.length - 8))
+      ? [i]
+      : [],
+  );
+  const kept: number[] = [];
+  for (const index of candidates.sort((a, b) => evidence[b]!.turn - evidence[a]!.turn)) {
+    if (
+      !kept.some((other) => {
+        const span = Math.abs(index - other);
+        return (closed ? Math.min(span, points.length - span) : span) <= 10;
+      })
+    )
+      kept.push(index);
+  }
+  return kept.sort((a, b) => a - b);
+}
+
+/**
  * 提取任意边数轮廓的稳定角点，不使用图形类别、模型分数或屏幕像素位置。
  * @param points 等弧长的有限归一化点；调用方限制为192点。
  * @param closed 是否具有可补齐的小闭合缺口。

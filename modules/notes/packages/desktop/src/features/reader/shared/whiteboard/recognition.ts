@@ -1,6 +1,6 @@
 import { BOARD_COORDINATE_LIMIT, type InkPoint } from "./model";
 
-/** 由轨迹结构与几何拟合产生的类型；任意边数的边段不受训练类别数量限制。 */
+/** 由轨迹结构与几何拟合产生的类型；规则图形和保形曲线共用返回契约。 */
 const SHAPE_LABELS = [
   "line",
   "circle",
@@ -12,6 +12,7 @@ const SHAPE_LABELS = [
   "star",
   "polygon",
   "polyline",
+  "curve",
 ] as const;
 /** 规范几何的类别，无法修复时使用null，不伪造未知类或置信分数。 */
 export type ShapeLabel = (typeof SHAPE_LABELS)[number];
