@@ -51,28 +51,28 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it("左右范围选择和修饰键焦点移动遵循网格次序，纵向按实际列数移动", async () => {
-  expect(target.querySelector('[role="grid"]')?.getAttribute("aria-colcount")).toBe("3");
+it("层级列表按可见行连续选择，修饰键只移动焦点", async () => {
+  expect(target.querySelector('[role="treegrid"]')?.getAttribute("aria-colcount")).toBe("1");
   card("a.md").click();
-  await press("a.md", "ArrowRight", { shiftKey: true });
+  await press("a.md", "ArrowDown", { shiftKey: true });
   expect(workspace.fileTree.state.selected).toEqual(["a.md", "b.md"]);
   expect(document.activeElement).toBe(card("b.md"));
-  await press("b.md", "ArrowLeft", { ctrlKey: true });
+  await press("b.md", "ArrowUp", { ctrlKey: true });
   expect(workspace.fileTree.state.selected).toEqual(["a.md", "b.md"]);
   expect(document.activeElement).toBe(card("a.md"));
   await press("a.md", "ArrowDown");
-  expect(document.activeElement).toBe(card("d.md"));
-  expect(workspace.fileTree.state.selected).toEqual(["d.md"]);
+  expect(document.activeElement).toBe(card("b.md"));
+  expect(workspace.fileTree.state.selected).toEqual(["b.md"]);
 });
 
-it("单击文件夹只选择，双击进入；路径搜索清空后恢复当前文件夹", async () => {
+it("单击文件夹展开，搜索清空后恢复原选择与目录层级", async () => {
   card("docs").click();
   flushSync();
-  expect(card("docs/nested.md")).toBeNull();
+  expect(card("docs/nested.md")).not.toBeNull();
   card("docs").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
   await settle();
   expect(card("docs/nested.md")).not.toBeNull();
-  expect(card("a.md")).toBeNull();
+  expect(card("a.md")).not.toBeNull();
   expect(workspace.fileTree.state.browse?.directory).toBe("docs");
   const search = target.querySelector<HTMLInputElement>('[role="searchbox"]')!;
   search.value = "a.md";
@@ -81,7 +81,7 @@ it("单击文件夹只选择，双击进入；路径搜索清空后恢复当前�
   expect(card("a.md")).not.toBeNull();
   search.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await settle();
-  expect(card("a.md")).toBeNull();
+  expect(card("a.md")).not.toBeNull();
   expect(card("docs/nested.md")).not.toBeNull();
 });
 
@@ -93,10 +93,13 @@ it("同一库恢复浏览现场时，目录、查询与分类统一来自会话�
   expect(card("docs/nested.md")).toBeNull();
   workspace.fileTree.update({ browse: { directory: "docs", query: "", section: "bookmarks" } });
   await settle();
-  expect(target.querySelector('[role="grid"]')).toBeNull();
+  expect(target.querySelector('[role="treegrid"]')).toBeNull();
   expect(target.querySelector(".bookmarks")).not.toBeNull();
-  workspace.fileTree.update({ browse: { directory: "docs", query: "", section: "files" } });
+  workspace.fileTree.update({
+    expanded: ["docs"],
+    browse: { directory: "docs", query: "", section: "files" },
+  });
   await settle();
   expect(card("docs/nested.md")).not.toBeNull();
-  expect(card("a.md")).toBeNull();
+  expect(card("a.md")).not.toBeNull();
 });

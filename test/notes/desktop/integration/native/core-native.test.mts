@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "vitest";
@@ -326,7 +326,7 @@ test("native runtime preserves directory entries, current paths and safe file op
   assert.deepEqual(await core.call("entryRename", "项目", "资料"), { warning: null });
   assert.deepEqual(await core.call("vaultEntries"), [
     { path: "资料", kind: "directory" },
-    { path: "资料/笔记.md", kind: "file" },
+    { path: "资料/笔记.md", kind: "file", modifiedAt: Number((await stat(join(root, "资料/笔记.md"), { bigint: true })).mtimeNs / 1_000_000n) },
   ]);
   assert.equal(
     (await core.call("readerSessionLoad")).documents.panes[0]?.currentPath,
@@ -509,7 +509,7 @@ test("queued writes stay in their original vault and shutdown drains the final s
   const { core: restored } = start();
   assert.deepEqual(await restored.call("vaultRestore"), {
     root: second,
-    entries: [{ path: "a.md", kind: "file" }],
+    entries: [{ path: "a.md", kind: "file", modifiedAt: Number((await stat(join(second, "a.md"), { bigint: true })).mtimeNs / 1_000_000n) }],
     documents: { panes: [{ currentPath: "a.md", history: { back: [], forward: [] } }], active: 0, split: false },
     viewModes: {},
     recentFiles: [],

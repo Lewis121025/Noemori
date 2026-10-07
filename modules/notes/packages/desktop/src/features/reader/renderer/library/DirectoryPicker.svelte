@@ -9,10 +9,16 @@
     initialPath,
     disabled,
     onSelect,
+    confirmLabel = "移动",
+    focusOnMount = true,
   }: {
     destinations: readonly MoveDestination[];
     initialPath: string;
     disabled: boolean;
+    /** 创建和移动共用目录选择，提交动作由外层表单决定。 */
+    confirmLabel?: string;
+    /** 新建表单先编辑名称，移动表单直接搜索目标目录。 */
+    focusOnMount?: boolean;
     /** 查询无匹配或目标不可用时返回 null，使外层表单无法误提交旧目标。 */
     onSelect: (path: string | null) => void;
   } = $props();
@@ -37,7 +43,9 @@
   );
   const index = $derived(choice === null ? -1 : matches.indexOf(choice));
 
-  onMount(() => input.focus());
+  onMount(() => {
+    if (focusOnMount) input.focus();
+  });
 
   $effect(() => {
     onSelect(choice?.reason === null ? choice.path : null);
@@ -117,7 +125,8 @@
       目标文件夹已不可用，请重新选择。
     </p>{/if}
   {#if !disabled}<p id={`${id}-hint`} class="hint">
-      <kbd>↑↓</kbd> 选择 <kbd>Enter</kbd> 移动 <kbd>Esc</kbd> 取消
+      <kbd>↑↓</kbd> 选择 <kbd>Enter</kbd>
+      {confirmLabel} <kbd>Esc</kbd> 取消
     </p>{/if}
 </div>
 

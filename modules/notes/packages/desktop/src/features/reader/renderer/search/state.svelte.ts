@@ -77,6 +77,7 @@ export class ReaderSearch {
       "searchQuery" | "searchCancel" | "searchMatches" | "searchModelInstall" | "searchModelCancel"
     >,
     private readonly report: (message: string) => void,
+    private readonly parse: (text: string) => SearchRequest = parseSearchRequest,
   ) {}
 
   /** 解析失败也保留结果模式，避免错误被文件树遮蔽。 */
@@ -185,7 +186,7 @@ export class ReaderSearch {
     this.text = text;
     this.failure = null;
     try {
-      const query = parseSearchRequest(text);
+      const query = this.parse(text);
       if (isEmptyQuery(query)) return false;
       const id = crypto.randomUUID();
       this.requestId = id;

@@ -277,3 +277,25 @@ fn file_system_folder_and_legacy_boards_destination_survive_normalization() {
     assert_eq!(normalized["reader"]["fileTree"]["browse"]["directory"], "docs");
     assert_eq!(normalized["reader"]["documents"]["panes"][0]["currentPath"], "docs/note.md");
 }
+
+#[test]
+fn file_presentation_survives_restart_and_path_remap() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    let presentation = json!({"layout": "list", "sort": "modified", "preview": true});
+    store
+        .patch_reader(&json!({"fileTree": {
+            "expanded": [], "selected": ["old/a.md"], "focused": "old/a.md", "scroll": null,
+            "presentation": presentation,
+            "browse": {"query": "", "section": "files", "directory": "old"}
+        }}))
+        .unwrap();
+    store.remap("old", Some("new")).unwrap();
+    let restored = SessionStore::new(data.path()).load();
+    assert_eq!(restored["reader"]["fileTree"]["presentation"], presentation);
+    assert_eq!(restored["reader"]["fileTree"]["browse"]["directory"], "new");
+    let invalid = normalize(&json!({"reader": {"fileTree": {"presentation": {
+        "layout": "cards", "sort": "name", "preview": true
+    }}}}));
+    assert!(invalid["reader"]["fileTree"].get("presentation").is_none());
+}

@@ -10,6 +10,10 @@
   import { markdownLinkCompletion } from "../editor/links/suggestions/codemirror";
   import type { ReaderPane } from "./pane.svelte";
   import type { ReaderWorkspaceController } from "./state.svelte";
+  import type {
+    ArticleAgentActions,
+    ArticleEditorActions,
+  } from "../../shared/article-conversations";
 
   let {
     workspace,
@@ -17,6 +21,7 @@
     mediaIo,
     registerToolbar,
     onShowTools,
+    articleAgent,
   }: {
     workspace: ReaderWorkspaceController;
     /** 本栏文档面；文档、导航与链接动作都归属这一栏。 */
@@ -25,6 +30,7 @@
     /** 当前表面的工具由窗口顶栏呈现，卸载时撤下。 */
     registerToolbar: (toolbar: Snippet | null) => void;
     onShowTools: () => void;
+    articleAgent?: ArticleAgentActions;
   } = $props();
   const doc = $derived(pane.document);
   const navigation = $derived(pane.navigation);
@@ -37,6 +43,35 @@
     ensureBlockId: (path, block) => pane.ensureBlockId(path, block),
   });
   let editorTools = $state<Snippet | null>(null);
+  const articleActions = $derived.by((): ArticleEditorActions | undefined => {
+    const bridge = articleAgent,
+      root = workspace.vaultRoot,
+      path = doc.path;
+    if (!bridge || !root || !path) return undefined;
+    const preview: ArticleEditorActions["preview"] = async (id) => {
+      await bridge.api.attachVault(root);
+      return bridge.api.snapshot(id);
+    };
+    return {
+      create: async (title) => {
+        if (
+          !(await pane.flushBeforeLeave()) ||
+          root !== workspace.vaultRoot ||
+          path !== pane.document.path
+        )
+          throw new Error("文章尚未保存或已经切换");
+        return bridge.api.createArticle({ root, path, title });
+      },
+      discard: (id) => bridge.api.remove(id),
+      preview,
+      open: async (id) => {
+        if (!(await pane.flushBeforeLeave())) throw new Error("请先处理文章保存问题");
+        const item = await preview(id);
+        await bridge.open(id, { root: item.workspace, path: item.article?.path ?? path });
+      },
+      report: (message) => workspace.report(message),
+    };
+  });
   function registerEditorTools(tools: Snippet | null): void {
     editorTools = tools;
   }
@@ -61,6 +96,7 @@
         />
       {:else if doc.content?.kind === "markdown" && pane.viewMode !== "source"}
         <DocumentEditor
+          {...articleActions ? { articleActions } : {}}
           {onShowTools}
           registerToolbar={registerEditorTools}
           epoch={doc.epoch}

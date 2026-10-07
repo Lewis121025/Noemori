@@ -345,6 +345,8 @@ export type RenameOutcome = { warning: string | null };
 export type VaultEntry = {
   path: string;
   kind: "file" | "directory";
+  /** 索引记录的 Unix 毫秒时间；目录和未落盘草稿缺省，不推测修改时间。 */
+  modifiedAt?: number;
   /** 仅用于被目录变化阻挡的文件草稿，须与真实磁盘目录分开呈现。 */
   recoveryOnly?: true;
 };

@@ -2,7 +2,7 @@
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { fromStore, writable } from "svelte/store";
 import { afterEach, expect, it, vi } from "vitest";
-import FileGridViewport from "@reader/renderer/library/FileGridViewport.svelte";
+import FileTreeViewport from "@reader/renderer/library/FileTreeViewport.svelte";
 import type { FileTreeRow } from "@reader/renderer/library/file-tree";
 import type { FileTreePosition } from "@reader/shared/file-browser";
 
@@ -43,7 +43,7 @@ function start(count: number) {
   const target = document.createElement("div");
   document.body.append(target);
   const empty = vi.fn();
-  const view = mount(FileGridViewport, {
+  const view = mount(FileTreeViewport, {
     target,
     props: {
       get rows() {
@@ -52,6 +52,8 @@ function start(count: number) {
       focused: null,
       dragging: null,
       selected: new Set(),
+      expanded: new Set(),
+      excerpts: new Set(),
       get position() {
         return anchor.current;
       },
@@ -63,7 +65,7 @@ function start(count: number) {
     },
   });
   flushSync();
-  const grid = target.querySelector<HTMLDivElement>('[role="grid"]')!;
+  const grid = target.querySelector<HTMLDivElement>('[role="treegrid"]')!;
   return {
     target,
     view,
@@ -85,20 +87,20 @@ function start(count: number) {
   };
 }
 
-it("万项网格只挂载可见行；远处焦点挂载后完整可见，列数变化保持文件锚点", async () => {
+it("万项层级列表只挂载可见行，远处焦点挂载后可见且缩放保持锚点", async () => {
   const test = start(10000);
   try {
     expect(test.target.querySelectorAll("button").length).toBeLessThan(100);
     await test.view.focusPath("5000.md");
     flushSync();
     expect(document.activeElement?.getAttribute("data-path")).toBe("5000.md");
-    const top = Math.floor(5000 / 3) * 148;
+    const top = 5000 * 28;
     expect(test.grid.scrollTop).toBeLessThanOrEqual(top);
-    expect(test.grid.scrollTop + 296).toBeGreaterThanOrEqual(top + 148);
+    expect(test.grid.scrollTop + 296).toBeGreaterThanOrEqual(top + 28);
     const path = test.anchor.current!.path;
     test.resize(604);
-    expect(test.grid.getAttribute("aria-colcount")).toBe("4");
-    expect(test.grid.scrollTop).toBe(Math.floor(Number.parseInt(path) / 4) * 148);
+    expect(test.grid.getAttribute("aria-colcount")).toBe("1");
+    expect(test.grid.scrollTop).toBe(Number.parseInt(path) * 28 + test.anchor.current!.offset);
   } finally {
     await test.close();
   }
@@ -136,4 +138,15 @@ it("卸载取消等待中的焦点交接，浏览器夹取滚动时及时记录�
   }
   await expect(focusing).resolves.toBeUndefined();
   expect(document.activeElement).toBe(document.body);
+});
+
+it("行末的小数像素锚点原样恢复，不能向上取整造成触控板回跳", async () => {
+  const test = start(40);
+  try {
+    test.position.set({ path: "0.md", offset: 27.5 });
+    flushSync();
+    expect(test.grid.scrollTop).toBe(27.5);
+  } finally {
+    await test.close();
+  }
 });

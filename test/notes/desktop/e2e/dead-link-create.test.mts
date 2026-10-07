@@ -77,7 +77,7 @@ test("死链创建：#标题锚点随创建写入新笔记并直接定位", asyn
     await expect
       .poll(() =>
         page
-          .getByRole("grid")
+          .getByRole("treegrid")
           .getByRole("button", { name: "新笔记.md", exact: true })
           .count(),
       )

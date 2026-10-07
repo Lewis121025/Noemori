@@ -49,6 +49,8 @@ export type TextEditorApi = ContentEditorApi &
  * 重复打开查找时保留已有查询词，便于连续阅读与编辑。
  */
 export type MarkdownEditorApi = TextEditorApi & {
+  /** 返回所属文章的对话入口；入口不存在时返回 false，不修改正文。 */
+  jumpToConversation?: (id: string) => boolean;
   /** 从当前文档选区打开附件选择器，取消不改动正文。 */
   openAttachments: () => void;
   /** 在当前正文位置创建独立白板并插入引用，复用附件异步插入与保存门禁。 */

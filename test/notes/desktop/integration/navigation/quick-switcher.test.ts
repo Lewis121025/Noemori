@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@app/App.svelte";
 import type { AppApi } from "../../../../../modules/notes/packages/desktop/src/shared/api";
@@ -164,18 +164,27 @@ describe("快速切换器", () => {
     );
   });
 
-  it("Shift+Enter 按输入新建笔记，无命中时 Enter 同样新建", async () => {
+  it("快速新建先确认名称和目录，取消无写入，确认后才创建", async () => {
     await start();
     shortcut("o");
     type("beta");
     press("Enter", { shiftKey: true });
-    await vi.waitFor(() =>
-      expect(api.entryCreate).toHaveBeenCalledWith("beta.md", "file", undefined),
-    );
+    await vi.waitFor(() => expect(target.querySelector(".create-dialog[open]")).not.toBeNull());
+    expect(api.entryCreate).not.toHaveBeenCalled();
+    const dialog = target.querySelector<HTMLDialogElement>(".create-dialog")!;
+    expect(dialog.querySelector<HTMLInputElement>('input[aria-label="名称"]')!.value).toBe("beta");
+    [...dialog.querySelectorAll("button")].find((button) => button.textContent === "取消")!.click();
+    flushSync();
+    expect(api.entryCreate).not.toHaveBeenCalled();
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(picker()).toBeNull());
     shortcut("o");
     type("全新的笔记");
     expect(options()).toEqual(["＋ 新建笔记「全新的笔记」"]);
     press("Enter");
+    await vi.waitFor(() => expect(dialog.open).toBe(true));
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() =>
       expect(api.entryCreate).toHaveBeenLastCalledWith("全新的笔记.md", "file", undefined),
     );

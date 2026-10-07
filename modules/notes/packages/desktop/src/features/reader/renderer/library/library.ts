@@ -1,20 +1,6 @@
-import { toString } from "mdast-util-to-string";
-import { markdownProcessor } from "../../shared/markdown/markdown-processor";
 import { mimeFromPath } from "../preview/media";
 import type { VaultEntry } from "../../shared/api";
 import { isWhiteboardPath } from "../../shared/whiteboard/model";
-import { parentDirectory } from "./file-tree";
-
-/**
- * 所有新建入口共用目标规则，跨目录搜索后也不能因入口不同而写入不同文件夹。
- * @param entry 唯一选中的条目；多选或没有选择时为 null。
- * @param directory 当前浏览目录，空字符串表示库根。
- * @returns 选中文件夹本身、选中文件的父目录或当前浏览目录；不读写磁盘、不抛出异常。
- */
-export function libraryCreationDirectory(entry: VaultEntry | null, directory: string): string {
-  if (entry === null) return directory;
-  return entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
-}
 
 /**
  * 为直接落笔选取未占用的本地路径，不创建或覆盖文件。
@@ -65,20 +51,4 @@ export function libraryEntryKind(entry: VaultEntry): string {
   if (mime.startsWith("audio/")) return "音频";
   if (mime.startsWith("video/")) return "视频";
   return "文件";
-}
-
-/**
- * 资料预览只提取有限的正文，不加载嵌入资源或运行文档中的内容。
- * @param source 磁盘 Markdown；上限截断仅作用于展示，不写回文件。
- * @returns 最多八段文本摘要；解析错误交给预览界面显示。
- */
-export function libraryExcerpt(source: string): string[] {
-  return markdownProcessor
-    .parse(source.slice(0, 12000))
-    .children.filter(
-      (node) => node.type !== "yaml" && node.type !== "html" && node.type !== "definition",
-    )
-    .map((node) => toString(node).trim())
-    .filter(Boolean)
-    .slice(0, 8);
 }

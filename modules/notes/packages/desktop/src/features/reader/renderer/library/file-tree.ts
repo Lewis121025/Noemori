@@ -51,7 +51,7 @@ export function buildFileTree(entries: VaultEntry[]): FileTreeNode[] {
     if (parent !== "") ensure(parent, "directory").children.push(node);
     return node;
   }
-  for (const entry of entries) ensure(entry.path, entry.kind);
+  for (const entry of entries) Object.assign(ensure(entry.path, entry.kind), entry);
   const roots = [...nodes.values()].filter((node) => parentDirectory(node.path) === "");
   function sort(items: FileTreeNode[]): void {
     items.sort((a, b) =>

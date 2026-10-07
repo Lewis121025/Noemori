@@ -12,7 +12,7 @@
   import { createCompositionGuard } from "../../shared/composition";
   import { moveDestinations } from "./move-destinations";
   import { parentDirectory } from "./file-tree";
-  import MoveDestinationPicker from "./MoveDestinationPicker.svelte";
+  import DirectoryPicker from "./DirectoryPicker.svelte";
 
   let {
     workspace,
@@ -210,7 +210,7 @@
       </ul>
       {#if action === "move"}
         {#key opening}
-          <MoveDestinationPicker
+          <DirectoryPicker
             {destinations}
             initialPath={destination ?? parentDirectory(sources[0]?.path ?? "")}
             disabled={busy}

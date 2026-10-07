@@ -48,6 +48,9 @@
   import { linkSuggestPlugin, type SuggestKeymap } from "./links/suggestions/plugin";
   import { suggestInsertion } from "./links/suggestions/insert";
   import EditorFormatting from "./formatting/EditorFormatting.svelte";
+  import EditorConversation from "./agent/EditorConversation.svelte";
+  import { conversationInsertionPlugin, conversationRange } from "./agent/insertion";
+  import type { ArticleEditorActions } from "../../shared/article-conversations";
   import EditorLink from "./links/EditorLink.svelte";
   import EditorSearch from "./search/EditorSearch.svelte";
   import EditorAttachments from "./attachments/EditorAttachments.svelte";
@@ -69,6 +72,7 @@
   } from "../links/block-list";
 
   type Props = {
+    articleActions?: ArticleEditorActions;
     /** 文档加载代次；文本相同的重载只重新登记表面归属。 */
     epoch?: number;
     /** 阅读器注入的资源访问能力，编辑器不依赖宿主应用。 */
@@ -126,6 +130,7 @@
   };
 
   let {
+    articleActions,
     epoch = 0,
     mediaIo,
     importAttachment,
@@ -162,6 +167,7 @@
   });
   let publicApi = $state.raw<MarkdownEditorApi | null>(null);
   let showLink = $state(false);
+  let conversationEditor: EditorConversation | undefined = $state();
   let showWebPage = $state(false);
   // 退出尾帧仍存活时，再次打开必须创建新的输入会话，不能复用已取消的表单。
   let linkOpening = $state(0);
@@ -470,6 +476,7 @@
             // 补全弹层激活时优先接管导航键；未激活时完全透明。
             linkSuggestPlugin(suggestKeys),
             history(),
+            conversationInsertionPlugin(),
             attachmentEditing.plugin,
             search(),
             createSourceEditingPlugin(reload?.sourceEditing),
@@ -576,6 +583,12 @@
           jumpEditor(created, pos, "start");
           return true;
         },
+        jumpToConversation: (id) => {
+          const range = conversationRange(created.state.doc, id);
+          if (!range) return false;
+          jumpEditor(created, range.from, "center");
+          return true;
+        },
         visibleHeading: () => outlinePosition.visibleHeading(created),
         currentHeading: () => {
           const from = created.state.selection.from;
@@ -647,6 +660,13 @@
   }
 </script>
 
+{#if editor && editorState && articleActions}<EditorConversation
+    bind:this={conversationEditor}
+    view={editor}
+    state={editorState}
+    actions={articleActions}
+  />{/if}
+
 {#snippet editorToolbar()}
   {#if hasToolbar && editor !== null && editorState !== null}<EditorFormatting
       id={formattingId}
@@ -656,6 +676,7 @@
       onLink={openLinkEditor}
       onAttachment={openAttachments}
       onWebPage={openWebPage}
+      {...articleActions ? { onConversation: () => void conversationEditor?.open() } : {}}
     />{/if}
   {#if editor !== null && editorState !== null}
     {#if attachments}<EditorAttachments
@@ -708,6 +729,21 @@
 {/if}
 
 <style>
+  .surface :global(a[href^="noemori://conversation/"]) {
+    display: inline;
+    padding: 0.12em 0.45em;
+    border: 1px solid var(--border);
+    border-radius: 0.4em;
+    background: var(--sidebar);
+    color: var(--accent);
+    font: 0.82em/1.8 var(--font-ui, sans-serif);
+    text-decoration: none;
+    cursor: pointer;
+    box-decoration-break: clone;
+  }
+  .surface :global(a[href^="noemori://conversation/"]::before) {
+    content: "◌ ";
+  }
   .properties-popover {
     width: min(32rem, calc(100vw - 2rem));
     max-height: 70vh;

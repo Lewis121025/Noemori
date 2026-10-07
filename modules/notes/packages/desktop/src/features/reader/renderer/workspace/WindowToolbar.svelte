@@ -213,7 +213,8 @@
     padding: 0 4px;
   }
   .window-document-tools :global(.formatting-panel) {
-    min-width: 360px;
+    flex: 1;
+    min-width: 0;
   }
   .window-document-tools :global(.search-panel) {
     position: fixed;

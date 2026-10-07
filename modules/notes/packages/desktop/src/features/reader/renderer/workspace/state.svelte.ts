@@ -31,6 +31,7 @@ import {
 import { ReaderPane, type PaneHost, type ViewMode } from "./pane.svelte";
 import type { ReaderHistory } from "../navigation/history.svelte";
 import { ReaderSearch } from "../search/state.svelte";
+import { createBrowserMediaIo, type MediaIo } from "../preview/media";
 import { ReaderBookmarks } from "../bookmarks/state.svelte";
 import { ReaderFileTree } from "../library/state.svelte";
 import { createSessionWrite, type SessionWrite } from "../session-write";
@@ -150,6 +151,10 @@ export class ReaderWorkspaceController {
   }
   /** 全库搜索；结果属于当前库，切库必须丢弃。 */
   readonly search: ReaderSearch;
+  /** 文件管理采用字面正文检索，与高级搜索的查询、取消和分页各自独立。 */
+  readonly librarySearch: ReaderSearch;
+  /** 所有阅读与预览表面共用同一库内资源访问能力。 */
+  readonly mediaIo: MediaIo;
   /** 左栏面板独立于文档焦点，文件选择与浏览位置统一归属 fileTree。 */
   sidebarView = $state<SidebarView>("outline");
   private openingOther = false;
@@ -220,6 +225,10 @@ export class ReaderWorkspaceController {
     private readonly api: ReaderApi,
     /** 模式提交后由布局宿主串行保存偏好；恢复阶段不触发写入。 */
     private readonly onLayoutChange: () => void = () => {},
+    private readonly onEntriesChanged?: (
+      root: string,
+      changes: { from: string; to: string | null }[],
+    ) => Promise<void>,
   ) {
     this.documentSession = createSessionWrite({
       delayMs: 300,
@@ -227,7 +236,16 @@ export class ReaderWorkspaceController {
       ready: () => !this.composing && this.paneList.every((pane) => pane.idle),
       report: (error) => this.reportSessionFailure(READING_SESSION_ERROR, error),
     });
+    this.mediaIo = createBrowserMediaIo(api);
     this.search = new ReaderSearch(api, (message) => this.report(message));
+    this.librarySearch = new ReaderSearch(
+      api,
+      (message) => this.report(message),
+      (text) => ({
+        expr: { kind: "term", value: text.trim() },
+        limit: 100,
+      }),
+    );
     this.bookmarks = new ReaderBookmarks(api);
     this.fileTree = new ReaderFileTree(
       () => this.root,
@@ -554,6 +572,7 @@ export class ReaderWorkspaceController {
     const unsubscribe = this.api.subscribeVaultChanged((event) => {
       // 检索结果的版本立即失效，不能等输入法、写盘或正文重载的门禁释放。
       this.search.markStale();
+      this.librarySearch.markStale();
       if (event.status === "changed") {
         if (event.healthy) this.backgroundError = "";
         void this.onVaultChanged();
@@ -570,6 +589,7 @@ export class ReaderWorkspaceController {
     return () => {
       this.documentSession.dispose();
       this.search.reset();
+      this.librarySearch.reset();
       this.fileTree.reset();
       for (const pane of this.paneList) pane.dispose();
       unsubscribe();
@@ -585,6 +605,7 @@ export class ReaderWorkspaceController {
       if (restored === null) return;
       this.root = restored.root;
       this.search.reset();
+      this.librarySearch.reset();
       this.bookmarks.reset();
       this.publishEntries(restored.entries);
       // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
@@ -653,6 +674,7 @@ export class ReaderWorkspaceController {
           this.paneList = [new ReaderPane(0, this.api, this.host, false)];
           this.activeId = 0;
           this.search.reset();
+          this.librarySearch.reset();
           this.search.input = "";
           this.sidebarView = "outline";
           this.bookmarks.reset();
@@ -917,7 +939,7 @@ export class ReaderWorkspaceController {
     if (from === to) return Promise.resolve(null);
     return this.mutateEntries(
       "重命名或移动",
-      () => this.api.entryRename(from, to),
+      async () => this.syncArticleEntries(await this.api.entryRename(from, to), [{ from, to }]),
       (_pane, current) => {
         if (current === from) return to;
         return current?.startsWith(`${from}/`) ? `${to}${current.slice(from.length)}` : current;
@@ -935,7 +957,8 @@ export class ReaderWorkspaceController {
   trashEntry(path: string): Promise<string | null> {
     return this.mutateEntries(
       "移到废纸篓",
-      () => this.api.entryTrash(path),
+      async () =>
+        this.syncArticleEntries(await this.api.entryTrash(path), [{ from: path, to: null }]),
       (_pane, current) => (current === path || current?.startsWith(`${path}/`) ? null : current),
       false,
       (history) => {
@@ -976,6 +999,9 @@ export class ReaderWorkspaceController {
           ? this.api.entryBatch(request)
           : this.api.entryBatch(request, onProgress));
         awaitingReply = false;
+        result.warning = (
+          await this.syncArticleEntries({ warning: result.warning }, result.completed)
+        ).warning;
         if (result.completed.length === 0) {
           await this.refreshList();
           return true;
@@ -1137,6 +1163,23 @@ export class ReaderWorkspaceController {
         this.report(`${this.message}；文件列表刷新失败：${errorText(refreshError)}`);
       }
       return null;
+    }
+  }
+
+  private async syncArticleEntries(
+    result: RenameOutcome,
+    changes: { from: string; to: string | null }[],
+  ): Promise<RenameOutcome> {
+    if (!this.root || changes.length === 0 || !this.onEntriesChanged) return result;
+    try {
+      await this.onEntriesChanged(this.root, changes);
+      return result;
+    } catch (error) {
+      return {
+        warning: [result.warning, `文章对话归属未能更新：${errorText(error)}`]
+          .filter(Boolean)
+          .join("；"),
+      };
     }
   }
 

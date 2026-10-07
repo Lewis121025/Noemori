@@ -5,11 +5,13 @@
 
   let {
     active,
+    compact = false,
     disabled,
     canRun,
     onSelect,
   }: {
     active: SidebarEntry["id"];
+    compact?: boolean;
     disabled: boolean;
     canRun: (entry: SidebarEntry) => boolean;
     onSelect: (entry: SidebarEntry) => void;
@@ -29,7 +31,9 @@
   });
 
   function navigate(event: KeyboardEvent): void {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const previousKey = compact ? "ArrowUp" : "ArrowLeft",
+      nextKey = compact ? "ArrowDown" : "ArrowRight";
+    if (![previousKey, nextKey, "Home", "End"].includes(event.key)) return;
     const buttons = Array.from(
       scroller.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
     );
@@ -41,7 +45,7 @@
         ? 0
         : event.key === "End"
           ? buttons.length - 1
-          : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+          : (index + (event.key === nextKey ? 1 : -1) + buttons.length) % buttons.length;
     buttons[next]?.focus();
   }
 
@@ -60,12 +64,13 @@
   }
 </script>
 
-<div class="component-bar">
+<div class="component-bar" class:compact>
   <div
     class="component-scroll"
     use:selectionIndicator={active}
     role="toolbar"
     aria-label="组件栏"
+    aria-orientation={compact ? "vertical" : "horizontal"}
     tabindex="-1"
     bind:this={scroller}
     onkeydown={navigate}
@@ -111,6 +116,27 @@
     overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
+  .compact {
+    padding: 7px 5px;
+    border-bottom: 0;
+  }
+  .compact .component-scroll {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .compact .component-button {
+    flex: 0 0 40px;
+    min-height: 40px;
+    padding: 7px;
+  }
+  .compact .component-name {
+    display: none;
+  }
+  .compact svg {
+    width: 18px;
+    height: 18px;
+  }
   .component-scroll::-webkit-scrollbar {
     display: none;
   }
@@ -118,10 +144,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 36px;
-    width: 36px;
-    height: 36px;
-    padding: 7px;
+    flex: 1 0 54px;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 52px;
+    padding: 7px 4px;
     border: 0;
     border-radius: 7px;
     background: transparent;
@@ -150,12 +177,8 @@
     stroke-linejoin: round;
   }
   .component-name {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
+    font: inherit;
+    font-size: 0.68rem;
     white-space: nowrap;
   }
 </style>

@@ -1,6 +1,6 @@
 <script module lang="ts">
-  /** 文件操作共用一个对话框；所有写入通过工作区的保存门禁。 */
-  export type EntryDialogAction = "file" | "directory" | "rename" | "move" | "trash";
+  /** 已有条目的操作；创建由独立表单确认名称和目标目录。 */
+  export type EntryDialogAction = "rename" | "move" | "trash";
 </script>
 
 <script lang="ts">
@@ -9,13 +9,8 @@
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import { createCompositionGuard } from "../../shared/composition";
   import { moveDestinations } from "./move-destinations";
-  import MoveDestinationPicker from "./MoveDestinationPicker.svelte";
-  import {
-    entryNameError,
-    parentDirectory,
-    suggestEntryName,
-    type FileEntryChange,
-  } from "./file-tree";
+  import DirectoryPicker from "./DirectoryPicker.svelte";
+  import { entryNameError, parentDirectory, type FileEntryChange } from "./file-tree";
 
   let {
     workspace,
@@ -27,7 +22,7 @@
   } = $props();
   let dialog: HTMLDialogElement;
   let input: HTMLInputElement | undefined = $state();
-  let action = $state<EntryDialogAction>("file");
+  let action = $state<EntryDialogAction>("rename");
   let entry = $state<VaultEntry | null>(null);
   let name = $state("");
   let parent = $state("");
@@ -36,9 +31,6 @@
   let opening = $state(0);
   let moveParent = $state<string | null>(null);
   const composition = createCompositionGuard();
-  const filename = $derived(
-    action === "file" && !name.toLowerCase().endsWith(".md") ? `${name}.md` : name,
-  );
   const directory = $derived(
     action === "move"
       ? (moveParent ?? parent)
@@ -46,7 +38,7 @@
         ? parentDirectory(entry.path)
         : parent,
   );
-  const destination = $derived(directory === "" ? filename : `${directory}/${filename}`);
+  const destination = $derived(directory === "" ? name : `${directory}/${name}`);
   const unchanged = $derived(
     (action === "rename" || action === "move") && destination === entry?.path,
   );
@@ -63,22 +55,12 @@
   });
   const issue = $derived(validation ?? error);
   const title = $derived(
-    action === "file"
-      ? "新建笔记"
-      : action === "directory"
-        ? "新建文件夹"
-        : action === "rename"
-          ? "重命名"
-          : action === "move"
-            ? "移动到文件夹"
-            : "移到废纸篓",
+    action === "rename" ? "重命名" : action === "move" ? "移动到文件夹" : "移到废纸篓",
   );
-  const confirmLabel = $derived(
-    action === "file" || action === "directory" ? "创建" : action === "move" ? "移动" : title,
-  );
+  const confirmLabel = $derived(action === "move" ? "移动" : title);
   const destinations = $derived(entry === null ? [] : moveDestinations(workspace.entries, entry));
 
-  /** 打开条目操作；目标为库内条目，新建时 parentPath 决定所在文件夹。 */
+  /** 打开已有条目的操作；parentPath 决定移动选择器的初始目录。 */
   export async function open(
     next: typeof action,
     target: VaultEntry | null,
@@ -90,19 +72,13 @@
     moveParent = null;
     opening += 1;
     error = "";
-    name =
-      next === "file" || next === "directory"
-        ? suggestEntryName(workspace.entries, parentPath, next)
-        : (target?.path.split("/").at(-1) ?? "");
+    name = target?.path.split("/").at(-1) ?? "";
     dialog.showModal();
     await tick();
     if (next !== "move" && next !== "trash") {
       input?.focus();
       const dot = name.lastIndexOf(".");
-      input?.setSelectionRange(
-        0,
-        (next === "file" || target?.kind === "file") && dot > 0 ? dot : name.length,
-      );
+      input?.setSelectionRange(0, target?.kind === "file" && dot > 0 ? dot : name.length);
     }
   }
 
@@ -121,20 +97,13 @@
             : await workspace.trashEntry(requested.entry.path);
       else {
         result =
-          requested.action === "file" || requested.action === "directory"
-            ? await workspace.createEntry(requested.destination, requested.action)
-            : requested.entry === null
-              ? "没有选中的条目"
-              : await workspace.renameEntry(requested.entry.path, requested.destination);
+          requested.entry === null
+            ? "没有选中的条目"
+            : await workspace.renameEntry(requested.entry.path, requested.destination);
       }
       if (result === null) {
         dialog.close();
-        if (requested.action === "file" || requested.action === "directory")
-          onComplete({
-            action: "create",
-            entry: { path: requested.destination, kind: requested.action },
-          });
-        else if (requested.entry !== null)
+        if (requested.entry !== null)
           onComplete(
             requested.action === "trash"
               ? { action: "trash", entry: requested.entry }
@@ -177,7 +146,7 @@
     {:else if action === "move"}
       <p class="hint">{entry?.path}</p>
       {#key opening}
-        <MoveDestinationPicker
+        <DirectoryPicker
           {destinations}
           initialPath={parent}
           disabled={busy}
@@ -189,9 +158,7 @@
       {/key}
       {#if moveParent !== null}<p class="hint">移动后：{destination}</p>{/if}
     {:else}
-      <label for="entry-name"
-        >{action === "directory" || entry?.kind === "directory" ? "文件夹名称" : "文件名"}</label
-      >
+      <label for="entry-name">{entry?.kind === "directory" ? "文件夹名称" : "文件名"}</label>
       <input
         id="entry-name"
         class="reader-input"

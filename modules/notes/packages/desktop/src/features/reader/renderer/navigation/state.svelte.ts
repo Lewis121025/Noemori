@@ -35,6 +35,7 @@ type PositionRestore = {
 
 /** 等待编辑器挂载后兑现的定位；搜索范围必须属于当前内容版本。 */
 type PendingJump =
+  | { kind: "conversation"; path: string; id: string; onMissing: () => void }
   | { kind: "mention"; mention: MentionRecord; all: MentionRecord[] }
   | {
       kind: "search";
@@ -414,6 +415,16 @@ export class ReaderNavigation {
     await this.openJump(path, { kind: "heading", path, anchor, onMissing }, openFile);
   }
 
+  /** 打开文章并在表面挂载后定位对话入口；来源失效时调用可见反馈，不改正文。 */
+  async openConversation(
+    path: string,
+    id: string,
+    openFile: (path: string) => Promise<void>,
+    onMissing: () => void,
+  ): Promise<void> {
+    await this.openJump(path, { kind: "conversation", path, id, onMissing }, openFile);
+  }
+
   /** 挂载可以早于切换门禁释放；等文件切换与 DOM 解锁后，才允许定位交接焦点。 */
   private async openJump(
     path: string,
@@ -446,6 +457,14 @@ export class ReaderNavigation {
       return;
     }
     const pending = request.target;
+    if (pending.kind === "conversation") {
+      if (pending.path !== this.document.path) return;
+      const editor = this.markdown;
+      if (editor === null) return;
+      if (!editor.jumpToConversation?.(pending.id)) pending.onMissing();
+      this.pending = null;
+      return;
+    }
     if (pending.kind === "search") {
       if (pending.hit.path !== this.document.path) return;
       const editor = this.currentEditor();

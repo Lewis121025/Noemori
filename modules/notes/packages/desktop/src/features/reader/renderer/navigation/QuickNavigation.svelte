@@ -1,10 +1,9 @@
 <script lang="ts">
-  /** 侧栏外壳：组件栏、常驻新建入口、目录与全文搜索；文件浏览已迁至独立的文件系统页。 */
+  /** 侧栏外壳：组件栏、目录与全文搜索；文件浏览已迁至独立的文件系统页。 */
   import SearchResults from "../search/SearchResults.svelte";
   import type { ReaderCommand } from "../../shared/commands";
   import type { SearchHit, SearchMatch } from "../../shared/api";
   import Sidebar from "../library/Sidebar.svelte";
-  import FolderNavigation from "../library/FolderNavigation.svelte";
   import ComponentBar from "./ComponentBar.svelte";
   import type { SidebarEntry, SidebarPanel } from "./sidebar-components";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
@@ -19,17 +18,13 @@
     onCommand,
     canRun,
     onSearchHit,
-    header,
     documentTools,
     footer,
     panel,
     activeEntry,
     onSelectPanel,
     libraryShown = false,
-    onNavigateDirectory = () => {},
   }: {
-    /** 工作区与当前文档的操作统一在侧栏呈现。 */
-    header?: Snippet;
     /** 当前文档的目录（大纲）；无标题时由文档栏回退展示最近文件。 */
     documentTools?: Snippet;
     footer?: Snippet;
@@ -38,8 +33,6 @@
     onSelectPanel?: (panel: SidebarPanel) => void;
     /** 文件系统页隐藏文档专属内容，全文搜索仍可独立使用。 */
     libraryShown?: boolean;
-    /** 文件夹导航完成后让外壳处理窄屏抽屉与焦点，不改变文档会话。 */
-    onNavigateDirectory?: (path: string) => void;
     canRun: (command: ReaderCommand) => boolean;
     onCommand: (command: ReaderCommand) => void;
     onSearchHit: (hit: SearchHit, match?: SearchMatch) => void;
@@ -50,11 +43,6 @@
     /** 全文搜索的文件名命中直接打开；文件浏览与整理在文件系统页完成。 */
     onOpen: (path: string) => void;
   } = $props();
-  const sidebarCommands: ReadonlyArray<{ id: ReaderCommand; label: string }> = [
-    { id: "quick-switcher", label: "快速打开…" },
-    { id: "new-folder", label: "新建文件夹…" },
-    { id: "export-vault", label: "导出笔记库…" },
-  ];
   const selected = $derived(panel ?? workspace.sidebarView);
   function selectComponent(entry: SidebarEntry): void {
     if (entry.kind === "command") onCommand(entry.id);
@@ -64,11 +52,9 @@
       if (entry.id === "search") void focusSearch();
     }
   }
-  let workspaceMenu: HTMLDivElement;
   let fullSearchInput: HTMLInputElement;
   let searchResults: SearchResults | undefined = $state();
   const composition = createCompositionGuard();
-  const busy = $derived(workspace.switching || workspace.copying || workspace.isComposing);
   const active = $derived(workspace.document.path);
   const nameMatches = $derived(
     workspace.search.input.trim() === ""
@@ -92,34 +78,14 @@
   }
 </script>
 
-<Sidebar {width} {onWidth} {hidden}>
+<Sidebar {width} {onWidth} {hidden} compact={libraryShown && selected !== "search"}>
   <ComponentBar
+    compact={libraryShown && selected !== "search"}
     active={activeEntry ?? selected}
     disabled={workspace.isComposing}
     canRun={(entry) => entry.kind === "panel" || canRun(entry.id)}
     onSelect={selectComponent}
   />
-  {@render header?.()}
-  {#if libraryShown && selected !== "search"}
-    <FolderNavigation {workspace} onNavigate={onNavigateDirectory} />
-  {/if}
-  <div class="sidebar-actions" hidden={libraryShown}>
-    <button
-      class="reader-button"
-      type="button"
-      aria-label={workspace.vaultRoot === null ? "开始记录" : "新建笔记"}
-      title="新建笔记（⌘/Ctrl+N）"
-      onclick={() => onCommand("new-note")}
-      disabled={busy}>{workspace.vaultRoot === null ? "开始记录" : "＋ 新建笔记"}</button
-    >
-    <button
-      class="reader-button icon-button"
-      type="button"
-      aria-label="工作台更多"
-      title="工作台更多"
-      popovertarget="workspace-menu">⋯</button
-    >
-  </div>
   {#if documentTools}<div
       class="document-tools"
       data-motion="reveal"
@@ -190,38 +156,10 @@
       {:else}<p class="empty">输入关键词，搜索当前笔记库的文件名和正文。</p>{/if}
     </div>
   </nav>
-  <div
-    bind:this={workspaceMenu}
-    id="workspace-menu"
-    popover="auto"
-    class="reader-popover workspace-menu"
-  >
-    {#each sidebarCommands as command (command.id)}
-      <button
-        class="reader-button"
-        type="button"
-        popovertarget="workspace-menu"
-        popovertargetaction="hide"
-        disabled={busy || !canRun(command.id)}
-        aria-label={command.label}
-        onclick={() => {
-          workspaceMenu.hidePopover();
-          onCommand(command.id);
-        }}>{command.label}</button
-      >
-    {/each}
-  </div>
   {@render footer?.()}
 </Sidebar>
 
 <style>
-  .sidebar-actions {
-    display: flex;
-    gap: 0.25rem;
-    justify-content: space-between;
-    margin-bottom: 0.5rem;
-    padding: 0.75rem 0.75rem 0;
-  }
   .search-content {
     display: flex;
     flex-direction: column;
@@ -240,11 +178,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .workspace-menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
-  }
   .quick-navigation {
     display: flex;
     flex-direction: column;
@@ -261,8 +194,7 @@
     border-bottom: 1px solid var(--border);
   }
   .document-tools[hidden],
-  .quick-navigation[hidden],
-  .sidebar-actions[hidden] {
+  .quick-navigation[hidden] {
     display: none;
   }
   .empty {

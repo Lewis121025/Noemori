@@ -131,9 +131,9 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
     await settle(page);
     expect(await page.locator(".main").evaluate((element) => element.scrollTop)).toBe(top);
 
-    const more = page.getByRole("button", { name: "工作台更多", exact: true });
+    const more = page.getByRole("button", { name: "笔记操作", exact: true });
     await more.click();
-    const menu = page.locator("#workspace-menu");
+    const menu = page.locator(".topbar-document:not([hidden]) .note-menu");
     expect((await midpoint(menu)).count).toBeGreaterThan(0);
     await page.keyboard.press("Escape");
     expect(await menu.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe("none");

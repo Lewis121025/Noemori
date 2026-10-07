@@ -103,7 +103,7 @@ afterEach(async () => {
 
 describe("文件树多选与批量整理", () => {
   it("浏览器滚动事件尚未交付时，行焦点更新不回放旧锚点", () => {
-    const viewport = target.querySelector<HTMLElement>('[role="grid"]')!;
+    const viewport = target.querySelector<HTMLElement>('[role="treegrid"]')!;
     viewport.scrollTop = 48;
     row("c.md").focus();
     flushSync();
@@ -197,7 +197,7 @@ describe("文件树多选与批量整理", () => {
     entries = entries.filter((entry) => entry.path !== "c.md");
     await workspace.refreshList();
     await settle();
-    expect(document.activeElement).toBe(row("a.md"));
+    expect(document.activeElement).toBe(row("folder"));
   });
 
   it("目录清空后焦点回到搜索；编辑其他控件时目录变化不抢焦点", async () => {
@@ -240,7 +240,7 @@ describe("文件树多选与批量整理", () => {
     click("folder");
     row("folder").dispatchEvent(new MouseEvent("dblclick", { bubbles:true }));
     await settle();
-    expect(selected()).toEqual([]);
+    expect(selected()).toEqual(["folder"]);
     expect(row("folder/note.md")).not.toBeNull();
     const root = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "全部文件")!;
     root.click();
@@ -326,12 +326,12 @@ describe("文件树多选与批量整理", () => {
     flushSync();
     expect(workspace.fileTree.state.expanded).toEqual([]);
     expect(selected()).toEqual(["b.md", "c.md"]);
-    const tree = target.querySelector<HTMLUListElement>('[role="grid"]')!;
+    const tree = target.querySelector<HTMLUListElement>('[role="treegrid"]')!;
     const before = tree.scrollTop;
     entries = [...entries, { path: "0.md", kind: "file" }];
     await workspace.refreshList();
     flushSync();
-    expect(tree.scrollTop).toBeCloseTo(before + 148);
+    expect(tree.scrollTop).toBeCloseTo(before + 28);
     expect(workspace.fileTree.state.scroll).toEqual({ path: "b.md", offset: 7 });
     entries = entries.filter((entry) => entry.path !== "c.md");
     await workspace.refreshList();

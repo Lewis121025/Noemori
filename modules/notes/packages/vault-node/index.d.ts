@@ -31,6 +31,8 @@ export interface JsVaultEntry {
   kind: string
   /** 仅在草稿无法对应真实文件条目时设置。 */
   recoveryOnly?: boolean
+  /** 文件索引的 Unix 毫秒修改时间；目录或恢复草稿缺省。 */
+  modifiedAt?: number
 }
 /** 文件已经完成改名，索引或日志清理可能仍需重试。 */
 export interface JsRenameOutcome {

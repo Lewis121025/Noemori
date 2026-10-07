@@ -27,6 +27,8 @@ pub struct JsVaultEntry {
     pub kind: String,
     /// 仅在草稿无法对应真实文件条目时设置。
     pub recovery_only: Option<bool>,
+    /// 文件索引的 Unix 毫秒修改时间；目录或恢复草稿缺省。
+    pub modified_at: Option<f64>,
 }
 
 impl From<noemori_vault::VaultEntry> for JsVaultEntry {
@@ -39,6 +41,7 @@ impl From<noemori_vault::VaultEntry> for JsVaultEntry {
             }
             .into(),
             recovery_only: entry.recovery_only.then_some(true),
+            modified_at: entry.modified_at.map(|time| time as f64),
         }
     }
 }

@@ -108,7 +108,7 @@ async function startList(api: ReaderApi, libraryMode = false): Promise<void> {
 
 function searchBox(): HTMLInputElement {
   const input = target.querySelector<HTMLInputElement>(
-    isLibrary ? '[aria-label="筛选当前列表"]' : '[aria-label="搜索文件和全文"]',
+    isLibrary ? '[aria-label="搜索笔记库"]' : '[aria-label="搜索文件和全文"]',
   );
   if (input === null) throw new Error("搜索框不存在");
   return input;
@@ -420,12 +420,12 @@ describe("侧栏全文搜索", () => {
     expect(target.querySelectorAll(".occurrence").length).toBe(2);
   });
   it.each(["标签", "书签", "过滤"])(
-    "从%s返回时保留当前目录的网格滚动位置",
+    "从%s返回时保留层级目录的滚动位置",
     async (mode) => {
       await startList(createApi(), true);
       target.querySelector<HTMLButtonElement>('[data-path="notes"]')!.click();
       flushSync();
-      const tree = target.querySelector<HTMLDivElement>('[role="grid"]')!;
+      const tree = target.querySelector<HTMLDivElement>('[role="treegrid"]')!;
       // 锚点必须落在真实行内；jsdom 不会像浏览器一样夹住越界的 scrollTop。
       tree.scrollTop = 72;
       tree.dispatchEvent(new Event("scroll"));
@@ -445,7 +445,7 @@ describe("侧栏全文搜索", () => {
         target.querySelector<HTMLButtonElement>('[aria-label="清除搜索"]')!.click();
       }
       flushSync();
-      expect(target.querySelector<HTMLDivElement>('[role="grid"]')!.scrollTop).toBe(72);
+      expect(target.querySelector<HTMLDivElement>('[role="treegrid"]')!.scrollTop).toBe(72);
       expect(target.querySelector('[data-path="notes"]')).not.toBeNull();
     },
   );
@@ -463,11 +463,7 @@ describe("侧栏全文搜索", () => {
         .click();
       flushSync();
     }
-    target.querySelector<HTMLButtonElement>('[aria-label="文件管理"]')!.click();
-    await settle();
-    [...target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent === "定位当前文件")!
-      .click();
+    target.querySelector<HTMLButtonElement>('[aria-label="定位当前文件"]')!.click();
     await settle();
     flushSync();
     expect(searchBox().value).toBe("");
@@ -477,7 +473,7 @@ describe("侧栏全文搜索", () => {
     expect(document.activeElement).toBe(row);
   });
 
-  it("分类切换与路径查询只更新网格，回车不发起全文检索", async () => {
+  it("分类切换与层级检索独立于高级搜索的状态", async () => {
     const api = createApi();
     await startList(api, true);
     await typeAndSubmit("正文");
@@ -497,7 +493,8 @@ describe("侧栏全文搜索", () => {
     flushSync();
     expect(workspace.search.active).toBe(false);
     expect(target.querySelector('[data-path="alpha.md"]')).not.toBeNull();
-    expect(api.searchQuery).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
+    expect(workspace.search.active).toBe(false);
   });
 
   it("文件操作完成后从书签面板回到条目所在目录", async () => {
@@ -730,7 +727,7 @@ describe("侧栏全文搜索", () => {
     const names = [...target.querySelectorAll(".tag .name")].map((node) => node.textContent);
     expect(names).toEqual(["#project", "#noemori"]);
     // 分类切换应真正卸载文件网格，保留标签自己的树形结构。
-    expect(target.querySelector('[role="grid"]')).toBeNull();
+    expect(target.querySelector('[role="treegrid"]')).toBeNull();
 
     // 点击子标签：转成 tag: 谓词检索并展示结果。
     const child = [...target.querySelectorAll<HTMLButtonElement>(".tag")].find((button) =>

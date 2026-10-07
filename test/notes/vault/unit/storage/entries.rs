@@ -10,6 +10,17 @@ fn setup() -> (TempDir, TempDir, Vault) {
 }
 
 #[test]
+fn entries_publish_indexed_modification_time_in_milliseconds() {
+    let (root, _state, vault) = setup();
+    fs::write(root.path().join("a.md"), "# 时间").unwrap();
+    let time = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_700_000_001_234);
+    fs::File::options().write(true).open(root.path().join("a.md")).unwrap()
+        .set_times(fs::FileTimes::new().set_modified(time)).unwrap();
+    vault.refresh_index().unwrap();
+    assert_eq!(vault.list_entries().unwrap()[0].modified_at, Some(1_700_000_001_234));
+}
+
+#[test]
 fn batch_preflight_rejects_later_conflicts_without_moving_earlier_files() {
     let (root, _state, vault) = setup();
     fs::create_dir(root.path().join("target")).unwrap();

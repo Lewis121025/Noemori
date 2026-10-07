@@ -3,9 +3,9 @@
    * 快速切换器：按文件名、路径、标题与别名打开文件，空查询列出最近打开。
    *
    * Enter 在活动栏打开；Cmd/Ctrl+Enter 在另一栏打开（单栏时先拆栏）；
-   * Shift+Enter 或选择明确的新建候选后创建笔记；打开与创建失败均保留弹层。
+   * Shift+Enter 或选择新建候选后进入名称与位置确认；打开失败保留弹层。
    */
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import PickerDialog from "../workspace/PickerDialog.svelte";
   import type { NoteKeys } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
@@ -16,7 +16,7 @@
     mac,
     onClose,
     onOpened,
-    onCreated,
+    onCreate,
     otherPane = false,
   }: {
     otherPane?: boolean;
@@ -27,8 +27,8 @@
     onClose: () => void;
     /** 已在某栏打开文件，工作区负责交接焦点。 */
     onOpened: () => void;
-    /** 新笔记已创建并打开，工作区负责同步文件栏。 */
-    onCreated: (path: string) => void;
+    /** 交付用户输入的建议路径，工作区统一确认名称和保存位置。 */
+    onCreate: (path: string) => void;
   } = $props();
 
   let query = $state("");
@@ -81,7 +81,11 @@
         notice = workspace.message || "未能打开文件，请重试。";
         return;
       }
+      const pane = workspace.activePane.id;
       onClose();
+      // 原生模态框关闭会恢复旧焦点；完成后再交接给用户指定的目标分栏。
+      await tick();
+      workspace.activatePane(pane);
       onOpened();
     } finally {
       busy = false;
@@ -91,18 +95,9 @@
   async function create(): Promise<void> {
     const path = createNotePath(query);
     if (path === null) return;
-    busy = true;
-    try {
-      const error = await workspace.createEntry(path, "file");
-      if (error !== null) {
-        notice = error;
-        return;
-      }
-      onClose();
-      onCreated(path);
-    } finally {
-      busy = false;
-    }
+    onClose();
+    await tick();
+    onCreate(path);
   }
 </script>
 

@@ -1,3 +1,4 @@
+import { confirmNewEntry, newEntry } from "../support/workspace-actions";
 import { documentTools, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -190,7 +191,8 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
     expect(await readFile(join(vault, "Home.md"), "utf8")).toContain("保留后文");
     await sidebarComponent(page, "文件系统");
     await page.locator(".root-label").click();
-    await page.getByRole("button", { name: "新建白板", exact: true }).click();
+    await newEntry(page, "白板");
+    await confirmNewEntry(page);
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
     await documentTools(page);
     await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
@@ -248,6 +250,7 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
       force: 0.8,
     });
     await command(app, "new-note");
+    await confirmNewEntry(page);
     await page.locator(".ProseMirror").first().waitFor();
     await cdp.send("Input.dispatchMouseEvent", {
       type: "mouseReleased",

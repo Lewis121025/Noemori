@@ -1,3 +1,4 @@
+import { confirmNewEntry, newEntry } from "../support/workspace-actions";
 import {
   noteAction,
   openLibrary,
@@ -60,7 +61,7 @@ test("批量进度经真实 Rust 运行时交付，停止与继续保留文件�
     page.on("pageerror", (error) => errors.push(error.message));
     const files = page.locator(".library").getByRole("navigation", { name: "文件列表" });
     const search = files.getByRole("searchbox");
-    await files.locator('[data-path="archive"]').waitFor();
+    await files.locator('[data-path="batch000.md"]').waitFor();
     await search.fill("batch");
     await search.press("ArrowDown");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+a" : "Control+a");
@@ -114,7 +115,7 @@ test("批量进度经真实 Rust 运行时交付，停止与继续保留文件�
   }
 });
 
-test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", async (t) => {
+test("万项层级目录的虚拟滚动、键盘导航与隐藏恢复保持稳定", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-files-scroll-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -144,7 +145,7 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
   try {
     const page = await app.firstWindow();
     await openLibrary(page);
-    const tree = page.getByRole("grid", { name: "文件系统" });
+    const tree = page.getByRole("treegrid", { name: "文件系统" });
     await tree.waitFor();
     await tree.evaluate((node) => {
       node.scrollTop = node.scrollHeight / 2;
@@ -159,14 +160,14 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
     });
     await middle.dispatchEvent("dragend", { dataTransfer: transfer });
     await transfer.dispose();
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
     expect(
       await tree
         .locator('[data-path="笔记5001.md"]')
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
-    await page.getByRole("button", { name: "← 返回文档", exact: true }).click();
+    await page.getByRole("button", { name: "目录", exact: true }).click();
     await openLibrary(page);
     await page.evaluate(
       () =>
@@ -186,7 +187,7 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
     );
     // 触控板可以停在行末的半像素处，记录与恢复滚动锚点不能把它向上截断。
     const fractional = await tree.evaluate((node) => {
-      const row = node.querySelector(".grid-row")!;
+      const row = node.querySelector(".tree-row")!;
       node.scrollTop = row.getBoundingClientRect().height - 0.5;
       return node.scrollTop;
     });
@@ -204,9 +205,9 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await search.fill("笔记500");
     await search.press("ArrowDown");
-    await page.keyboard.press(`${modifier}+ArrowRight`);
+    await page.keyboard.press(`${modifier}+ArrowDown`);
     expect(await row("笔记5000.md").evaluate((node) => node === document.activeElement)).toBe(true);
-    expect(await row("笔记500.md").locator("..").getAttribute("aria-selected")).toBe("true");
+    expect(await row("笔记500.md").locator('xpath=ancestor::*[@role="gridcell"]').getAttribute("aria-selected")).toBe("true");
     await page.keyboard.press("Delete");
     const trash = page.getByRole("dialog", { name: "移到废纸篓", exact: true });
     await trash.waitFor();
@@ -220,7 +221,7 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
     await rename.press("Escape");
     await page.keyboard.press("Space");
     await page.keyboard.press("Delete");
-    expect(await trash.isVisible()).toBe(false);
+    await expect.poll(() => trash.isVisible()).toBe(false);
     expect(await tree.locator('[aria-selected="true"]').count()).toBe(0);
     await row("笔记5000.md").click({ modifiers: [modifier] });
     expect(await row("笔记5000.md").evaluate((node) => node === document.activeElement)).toBe(true);
@@ -231,8 +232,8 @@ test("万项网格的虚拟滚动、列间导航与隐藏恢复保持稳定", as
       .poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-path")))
       .toBe("笔记5001.md");
     expect(await tree.locator('[aria-selected="true"]').count()).toBe(0);
-    await page.keyboard.press("ArrowRight");
-    expect(await row("笔记5002.md").locator("..").getAttribute("aria-selected")).toBe("true");
+    await page.keyboard.press("ArrowDown");
+    expect(await row("笔记5002.md").locator('xpath=ancestor::*[@role="gridcell"]').getAttribute("aria-selected")).toBe("true");
   } finally {
     await app.close();
   }
@@ -321,23 +322,20 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
       );
     };
     const dialog = page.locator(".entry-dialog");
+    const creation = page.locator(".create-dialog");
     const contextAction = async (path: string, label: string) => {
       await openLibrary(page);
       await row(path).click({ button: "right" });
       await page.getByRole("menuitem", { name: label, exact: true }).click();
     };
-    const rootAction = async (label: string) => {
+    const locateCurrentFile = async () => {
       await openLibrary(page);
-      await files.getByRole("button", { name: "文件管理", exact: true }).click();
-      await page.getByRole("menuitem", { name: label, exact: true }).click();
+      await files.getByRole("button", { name: "定位当前文件", exact: true }).click();
     };
     const createRootFolder = async () => {
       await openLibrary(page);
       await files.getByRole("button", { name: "全部文件", exact: true }).click();
-      await page
-        .locator(".library-heading")
-        .getByRole("button", { name: "新建文件夹", exact: true })
-        .click();
+      await newEntry(page, "文件夹");
     };
     const nameAndSubmit = async (name: string, label: string) => {
       await dialog.locator("input").fill(name);
@@ -350,14 +348,16 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     const browse = async (path: string) => {
       await openLibrary(page);
       await files.getByRole("button", { name: "全部文件", exact: true }).click();
-      const parts = path.split("/").filter(Boolean);
-      for (let i = 0; i < parts.length; i++) await row(parts.slice(0, i + 1).join("/")).dblclick();
+      if (path) {
+        await files.getByRole("searchbox").fill(path);
+        await row(path).dblclick();
+      }
     };
-    const selected = (path: string) => row(path).locator("..").getAttribute("aria-selected");
+    const selected = (path: string) => row(path).locator('xpath=ancestor::*[@role="gridcell"]').getAttribute("aria-selected");
     await active("项目/研究/笔记.md");
     await row("项目/研究/笔记.md").waitFor();
-    expect(await row("项目").count()).toBe(0);
-    await browse("");
+    expect(await row("项目").count()).toBe(1);
+    await browse("项目");
     await row("项目").click();
     expect(await row("项目/研究").count()).toBe(0);
     await row("项目").dblclick();
@@ -367,15 +367,13 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     expect(await row("项目/研究/笔记.md").isVisible()).toBe(true);
     expect(await row("归档/笔记.md").isVisible()).toBe(true);
     await search.press("Escape");
-    expect(await row("项目/研究/笔记.md").count()).toBe(0);
-    await rootAction("定位当前文件");
+    expect(await row("项目/研究/笔记.md").count()).toBe(1);
+    await locateCurrentFile();
     expect(await row("项目/研究/笔记.md").evaluate((node) => document.activeElement === node)).toBe(
       true,
     );
-    await page
-      .locator(".library-heading")
-      .getByRole("button", { name: "新建笔记", exact: true })
-      .click();
+    await newEntry(page, "笔记");
+    await confirmNewEntry(page);
     await active("项目/研究/未命名 2.md");
     expect(await readFile(join(vault, "项目/研究/未命名 2.md"), "utf8")).toBe("");
     await noteAction(page, "重命名…");
@@ -385,7 +383,7 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await page.keyboard.press("Escape");
 
     await browse("归档/浏览");
-    const grid = files.getByRole("grid");
+    const grid = files.getByRole("treegrid");
     await grid.evaluate((node) => {
       node.scrollTop = 900;
     });
@@ -400,19 +398,20 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(0);
     await search.press("Escape");
     await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(900);
-    await rootAction("定位当前文件");
+    await locateCurrentFile();
 
     await browse("");
     await createRootFolder();
-    await nameAndSubmit("资料", "创建");
-    await dialog.waitFor({ state: "hidden" });
+    await confirmNewEntry(page, "资料");
     expect((await stat(join(vault, "资料"))).isDirectory()).toBe(true);
     expect(await selected("资料")).toBe("true");
     await createRootFolder();
-    await dialog.locator("input").fill("资料");
-    expect(await dialog.getByRole("button", { name: "创建", exact: true }).isDisabled()).toBe(true);
-    await dialog.getByRole("button", { name: "取消", exact: true }).click();
-    await contextAction("资料", "新建笔记");
+    await creation.getByRole("textbox", { name: "名称", exact: true }).fill("资料");
+    expect(await creation.getByRole("button", { name: "创建", exact: true }).isDisabled()).toBe(true);
+    await creation.getByRole("button", { name: "取消", exact: true }).click();
+    await browse("资料");
+    await newEntry(page, "笔记");
+    await confirmNewEntry(page);
     await active("资料/未命名.md");
     await noteAction(page, "重命名…");
     await nameAndSubmit("入门.md", "重命名");
@@ -424,7 +423,7 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await active("项目/研究/笔记.md");
     expect(await readFile(join(vault, "资料/入门.md"), "utf8")).toContain("创建后的内容");
 
-    await browse("");
+    await browse("项目");
     await row("项目").click();
     await row("项目").press("F2");
     const renameFolder = files.getByRole("textbox", { name: "重命名文件夹", exact: true });
@@ -457,6 +456,7 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
       files.getByRole("button", { name: "全部文件", exact: true }),
     );
     await row("入门.md").waitFor();
+    await files.getByRole("button", { name: "折叠全部目录", exact: true }).click();
     await row("入门.md").dragTo(row("收件箱"));
     await row("收件箱/入门.md").waitFor();
     await row("收件箱/入门.md").dblclick();
@@ -478,7 +478,6 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await page.getByRole("button", { name: "深色", exact: true }).click();
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 600, height: 700 });
-    await page.getByRole("button", { name: "收起文件栏", exact: true }).waitFor();
     await openLibrary(page);
     await row("收件箱/完成.md").click();
     await page.getByRole("button", { name: "预览", exact: true }).click();
@@ -503,7 +502,9 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     );
     if (screenshots) await page.screenshot({ path: join(screenshots, "files-narrow.png") });
     await row("收件箱/完成.md").dblclick();
-    expect(await page.getByRole("complementary", { name: "文件栏" }).isVisible()).toBe(false);
+    await expect
+      .poll(() => page.getByRole("complementary", { name: "文件栏" }).isVisible())
+      .toBe(false);
     expect(errors).toEqual([]);
     await assertHidden();
     await app.close();
@@ -553,18 +554,23 @@ test("空库新建直接进入写作，窄窗口交还焦点且保存后可重�
       [1100, "未命名.md"],
       [600, "未命名 2.md"],
     ] as const) {
-      await page.setViewportSize({ width, height: 700 });
+      const height = width === 600 ? 480 : 700;
+      await page.setViewportSize({ width, height });
       await sidebarComponent(page, "目录");
-      await page
-        .locator(".sidebar-actions")
-        .getByRole("button", { name: "新建笔记", exact: true })
-        .click();
+      await page.keyboard.press(`${modifier}+n`);
+      const creation = page.locator(".create-dialog[open]");
+      await creation.waitFor();
+      const footer = (await creation.locator("footer").boundingBox())!;
+      expect(footer.y + footer.height).toBeLessThanOrEqual(height - 16);
+      await confirmNewEntry(page);
       const editor = page.locator(".ProseMirror");
       await expect
         .poll(() => editor.evaluate((node) => node.contains(document.activeElement)))
         .toBe(true);
       if (width === 600)
-        expect(await page.getByRole("complementary", { name: "文件栏" }).isVisible()).toBe(false);
+        await expect
+          .poll(() => page.getByRole("complementary", { name: "文件栏" }).isVisible())
+          .toBe(false);
       await page.keyboard.insertText(`在 ${width} 像素窗口直接写作。`);
       await page.keyboard.press(`${modifier}+s`);
       await expect
@@ -696,7 +702,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
     // 活动文档保持打开，浏览目录和滚动位置独立保存。
     await files.getByRole("button", { name: "全部文件", exact: true }).click();
     await row("browse").dblclick();
-    const tree = files.getByRole("grid");
+    const tree = files.getByRole("treegrid");
     await tree.evaluate((node) => {
       node.scrollTop = 1050;
     });
@@ -710,7 +716,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
         writeFile(join(vault, `browse/000-new-${i}.md`), "# 外部新增\n"),
       ),
     );
-    await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeCloseTo(before + 148, 0);
+    await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeCloseTo(before + 28, 0);
     await expect.poll(async () => (await session()).fileTree.scroll.path).toBe(stored.scroll.path);
     const after = await tree.evaluate((node) => node.scrollTop);
     await rm(join(vault, "source"), { recursive: true });
@@ -725,7 +731,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
     app = await launch();
     const reopened = await app.firstWindow();
     await reopened.getByRole("region", { name: "文件系统", exact: true }).waitFor();
-    const restoredTree = reopened.getByRole("grid", { name: "文件系统" });
+    const restoredTree = reopened.getByRole("treegrid", { name: "文件系统" });
     await expect.poll(() => restoredTree.evaluate((node) => node.scrollTop)).toBeCloseTo(after, 0);
     expect(await reopened.locator('.library [data-path="target/a.md"]').count()).toBe(0);
     expect((await session()).fileTree.scroll.path).toBe(stored.scroll.path);

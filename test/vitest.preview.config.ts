@@ -33,6 +33,7 @@ export default defineConfig({
       "../../../../test/notes/desktop/e2e/continuous-editing.test.mts",
       "../../../../test/notes/desktop/e2e/external-reload.test.mts",
       "../../../../test/notes/desktop/e2e/files.test.mts",
+      "../../../../test/notes/desktop/e2e/library-hierarchy.test.mts",
       "../../../../test/notes/desktop/e2e/vault-search.test.mts",
       "../../../../test/notes/desktop/e2e/quick-switcher.test.mts",
       "../../../../test/notes/desktop/e2e/dialect.test.mts",

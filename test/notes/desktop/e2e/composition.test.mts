@@ -1,4 +1,5 @@
-import { noteAction, sidebarComponent } from "../support/workspace-actions";
+import { confirmNewEntry } from "../support/workspace-actions";
+import { noteAction } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,9 +71,9 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     await page.getByRole("button", { name: "清除搜索", exact: true }).click();
     expect(await fileSearch.inputValue()).toBe("");
 
-    // 新建入口属于文件面板；组词结束后返回文件，才能继续验证正文输入。
-    await sidebarComponent(page, "文件");
-    await page.getByRole("button", { name: "新建笔记", exact: true }).click();
+    // 组词结束后通过快捷键新建文档，继续验证正文输入。
+    await page.keyboard.press("ControlOrMeta+n");
+    await confirmNewEntry(page);
     await expect.poll(() => page.locator(".document-name").textContent()).toBe("未命名.md");
     await noteAction(page, "重命名…");
     const entry = page.getByRole("dialog", { name: "重命名", exact: true });
@@ -105,8 +106,8 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     await link.waitFor({ state: "hidden" });
     expect(await editor.locator(".wiki-link").innerText()).toBe("中文链接");
     expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
-    await page.getByRole("button", { name: "文件", exact: true }).click();
-    await page.getByRole("treeitem", { name: "输入.md", exact: true }).click();
+    await page.getByRole("button", { name: "文件系统", exact: true }).click();
+    await page.locator('.library [data-path="输入.md"]').dblclick();
     await page.getByRole("heading", { name: "输入验收" }).waitFor();
 
     await noteAction(page, "文内查找");

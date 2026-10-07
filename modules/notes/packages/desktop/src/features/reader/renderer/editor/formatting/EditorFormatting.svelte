@@ -17,6 +17,7 @@
     onLink,
     onAttachment,
     onWebPage,
+    onConversation,
     sidebar = false,
     onShowTools,
   }: {
@@ -28,6 +29,8 @@
     onAttachment: () => void;
     /** 打开所属编辑器的网页插入对话框；静态格式测试可不提供。 */
     onWebPage?: () => void;
+    /** 在当前文章位置创建对话；能力由应用装配，独立编辑器可不提供。 */
+    onConversation?: () => void;
     /** 侧栏固定使用换行布局，基础格式不随栏宽藏入菜单。 */
     sidebar?: boolean;
     /** 快捷键进入工具时先展开所属侧栏，不新建另一组选区按钮。 */
@@ -99,6 +102,7 @@
   let moreMenu: HTMLDivElement;
   const compact = $derived(sidebar || width < 620);
   const minimal = $derived(!sidebar && width < 360);
+  const condensed = $derived(!sidebar && width < 200);
   function closeMenus(): void {
     insertMenu.hidePopover();
     moreMenu.hidePopover();
@@ -130,6 +134,20 @@
 
 <svelte:window onkeydown={focusTools} />
 
+{#snippet blockPicker()}
+  <select
+    class="reader-input"
+    aria-label="段落格式"
+    value={block}
+    onchange={(event) => setBlock(event.currentTarget.value)}
+  >
+    {#each blocks as option (option.name)}<option
+        value={option.name}
+        disabled={option.name !== block && !writingCommands[option.name](editorState)}
+        >{option.label}</option
+      >{/each}
+  </select>
+{/snippet}
 {#snippet listButtons()}
   {#each structures as format (format.name)}
     <button
@@ -173,18 +191,7 @@
       event.preventDefault();
   }}
 >
-  <select
-    class="reader-input"
-    aria-label="段落格式"
-    value={block}
-    onchange={(event) => setBlock(event.currentTarget.value)}
-  >
-    {#each blocks as option (option.name)}<option
-        value={option.name}
-        disabled={option.name !== block && !writingCommands[option.name](editorState)}
-        >{option.label}</option
-      >{/each}
-  </select>
+  {#if !condensed}{@render blockPicker()}{/if}
   {#if !minimal}<InlineFormatting state={editorState} onFormat={run} variant="primary" />{/if}
   {#if !compact}<div class="lists">{@render listButtons()}</div>{/if}
   <button
@@ -204,6 +211,15 @@
   >
 </div>
 <div id="{id}-insert" bind:this={insertMenu} popover="auto" class="reader-popover formatting-menu">
+  {#if onConversation}<button
+      class="reader-button"
+      type="button"
+      disabled={!canInsertAttachment(editorState)}
+      onclick={() => {
+        closeMenus();
+        onConversation?.();
+      }}>插入 Agent 对话…</button
+    >{/if}
   <button
     class="reader-button"
     type="button"
@@ -242,6 +258,7 @@
   >
 </div>
 <div id="{id}-more" bind:this={moreMenu} popover="auto" class="reader-popover formatting-menu">
+  {#if condensed}{@render blockPicker()}{/if}
   <InlineFormatting state={editorState} onFormat={action} variant={minimal ? "all" : "secondary"} />
   {#if compact}{@render listButtons()}{@render historyButtons()}{/if}
   {#if table}

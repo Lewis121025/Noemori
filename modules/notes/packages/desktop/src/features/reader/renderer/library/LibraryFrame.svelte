@@ -1,172 +1,172 @@
 <script lang="ts">
-  /** 独立资料管理页面：选择与文件操作由工作区持有，预览不切换正在编辑的文档。 */
   import { onMount, type Snippet } from "svelte";
   import type { VaultEntry } from "../../shared/api";
+  import type { ArticleAgentActions } from "../../shared/article-conversations";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
-  import type { FileMenuAction } from "./FileMenu.svelte";
   import { isCompositionKey } from "../../shared/composition";
+  import type { OpenContentLink } from "../editor/links/link-interaction";
   import LibraryPreview from "./LibraryPreview.svelte";
 
   let {
     workspace,
     hidden,
-    selected,
-    onAction,
+    entry,
+    onCreate,
     onOpen,
     readFile,
     children,
     previewOpen = $bindable(false),
+    previewTab = $bindable("article"),
     onClosePreview,
     onNewWhiteboard,
-    count,
+    onOpenVault,
+    articleAgent,
+    query,
+    onFollowLink,
+    focused = $bindable(false),
   }: {
     workspace: ReaderWorkspaceController;
     hidden: boolean;
-    selected: VaultEntry[];
-    onAction: (action: FileMenuAction, entry: VaultEntry | null) => void;
+    entry: VaultEntry | null;
+    onCreate: (kind: "file" | "directory") => void;
     onOpen: (entry: VaultEntry) => void;
     readFile: (path: string) => Promise<Uint8Array>;
     children: Snippet;
     previewOpen?: boolean;
+    previewTab?: "article" | "chat";
     onClosePreview: () => void;
     onNewWhiteboard?: () => void;
-    count: number;
+    onOpenVault?: () => void;
+    articleAgent?: ArticleAgentActions;
+    query: string;
+    onFollowLink: OpenContentLink;
+    focused?: boolean;
   } = $props();
   let compact = $state(false);
   let container: HTMLElement;
-  const current = $derived(selected.length === 1 ? selected[0]! : null);
+  let createMenu: HTMLDivElement;
+  const id = $props.id();
   const busy = $derived(workspace.switching || workspace.copying);
-
-  function resize(): void {
-    compact = window.innerWidth <= 720;
-    if (!compact) previewOpen = false;
+  function create(kind: "file" | "directory" | "whiteboard"): void {
+    createMenu.hidePopover();
+    if (kind === "whiteboard") onNewWhiteboard?.();
+    else onCreate(kind);
   }
-  onMount(resize);
-
+  onMount(() => {
+    const observer = new ResizeObserver(() => {
+      compact = container.clientWidth < 650;
+    });
+    compact = container.clientWidth < 650;
+    observer.observe(container);
+    return () => observer.disconnect();
+  });
   function previewKeydown(event: KeyboardEvent): void {
     if (
       event.key !== "Escape" ||
       event.defaultPrevented ||
       isCompositionKey(event) ||
-      workspace.isComposing ||
       hidden ||
-      !compact ||
-      !previewOpen ||
       !(event.target instanceof Element) ||
       !container.contains(event.target) ||
       event.target.closest("dialog[open], [popover]")
     )
       return;
-    event.preventDefault();
-    onClosePreview();
+    if (compact && previewOpen) {
+      event.preventDefault();
+      onClosePreview();
+    } else if (focused) {
+      event.preventDefault();
+      focused = false;
+    }
   }
 </script>
 
-<svelte:window onresize={resize} onkeydown={previewKeydown} />
-
-<section class="library" data-motion="reveal" {hidden} aria-label="文件系统" bind:this={container}>
+<svelte:window onkeydown={previewKeydown} />
+<section
+  class="library"
+  class:compact
+  class:focused
+  class:preview-open={previewOpen}
+  {hidden}
+  aria-label="文件系统"
+  bind:this={container}
+>
   <header class="library-heading">
-    <div>
-      <h1>文件系统</h1>
-      <p>
-        {count} 个文件和文件夹
-      </p>
-    </div>
+    <span class="vault-name" title={workspace.vaultRoot ?? "笔记库"}
+      >{workspace.vaultRoot?.split(/[\\/]/).at(-1) || "笔记库"}</span
+    >
     <div class="create-actions">
-      {#if onNewWhiteboard}<button
-          class="reader-button"
+      {#if compact}<button
+          class="reader-button preview-toggle"
           type="button"
-          disabled={busy}
-          onclick={onNewWhiteboard}>新建白板</button
+          aria-label={previewOpen ? "返回列表" : "预览"}
+          aria-pressed={previewOpen}
+          disabled={!previewOpen && entry === null}
+          onclick={() => {
+            if (previewOpen) onClosePreview();
+            else previewOpen = true;
+          }}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3zM8 4v12" /></svg
+          >{previewOpen ? "返回" : "预览"}</button
         >{/if}
-      <button
-        class="reader-button"
-        type="button"
-        aria-label="新建文件夹"
-        title="新建文件夹"
-        disabled={busy || workspace.vaultRoot === null}
-        onclick={() => onAction("directory", current)}
-        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M3 7V5h7l2 2h9v13H3V7M12 10v7m-3-3.5h6" /></svg
-        ></button
-      >
       <button
         class="reader-button primary"
         type="button"
-        disabled={busy}
-        onclick={() => onAction("file", current)}>新建笔记</button
+        disabled={busy || workspace.vaultRoot === null}
+        popovertarget={`${id}-create`}
+        ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>新建</button
       >
+      <div
+        id={`${id}-create`}
+        bind:this={createMenu}
+        popover="auto"
+        class="reader-popover create-menu"
+        aria-label="新建项目"
+      >
+        <button
+          class="reader-button"
+          type="button"
+          aria-label="新建笔记"
+          onclick={() => create("file")}
+          >笔记<span>{navigator.userAgent.includes("Mac") ? "⌘N" : "Ctrl+N"}</span></button
+        >
+        {#if onNewWhiteboard}<button
+            class="reader-button"
+            type="button"
+            aria-label="新建白板"
+            onclick={() => create("whiteboard")}>白板</button
+          >{/if}
+        <button
+          class="reader-button"
+          type="button"
+          aria-label="新建文件夹"
+          onclick={() => create("directory")}>文件夹</button
+        >
+      </div>
     </div>
   </header>
-  <div class="library-actions" role="toolbar" aria-label="资料整理">
-    <span>{selected.length > 0 ? `已选 ${selected.length} 项` : "浏览资料"}</span>
-    {#if compact}
-      <button
-        class="reader-button"
-        type="button"
-        aria-expanded={previewOpen}
-        disabled={!previewOpen && current === null}
-        onclick={() => {
-          if (previewOpen) onClosePreview();
-          else previewOpen = true;
-        }}>{previewOpen ? "返回列表" : "预览"}</button
-      >
-    {/if}
-    {#if selected.length > 0}
-      <button
-        class="reader-button"
-        type="button"
-        disabled={busy}
-        onclick={() => onAction("export", current)}>导出…</button
-      >
-      <button
-        class="reader-button"
-        type="button"
-        aria-label="重命名"
-        title="重命名"
-        disabled={busy || current === null}
-        onclick={() => onAction("rename", current)}
-        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="m4 16 11-11 4 4-11 11H4v-4M13 7l4 4M14 20h6" /></svg
-        ></button
-      >
-      <button
-        class="reader-button"
-        type="button"
-        aria-label="移动到…"
-        title="移动到…"
-        disabled={busy}
-        onclick={() => onAction("move", current)}
-        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M3 7V5h7l2 2h9v13H3V7m5 7h9m-3-3 3 3-3 3" /></svg
-        ></button
-      >
-      <button
-        class="reader-button"
-        type="button"
-        aria-label="移到废纸篓"
-        title="移到废纸篓"
-        disabled={busy}
-        onclick={() => onAction("trash", current)}
-        ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5" /></svg
-        ></button
-      >
-    {/if}
-  </div>
+  {#if workspace.vaultRoot === null && onOpenVault}<div class="open-library">
+      <button class="reader-button" type="button" onclick={onOpenVault}>打开笔记库…</button>
+    </div>{/if}
   <div class="library-body">
-    <div class="library-list" inert={compact && previewOpen} aria-hidden={compact && previewOpen}>
+    <div class="library-list" hidden={focused || (compact && previewOpen)}>
       {@render children()}
     </div>
     {#if !hidden && (!compact || previewOpen)}<LibraryPreview
-        entry={current}
-        entries={workspace.entries}
-        root={workspace.vaultRoot}
-        revision={workspace.indexRevision}
+        {entry}
+        {workspace}
         {readFile}
         {onOpen}
         {busy}
-        selectionCount={selected.length}
+        {query}
+        {onFollowLink}
+        bind:tab={previewTab}
+        {focused}
+        onFocus={() => {
+          focused = !focused;
+        }}
+        {...articleAgent ? { articleAgent } : {}}
       />{/if}
   </div>
 </section>
@@ -186,82 +186,90 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 1.75rem 2.5rem 0.75rem;
+    gap: 12px;
+    min-height: 43px;
+    padding: 5px 15px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--border);
   }
-  h1 {
-    font-size: 1.6rem;
-    letter-spacing: -0.04em;
+  .vault-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
     font-weight: 500;
-    margin: 0;
-  }
-  p {
-    color: var(--muted);
-    font-size: 0.8rem;
-    margin: 0.25rem 0 0;
   }
   .create-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    align-items: center;
+    gap: 7px;
   }
-  .create-actions .reader-button,
-  .library-actions .reader-button {
-    display: inline-flex;
+  .create-actions > button {
+    display: flex;
     align-items: center;
     justify-content: center;
+    gap: 4px;
+    font-size: 12px;
+    padding: 4px 9px;
+    border-radius: 5px;
   }
-  .library-actions .reader-button {
-    background: transparent;
+  .create-actions .primary {
+    background: var(--fg);
+    color: var(--bg);
     border-color: transparent;
-    color: var(--muted);
   }
-  .library-actions .reader-button:hover:not(:disabled) {
-    background: var(--selected);
-    color: var(--fg);
-  }
-  .library-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    padding: 0.5rem 2.5rem 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .library-actions span {
-    flex: 1;
-    color: var(--muted);
-    font-size: 0.8rem;
+  svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
   }
   .library-body {
     position: relative;
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 34%);
-    margin: 0 2.5rem 2rem;
-    padding-top: 1rem;
+    grid-template-columns: minmax(270px, 36%) minmax(0, 1fr);
   }
   .library-list {
-    min-height: 0;
     min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border);
   }
-  .library-list[inert] {
-    position: absolute;
-    inset: 0;
-    visibility: hidden;
+  .library-list[hidden] {
+    display: none;
   }
-  @media (max-width: 720px) {
-    .library-heading {
-      padding: 1rem;
-    }
-    .library-actions {
-      padding: 0.5rem 1rem;
-      flex-wrap: wrap;
-    }
-    .library-body {
-      margin: 0 1rem 1rem;
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr);
-    }
+  .focused .library-body,
+  .compact .library-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compact .library-list {
+    border-right: 0;
+  }
+  .create-menu {
+    min-width: 170px;
+    padding: 5px;
+  }
+  .create-menu button {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    font-size: 12px;
+  }
+  .create-menu button:hover {
+    background: var(--selected);
+  }
+  .create-menu span {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .open-library {
+    padding: 12px;
   }
 </style>

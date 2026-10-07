@@ -10,12 +10,15 @@
   let {
     workspace,
     enabled,
+    compact = false,
     onMention,
     onLink,
     onOpenSettings,
   }: {
     workspace: ReaderWorkspaceController;
     enabled: boolean;
+    /** 文件管理窄栏只保留设置入口。 */
+    compact?: boolean;
     onMention: (mention: MentionRecord) => void;
     onLink: (link: LinkRecord) => void;
     onOpenSettings: () => void;
@@ -138,10 +141,11 @@
   </svg>
 {/snippet}
 
-<footer class="links-dock" bind:this={dock}>
+<footer class="links-dock" class:compact bind:this={dock}>
   <div class="dock-actions" bind:this={actions}>
     <button
       class="dock-toggle"
+      hidden={compact}
       type="button"
       aria-label="双链"
       title={`双链 · ${incoming} 个来源 · ${outgoing} 个目标；圆点代表当前笔记`}
@@ -307,6 +311,13 @@
     text-align: left;
     cursor: pointer;
     white-space: nowrap;
+  }
+  .dock-toggle[hidden] {
+    display: none;
+  }
+  .compact .dock-actions {
+    padding: 6px;
+    justify-content: center;
   }
   .dock-toggle:hover:not(:disabled),
   .dock-toggle[aria-expanded="true"] {

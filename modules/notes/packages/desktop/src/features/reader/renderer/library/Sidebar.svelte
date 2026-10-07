@@ -12,9 +12,11 @@
     onWidth: (width: number) => void;
     children: Snippet;
     hidden?: boolean;
+    /** 文件管理已包含目录，只保留应用入口窄栏。 */
+    compact?: boolean;
   };
 
-  let { width, onWidth, children, hidden = false }: Props = $props();
+  let { width, onWidth, children, hidden = false, compact = false }: Props = $props();
   let resize = $state<{
     pointerId: number;
     startX: number;
@@ -64,8 +66,9 @@
   {hidden}
   inert={hidden}
   class="file-sidebar"
+  class:compact
   class:resizing={resize !== null}
-  style:--sidebar-width="{resize?.width ?? width}px"
+  style:--sidebar-width="{compact ? 54 : (resize?.width ?? width)}px"
   aria-label="文件栏"
 >
   <div class="body">{@render children()}</div>
@@ -73,6 +76,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="resize"
+    hidden={compact}
     class:resizing={resize !== null}
     role="separator"
     tabindex="0"
@@ -153,6 +157,9 @@
     touch-action: none;
     outline-offset: -2px;
   }
+  .resize[hidden] {
+    display: none;
+  }
   .resize:hover,
   .resize:focus-visible,
   .resize.resizing {
@@ -160,6 +167,12 @@
   }
 
   @media (max-width: 640px) {
+    .file-sidebar.compact {
+      position: relative;
+      inset: auto;
+      max-width: none;
+      box-shadow: none;
+    }
     .file-sidebar {
       position: absolute;
       inset: 0 auto 0 0;

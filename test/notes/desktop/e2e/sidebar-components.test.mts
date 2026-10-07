@@ -105,40 +105,19 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
     expect(await editor.evaluate((node, original) => node === original, original)).toBe(true);
 
     await openLibrary(page);
-    const folders = page.getByRole("navigation", { name: "文件夹导航", exact: true });
-    expect(await folders.isVisible()).toBe(true);
-    expect(await folders.getByRole("treeitem", { name: "资料", exact: true }).isVisible()).toBe(true);
-    const grid = page.getByRole("grid", { name: "文件系统", exact: true });
-    expect(Number(await grid.getAttribute("aria-colcount"))).toBeGreaterThanOrEqual(2);
-    // 两次采样要比较布局终态，不能比较进入动画的不同帧。
-    await page.waitForFunction(() =>
-      document.querySelector(".library")?.getAnimations().every((animation) => animation.playState === "finished"),
-    );
+    expect(await page.locator(".folder-navigation").count()).toBe(0);
+    expect(await page.locator(".file-sidebar").evaluate((el) => el.clientWidth)).toBeLessThan(70);
+    const grid = page.getByRole("treegrid", { name: "文件系统", exact: true });
+    expect(await grid.getAttribute("aria-colcount")).toBe("1");
     const a = await grid.locator('[data-path="想法.md"]').boundingBox();
     const b = await grid.locator('[data-path="资料"]').boundingBox();
-    expect(a!.y).toBe(b!.y);
-    expect(a!.x).not.toBe(b!.x);
-    if (process.env.NOEMORI_FILE_GRID_SCREENSHOT)
-      await page.screenshot({ path: process.env.NOEMORI_FILE_GRID_SCREENSHOT });
+    expect(a!.y).not.toBe(b!.y);
+    expect(a!.x).toBe(b!.x);
     await grid.getByRole("button", { name: "资料", exact: true }).click();
-    expect(await grid.getByRole("button", { name: "里面.md", exact: true }).count()).toBe(0);
-    await grid.getByRole("button", { name: "资料", exact: true }).dblclick();
     await grid.getByRole("button", { name: "里面.md", exact: true }).waitFor();
-    await expect
-      .poll(
-        async () =>
-          JSON.parse(await readFile(join(state, "session.json"), "utf8")).reader.fileTree.browse
-            .directory,
-      )
-      .toBe("资料");
-    expect(await folders.getByRole("treeitem", { name: "资料", exact: true }).getAttribute("aria-current")).toBe("location");
-    await folders.getByRole("treeitem", { name: "子目录", exact: true }).press("Enter");
+    await grid.getByRole("button", { name: "子目录", exact: true }).press("Enter");
     await grid.getByRole("button", { name: "深处.md", exact: true }).waitFor();
-    expect(await folders.getByRole("treeitem", { name: "子目录", exact: true }).getAttribute("aria-current")).toBe("location");
-    expect(await editor.evaluate((node, original) => node === original, original)).toBe(true);
-    await page.locator(".breadcrumbs").getByRole("button", { name: "资料", exact: true }).click();
-    await grid.getByRole("button", { name: "里面.md", exact: true }).waitFor();
-    expect(await folders.getByRole("treeitem", { name: "资料", exact: true }).getAttribute("aria-current")).toBe("location");
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
     await page.locator(".root-label").click();
     await grid.getByRole("button", { name: "阅读.md", exact: true }).waitFor();
     expect(await page.locator(".quick-navigation").isVisible()).toBe(false);
@@ -254,8 +233,13 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
     await page.getByRole("button", { name: "收起文件栏", exact: true }).waitFor();
     await sidebarComponent(page, "文件系统");
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-    await folders.getByRole("treeitem", { name: "资料", exact: true }).click();
-    await page.getByRole("complementary", { name: "文件栏", exact: true }).waitFor({ state: "hidden" });
+    await page.locator(".library .root-label").click();
+    await grid.getByRole("button", { name: "资料", exact: true }).dblclick();
+    await expect.poll(() => page.evaluate(() => ({
+      libraryHidden: document.querySelector<HTMLElement>(".library")?.hidden,
+      scrimHidden: document.querySelector<HTMLElement>(".files-scrim")?.hidden,
+      selected: document.querySelector('.component-button[aria-pressed="true"]')?.getAttribute("data-component"),
+    }))).toEqual({ libraryHidden: false, scrimHidden: true, selected: "open-library" });
     expect(await grid.getByRole("button", { name: "里面.md", exact: true }).isVisible()).toBe(true);
     expect(errors).toEqual([]);
   } finally {

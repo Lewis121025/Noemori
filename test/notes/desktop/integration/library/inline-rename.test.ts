@@ -105,7 +105,7 @@ describe("文件树原位重命名", () => {
     type("计划");
     key("Enter");
     await settle();
-    expect(workspace.fileTree.state.browse?.directory).toBe("");
+    expect(workspace.fileTree.state.browse?.directory).toBe("计划");
     expect(workspace.document.path).toBe("计划/笔记.md");
     expect(document.activeElement).toBe(row("计划"));
   });

@@ -154,6 +154,7 @@ impl State {
         let entries: Vec<_> = candidate.vault.list_entries()?.into_iter().map(|entry| {
             let mut value = json!({"path": entry.path, "kind": if entry.kind == noemori_vault::EntryKind::File { "file" } else { "directory" }});
             if entry.recovery_only { value["recoveryOnly"] = json!(true); }
+            if let Some(time) = entry.modified_at { value["modifiedAt"] = json!(time); }
             value
         }).collect();
         if !control.commit() {

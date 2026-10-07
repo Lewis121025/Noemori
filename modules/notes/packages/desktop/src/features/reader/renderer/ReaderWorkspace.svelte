@@ -15,21 +15,15 @@
   } from "./navigation/sidebar-components";
   import PaneColumn from "./workspace/PaneColumn.svelte";
   import FileEntryDialog from "./library/FileEntryDialog.svelte";
+  import CreateEntryDialog, { type CreateEntryKind } from "./library/CreateEntryDialog.svelte";
   import LinkCandidatesDialog from "./links/LinkCandidatesDialog.svelte";
   import DeadLinkDialog from "./links/DeadLinkDialog.svelte";
   import QuickSwitcher from "./navigation/QuickSwitcher.svelte";
   import CommandPalette from "./workspace/CommandPalette.svelte";
   import type { PaneControls } from "./workspace/pane-controls";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
-  import {
-    libraryCreationDirectory,
-    untitledNotePath,
-    untitledWhiteboardPath,
-  } from "./library/library";
-  import { emptyWhiteboard, serializeWhiteboard } from "../shared/whiteboard/model";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
   import { WorkspaceSpaces } from "./workspace/spaces.svelte";
-  import { createBrowserMediaIo } from "./preview/media";
   import { SIDEBAR_LAYOUT, type ReaderApi, type PaneLayout } from "../shared/api";
   import "./styles/controls.css";
   import "./styles/motion.css";
@@ -47,6 +41,7 @@
   import { createSessionWrite } from "./session-write";
   import { READING_FONTS, type ReadingFont } from "../shared/reading-font";
   import { DEFAULT_READING_PALETTE, type ReadingPalette } from "../shared/reading-palette";
+  import type { ArticleAgentActions } from "../shared/article-conversations";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
   let {
@@ -55,6 +50,7 @@
     palette = DEFAULT_READING_PALETTE,
     agentOpen = false,
     onOpenAgent,
+    articleAgent,
   }: {
     api: ReaderApi;
     applicationMenu: Snippet;
@@ -62,12 +58,52 @@
     palette?: ReadingPalette;
     agentOpen?: boolean;
     onOpenAgent?: () => void;
+    articleAgent?: ArticleAgentActions;
   } = $props();
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
-  const workspace = new ReaderWorkspaceController(readerApi, () => layoutWrites.request());
+  const workspace = new ReaderWorkspaceController(
+    readerApi,
+    () => layoutWrites.request(),
+    async (root, changes) => {
+      await articleAgent?.api.remapArticles(root, changes);
+    },
+  );
+  let articleCounts = $state<Record<string, number>>({});
+  $effect(() => {
+    const root = workspace.vaultRoot;
+    const bridge = articleAgent;
+    void workspace.entries;
+    if (!root || !bridge) {
+      articleCounts = {};
+      return;
+    }
+    let live = true;
+    const refresh = async () => {
+      await bridge.api.attachVault(root);
+      const list = await bridge.api.list();
+      if (!live) return;
+      const counts: Record<string, number> = {};
+      for (const item of list.items)
+        if (item.workspace === root && item.article && !item.archived)
+          counts[item.article.path] = (counts[item.article.path] ?? 0) + 1;
+      articleCounts = counts;
+    };
+    void refresh().catch((error) => {
+      if (live) workspace.report(String(error));
+    });
+    const stop = bridge.api.subscribe(() => {
+      void refresh().catch((error) => {
+        if (live) workspace.report(String(error));
+      });
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  });
   const spaces = new WorkspaceSpaces(workspace, prepareSpaceInput, persistPanes);
-  const mediaIo = createBrowserMediaIo(readerApi);
+  const mediaIo = workspace.mediaIo;
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
   const doc = $derived(workspace.document);
   let filesCollapsed = $state(false);
@@ -81,6 +117,8 @@
   const changingSpace = $derived(spaces.changing);
   let creatingDocument = false;
   let narrow = $state(false);
+  const sidebarIsDrawer = $derived(narrow && !(space === "library" && sidebarPanel !== "search"));
+  const drawerOpen = $derived(sidebarIsDrawer && !filesCollapsed);
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
   const layoutWrites = createSessionWrite({
     delayMs: 300,
@@ -97,6 +135,7 @@
     report: reportLayoutFailure,
   });
   let entryDialog: FileEntryDialog | undefined = $state();
+  let createDialog: CreateEntryDialog | undefined = $state();
   let fileList: LibraryBrowser | undefined = $state();
   let fileNavigation: QuickNavigation | undefined = $state();
   let windowToolbar: WindowToolbar | undefined = $state();
@@ -219,7 +258,7 @@
         workspace.navigation.insertWebPage();
         break;
       case "new-folder":
-        void entryDialog?.open("directory", null, creationDirectory());
+        void startDocument("directory");
         break;
       case "save":
         workspace.requestSave();
@@ -369,38 +408,23 @@
   /** 新建动作以当前浏览位置为准；返回文档后才使用文档所在目录。 */
   function creationDirectory(): string {
     if (space !== "library") return doc.path === null ? "" : parentDirectory(doc.path);
-    const { selected, browse } = workspace.fileTree.state;
-    const entry =
-      selected.length === 1
-        ? workspace.entries.find((entry) => entry.path === selected[0])
-        : undefined;
-    return libraryCreationDirectory(entry ?? null, browse?.directory ?? "");
+    return workspace.fileTree.state.browse?.directory ?? "";
   }
 
-  /** 笔记与白板共用创建门禁、路径冲突规则和焦点交接，只在初始内容上分流。 */
+  /** 创建入口只准备用户可确认的表单；选中条目不会隐式改变保存目录。 */
   async function startDocument(
-    kind: "note" | "whiteboard",
+    kind: CreateEntryKind,
     parentOverride?: string,
+    suggestedName?: string,
   ): Promise<void> {
     if (creatingDocument || changingSpace || workspace.isComposing) return;
     creatingDocument = true;
     try {
-      if (workspace.vaultRoot === null) await workspace.openVault("default");
+      if (workspace.vaultRoot === null) await workspace.openVault();
       if (workspace.vaultRoot === null) return;
-      const parent = parentOverride ?? creationDirectory();
-      const path =
-        kind === "note"
-          ? untitledNotePath(workspace.entries, parent)
-          : untitledWhiteboardPath(workspace.entries, parent);
-      const error = await workspace.createEntry(
-        path,
-        "file",
-        kind === "whiteboard"
-          ? new TextEncoder().encode(serializeWhiteboard(emptyWhiteboard()))
-          : undefined,
-      );
-      if (error !== null) workspace.report(error);
-      else finishFileNavigation();
+      await createDialog?.open(kind, parentOverride ?? creationDirectory(), suggestedName);
+    } catch (error) {
+      workspace.report(error instanceof Error ? error.message : String(error));
     } finally {
       creatingDocument = false;
     }
@@ -441,12 +465,14 @@
   /** 组件切换保留挂载；返回文档工具时先通过已有页面门禁，不重新加载正文。 */
   async function selectSidebarPanel(panel: SidebarPanel): Promise<void> {
     if (workspace.isComposing || changingSpace) return;
-    if (panel !== "search" && !documentVisible) {
+    const returning = panel === "outline" && !documentVisible;
+    if (returning) {
       if (!(await spaces.resumeWriting())) return;
     }
     selectedComponent = panel;
     workspace.setSidebarView(panel);
     if (panel === "search") await fileNavigation?.focusSearch();
+    else if (returning) focusDocument();
   }
 
   function prepareDocumentAction(): boolean {
@@ -491,7 +517,8 @@
     if (workspace.activePane === pane && pane.document.path === path) finishFileNavigation();
   }
 
-  function focusDocument(): void {
+  /** 外壳解除正文 inert 后交还键盘焦点，保留原段落选区。 */
+  export function focusDocument(): void {
     // 所有打开共用焦点交接：先解除 inert 并聚焦活动栏，文本表面再接续选区。
     // 图片、PDF 与空白页也因此有可用的键盘落点。
     prepareDocumentAction();
@@ -527,8 +554,7 @@
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     if (
       event.key === "Escape" &&
-      narrow &&
-      !filesCollapsed &&
+      drawerOpen &&
       !(event.target instanceof Element && event.target.closest("[popover]"))
     ) {
       event.preventDefault();
@@ -553,6 +579,20 @@
       return false;
     }
     return workspace.flushBeforeClose();
+  }
+
+  /** 从文章对话返回稳定入口；跨库或来源已移除时明确报错，不打开错误文章。 */
+  export async function openArticle(root: string, path: string, markerId: string): Promise<void> {
+    if (root !== workspace.vaultRoot) throw new Error(`请先打开此对话所属的笔记库：${root}`);
+    if (!workspace.files.includes(path)) throw new Error("来源文章已移除，对话历史仍保留");
+    await workspace.openFile(path);
+    if (workspace.document.path !== path) throw new Error("文章切换未完成，请先处理保存问题");
+    if (workspace.viewMode === "source") await workspace.toggleViewMode();
+    finishFileNavigation();
+    if (markerId)
+      await workspace.navigation.openConversation(path, markerId, workspace.openFile, () =>
+        workspace.report("文章已打开，但未找到唯一的对话入口；请检查入口是否被移除或重复"),
+      );
   }
 </script>
 
@@ -598,8 +638,8 @@
   <div class="panes" inert={agentOpen} aria-hidden={agentOpen}>
     <button
       class="files-scrim"
-      hidden={filesCollapsed || !narrow}
-      inert={filesCollapsed || !narrow}
+      hidden={!drawerOpen}
+      inert={!drawerOpen}
       type="button"
       aria-label="收起文件栏"
       onclick={closeFilesPane}
@@ -610,10 +650,6 @@
       panel={sidebarPanel}
       activeEntry={selectedComponent}
       libraryShown={space === "library"}
-      onNavigateDirectory={(path) => {
-        fileList?.enterDirectory(path);
-        if (narrow) closeFilesPane();
-      }}
       onSelectPanel={(panel) => void selectSidebarPanel(panel)}
       hidden={filesCollapsed}
       width={leftWidth}
@@ -636,13 +672,6 @@
         layoutWrites.request();
       }}
     >
-      {#snippet header()}
-        {#if !documentVisible}
-          <button class="reader-button" type="button" onclick={() => void resumeWriting()}
-            >← 返回文档</button
-          >
-        {/if}
-      {/snippet}
       {#snippet documentTools()}
         {#each workspace.panes as pane (pane.id)}
           {@const controls = paneControls.get(pane.id)}
@@ -657,6 +686,7 @@
       {/snippet}
       {#snippet footer()}
         <LinksDock
+          compact={space === "library" && sidebarPanel !== "search"}
           {workspace}
           enabled={documentVisible}
           onOpenSettings={() => settingsWindow?.open()}
@@ -674,10 +704,10 @@
     </QuickNavigation>
     <div
       class="content-space"
-      use:sidebarMotion={{ collapsed: filesCollapsed, narrow }}
+      use:sidebarMotion={{ collapsed: filesCollapsed, narrow: sidebarIsDrawer }}
       bind:this={contentElement}
       tabindex="-1"
-      inert={narrow && !filesCollapsed}
+      inert={drawerOpen}
     >
       <div
         class="reading-space"
@@ -691,13 +721,14 @@
         <div class="document-panes">
           {#each workspace.panes as pane (pane.id)}
             <PaneColumn
+              {...articleAgent ? { articleAgent } : {}}
               {workspace}
               {pane}
               {registerControls}
               onShowTools={showDocumentTools}
               {mediaIo}
               hidden={compactSplit && workspace.activePane !== pane}
-              narrowInert={narrow && !filesCollapsed}
+              narrowInert={drawerOpen}
               onRename={() => {
                 workspace.activatePane(pane.id);
                 beginRename();
@@ -707,6 +738,20 @@
         </div>
       </div>
       <LibraryBrowser
+        {...articleAgent ? { articleAgent } : {}}
+        {articleCounts}
+        {...articleAgent
+          ? {
+              onConversations: (path: string) => {
+                const root = workspace.vaultRoot;
+                if (root)
+                  void articleAgent
+                    .open(null, { root, path })
+                    .catch((error) => workspace.report(String(error)));
+              },
+            }
+          : {}}
+        onOpenVault={() => void openVault()}
         bind:this={fileList}
         onOpen={finishFileNavigation}
         {workspace}
@@ -718,6 +763,7 @@
         readFile={readerApi.fileRead}
         onEdit={(action, entry, parent) => {
           if (action === "file") void startDocument("note", parent);
+          else if (action === "directory") void startDocument("directory", parent);
           else void entryDialog?.open(action, entry, parent);
         }}
         onNewWhiteboard={(parent) => void startDocument("whiteboard", parent)}
@@ -745,6 +791,11 @@
     {workspace}
     onComplete={(change) => void finishEntryOperation(change)}
   />
+  <CreateEntryDialog
+    bind:this={createDialog}
+    {workspace}
+    onComplete={(change) => void finishEntryOperation(change)}
+  />
   {#key pickerOpening}{#if picker === "switcher" || picker === "split"}
       <QuickSwitcher
         otherPane={picker === "split"}
@@ -754,8 +805,12 @@
           picker = null;
         }}
         onOpened={() => finishFileNavigation()}
-        onCreated={(path) =>
-          void finishEntryOperation({ action: "create", entry: { path, kind: "file" } })}
+        onCreate={(path) =>
+          void startDocument(
+            "note",
+            path.includes("/") ? parentDirectory(path) : undefined,
+            path.split("/").at(-1),
+          )}
       />
     {:else if picker === "palette"}
       <CommandPalette
@@ -841,7 +896,7 @@
     .files-scrim[hidden] {
       display: none;
     }
-    .panes :global(.file-sidebar) {
+    .panes :global(.file-sidebar:not(.compact)) {
       position: absolute;
       left: 0;
       top: 0;

@@ -2,7 +2,7 @@
 use crate::storage::path::{path_to_slashes, resolve_in_root, validate_relative_path};
 use crate::storage::save::{read_optional, stage, sync_parent};
 use crate::{Error, RenameOutcome, Vault};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,6 +23,8 @@ pub struct VaultEntry {
     pub kind: EntryKind,
     /// 原路径被其他类型条目占用或不可安全访问，草稿须单独显示，不能伪装成磁盘条目。
     pub recovery_only: bool,
+    /// 索引修改时间，Unix 毫秒；目录和未落盘草稿不伪造时间。
+    pub modified_at: Option<i64>,
 }
 
 /// 批量操作的独立源条目；目标缺席表示移入系统废纸篓。
@@ -36,8 +38,16 @@ pub struct EntryMutation {
 impl Vault {
     /// 列出可见文件、空目录和可恢复草稿。
     /// # Errors
-    /// 目录缓存、恢复记录不可读时失败。
+    /// 目录缓存、文件索引或恢复记录不可读时失败。
     pub fn list_entries(&self) -> Result<Vec<VaultEntry>, Error> {
+        let modified: HashMap<_, _> = {
+            let conn = self.lock_conn()?;
+            crate::index::load_files(&conn)?
+                .into_iter()
+                .filter(|row| row.mtime > 0)
+                .map(|row| (row.path, row.mtime / 1_000_000))
+                .collect()
+        };
         let files: HashSet<_> = self.list_disk_files()?.into_iter().collect();
         let mut entries: Vec<_> = files
             .iter()
@@ -45,12 +55,14 @@ impl Vault {
                 path: path.clone(),
                 kind: EntryKind::File,
                 recovery_only: false,
+                modified_at: modified.get(path).copied(),
             })
             .collect();
         entries.extend(self.directory_paths()?.into_iter().map(|path| VaultEntry {
             path,
             kind: EntryKind::Directory,
             recovery_only: false,
+            modified_at: None,
         }));
         for path in self.recovery.paths()? {
             if files.contains(&path) {
@@ -67,6 +79,7 @@ impl Vault {
                 path,
                 kind: EntryKind::File,
                 recovery_only,
+                modified_at: None,
             });
         }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
@@ -274,6 +287,7 @@ pub(crate) fn scan_entries_observed(
                     EntryKind::File
                 },
                 recovery_only: false,
+                modified_at: None,
             });
             if entries.len().is_multiple_of(256) {
                 progress(entries.len())?;

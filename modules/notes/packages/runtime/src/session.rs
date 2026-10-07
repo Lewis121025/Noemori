@@ -335,6 +335,16 @@ fn file_tree(value: &Value) -> Value {
     let scroll = tree_position(&value["scroll"]);
     let mut result = json!({"expanded": paths(&value["expanded"], usize::MAX, true),
         "selected": paths(&value["selected"], usize::MAX, true), "focused": focused, "scroll": scroll});
+    let presentation = &value["presentation"];
+    if matches!(presentation["layout"].as_str(), Some("list" | "grid"))
+        && matches!(presentation["sort"].as_str(), Some("name" | "name-desc" | "type" | "modified"))
+        && presentation["preview"].is_boolean()
+    {
+        result["presentation"] = json!({
+            "layout": presentation["layout"], "sort": presentation["sort"],
+            "preview": presentation["preview"]
+        });
+    }
     if value.get("navigationScroll").is_some() {
         result["navigationScroll"] = tree_position(&value["navigationScroll"]);
     }
@@ -490,6 +500,14 @@ fn remap_reader(reader: &mut Value, from: &str, to: Option<&str>) {
             map_list(&mut tree[field], true);
         }
         tree["focused"] = map(&tree["focused"]);
+        if tree["browse"]["directory"].is_string() {
+            let directory = map(&tree["browse"]["directory"]);
+            tree["browse"]["directory"] = if directory.is_null() {
+                json!("")
+            } else {
+                directory
+            };
+        }
         for field in ["scroll", "navigationScroll"] {
             if tree[field].is_object() {
                 tree[field]["path"] = map(&tree[field]["path"]);

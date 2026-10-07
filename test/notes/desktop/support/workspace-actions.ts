@@ -73,7 +73,7 @@ export async function openLibrary(page: Page): Promise<void> {
       document.querySelector('.window-toolbar [aria-label="显示或隐藏文件栏"]') !== null,
   );
   // 抽屉会让中央页面 inert；应先关闭抽屉，不能把正常的遮罩状态误判为保存未完成。
-  if (await page.locator(".library").isVisible()) {
+  if ((await page.locator(".library").getAttribute("hidden")) === null) {
     const scrim = page.getByRole("button", { name: "收起文件栏", exact: true });
     if (await scrim.isVisible())
       await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
@@ -81,4 +81,19 @@ export async function openLibrary(page: Page): Promise<void> {
   }
   await sidebarComponent(page, "文件系统");
   await page.getByRole("region", { name: "文件系统", exact: true }).waitFor();
+}
+
+/** 确认新建表单中的名称与目录；可选名称覆盖建议值，确认成功后等待表单关闭。 */
+export async function confirmNewEntry(page: Page, name?: string): Promise<void> {
+  const dialog = page.locator(".create-dialog[open]");
+  await dialog.waitFor();
+  if (name !== undefined) await dialog.getByRole("textbox", { name: "名称", exact: true }).fill(name);
+  await dialog.getByRole("button", { name: "创建", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+}
+
+/** 文件管理的新建菜单是唯一可见的创建入口，类型选择后仍需确认名称和位置。 */
+export async function newEntry(page: Page, kind: "笔记" | "白板" | "文件夹"): Promise<void> {
+  await page.locator(".library-heading").getByRole("button", { name: "新建", exact: true }).click();
+  await page.locator(".create-menu").getByRole("button", { name: `新建${kind}`, exact: true }).click();
 }

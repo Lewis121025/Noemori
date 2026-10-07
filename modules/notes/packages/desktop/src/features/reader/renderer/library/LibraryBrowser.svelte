@@ -1,14 +1,19 @@
 <script lang="ts">
-  import { revealOnChange } from "../motion";
   import { tick, untrack } from "svelte";
   import LibraryFrame from "./LibraryFrame.svelte";
-  import { libraryCreationDirectory, libraryEntryKind } from "./library";
-  import FileGridViewport from "./FileGridViewport.svelte";
-  import { fileGridRows } from "./file-grid";
+  import FileTreeViewport from "./FileTreeViewport.svelte";
+  import { libraryTreeRows, libraryTitle } from "./library-tree";
+  import HighlightedText from "./HighlightedText.svelte";
+  import { SvelteSet } from "svelte/reactivity";
+  import type { ArticleAgentActions } from "../../shared/article-conversations";
   import InlineRename from "./InlineRename.svelte";
   import FileBatchDialog from "./FileBatchDialog.svelte";
   import { selectFileRows } from "./file-selection";
-  import type { FileTreePosition } from "../../shared/file-browser";
+  import {
+    DEFAULT_FILE_PRESENTATION,
+    type FileTreePosition,
+    type FilePresentation,
+  } from "../../shared/file-browser";
   import type { EntryBatchResult } from "../../shared/entry-batch";
   import TagBrowser from "../tags/TagBrowser.svelte";
   import BookmarksPane from "../bookmarks/BookmarksPane.svelte";
@@ -18,6 +23,7 @@
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import { isCompositionKey } from "../../shared/composition";
   import {
+    ancestorDirectories,
     buildFileTree,
     findFileTreeNode,
     parentDirectory,
@@ -33,17 +39,33 @@
     hidden = false,
     onSearch = () => {},
     onNewWhiteboard,
+    onOpenVault,
+    articleAgent,
+    articleCounts = {},
+    onConversations,
   }: {
     workspace: ReaderWorkspaceController;
     readFile: (path: string) => Promise<Uint8Array>;
-    onEdit: (action: EntryDialogAction, entry: VaultEntry | null, parent: string) => void;
+    onEdit: (
+      action: EntryDialogAction | "file" | "directory",
+      entry: VaultEntry | null,
+      parent: string,
+    ) => void;
     onOpen: () => void;
     hidden?: boolean;
     onSearch?: (query: string) => void;
     onNewWhiteboard?: (parent: string) => void;
+    onOpenVault?: () => void;
+    articleAgent?: ArticleAgentActions;
+    articleCounts?: Record<string, number>;
+    onConversations?: (path: string) => void;
   } = $props();
   let previewOpen = $state(false);
+  let readingFocused = $state(false);
+  let previewTab = $state<"article" | "chat">("article");
   const browser = $derived(workspace.fileTree);
+  const presentation = $derived(browser.state.presentation ?? DEFAULT_FILE_PRESENTATION);
+  const sort = $derived(presentation.sort);
   const browse = $derived(browser.state.browse);
   const query = $derived(browse?.query ?? "");
   const currentDirectory = $derived(browse?.directory ?? "");
@@ -55,8 +77,8 @@
   let renaming = $state.raw<VaultEntry | null>(null);
   let renameIssue = $state("");
   const renameErrorId = $props.id();
-  // 标签与书签会卸载网格，异步焦点交接必须允许视口已经消失。
-  let gridViewport: FileGridViewport | undefined = $state();
+  // 标签与书签会卸载目录树，异步焦点交接必须允许视口已经消失。
+  let treeViewport: FileTreeViewport | undefined = $state();
   let recoveryElement: HTMLElement | undefined = $state();
   let searchInput: HTMLInputElement;
   let menu: FileMenu;
@@ -78,23 +100,85 @@
     ),
   );
   const searching = $derived(query.trim() !== "");
-  const rows = $derived(fileGridRows(tree, currentDirectory, query));
+  const searchClosed = new SvelteSet<string>();
+  const contentSearch = $derived(workspace.librarySearch);
+  const nameMatches = $derived(
+    new Set(
+      workspace.entries
+        .filter(
+          (entry) =>
+            !entry.recoveryOnly &&
+            entry.path.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+        )
+        .map((entry) => entry.path),
+    ),
+  );
+  const matchingPaths = $derived(
+    new Set([...nameMatches, ...contentSearch.hits.map((hit) => hit.path)]),
+  );
+  const hitByPath = $derived(new Map(contentSearch.hits.map((hit) => [hit.path, hit])));
+  const excerptPaths = $derived(
+    new Set(
+      contentSearch.hits
+        .filter((hit) => !nameMatches.has(hit.path) && hit.snippet !== "")
+        .map((hit) => hit.path),
+    ),
+  );
+  const expandedPaths = $derived(browser.state.expanded);
+  const expanded = $derived(
+    searching
+      ? new Set(
+          [...matchingPaths].flatMap(ancestorDirectories).filter((path) => !searchClosed.has(path)),
+        )
+      : new Set(expandedPaths),
+  );
+  const rows = $derived(
+    libraryTreeRows(
+      workspace.entries,
+      expanded,
+      sort,
+      searching ? matchingPaths : undefined,
+      searchClosed,
+    ),
+  );
+  const resultCount = $derived(
+    searching
+      ? workspace.entries.filter(
+          (entry) => entry.kind === "file" && !entry.recoveryOnly && matchingPaths.has(entry.path),
+        ).length
+      : workspace.entries.filter((entry) => entry.kind === "file" && !entry.recoveryOnly).length,
+  );
+  $effect(() => {
+    void workspace.vaultRoot;
+    const text = query,
+      suspended = hidden;
+    untrack(() => {
+      contentSearch.setInput(text, suspended);
+      searchClosed.clear();
+    });
+    return () => contentSearch.reset();
+  });
   const selectedEntries = $derived(
-    rows
-      .filter((row) => selected.has(row.node.path))
-      .map((row) => ({ path: row.node.path, kind: row.node.kind })),
+    rows.filter((row) => selected.has(row.node.path)).map((row) => row.node),
   );
   const active = $derived(workspace.document.path);
   const activeRecovery = $derived(
     workspace.entries.some((entry) => entry.recoveryOnly && entry.path === active),
   );
   const busy = $derived(workspace.switching || workspace.copying);
+  function present(patch: Partial<FilePresentation>): void {
+    browser.update({
+      presentation: { ...presentation, ...patch },
+      ...(patch.sort === undefined ? {} : { scroll: null }),
+    });
+    if (patch.sort !== undefined) filteredScroll = null;
+  }
   const focusable = $derived(
     rows.some((row) => row.node.path === focused)
       ? focused
       : rows.some((row) => row.node.kind === "file" && row.node.path === active)
         ? active
-        : (rows[0]?.node.path ?? null),
+        : (rows.find((row) => row.node.kind === "file")?.node.path ?? rows[0]?.node.path ?? null),
   );
 
   $effect(() => {
@@ -118,6 +202,7 @@
             section: "files",
             directory: path === null || recovering ? "" : parentDirectory(path),
           },
+          expanded: ancestorDirectories(path),
         });
         if (path !== null) selectOnly(recovering ? null : path);
       }
@@ -134,13 +219,29 @@
   });
 
   function selectOnly(path: string | null): void {
-    browser.update({ selected: path === null ? [] : [path], focused: path });
+    const node = findFileTreeNode(tree, path);
+    browser.update({
+      selected: path === null ? [] : [path],
+      focused: path,
+      ...(node
+        ? {
+            browse: {
+              query,
+              section: "files",
+              directory: node.kind === "directory" ? node.path : parentDirectory(node.path),
+            },
+          }
+        : {}),
+    });
     selectionAnchor = path;
   }
   function selectRow(path: string, mode: "replace" | "toggle" | "range" | "extend"): void {
+    const filesOnly =
+      findFileTreeNode(tree, path)?.kind === "file" &&
+      findFileTreeNode(tree, selectionAnchor)?.kind === "file";
     const next = selectFileRows(
       { paths: selected, anchor: selectionAnchor },
-      rows.map((row) => row.node.path),
+      rows.filter((row) => !filesOnly || row.node.kind === "file").map((row) => row.node.path),
       path,
       mode,
     );
@@ -148,43 +249,52 @@
     selectionAnchor = next.anchor;
   }
   /**
-   * 用户从侧栏、网格或面包屑切换目录时结束临时编辑；文件改名的路径映射不调用此入口。
+   * 用户切换浏览目录时结束临时编辑；文件改名的路径映射不调用此入口。
    * @param path 已存在的库内目录，空字符串表示库根。
    * @returns 不返回值；目录持久化失败由工作区统一报告。
    */
   export function enterDirectory(path: string): void {
     previewOpen = false;
+    readingFocused = false;
     filteredScroll = null;
     renaming = null;
     renameIssue = "";
     selectionAnchor = null;
     browser.enterDirectory(path);
+    selectOnly(path || null);
   }
   /** 查询、分类与目录一次提交到会话，避免视图切换后恢复过时的浏览位置。 */
   function showPane(mode: typeof paneMode, text = ""): void {
     previewOpen = false;
-    if (browser.ready)
-      browser.update({ browse: { query: text, section: mode, directory: currentDirectory } });
+    readingFocused = false;
+    if (browser.ready) {
+      browser.setQuery(text);
+      browser.update({ browse: { ...browser.state.browse!, section: mode } });
+    }
   }
   async function focusPath(path: string, select = true): Promise<void> {
     previewOpen = false;
+    readingFocused = false;
     if (select) selectOnly(path);
     else browser.update({ focused: path });
     await tick();
-    await gridViewport?.focusPath(path);
+    await treeViewport?.focusPath(path);
   }
   /** 关闭窄窗口预览后使原焦点条目可见并接续键盘操作，保留选择与查询。 */
   async function closePreview(): Promise<void> {
     previewOpen = false;
+    readingFocused = false;
     await tick();
     if (hidden) return;
-    if (focusable !== null) await gridViewport?.focusPath(focusable);
+    if (focusable !== null) await treeViewport?.focusPath(focusable);
     else searchInput.focus();
   }
   async function activate(entry: VaultEntry): Promise<void> {
     selectOnly(entry.recoveryOnly ? null : entry.path);
-    if (entry.kind === "directory") enterDirectory(entry.path);
-    else {
+    if (entry.kind === "directory") {
+      enterDirectory(entry.path);
+      await focusPath(entry.path, false);
+    } else {
       await workspace.openFile(entry.path);
       if (workspace.document.path === entry.path) onOpen();
     }
@@ -209,19 +319,19 @@
     return { kind: entry.kind === "directory" ? "folder" : "file", path: entry.path, title: null };
   }
   function action(kind: FileMenuAction, entry: VaultEntry | null): void {
+    if (kind === "conversations") {
+      if (entry && articleAgent) {
+        selectOnly(entry.path);
+        previewTab = "chat";
+        previewOpen = true;
+      } else if (entry) onConversations?.(entry.path);
+      return;
+    }
     if (kind === "bookmark") {
       if (entry !== null) void workspace.bookmarks.toggle(entryBookmark(entry));
       return;
     }
-    if (kind === "locate") {
-      void locate();
-      return;
-    }
     if (busy) return;
-    if (kind === "file") {
-      onEdit("file", entry, libraryCreationDirectory(entry, currentDirectory));
-      return;
-    }
     if (workspace.vaultRoot === null) return;
     if (kind === "export") {
       const paths = selected.size > 1 ? [...selected] : entry ? [entry.path] : [...selected];
@@ -240,12 +350,7 @@
       if (entry !== null) void beginRename(entry);
       return;
     }
-    const parent =
-      kind === "directory"
-        ? libraryCreationDirectory(entry, currentDirectory)
-        : entry === null
-          ? currentDirectory
-          : parentDirectory(entry.path);
+    const parent = entry === null ? currentDirectory : parentDirectory(entry.path);
     onEdit(kind, entry, parent);
   }
   async function beginRename(entry: VaultEntry): Promise<void> {
@@ -319,6 +424,7 @@
   /** 聚焦资料搜索并选中现有查询；调用方须先进入资料管理空间。 */
   export async function focusSearch(): Promise<void> {
     previewOpen = false;
+    readingFocused = false;
     await tick();
     searchInput.focus();
     searchInput.select();
@@ -341,7 +447,7 @@
     if (next === null) searchInput.focus();
     else await focusPath(next);
   }
-  /** 清空路径查询，恢复当前文件夹的网格与滚动位置。 */
+  /** 清空搜索，恢复之前的目录选择与滚动位置。 */
   function clearSearch(): void {
     if (workspace.isComposing) return;
     showPane("files");
@@ -370,13 +476,16 @@
   }
   function searchKeydown(event: KeyboardEvent): void {
     if (busy || isCompositionKey(event) || workspace.isComposing) return;
-    if (event.key === "Escape" && query !== "") {
+    if (event.key === "Enter" && query.trim()) {
+      event.preventDefault();
+      void contentSearch.run(query);
+    } else if (event.key === "Escape" && query !== "") {
       event.preventDefault();
       event.stopPropagation();
       clearSearch();
     } else if (event.key === "ArrowDown" && rows[0]) {
       event.preventDefault();
-      void focusPath(rows[0].node.path);
+      void focusPath(focusable ?? rows[0].node.path);
     }
   }
   function context(event: MouseEvent, entry: VaultEntry): void {
@@ -402,7 +511,11 @@
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
       event.preventDefault();
       event.stopPropagation();
-      browser.update({ selected: rows.map((item) => item.node.path) });
+      browser.update({
+        selected: rows
+          .filter((item) => !searching || matchingPaths.has(item.node.path))
+          .map((item) => item.node.path),
+      });
       selectionAnchor = row.node.path;
       return;
     }
@@ -442,8 +555,26 @@
       clearSearch();
       return;
     }
-    const next = gridViewport?.nextPath(row.node.path, event.key) ?? undefined;
-    if (next !== undefined) {
+    if (
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      (event.key === "ArrowRight" || event.key === "ArrowLeft")
+    ) {
+      event.preventDefault();
+      if (event.key === "ArrowRight" && row.node.kind === "directory") {
+        if (!expanded.has(row.node.path)) toggleFolder(row.node.path);
+        else if (rows[rows.indexOf(row) + 1]?.parent === row.node.path)
+          void focusPath(rows[rows.indexOf(row) + 1]!.node.path);
+      } else if (event.key === "ArrowLeft") {
+        if (row.node.kind === "directory" && expanded.has(row.node.path))
+          toggleFolder(row.node.path);
+        else if (row.parent) void focusPath(row.parent);
+      }
+      return;
+    }
+    const next = treeViewport?.nextPath(row.node.path, event.key) ?? undefined;
+    if (next !== undefined && next !== null) {
       if (event.shiftKey) selectRow(next, event.metaKey || event.ctrlKey ? "extend" : "range");
       else if (!event.metaKey && !event.ctrlKey) selectOnly(next);
       event.preventDefault();
@@ -461,6 +592,42 @@
       if (rect) void menu.open(row.node, rect.left + 20, rect.bottom);
     } else return;
     event.preventDefault();
+  }
+  function toggleFolder(path: string): void {
+    if (busy) return;
+    if (searching) {
+      if (searchClosed.has(path)) searchClosed.delete(path);
+      else searchClosed.add(path);
+    } else
+      browser.update({
+        expanded: expanded.has(path)
+          ? browser.state.expanded.filter((item) => item !== path)
+          : [...browser.state.expanded, path],
+      });
+  }
+  function collapseAll(): void {
+    const folders = rows.filter((row) => row.node.kind === "directory").map((row) => row.node.path);
+    if (searching) {
+      if (searchClosed.size) searchClosed.clear();
+      else folders.forEach((path) => searchClosed.add(path));
+    } else
+      browser.update({
+        expanded: browser.state.expanded.length
+          ? []
+          : [
+              ...new Set(
+                workspace.entries.flatMap((entry) => [
+                  ...ancestorDirectories(entry.path),
+                  ...(entry.kind === "directory" ? [entry.path] : []),
+                ]),
+              ),
+            ],
+      });
+  }
+  function inputQuery(event: Event & { currentTarget: HTMLInputElement }): void {
+    if (event instanceof InputEvent && event.isComposing) return;
+    browser.setQuery(event.currentTarget.value);
+    filteredScroll = null;
   }
   function allowDrop(event: DragEvent, directory: string): void {
     if (
@@ -493,176 +660,180 @@
 </script>
 
 {#snippet entryIcon(row: FileTreeRow)}
-  <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true"
-    >{#if row.node.kind === "directory"}<path
-        d="M2.5 5a1 1 0 0 1 1-1h4l2 2h7a1 1 0 0 1 1 1v9h-15z"
-      />{:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4" />{/if}</svg
-  >
+  <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
+    {#if row.node.kind === "directory"}<path
+        d={expanded.has(row.node.path) ? "m5 7 5 5 5-5" : "m7 5 5 5-5 5"}
+      />
+    {:else if row.node.path.endsWith(".noemoriboard")}<path d="M3 4h14v12H3zM7 4v12M7 9h10" />
+    {:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4M8 10h4M8 13h4" />{/if}
+  </svg>
 {/snippet}
 
 <LibraryFrame
   {workspace}
-  count={rows.length}
   {hidden}
-  bind:previewOpen
-  onClosePreview={() => void closePreview()}
-  selected={selectedEntries}
-  onAction={action}
-  onOpen={(entry) => void activate(entry)}
   {readFile}
+  bind:previewOpen
+  bind:previewTab
+  bind:focused={readingFocused}
+  onFollowLink={(kind, raw, from) => {
+    void workspace.openLink(kind, raw, from).then(onOpen);
+  }}
+  entry={findFileTreeNode(tree, focusable)}
+  {...articleAgent ? { articleAgent } : {}}
+  query={searching ? query : ""}
+  onClosePreview={() => void closePreview()}
+  {...onOpenVault === undefined ? {} : { onOpenVault }}
+  onCreate={(kind) => onEdit(kind, null, currentDirectory)}
+  onOpen={(entry) => void activate(entry)}
   {...onNewWhiteboard === undefined
     ? {}
-    : {
-        onNewWhiteboard: () =>
-          onNewWhiteboard?.(libraryCreationDirectory(currentEntry(), currentDirectory)),
-      }}
+    : { onNewWhiteboard: () => onNewWhiteboard?.(currentDirectory) }}
 >
-  <nav
-    class="list"
-    aria-label="文件列表"
-    use:revealOnChange={{ key: workspace.fileTree.state.browse?.directory ?? "", kind: "panel" }}
-  >
-    <div class="pane-head">
+  <nav class="list" aria-label="文件列表">
+    <div class="search-wrap">
+      <div class="search">
+        <svg viewBox="0 0 20 20" aria-hidden="true"
+          ><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg
+        >
+        <input
+          type="text"
+          role="searchbox"
+          aria-label="搜索笔记库"
+          placeholder="搜索笔记库…"
+          disabled={busy}
+          bind:this={searchInput}
+          value={query}
+          oninput={inputQuery}
+          oncompositionend={inputQuery}
+          onkeydown={searchKeydown}
+        />
+        {#if query !== ""}<button
+            type="button"
+            class="clear-search"
+            aria-label="清除搜索"
+            title="清除搜索（Esc）"
+            disabled={busy}
+            onclick={clearSearch}
+            ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8m0-8-8 8" /></svg></button
+          >{/if}
+      </div>
+    </div>
+    <div class="view-options">
       <button
-        type="button"
         class="root-label"
+        type="button"
+        aria-label="全部文件"
+        title="全部文件"
         class:drop-target={dropTarget === ""}
-        title="笔记库根目录；可将条目拖到这里"
-        onclick={() => {
-          enterDirectory("");
-        }}
+        onclick={() => enterDirectory("")}
         ondragover={(event) => allowDrop(event, "")}
         ondrop={(event) => void drop(event, "")}>全部文件</button
       >
-      <div class="breadcrumbs" aria-label="当前文件夹">
-        {#each currentDirectory.split("/").filter(Boolean) as name, index (currentDirectory
-          .split("/")
-          .slice(0, index + 1)
-          .join("/"))}
-          <span aria-hidden="true">/</span>
-          <button
-            type="button"
-            onclick={() =>
-              enterDirectory(
-                currentDirectory
-                  .split("/")
-                  .slice(0, index + 1)
-                  .join("/"),
-              )}>{name}</button
-          >
-        {/each}
-      </div>
+      <span class="result-count" aria-live="polite"
+        >{resultCount}{contentSearch.hasMore && searching ? "+" : ""}</span
+      >
       <div class="tools">
         <button
           type="button"
           aria-label="浏览标签"
+          title="标签"
           aria-pressed={paneMode === "tags"}
-          title="浏览标签"
           disabled={busy || workspace.vaultRoot === null}
-          onclick={() => {
-            showPane(paneMode === "tags" ? "files" : "tags");
-          }}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"
+          onclick={() => showPane(paneMode === "tags" ? "files" : "tags")}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"
             ><path d="M8 3 6.5 17M14 3l-1.5 14M4 7.5h12M3.5 12.5h12" /></svg
-          >标签</button
+          ></button
         >
         <button
           type="button"
           aria-label="书签"
-          aria-pressed={paneMode === "bookmarks"}
           title="书签"
+          aria-pressed={paneMode === "bookmarks"}
           disabled={busy || workspace.vaultRoot === null}
-          onclick={() => {
-            showPane(paneMode === "bookmarks" ? "files" : "bookmarks");
-          }}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"
-            ><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
-          >收藏</button
+          onclick={() => showPane(paneMode === "bookmarks" ? "files" : "bookmarks")}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
+          ></button
         >
         <button
           type="button"
-          aria-label="文件管理"
-          title="文件管理"
-          disabled={busy || workspace.vaultRoot === null}
-          onclick={(event) => {
-            const box = event.currentTarget.getBoundingClientRect();
-            void menu.open(null, box.left, box.bottom + 4);
-          }}
+          aria-label="定位当前文件"
+          title="定位当前文件"
+          disabled={busy || workspace.isComposing || active === null}
+          onclick={() => void locate()}
           ><svg viewBox="0 0 20 20" aria-hidden="true"
-            ><circle cx="4" cy="10" r="1" /><circle cx="10" cy="10" r="1" /><circle
-              cx="16"
-              cy="10"
-              r="1"
-            /></svg
+            ><circle cx="10" cy="10" r="5" /><path d="M10 2v4m0 8v4M2 10h4m8 0h4" /></svg
+          ></button
+        >
+        <label class="sort" title="排序"
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M4 3v14m-3-3 3 3 3-3M10 5h7M10 9h5M10 13h3" /></svg
+          >
+          <select
+            aria-label="文件排序"
+            value={sort === "modified" ? "modified" : "name"}
+            onchange={(event) => {
+              const value = event.currentTarget.value;
+              if (value === "name" || value === "modified") present({ sort: value });
+            }}
+            ><option value="name">标题顺序</option><option value="modified">最近修改</option
+            ></select
+          >
+        </label>
+        <button
+          type="button"
+          aria-label={(searching ? searchClosed.size === 0 : expanded.size > 0)
+            ? "折叠全部目录"
+            : "展开全部目录"}
+          title={(searching ? searchClosed.size === 0 : expanded.size > 0)
+            ? "折叠全部目录"
+            : "展开全部目录"}
+          disabled={busy}
+          onclick={collapseAll}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="m6 3 4 4 4-4M4 10h12m-10 7 4-4 4 4" /></svg
           ></button
         >
       </div>
     </div>
-    <div class="search">
-      <svg viewBox="0 0 20 20" aria-hidden="true"
-        ><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg
-      ><input
-        type="text"
-        role="searchbox"
-        aria-label="筛选当前列表"
-        placeholder="筛选文件名…"
-        disabled={busy}
-        bind:this={searchInput}
-        value={query}
-        oninput={(event) => {
-          showPane("files", event.currentTarget.value);
-          filteredScroll = null;
-        }}
-        onkeydown={searchKeydown}
-      />
-      {#if query !== ""}
-        <button
-          type="button"
-          class="clear-search"
-          aria-label="清除搜索"
-          title="清除搜索（Esc）"
-          disabled={busy}
-          onclick={clearSearch}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8m0-8-8 8" /></svg></button
-        >
-      {/if}
-    </div>
-    {#if paneMode === "tags"}
-      <TagBrowser {workspace} onPick={pickTag} />
-    {:else if paneMode === "bookmarks"}
-      <BookmarksPane
+    {#if paneMode === "tags"}<TagBrowser {workspace} onPick={pickTag} />
+    {:else if paneMode === "bookmarks"}<BookmarksPane
         bind:this={bookmarksPane}
         {workspace}
         {busy}
         onActivate={(bookmark) => void openBookmark(bookmark)}
       />
     {:else}
-      {#if recoveries.length > 0}
-        <section class="recovery" aria-label="待恢复的笔记" bind:this={recoveryElement}>
+      {#if searching && contentSearch.busy}<p class="search-status" role="status">正在搜索…</p>{/if}
+      {#if searching && contentSearch.error}<div class="search-error" role="alert">
+          {contentSearch.error}
+          <button type="button" onclick={() => void contentSearch.run(query)}>重试</button>
+        </div>{/if}
+      {#if recoveries.length > 0}<section
+          class="recovery"
+          aria-label="待恢复的笔记"
+          bind:this={recoveryElement}
+        >
           <h2>待恢复的笔记</h2>
-          <p>原路径发生变化。打开笔记后，可另存副本。</p>
-          {#each recoveries as entry (entry.path)}
-            <button
+          {#each recoveries as entry (entry.path)}<button
               type="button"
               class="recovery-entry"
-              class:active={entry.path === active}
               data-path={entry.path}
               aria-current={entry.path === active ? "page" : undefined}
               title={entry.path}
               disabled={busy}
-              onclick={() => void activate(entry)}
-            >
-              <span class="name">{entry.path.split("/").at(-1)}</span>
-              <span class="recovery-path">{entry.path}</span>
-            </button>
-          {/each}
-        </section>
-      {/if}
-      <FileGridViewport
-        bind:this={gridViewport}
+              onclick={() => void activate(entry)}>{entry.path}</button
+            >{/each}
+        </section>{/if}
+      <FileTreeViewport
+        bind:this={treeViewport}
         {rows}
         focused={focusable}
         {selected}
+        {expanded}
+        excerpts={excerptPaths}
         dragging={dragging?.path ?? null}
         position={searching ? filteredScroll : browser.state.scroll}
         onPosition={(position) => {
@@ -672,123 +843,134 @@
         onEmptyFocus={() => searchInput.focus()}
       >
         {#snippet children(row)}
-          {#if renaming?.path === row.node.path}
-            {@const entry = renaming}
-            <div
-              class="file file-card"
-              class:folder={row.node.kind === "directory"}
-              data-path={row.node.path}
-              aria-label={row.node.name}
-            >
-              {@render entryIcon(row)}
-              <InlineRename
-                {entry}
-                entries={workspace.entries}
-                errorId={renameErrorId}
-                onRename={(from, to) => workspace.renameEntry(from, to)}
-                onIssue={(issue) => {
-                  renameIssue = issue;
+          <div
+            class="file-row"
+            class:folder={row.node.kind === "directory"}
+            class:active={row.node.path === focusable}
+            class:selected={selected.has(row.node.path)}
+            class:dragging={dragging?.path === row.node.path}
+            class:drop-target={dropTarget === row.node.path}
+          >
+            {#if renaming?.path === row.node.path}
+              {@const entry = renaming}
+              <div class="file renaming" data-path={row.node.path} aria-label={row.node.name}>
+                {@render entryIcon(row)}
+                <InlineRename
+                  {entry}
+                  entries={workspace.entries}
+                  errorId={renameErrorId}
+                  onRename={(from, to) => workspace.renameEntry(from, to)}
+                  onIssue={(issue) => {
+                    renameIssue = issue;
+                  }}
+                  onFinish={(destination, focus) => void finishRename(entry, destination, focus)}
+                />
+              </div>
+            {:else}
+              <button
+                type="button"
+                class="file"
+                data-path={row.node.path}
+                tabindex={focusable === row.node.path ? 0 : -1}
+                aria-label={row.node.name}
+                aria-keyshortcuts="F2 Delete Meta+Backspace"
+                aria-current={row.node.kind === "file" && row.node.path === active
+                  ? "page"
+                  : undefined}
+                title={row.node.path}
+                disabled={busy}
+                draggable={!busy}
+                onfocus={() => browser.update({ focused: row.node.path })}
+                onclick={(event) => {
+                  if (event.shiftKey)
+                    selectRow(row.node.path, event.metaKey || event.ctrlKey ? "extend" : "range");
+                  else if (event.metaKey || event.ctrlKey) selectRow(row.node.path, "toggle");
+                  else {
+                    selectOnly(row.node.path);
+                    if (row.node.kind === "directory") toggleFolder(row.node.path);
+                  }
                 }}
-                onFinish={(destination, focus) => void finishRename(entry, destination, focus)}
-              />
-            </div>
-          {:else}
-            <button
-              type="button"
-              class="file file-card"
-              class:folder={row.node.kind === "directory"}
-              class:active={row.node.kind === "file" && row.node.path === active}
-              class:selected={selected.has(row.node.path)}
-              class:dragging={dragging?.path === row.node.path}
-              class:drop-target={dropTarget === row.node.path}
-              data-path={row.node.path}
-              tabindex={focusable === row.node.path ? 0 : -1}
-              aria-label={row.node.name}
-              aria-keyshortcuts="F2 Delete Meta+Backspace"
-              aria-current={row.node.kind === "file" && row.node.path === active
-                ? "page"
-                : undefined}
-              title={row.node.path}
-              disabled={busy}
-              draggable={!busy}
-              onfocus={() => {
-                browser.update({ focused: row.node.path });
-              }}
-              onclick={(event) => {
-                if (event.shiftKey)
-                  selectRow(row.node.path, event.metaKey || event.ctrlKey ? "extend" : "range");
-                else if (event.metaKey || event.ctrlKey) selectRow(row.node.path, "toggle");
-                else selectOnly(row.node.path);
-              }}
-              ondblclick={() => {
-                void activate(row.node);
-              }}
-              onkeydown={(event) => keydown(event, row)}
-              oncontextmenu={(event) => context(event, row.node)}
-              ondragstart={(event) => {
-                if (!selected.has(row.node.path)) selectOnly(row.node.path);
-                draggedEntries = selectedEntries;
-                dragging = { path: row.node.path, kind: row.node.kind };
-                event.dataTransfer?.setData(
-                  "text/plain",
-                  draggedEntries.map((entry) => entry.path).join("\n"),
-                );
-                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-              }}
-              ondragend={() => {
-                dragging = null;
-                draggedEntries = [];
-                dropTarget = null;
-              }}
-              ondragover={(event) => {
-                if (row.node.kind === "directory") allowDrop(event, row.node.path);
-              }}
-              ondragleave={() => {
-                dropTarget = null;
-              }}
-              ondrop={(event) => {
-                if (row.node.kind === "directory") void drop(event, row.node.path);
-              }}
-            >
-              {@render entryIcon(row)}
-              <span class="name">{row.node.name}</span>
-              <span class="entry-kind" title={searching ? row.node.path : undefined}
-                >{searching
-                  ? parentDirectory(row.node.path) || "根目录"
-                  : libraryEntryKind(row.node)}</span
+                ondblclick={() => void activate(row.node)}
+                onkeydown={(event) => keydown(event, row)}
+                oncontextmenu={(event) => context(event, row.node)}
+                ondragstart={(event) => {
+                  if (!selected.has(row.node.path)) selectOnly(row.node.path);
+                  draggedEntries = selectedEntries;
+                  dragging = row.node;
+                  event.dataTransfer?.setData(
+                    "text/plain",
+                    draggedEntries.map((entry) => entry.path).join("\n"),
+                  );
+                  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+                }}
+                ondragend={() => {
+                  dragging = null;
+                  draggedEntries = [];
+                  dropTarget = null;
+                }}
+                ondragover={(event) => {
+                  if (row.node.kind === "directory") allowDrop(event, row.node.path);
+                }}
+                ondragleave={() => {
+                  dropTarget = null;
+                }}
+                ondrop={(event) => {
+                  if (row.node.kind === "directory") void drop(event, row.node.path);
+                }}
               >
-              {#if row.node.kind === "file" && row.node.path === active}<span
-                  class="current-dot"
-                  aria-hidden="true"
-                  title="正在阅读"
-                ></span>{/if}
-            </button>
-          {/if}
+                {@render entryIcon(row)}
+                <span class="file-copy"
+                  ><span class="name"
+                    ><HighlightedText text={libraryTitle(row.node)} {query} /></span
+                  >
+                  {#if excerptPaths.has(row.node.path)}<span class="excerpt"
+                      ><HighlightedText
+                        text={hitByPath.get(row.node.path)?.snippet ?? ""}
+                        snippet
+                      /></span
+                    >{/if}
+                </span>
+              </button>
+              {#if articleCounts[row.node.path]}<button
+                  type="button"
+                  class="article-conversations"
+                  aria-label={`${libraryTitle(row.node)}：${articleCounts[row.node.path]} 条对话`}
+                  title="文章对话"
+                  onclick={() => {
+                    selectOnly(row.node.path);
+                    previewTab = "chat";
+                    previewOpen = true;
+                  }}
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true"
+                    ><path d="M17 9a7 7 0 0 1-10 6.3L3 17l1-4A7 7 0 1 1 17 9Z" /></svg
+                  ></button
+                >{/if}
+            {/if}
+          </div>
         {/snippet}
-      </FileGridViewport>
+      </FileTreeViewport>
+      {#if searching && contentSearch.hasMore}<button
+          class="load-more"
+          type="button"
+          disabled={contentSearch.loadingMore || contentSearch.stale}
+          onclick={() => void contentSearch.loadMore()}
+          >{contentSearch.loadingMore ? "正在加载…" : "更多结果"}</button
+        >{/if}
       {#if renameIssue}<p class="rename-error" id={renameErrorId} role="alert">
           {renameIssue}
         </p>{/if}
-      {#if rows.length === 0 && recoveries.length === 0}
-        <div class="empty">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v13H4z" /></svg>
-          <strong>{searching ? "没有匹配的文件" : "这里还很安静"}</strong>
-          <p>
-            {searching
-              ? "试试其他关键词，或查看全部文件。"
-              : workspace.vaultRoot === null
-                ? "打开笔记库，让想法有个归处。"
-                : "写下第一篇笔记，从这里开始。"}
-          </p>
-          {#if searching}
-            <button type="button" class="empty-action" onclick={clearSearch}>查看全部文件</button>
-          {/if}
-        </div>
-      {/if}
+      {#if rows.length === 0 && recoveries.length === 0 && !contentSearch.busy}<p class="empty">
+          {searching ? "无匹配结果" : "暂无文件"}
+        </p>{/if}
     {/if}
+    {#if selected.size > 1}<div class="selection-status" aria-live="polite">
+        已选 {selected.size} 项
+      </div>{/if}
   </nav>
 </LibraryFrame>
 <FileMenu
+  articleConversations={onConversations !== undefined}
   bind:this={menu}
   onAction={action}
   selectionCount={selected.size}
@@ -805,239 +987,281 @@
   .list {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     min-height: 0;
     height: 100%;
-    background: var(--bg);
-    min-width: 0;
+    background: var(--sidebar);
   }
-  .pane-head {
+  .search-wrap {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0.7rem 0.8rem 0.35rem;
-  }
-  .root-label {
-    color: var(--muted);
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.3rem;
-  }
-  button {
-    font: inherit;
-    color: inherit;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-radius: 0.4rem;
-  }
-  .tools {
-    display: flex;
-    gap: 0.15rem;
-  }
-  .tools button {
-    padding: 0.35rem;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-  }
-  svg {
-    width: 1.1rem;
-    height: 1.1rem;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    flex-shrink: 0;
-  }
-  button:hover:not(:disabled) {
-    background: var(--selected);
-  }
-  .tools button[aria-pressed="true"] {
-    background: var(--selected);
-    color: var(--accent);
+    padding: 6px 12px;
+    min-height: 47px;
+    box-sizing: border-box;
   }
   .search {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin: 0.1rem 0.8rem 0.65rem;
-    padding: 0.3rem 0.5rem;
+    gap: 7px;
+    width: 100%;
+    min-height: 33px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     color: var(--muted);
-    background: var(--sidebar);
-    border: 1px solid transparent;
-    border-radius: 0.55rem;
   }
   input {
     width: 100%;
     min-width: 0;
     color: var(--fg);
     background: transparent;
-    border: none;
+    border: 0;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: 13px;
     outline: none;
-  }
-  .clear-search {
-    display: flex;
-    padding: 0;
-    color: var(--muted);
-    flex-shrink: 0;
   }
   .search:focus-within {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
-  .recovery {
-    flex: 0 1 auto;
-    max-height: 40%;
-    overflow: auto;
-    margin: 0 0.55rem 0.65rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
+  .search input:focus-visible {
+    outline: none;
+    box-shadow: none;
   }
-  .recovery h2 {
-    color: var(--warning);
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin: 0.3rem 0.5rem;
+  button {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
   }
-  .recovery p {
-    color: var(--muted);
-    font-size: 0.75rem;
-    margin: 0.3rem 0.5rem 0.55rem;
-    line-height: 1.5;
-  }
-  .recovery-entry {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    gap: 0.2rem;
-    padding: 0.5rem;
-    text-align: left;
-    align-items: stretch;
-    font-size: 0.85rem;
-  }
-  .recovery-entry.active {
+  button:hover:not(:disabled) {
     background: var(--selected);
   }
-  .recovery-path {
-    font-size: 0.7rem;
-    color: var(--muted);
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
-  .file-card {
+  svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .clear-search {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 100%;
-    height: 136px;
+    min-width: 24px;
+    min-height: 26px;
+    padding: 0;
+  }
+  .view-options {
+    display: flex;
+    align-items: center;
+    min-height: 31px;
+    padding: 0 10px;
     gap: 6px;
-    padding: 10px 8px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    text-align: center;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .root-label {
+    padding: 4px;
+    white-space: nowrap;
+  }
+  .result-count {
+    font-variant-numeric: tabular-nums;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    margin-left: auto;
+  }
+  .tools button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 25px;
+    min-height: 27px;
+    padding: 3px;
+  }
+  .tools [aria-pressed="true"] {
+    color: var(--fg);
+    background: var(--selected);
+  }
+  .sort {
+    display: flex;
+    align-items: center;
+    position: relative;
+    min-width: 26px;
+    height: 27px;
+    justify-content: center;
+  }
+  .sort select {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+    cursor: pointer;
+  }
+  .sort:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+  .file-row {
+    display: flex;
+    height: 100%;
+    align-items: center;
+    border-radius: 4px;
+    margin-left: calc(var(--tree-depth) * 14px);
     position: relative;
   }
-  .file-card:hover:not(:disabled) {
-    background: var(--sidebar);
+  .file-row::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--border);
+    opacity: 0.6;
   }
-  .file-card.selected {
+  .file-row.active {
     background: var(--selected);
-    border-color: var(--accent);
   }
-  .file-card.dragging {
-    opacity: 0.45;
+  .file-row.selected:not(.folder) {
+    box-shadow: inset 2px 0 var(--accent);
+  }
+  .file-row.dragging {
+    opacity: 0.5;
   }
   .drop-target {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
-    background: var(--selected);
   }
-  .rename-error {
-    margin: 0.4rem 0.8rem 0.65rem;
-    color: var(--danger);
-    font-size: 0.8rem;
-    overflow-wrap: anywhere;
-  }
-  .file-card .entry-icon {
-    width: 44px;
-    height: 50px;
-    color: var(--muted);
-  }
-  .file-card.folder .entry-icon {
-    color: var(--accent);
-  }
-  .file-card .name {
-    max-width: 100%;
-    font-size: 0.8rem;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .file-card .entry-kind {
-    color: var(--muted);
-    font-size: 0.7rem;
-  }
-  .current-dot {
-    position: absolute;
-    top: 9px;
-    right: 9px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-  .breadcrumbs {
+  .file {
     display: flex;
+    align-items: center;
+    gap: 6px;
     flex: 1;
     min-width: 0;
-    align-items: center;
-    gap: 4px;
-    overflow: auto;
-    padding: 0 6px;
-    white-space: nowrap;
-    font-size: 0.75rem;
+    height: 100%;
+    padding: 2px 6px;
+    text-align: left;
+    font-size: 12px;
+  }
+  .file .entry-icon {
+    color: var(--muted);
+    width: 13px;
+    height: 13px;
+  }
+  .folder .file {
     color: var(--muted);
   }
-  .empty {
+  .folder .entry-icon {
+    width: 11px;
+    height: 11px;
+  }
+  .file-copy {
+    min-width: 0;
+    flex: 1;
+  }
+  .name,
+  .excerpt {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .excerpt {
+    margin-top: 2px;
     color: var(--muted);
-    font-size: 0.8rem;
-    padding: 2.5rem 1.2rem;
+    font-size: 11px;
+  }
+  .article-conversations {
     display: flex;
     align-items: center;
-    flex-direction: column;
-    gap: 0.65rem;
-    text-align: center;
-  }
-  .empty > svg {
-    width: 2rem;
-    height: 2rem;
-    stroke-width: 1.1;
-    opacity: 0.6;
-    margin-bottom: 0.2rem;
-  }
-  .empty strong {
-    font-weight: 500;
-    color: var(--fg);
-  }
-  .empty p {
-    margin: 0;
-    max-width: 12rem;
-  }
-  .empty-action {
+    justify-content: center;
+    min-width: 27px;
+    height: 100%;
     color: var(--accent);
-    padding: 0.35rem 0.65rem;
+    padding: 3px;
   }
-  button:disabled {
-    cursor: default;
-    opacity: 0.6;
+  .article-conversations svg {
+    width: 12px;
+    height: 12px;
+  }
+  .selection-status {
+    padding: 6px 13px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .empty,
+  .search-status {
+    padding: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .search-status {
+    padding: 4px 12px;
+    margin: 0;
+  }
+  .search-error,
+  .rename-error {
+    padding: 8px 12px;
+    color: var(--danger);
+    font-size: 12px;
+  }
+  .search-error button {
+    margin-left: 8px;
+  }
+  .load-more {
+    min-height: 30px;
+    color: var(--accent);
+    font-size: 12px;
+  }
+  .recovery {
+    max-height: 30%;
+    overflow: auto;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .recovery h2 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--warning);
+  }
+  .recovery-entry {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 12px;
+    padding: 5px;
+    overflow-wrap: anywhere;
+  }
+  @media (pointer: coarse) {
+    .tools button,
+    .article-conversations,
+    .clear-search,
+    .sort {
+      min-width: 44px;
+      min-height: 44px;
+    }
+    .view-options {
+      flex-wrap: wrap;
+    }
+    input {
+      font-size: 16px;
+    }
   }
 </style>

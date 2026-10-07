@@ -7,6 +7,13 @@ import {
   reconcileFileTreeState,
 } from "@reader/shared/file-browser";
 
+it("列表布局、排序与预览偏好跨目录映射保留，IPC 拒绝无效选项", () => {
+  const state = { ...emptyFileTreeState(), presentation: { layout: "list" as const, sort: "name-desc" as const, preview: true } };
+  expect(parseFileTreeMessage(state)).toEqual(state);
+  expect(mapFileTreeState(state, (path) => path).presentation).toEqual(state.presentation);
+  expect(() => parseFileTreeMessage({ ...state, presentation: { ...state.presentation, layout: "invalid" } })).toThrow();
+});
+
 describe("目录会话边界", () => {
   it("文件系统的当前文件夹跟随改名，并拒绝越界目录", () => {
     const state = {

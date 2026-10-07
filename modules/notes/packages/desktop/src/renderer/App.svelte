@@ -5,6 +5,7 @@
   import AppearanceOptions from "./AppearanceOptions.svelte";
   import ReadingFontOptions from "./ReadingFontOptions.svelte";
   import ReadingPaletteOptions from "./ReadingPaletteOptions.svelte";
+  import { createArticleAgentActions } from "./article-agent";
   import AgentPanel from "../features/agent/renderer/AgentPanel.svelte";
   import {
     DEFAULT_READING_PALETTE,
@@ -17,8 +18,32 @@
   let reader: ReaderWorkspace | undefined = $state();
   let showAgent = $state(false);
   let selectedConversation = $state<string | null>(null);
+  let articleFilter = $state<{ root: string; path: string } | null>(null);
+  const articleAgent = createArticleAgentActions(window.noemori.agent, openArticleAgent);
   async function prepareAgentRun(): Promise<void> {
     if (!(await reader?.flushBeforeClose())) throw new Error("请先处理文章保存问题，再发送消息");
+  }
+  async function openArticleAgent(
+    id: string | null,
+    article: { root: string; path: string },
+  ): Promise<void> {
+    if ((await agentPanel?.prepareToLeave()) === false) return;
+    await agentPanel?.flushDraft();
+    await prepareAgentRun();
+    await window.noemori.agent.attachVault(article.root);
+    showAgent = false;
+    await tick();
+    selectedConversation = id;
+    articleFilter = article;
+    showAgent = true;
+  }
+  async function returnToArticle(root: string, path: string, marker: string): Promise<void> {
+    if ((await agentPanel?.prepareToLeave()) === false) return;
+    await agentPanel?.flushDraft();
+    await reader?.openArticle(root, path, marker);
+    showAgent = false;
+    await tick();
+    reader?.focusDocument();
   }
   let agentPanel: AgentPanel | undefined = $state();
   let closeError = $state("");
@@ -30,6 +55,7 @@
         await window.noemori.agent.flush();
       }
       showAgent = !showAgent;
+      articleFilter = null;
       closeError = "";
     } catch (cause) {
       closeError = cause instanceof Error ? cause.message : String(cause);
@@ -125,6 +151,7 @@
 />
 
 <ReaderWorkspace
+  {articleAgent}
   api={readerApi}
   palette={readingPalette}
   bind:this={reader}
@@ -143,7 +170,9 @@
   {/snippet}
 </ReaderWorkspace>
 {#if showAgent}<AgentPanel
+    bind:articleFilter
     beforeSend={prepareAgentRun}
+    onOpenArticle={returnToArticle}
     bind:this={agentPanel}
     bind:selected={selectedConversation}
     api={window.noemori.agent}

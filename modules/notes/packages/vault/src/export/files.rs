@@ -259,6 +259,7 @@ impl Enumeration<'_> {
                         EntryKind::File
                     },
                     recovery_only: false,
+                    modified_at: None,
                 },
             );
         }

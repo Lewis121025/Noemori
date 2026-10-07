@@ -1,3 +1,4 @@
+import { confirmNewEntry } from "../support/workspace-actions";
 import { noteAction, openLibrary, sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -52,61 +53,8 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     page.setDefaultTimeout(5000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const editor = page.locator(".ProseMirror");
+    const editor = page.locator(".reading-space .ProseMirror");
     await editor.waitFor();
-    const quickSearch = page.getByRole("searchbox", { name: "快速查找文件", exact: true });
-    const quickRows = page.getByRole("tree", { name: "当前笔记库文件树" }).getByRole("treeitem");
-    await quickSearch.press("ArrowDown");
-    await expect
-      .poll(() => quickRows.first().evaluate((node) => node === document.activeElement))
-      .toBe(true);
-    await page.keyboard.press("ArrowDown");
-    await expect
-      .poll(() => quickRows.nth(1).evaluate((node) => node === document.activeElement))
-      .toBe(true);
-    expect(await editor.innerText()).toContain("打开笔记，是为了");
-    await page.keyboard.press("Escape");
-    await expect
-      .poll(() => quickSearch.evaluate((node) => node === document.activeElement))
-      .toBe(true);
-    const directory = quickRows.filter({ hasText: "阅读" });
-    await directory.click();
-    expect(await directory.getAttribute("aria-expanded")).toBe("true");
-    expect(await editor.innerText()).toContain("打开笔记，是为了");
-    const nestedNote = quickRows.filter({ hasText: "渐进呈现.md" });
-    expect(await nestedNote.getAttribute("aria-level")).toBe("2");
-    await nestedNote.click();
-    await expect.poll(() => editor.innerText()).toContain("在合适的时候");
-    expect(await nestedNote.getAttribute("aria-current")).toBe("page");
-    await quickRows.filter({ hasText: "注意力与工具.md" }).click();
-    await expect.poll(() => editor.innerText()).toContain("打开笔记，是为了");
-    await quickSearch.fill("注意力");
-    await quickSearch.press("Enter");
-    await expect
-      .poll(() => editor.evaluate((node) => node.contains(document.activeElement)))
-      .toBe(true);
-    await quickSearch.fill("");
-    const trashNote = page.getByRole("button", {
-      name: "将 注意力与工具.md 移到废纸篓",
-      exact: true,
-    });
-    await quickRows.filter({ hasText: "注意力与工具.md" }).hover();
-    await trashNote.click();
-    const trash = page.getByRole("dialog", { name: "移到废纸篓", exact: true });
-    expect(await trash.innerText()).toContain("将“注意力与工具.md”移到系统废纸篓");
-    await trash.getByRole("button", { name: "取消", exact: true }).click();
-    await expect
-      .poll(() => trashNote.evaluate((node) => node === document.activeElement))
-      .toBe(true);
-    await directory.focus();
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+Backspace" : "Delete");
-    await trash.waitFor();
-    expect(await trash.innerText()).toContain("其中的所有文件会一起移动");
-    await page.keyboard.press("Escape");
-    await expect
-      .poll(() => directory.evaluate((node) => node === document.activeElement))
-      .toBe(true);
-    expect(await readFile(join(vault, "阅读", "渐进呈现.md"), "utf8")).toContain("在合适的时候");
     const original = await editor.elementHandle();
     await editor.locator("p").last().click();
     await page.keyboard.press("End");
@@ -115,14 +63,9 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     const library = page.getByRole("region", { name: "文件系统", exact: true });
     await library.waitFor();
     expect(await readFile(join(vault, "注意力与工具.md"), "utf8")).toContain("继续思考");
-    if (
-      (await library
-        .getByRole("treeitem", { name: "阅读", exact: true })
-        .getAttribute("aria-expanded")) !== "true"
-    )
-      await library.getByRole("treeitem", { name: "阅读", exact: true }).click();
-    await library.getByRole("treeitem", { name: "渐进呈现.md", exact: true }).click();
-    await expect.poll(() => library.locator(".excerpt").innerText()).toContain("在合适的时候");
+    await library.locator('[data-path="阅读"]').dblclick();
+    await library.locator('[data-path="阅读/渐进呈现.md"]').click();
+    await expect.poll(() => library.locator(".library-document").innerText()).toContain("在合适的时候");
     expect(await page.locator(".reading-space").getAttribute("aria-hidden")).toBe("true");
     const artifacts = process.env.NOEMORI_SPACES_SCREENSHOTS;
     if (artifacts) {
@@ -135,7 +78,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
       });
       await writeFile(join(artifacts, "noemori-library.png"), Buffer.from(bytes));
     }
-    await page.getByRole("button", { name: "← 返回文档", exact: true }).click();
+    await page.getByRole("button", { name: "目录", exact: true }).click();
     expect(await original!.evaluate((element) => element.isConnected)).toBe(true);
     expect(await editor.innerText()).toContain("继续思考");
     await noteAction(page, "切换源码视图");
@@ -153,9 +96,7 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     }
     await openLibrary(page);
     expect(
-      await library
-        .getByRole("treeitem", { name: "渐进呈现.md", exact: true })
-        .getAttribute("aria-selected"),
+      await library.locator('[data-path="阅读/渐进呈现.md"]').locator('xpath=ancestor::*[@role="gridcell"]').getAttribute("aria-selected"),
     ).toBe("true");
     await library.getByRole("button", { name: "打开阅读与写作", exact: true }).click();
     await expect.poll(() => editor.innerText()).toContain("在合适的时候");
@@ -172,16 +113,16 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(640);
     if (await page.getByRole("complementary", { name: "文件栏", exact: true }).isVisible())
       await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-    const tree = library.getByRole("tree");
+    const tree = library.getByRole("treegrid");
     await expect.poll(async () => (await tree.boundingBox())!.height).toBeGreaterThan(70);
-    const selected = library.getByRole("treeitem", { name: "渐进呈现.md", exact: true });
+    const selected = library.locator('[data-path="阅读/渐进呈现.md"]');
     const scroll = await tree.evaluate((node) => node.scrollTop);
     await library.getByRole("button", { name: "预览", exact: true }).click();
-    await expect.poll(() => library.locator(".excerpt").innerText()).toContain("在合适的时候");
+    await expect.poll(() => library.locator(".library-document").innerText()).toContain("在合适的时候");
     expect(await tree.isVisible()).toBe(false);
     await library.getByRole("button", { name: "返回列表", exact: true }).click();
     await tree.waitFor();
-    expect(await selected.getAttribute("aria-selected")).toBe("true");
+    expect(await selected.locator('xpath=ancestor::*[@role="gridcell"]').getAttribute("aria-selected")).toBe("true");
     expect(await tree.evaluate((node) => node.scrollTop)).toBe(scroll);
     await library.getByRole("button", { name: "预览", exact: true }).click();
     await library.getByRole("button", { name: "打开阅读与写作", exact: true }).focus();
@@ -191,11 +132,12 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
       .poll(() => selected.evaluate((node) => node === document.activeElement))
       .toBe(true);
     await library.getByRole("button", { name: "预览", exact: true }).click();
-    await library.getByRole("button", { name: "重命名", exact: true }).click();
+    await library.getByRole("button", { name: "返回列表", exact: true }).click();
+    await selected.press("F2");
     await library.getByRole("textbox", { name: "重命名文件", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     await library.getByRole("searchbox").fill("渐进");
-    await library.getByRole("treeitem", { name: "渐进呈现.md", exact: true }).first().waitFor();
+    await library.locator('[data-path="阅读/渐进呈现.md"]').first().waitFor();
     await expect
       .poll(
         async () =>
@@ -230,14 +172,14 @@ test("两个空间：预览、连续写作、自动搜索和跨重启现场", as
           .inputValue(),
       )
       .toBe("渐进");
-    await sidebarComponent(page, "文件");
-    await expect.poll(() => page.locator(".ProseMirror").innerText()).toContain("在合适的时候");
+    await sidebarComponent(page, "目录");
+    await expect.poll(() => page.locator(".reading-space .ProseMirror").innerText()).toContain("在合适的时候");
   } finally {
     await app.close();
   }
 });
 
-test("首次记录不要求命名或选目录，实际文件创建在系统文稿目录", async (t) => {
+test("首次记录先选笔记库并确认名称位置，再连续创建笔记", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-first-note-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const executablePath: unknown = require("electron");
@@ -259,24 +201,29 @@ test("首次记录不要求命名或选目录，实际文件创建在系统文�
   });
   try {
     // 仅测试进程的系统路径指向临时目录，不接触真实用户文稿。
-    await app.evaluate(({ app }, path) => app.setPath("documents", path), root);
+    await mkdir(join(root, "Noemori"));
+    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, join(root, "Noemori"));
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "开始记录", exact: true }).click();
+    await page.getByRole("region", { name: "打开资料库", exact: true }).waitFor({ state: "hidden" });
+    await page.locator(".content-space").click();
+    await page.keyboard.press("ControlOrMeta+n");
+    await confirmNewEntry(page);
     await page.locator(".ProseMirror").waitFor();
     await page.locator(".ProseMirror").click();
     await page.keyboard.type("从一个想法开始。");
     await expect
       .poll(async () => readFile(join(root, "Noemori", "未命名.md"), "utf8"), { timeout: 5000 })
       .toContain("从一个想法开始");
-    expect(await page.getByRole("dialog").count()).toBe(0);
-    await page.getByRole("button", { name: "新建笔记", exact: true }).click();
+    expect(await page.locator("dialog[open]").count()).toBe(0);
+    await page.keyboard.press("ControlOrMeta+n");
+    await confirmNewEntry(page);
     await expect.poll(async () => readFile(join(root, "Noemori", "未命名 2.md"), "utf8")).toBe("");
   } finally {
     await app.close();
   }
 });
 
-test("笔记侧栏展开折叠和打开可见文件时保持操作位置", async (t) => {
+test("层级目录折叠与展开保持滚动，打开文件后可返回原浏览位置", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-sidebar-position-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -324,99 +271,41 @@ test("笔记侧栏展开折叠和打开可见文件时保持操作位置", async
     await page.locator(".ProseMirror").waitFor();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const tree = page.getByRole("tree", { name: "当前笔记库文件树" });
+    await openLibrary(page);
+    const tree = page.getByRole("treegrid", { name: "文件系统" });
     const row = (path: string) => tree.locator(`[data-path="${path}"]`);
     const project = row("项目");
-    const settle = () =>
-      page.evaluate(
-        () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          ),
-      );
-    await page.evaluate(() => document.fonts.ready.then(() => {}));
-    await settle();
     const initialY = (await project.boundingBox())!.y;
     for (let attempt = 0; attempt < 3; attempt++) {
-      await project.click();
-      await settle();
-      expect(await project.getAttribute("aria-expanded")).toBe("true");
-      expect(await tree.evaluate((node) => node.scrollTop)).toBe(0);
+      await project.press("ArrowRight");
+      await expect.poll(() => project.locator('xpath=ancestor::*[@role="row"]').getAttribute("aria-expanded")).toBe("true");
       expect((await project.boundingBox())!.y).toBeCloseTo(initialY, 0);
       await project.press("ArrowLeft");
-      await settle();
-      expect(await project.getAttribute("aria-expanded")).toBe("false");
+      await expect.poll(() => project.locator('xpath=ancestor::*[@role="row"]').getAttribute("aria-expanded")).toBe("false");
       expect((await project.boundingBox())!.y).toBeCloseTo(initialY, 0);
     }
-    await project.click();
-    await tree.evaluate((node) => {
-      node.scrollTop = 352;
-    });
-    await settle();
+    await project.press("ArrowRight");
+    await tree.evaluate((node) => { node.scrollTop = 280; });
     const directory = row("项目/目录15");
+    await directory.waitFor();
     const beforeY = (await directory.boundingBox())!.y;
-    const beforeScroll = await tree.evaluate((node) => node.scrollTop);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await directory.click();
-      await settle();
-      expect((await directory.boundingBox())!.y).toBeCloseTo(beforeY, 0);
-      expect(await tree.evaluate((node) => node.scrollTop)).toBe(beforeScroll);
-      await directory.press("ArrowLeft");
-      await settle();
-      expect((await directory.boundingBox())!.y).toBeCloseTo(beforeY, 0);
-      expect(await tree.evaluate((node) => node.scrollTop)).toBe(beforeScroll);
-    }
     await directory.click();
-    const note = row("项目/目录15/笔记0.md");
-    const noteY = (await note.boundingBox())!.y;
-    await note.click();
-    await expect.poll(() => page.locator(".ProseMirror").innerText()).toContain("目录15的内容");
-    await expect
-      .poll(() =>
-        page.locator(".ProseMirror").evaluate((node) => node.contains(document.activeElement)),
-      )
-      .toBe(true);
-    await settle();
-    expect((await note.boundingBox())!.y).toBeCloseTo(noteY, 0);
-    expect(await tree.evaluate((node) => node.scrollTop)).toBe(beforeScroll);
-    expect(await page.locator(".quick-navigation .library-link").count()).toBe(0);
-    expect(
-      await tree
-        .getByRole("button", { name: "将 项目/目录15/笔记0.md 移到废纸篓", exact: true })
-        .count(),
-    ).toBe(1);
-    const artifacts = process.env.NOEMORI_SPACES_SCREENSHOTS;
-    if (artifacts) {
-      await mkdir(artifacts, { recursive: true });
-      const bytes = await app.evaluate(async ({ BrowserWindow }) => {
-        const win = BrowserWindow.getAllWindows()[0]!;
-        const [width, height] = win.getContentSize();
-        if (width === undefined || height === undefined) throw new Error("窗口尺寸不可用");
-        return (await win.capturePage()).resize({ width, height }).toPNG();
-      });
-      await writeFile(join(artifacts, "sidebar-stable-position.png"), Buffer.from(bytes));
-    }
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0]!.setContentSize(640, 480),
-    );
-    await tree.waitFor();
-    await tree.evaluate((node) => {
-      node.scrollTop = 0;
-    });
-    await settle();
-    if (!(await page.getByRole("complementary", { name: "文件栏", exact: true }).isVisible()))
+    await page.locator('.library [data-path="项目/目录15/笔记0.md"]').waitFor();
+    expect((await directory.boundingBox())!.y).toBeCloseTo(beforeY, 0);
+    await page.locator('.library [data-path="项目/目录15/笔记0.md"]').dblclick();
+    await expect.poll(() => page.locator(".reading-space .ProseMirror").innerText()).toContain("目录15的内容");
+    await page.locator(".reading-space").waitFor();
+    await openLibrary(page);
+    expect((await directory.boundingBox())!.y).toBeCloseTo(beforeY, 0);
+    expect(await page.locator('.library [data-path="项目/目录15/笔记0.md"]').isVisible()).toBe(true);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(640, 480));
+    await page.waitForFunction(() => innerWidth === 640);
+    if ((await page.locator(".file-sidebar").getAttribute("hidden")) !== null)
       await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-    await tree.evaluate((node) => {
-      node.scrollTop = 0;
-    });
-    await settle();
-    const compactY = (await project.boundingBox())!.y;
+    await tree.evaluate((node) => { node.scrollTop = 0; });
     await project.click();
-    await settle();
-    expect((await project.boundingBox())!.y).toBeCloseTo(compactY, 0);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
+    expect(await tree.isVisible()).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   } finally {
     await app.close();

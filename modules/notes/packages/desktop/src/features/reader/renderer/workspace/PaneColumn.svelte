@@ -16,6 +16,7 @@
   import type { ReaderWorkspaceController } from "./state.svelte";
   import type { PaneControls } from "./pane-controls";
   import OutlineTree from "../navigation/OutlineTree.svelte";
+  import type { ArticleAgentActions } from "../../shared/article-conversations";
 
   let {
     workspace,
@@ -26,10 +27,12 @@
     onRename,
     registerControls,
     onShowTools,
+    articleAgent,
   }: {
     /** 将本栏操作与目录交给工作区，注销后不保留过期编辑器引用。 */
     registerControls: (id: number, controls: PaneControls | null) => void;
     onShowTools: () => void;
+    articleAgent?: ArticleAgentActions;
     hidden?: boolean;
     onRename: () => void;
     workspace: ReaderWorkspaceController;
@@ -193,7 +196,14 @@
         class:whiteboard-body={doc.content?.kind === "whiteboard"}
       >
         {#if doc.path !== null}
-          <DocumentSurface {workspace} {pane} {mediaIo} {registerToolbar} {onShowTools} />
+          <DocumentSurface
+            {...articleAgent ? { articleAgent } : {}}
+            {workspace}
+            {pane}
+            {mediaIo}
+            {registerToolbar}
+            {onShowTools}
+          />
           {#if scrollElement !== undefined}
             <HoverPreview
               host={scrollElement}
@@ -223,7 +233,7 @@
                     : "打开已有笔记，或写下此刻的想法。"}
             </p>
             {#if workspace.vaultRoot === null}
-              <p class="local-storage">笔记保存在本机的“文稿 / Noemori”文件夹。</p>
+              <p class="local-storage">笔记保存在你选择的本机文件夹中。</p>
             {/if}
           </div>
         {/if}

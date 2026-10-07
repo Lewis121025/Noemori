@@ -391,3 +391,11 @@ it("工作台布局 IPC 保留合法偏好并拒绝非法状态", () => {
   ])
     expect(() => parsePaneLayoutMessage({ ...layout, ...field })).toThrow("文件栏布局参数无效");
 });
+
+
+it("目录修改时间使用毫秒，拒绝非法元数据而不是伪造日期", () => {
+  const entry = { path: "a.md", kind: "file", modifiedAt: 1700000001234 };
+  expect(parseVaultEntries([entry])).toEqual([entry]);
+  for (const modifiedAt of [-1, NaN, Infinity, "昨天"])
+    expect(() => parseVaultEntries([{ ...entry, modifiedAt }])).toThrow();
+});

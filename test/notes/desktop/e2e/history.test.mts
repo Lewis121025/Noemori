@@ -157,7 +157,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
     await openLibrary(page);
     const note = page
       .getByRole("region", { name: "文件系统", exact: true })
-      .getByRole("treeitem", { name: "笔记.md", exact: true });
+      .getByRole("button", { name: "笔记.md", exact: true });
     await note.focus();
     await page.keyboard.press("F2");
     const filename = page.getByRole("textbox", { name: "重命名文件", exact: true });
@@ -176,7 +176,7 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
 
     await page
       .getByRole("region", { name: "文件系统", exact: true })
-      .getByRole("treeitem", { name: "文本.txt", exact: true })
+      .getByRole("button", { name: "文本.txt", exact: true })
       .dblclick();
     const code = page.locator(".cm-content");
     await code.locator(".cm-line").first().click();
@@ -213,7 +213,11 @@ test("原生菜单、快捷键和就地源码共用历史，普通输入框保�
       .poll(() => reopened.locator(".cm-content").textContent())
       .toBe("\uFEFF原文本。续写");
     await expect.poll(historyState).toEqual({ undo: false, redo: false });
-    await reopened.getByRole("treeitem", { name: "笔记.md", exact: true }).click();
+    await openLibrary(reopened);
+    await reopened
+      .getByRole("region", { name: "文件系统", exact: true })
+      .getByRole("button", { name: "笔记.md", exact: true })
+      .dblclick();
     await reopened.getByRole("heading", { name: "历史验收" }).waitFor();
     expect(await reopened.locator(".math-inline").getAttribute("data-math-tex")).toBe("x+y");
     expect(await readFile(join(vault, "笔记.md"))).toEqual(Buffer.from(saved));

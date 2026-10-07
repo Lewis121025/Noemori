@@ -138,7 +138,7 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     ).toBe(true);
     await page.getByRole("button", { name: "文件系统", exact: true }).click();
     await page
-      .getByRole("grid")
+      .getByRole("treegrid")
       .getByRole("button", { name: "森林.md", exact: true })
       .click({ button: "right" });
     const menu = page.getByRole("menu", { name: "文件操作", exact: true });

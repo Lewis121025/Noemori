@@ -243,17 +243,19 @@ function openDocument(path: string): void {
   flushSync();
 }
 
-async function requestToolbarTrash(path: string): Promise<void> {
+async function requestKeyboardTrash(path: string): Promise<void> {
   await manageFiles();
   const card = target.querySelector<HTMLButtonElement>(`.library button[data-path="${path}"]`)!;
   card.click();
   flushSync();
-  target.querySelector<HTMLButtonElement>('.library-actions [aria-label="移到废纸篓"]')!.click();
+  card.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }));
+  flushSync();
+  click("移到废纸篓…");
   flushSync();
 }
 
-async function beginToolbarTrash(path: string): Promise<void> {
-  await requestToolbarTrash(path);
+async function beginKeyboardTrash(path: string): Promise<void> {
+  await requestKeyboardTrash(path);
   click("移到废纸篓");
 }
 
@@ -399,7 +401,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
   it("焦点离开编辑器后，保存快捷键仍提交最新内容", async () => {
     await start();
     await edit("shortcut content");
-    target.querySelector<HTMLButtonElement>(".file.active")!.focus();
+    target.querySelector<HTMLButtonElement>(".file-row.active .file")!.focus();
     const event = new KeyboardEvent("keydown", {
       key: "s",
       metaKey: true,
@@ -434,9 +436,9 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     },
   );
 
-  it("工具栏删除可以取消，确认框明确显示目标且保持当前文档", async () => {
+  it("键盘菜单删除可以取消，确认框明确显示目标且保持当前文档", async () => {
     await start();
-    await requestToolbarTrash("other.md");
+    await requestKeyboardTrash("other.md");
     expect(target.querySelector(".entry-dialog")?.textContent).toContain(
       "将“other.md”移到系统废纸篓",
     );
@@ -460,7 +462,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       for (const item of disk.keys()) if (item.startsWith(`${path}/`)) disk.delete(item);
       return { warning: null };
     });
-    await requestToolbarTrash("项目");
+    await requestKeyboardTrash("项目");
     expect(target.querySelector(".entry-dialog")?.textContent).toContain(
       "其中的所有文件会一起移动",
     );
@@ -476,7 +478,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
 
   it.each([
     { source: "资料管理", trash: beginTrash },
-    { source: "文件管理工具栏", trash: beginToolbarTrash },
+    { source: "键盘上下文菜单", trash: beginKeyboardTrash },
   ])("删除当前笔记先保存最新编辑，成功后清空当前文档和会话（$source）", async ({ trash }) => {
     await start();
     await edit("before trash");
@@ -519,8 +521,10 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     flushSync();
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector(".message")?.textContent).toContain("当前编辑尚未保存");
+      expect(target.querySelector<HTMLDialogElement>(".create-dialog")?.open).toBe(true);
     });
+    target.querySelector(".create-dialog form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(target.querySelector('.create-dialog [role="alert"]')?.textContent).toContain("未保存"));
     expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
     expect(api.entryCreate).not.toHaveBeenCalled();
     expect(target.querySelector(".ProseMirror")?.textContent).toBe("my unsaved work");
@@ -557,22 +561,23 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(target.querySelector(".document-name")?.textContent).toBe("renamed.md");
   });
 
-  it("选择草稿补出的缺失目录后，新建不能悄悄改到笔记库根目录", async () => {
+  it("浏览草稿补出的缺失目录时，新建明确阻止提交，不退回笔记库根目录", async () => {
     disk.set("失踪/草稿.md", encode("recovered\n"));
     vi.mocked(api.entryCreate).mockRejectedValue(new Error("父文件夹不存在"));
     await start();
-    target.querySelector<HTMLButtonElement>('.library [data-path="失踪"]')!.click();
+    await manageFiles();
+    target.querySelector<HTMLButtonElement>('.library [data-path="失踪"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     flushSync();
-    target.querySelector<HTMLButtonElement>(".library-heading .primary")!.click();
+    onCommand("new-note");
     flushSync();
     await vi.waitFor(() => {
       flushSync();
-      expect(target.querySelector(".feedback-announcement")?.textContent).toContain(
-        "父文件夹不存在",
+      expect(target.querySelector('.create-dialog [role="alert"]')?.textContent).toContain(
+        "存在的文件夹",
       );
     });
-    expect(api.entryCreate).toHaveBeenCalledExactlyOnceWith("失踪/未命名.md", "file", undefined);
-    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
+    expect(api.entryCreate).not.toHaveBeenCalled();
+    expect(target.querySelector<HTMLDialogElement>(".create-dialog")?.open).toBe(true);
   });
 
   it("被真实目录结构阻挡的草稿有独立入口，打开并另存后移除恢复提示", async () => {
@@ -619,8 +624,8 @@ describe("保存、冲突与恢复的完整界面流程", () => {
         expect(target.querySelector(".save-notice")?.textContent).toContain("原文件暂时无法读取");
       });
       expect(target.querySelector(".save-notice")?.textContent).toContain("原路径被其他条目占用");
-      expect(target.querySelector('.library [role="grid"]')).not.toBeNull();
-      expect(target.querySelectorAll('.library [role="grid"] [aria-current="page"]')).toHaveLength(0);
+      expect(target.querySelector('.library [role="treegrid"]')).not.toBeNull();
+      expect(target.querySelectorAll('.library [role="treegrid"] [aria-current="page"]')).toHaveLength(0);
       click("另存为副本");
       await vi.waitFor(() => expect(status()).toBe("已保存"));
       expect(target.querySelector(`.recovery-entry[data-path="${path}"]`)).toBeNull();
@@ -633,7 +638,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
   it.each(
     [
       { source: "资料管理", trash: beginTrash },
-      { source: "文件管理工具栏", trash: beginToolbarTrash },
+      { source: "键盘上下文菜单", trash: beginKeyboardTrash },
     ].flatMap((entry) => [false, true].map((paletteFailed) => ({ ...entry, paletteFailed }))),
   )(
     "系统废纸篓失败时保留文件、当前选择和可重试的对话框（$source，配色读取失败：$paletteFailed）",
@@ -652,10 +657,10 @@ describe("保存、冲突与恢复的完整界面流程", () => {
           expect(target.querySelector(".palette-error")?.textContent).toContain("配色读取不可用");
       });
       expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(true);
-      expect(target.querySelector(".file.active")?.getAttribute("data-path")).toBe("note.md");
+      expect(target.querySelector(".file-row.active .file")?.getAttribute("data-path")).toBe("note.md");
       expect(disk.has("note.md")).toBe(true);
       click("取消");
-      click("← 返回文档");
+      click("目录");
       await vi.waitFor(() => expect(target.querySelector<HTMLElement>(".library")!.hidden).toBe(true));
       await edit("still editable");
       click("保存");
@@ -1329,8 +1334,8 @@ describe("原生菜单与输入法", () => {
     await start();
     onCommand("new-folder");
     flushSync();
-    const dialog = target.querySelector(".entry-dialog");
-    const input = target.querySelector("#entry-name");
+    const dialog = target.querySelector(".create-dialog");
+    const input = target.querySelector("#create-entry-name");
     if (!(dialog instanceof HTMLDialogElement) || !(input instanceof HTMLInputElement))
       throw new Error("新建对话框未挂载");
     await Promise.resolve();
@@ -1345,10 +1350,10 @@ describe("原生菜单与输入法", () => {
     const cancel = new Event("cancel", { cancelable: true });
     dialog.dispatchEvent(cancel);
     expect(cancel.defaultPrevented).toBe(true);
-    click("取消");
+    [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "取消")!.click();
     expect(dialog.open).toBe(true);
     input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
-    click("取消");
+    [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "取消")!.click();
     expect(dialog.open).toBe(false);
   });
 

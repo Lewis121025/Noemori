@@ -19,6 +19,7 @@ export class ReaderFileTree {
   private remembered = false;
   private readonly writing: SessionWrite;
   private epoch = 0;
+  private searchOrigin: FileTreeState | null = null;
 
   /** 保存函数必须核对 root，不能把旧库的延迟写入应用到新库。 */
   constructor(
@@ -60,11 +61,14 @@ export class ReaderFileTree {
     const parsed = parseFileTreeState(state);
     this.remembered = parsed !== null;
     this.value = reconcileFileTreeState(parsed ?? emptyFileTreeState(), entries);
+    if (this.value.browse?.query.trim())
+      this.searchOrigin = { ...this.value, browse: { ...this.value.browse, query: "" } };
     this.initialized = true;
   }
 
   /** 切库及卸载时取消尚未派发的写入；已派发请求由主进程核对库归属。 */
   reset(): void {
+    this.searchOrigin = null;
     this.epoch += 1;
     this.writing.reset();
     this.initialized = false;
@@ -79,6 +83,9 @@ export class ReaderFileTree {
       left === right ||
       (left.length === right.length && left.every((path, index) => path === right[index]));
     if (
+      next.presentation?.layout === this.value.presentation?.layout &&
+      next.presentation?.sort === this.value.presentation?.sort &&
+      next.presentation?.preview === this.value.presentation?.preview &&
       next.browse?.query === this.value.browse?.query &&
       next.browse?.section === this.value.browse?.section &&
       next.browse?.directory === this.value.browse?.directory &&
@@ -97,12 +104,13 @@ export class ReaderFileTree {
   }
 
   /**
-   * 侧栏、网格与面包屑共用的目录切换；原子清除旧目录的选择、查询和网格锚点。
+   * 目录切换原子清除之前的选择、查询和滚动锚点，保留其他分支的展开状态。
    * @param path 当前库中已存在的相对目录，空字符串表示库根。
    * @returns 不返回值；未恢复的会话不操作，持久化失败经既有错误通道报告。
    */
   enterDirectory(path: string): void {
     if (!this.initialized) return;
+    this.searchOrigin = null;
     const ancestors = path === "" ? [] : [...ancestorDirectories(path), path];
     this.update({
       browse: { query: "", section: "files", directory: path },
@@ -118,12 +126,38 @@ export class ReaderFileTree {
 
   /** 文件变化按同一映射迁移全部现场，提交后、清单刷新前调用。 */
   remap(map: (path: string) => string | null): void {
+    if (this.searchOrigin) this.searchOrigin = mapFileTreeState(this.searchOrigin, map);
     this.update(mapFileTreeState(this.value, map));
   }
 
   /** 外部变更仅删除失效条目，不把新文件自动加入既有多选。 */
   reconcile(entries: readonly VaultEntry[]): void {
+    if (this.searchOrigin) this.searchOrigin = reconcileFileTreeState(this.searchOrigin, entries);
     if (this.initialized) this.update(reconcileFileTreeState(this.value, entries));
+  }
+
+  /**
+   * 搜索临时接管选择与滚动；退出时恢复浏览现场，改名和删除同步映射该现场。
+   * @param query 已完成输入法组词的查询文本；空白退出搜索。
+   * @returns 无返回值；未恢复时不操作，持久化错误由既有报告通道处理。
+   */
+  setQuery(query: string): void {
+    if (!this.initialized || query === this.value.browse?.query) return;
+    const browse = this.value.browse ?? { query: "", section: "files", directory: "" };
+    if (!browse.query.trim() && query.trim()) this.searchOrigin = structuredClone(this.value);
+    if (!query.trim() && this.searchOrigin) {
+      const origin = this.searchOrigin;
+      this.searchOrigin = null;
+      this.update({
+        expanded: origin.expanded,
+        selected: origin.selected,
+        focused: origin.focused,
+        scroll: origin.scroll,
+        browse: { ...(origin.browse ?? browse), query: "", section: "files" },
+      });
+    } else {
+      this.update({ browse: { ...browse, query, section: "files" }, selected: [], focused: null });
+    }
   }
 
   /** 立即发送最新现场；返回是否成功，失败原因已交给工作区显示。 */

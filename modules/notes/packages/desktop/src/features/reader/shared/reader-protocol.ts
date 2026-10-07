@@ -218,13 +218,18 @@ export function parseVaultEntries(value: unknown): VaultEntry[] {
       !record(item) ||
       !relativePath(item.path) ||
       (item.kind !== "file" && item.kind !== "directory") ||
-      ("recoveryOnly" in item && (item.recoveryOnly !== true || item.kind !== "file"))
+      ("recoveryOnly" in item && (item.recoveryOnly !== true || item.kind !== "file")) ||
+      ("modifiedAt" in item &&
+        (typeof item.modifiedAt !== "number" ||
+          !Number.isSafeInteger(item.modifiedAt) ||
+          item.modifiedAt < 0))
     )
       throw new Error("目录快照包含无效条目");
     return {
       path: item.path,
       kind: item.kind,
       ...("recoveryOnly" in item ? { recoveryOnly: true as const } : {}),
+      ...(typeof item.modifiedAt === "number" ? { modifiedAt: item.modifiedAt } : {}),
     };
   });
 }

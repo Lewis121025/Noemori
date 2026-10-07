@@ -229,7 +229,7 @@ test("正文实时网页：插入保存、滚动点击、独立历史、模态�
       .waitFor();
     expect(await readFile(join(vault, "Home.md"), "utf8")).toBe(saved);
     await openLibrary(page);
-    await page.getByRole("grid").getByRole("button", { name: "Other.md", exact: true }).dblclick();
+    await page.getByRole("treegrid").getByRole("button", { name: "Other.md", exact: true }).dblclick();
     await page.getByRole("heading", { name: "其他笔记", exact: true }).waitFor();
     await expect.poll(countViews).toBe(0);
     expect(errors).toEqual([]);

@@ -3,6 +3,20 @@ import type { VaultEntry } from "./api";
 /** 以首个可见条目和行内偏移恢复位置，前方新增文件不会把视口推到别处。 */
 export type FileTreePosition = { path: string; offset: number };
 
+/** 文件管理偏好随库保存；保留旧布局字段的读取，默认呈现层级列表与文章预览。 */
+export type FilePresentation = {
+  layout: "list" | "grid";
+  sort: "name" | "name-desc" | "type" | "modified";
+  preview: boolean;
+};
+
+/** 旧会话采用稳定的默认对象，避免仅选择文件时重排列表并回放旧滚动位置。 */
+export const DEFAULT_FILE_PRESENTATION: Readonly<FilePresentation> = {
+  layout: "list",
+  sort: "name",
+  preview: true,
+};
+
 /** 资料管理的浏览入口；只保存查询文本，结果恢复时从当前索引重新读取。 */
 type LibraryBrowse = {
   query: string;
@@ -12,6 +26,7 @@ type LibraryBrowse = {
 
 /** 目录的持久化工作现场；旧会话缺少 browse 时显示全部资料。 */
 export type FileTreeState = {
+  presentation?: FilePresentation;
   browse?: LibraryBrowse;
   expanded: string[];
   selected: string[];
@@ -54,6 +69,24 @@ function parseBrowse(value: unknown): LibraryBrowse | null {
   };
 }
 
+function parsePresentation(value: unknown): FilePresentation | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("layout" in value) ||
+    !("sort" in value) ||
+    !("preview" in value) ||
+    (value.layout !== "list" && value.layout !== "grid") ||
+    (value.sort !== "name" &&
+      value.sort !== "name-desc" &&
+      value.sort !== "type" &&
+      value.sort !== "modified") ||
+    typeof value.preview !== "boolean"
+  )
+    return null;
+  return { layout: value.layout, sort: value.sort, preview: value.preview };
+}
+
 /** 恢复单个文件视口；非法字段回退为无锚点。 */
 function parseTreePosition(value: unknown): FileTreePosition | null {
   if (
@@ -76,7 +109,9 @@ export function parseFileTreeState(value: unknown): FileTreeState | null {
   const paths = (input: unknown): string[] =>
     Array.isArray(input) ? [...new Set(input.filter(isEntryPath))] : [];
   const browse = parseBrowse(record.browse);
+  const presentation = parsePresentation(record.presentation);
   return {
+    ...(presentation === null ? {} : { presentation }),
     ...(browse === null ? {} : { browse }),
     expanded: paths(record.expanded),
     selected: paths(record.selected),
@@ -95,6 +130,7 @@ export function parseFileTreeMessage(value: unknown): FileTreeState {
   const state = parseFileTreeState(value);
   if (
     state === null ||
+    (item.presentation !== undefined && parsePresentation(item.presentation) === null) ||
     !Array.isArray(item.expanded) ||
     !item.expanded.every(isEntryPath) ||
     !Array.isArray(item.selected) ||
@@ -135,6 +171,7 @@ export function mapFileTreeState(
     return path === null ? null : { path, offset: position.offset };
   };
   return {
+    ...(state.presentation === undefined ? {} : { presentation: { ...state.presentation } }),
     ...(state.browse === undefined
       ? {}
       : {

@@ -1,15 +1,7 @@
 <script module lang="ts">
   /** 文件菜单可以发出的动作；`bookmark` 切换条目的收藏状态。 */
   export type FileMenuAction =
-    | "file"
-    | "directory"
-    | "rename"
-    | "move"
-    | "trash"
-    | "reveal"
-    | "export"
-    | "locate"
-    | "bookmark";
+    "rename" | "move" | "trash" | "reveal" | "export" | "bookmark" | "conversations";
 </script>
 
 <script lang="ts">
@@ -19,11 +11,13 @@
     onAction,
     bookmarked,
     selectionCount = 0,
+    articleConversations = false,
   }: {
     onAction: (action: FileMenuAction, entry: VaultEntry | null) => void;
     /** 条目是否已收藏；决定菜单显示「加入」还是「移出」书签。 */
     bookmarked: (entry: VaultEntry) => boolean;
     selectionCount?: number;
+    articleConversations?: boolean;
   } = $props();
   let element: HTMLDivElement;
   let target = $state<VaultEntry | null>(null);
@@ -32,8 +26,15 @@
   let opened = false;
   let returnFocus: HTMLElement | null = null;
   const multiple = $derived(target !== null && selectionCount > 1);
-  /** 打开当前条目的菜单；位置限制在窗口内，键盘焦点进入第一项。 */
-  export async function open(entry: VaultEntry | null, x: number, y: number): Promise<void> {
+  /**
+   * 打开条目菜单并把键盘焦点交给第一项；新建与文件定位由固定入口负责。
+   * @param entry 用户选择的文件或文件夹，多选时保留整组选择。
+   * @param x 菜单期望的横坐标，超出窗口时收回可见范围。
+   * @param y 菜单期望的纵坐标，超出窗口时收回可见范围。
+   * @returns 菜单布局与焦点交接完成后兑现。
+   * @throws 原生浮层不可用时保留浏览器异常。
+   */
+  export async function open(entry: VaultEntry, x: number, y: number): Promise<void> {
     target = entry;
     left = x;
     top = y;
@@ -101,12 +102,11 @@
   onkeydown={keydown}
   tabindex="-1"
 >
-  {#if target !== null && !multiple}
-    <button role="menuitem" onclick={() => choose("file")}>新建笔记</button>
-    <button role="menuitem" onclick={() => choose("directory")}>新建文件夹</button>
-  {/if}
   {#if target !== null}
-    <div class="separator" role="separator"></div>
+    {#if articleConversations && !multiple && target.path.toLowerCase().endsWith(".md")}<button
+        role="menuitem"
+        onclick={() => choose("conversations")}>查看文章对话</button
+      >{/if}
     {#if !multiple}<button role="menuitem" onclick={() => choose("rename")}>重命名…</button>{/if}
     <button role="menuitem" onclick={() => choose("move")}>移动到…</button>
     <button role="menuitem" onclick={() => choose("export")}>导出…</button>
@@ -116,8 +116,6 @@
       <button role="menuitem" onclick={() => choose("reveal")}>在系统文件夹中显示</button>{/if}
     <div class="separator" role="separator"></div>
     <button role="menuitem" class="danger" onclick={() => choose("trash")}>移到废纸篓…</button>
-  {:else}
-    <button role="menuitem" onclick={() => choose("locate")}>定位当前文件</button>
   {/if}
 </div>
 
