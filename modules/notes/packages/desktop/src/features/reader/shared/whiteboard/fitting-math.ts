@@ -132,32 +132,28 @@ export function resample(points: readonly FitPoint[], count: number): FitPoint[]
   });
 }
 
-/** 最小二乘解小型线性系统；奇异或严重病态时返回 null，禁止输出失控参数。 */
+/**
+ * 用SVD直接求最小二乘，避免正规方程把条件数平方后误判瘦长或相近几何基函数。
+ * @param rows 有限设计矩阵，观测数不得少于未知数。
+ * @param targets 与每行对应的有限观测值。
+ * @returns 满列秩系统的参数；非法输入、秩亏或超出双精度可辨识范围返回null，不抛异常。
+ */
 export function leastSquares(
   rows: readonly number[][],
   targets: readonly number[],
 ): number[] | null {
-  const size = rows[0]!.length;
-  const matrix = Array.from({ length: size }, (_, i) =>
-    Array.from({ length: size + 1 }, (_, j) =>
-      rows.reduce((sum, row, k) => sum + row[i]! * (j === size ? targets[k]! : row[j]!), 0),
-    ),
-  );
-  for (let column = 0; column < size; column++) {
-    let pivot = column;
-    for (let row = column + 1; row < size; row++)
-      if (Math.abs(matrix[row]![column]!) > Math.abs(matrix[pivot]![column]!)) pivot = row;
-    if (Math.abs(matrix[pivot]![column]!) < 1e-8) return null;
-    [matrix[column], matrix[pivot]] = [matrix[pivot]!, matrix[column]!];
-    const divisor = matrix[column]![column]!;
-    for (let j = column; j <= size; j++) matrix[column]![j]! /= divisor;
-    for (let row = 0; row < size; row++) {
-      if (row === column) continue;
-      const factor = matrix[row]![column]!;
-      for (let j = column; j <= size; j++) matrix[row]![j]! -= factor * matrix[column]![j]!;
-    }
-  }
-  const result = matrix.map((row) => row[size]!);
+  const size = rows[0]?.length ?? 0;
+  if (
+    !size ||
+    rows.length < size ||
+    targets.length !== rows.length ||
+    !targets.every(Number.isFinite) ||
+    !rows.every((row) => row.length === size && row.every(Number.isFinite))
+  )
+    return null;
+  const decomposition = new SingularValueDecomposition(new Matrix(rows));
+  if (decomposition.rank < size) return null;
+  const result = decomposition.solve(Matrix.columnVector(targets)).to1DArray();
   return result.every(Number.isFinite) ? result : null;
 }
 
@@ -182,7 +178,8 @@ export function principalLine(
   return xx + yy < 1e-10 ? null : { center, angle: Math.atan2(2 * xy, xx - yy) / 2 };
 }
 
-const MAX_CONTOUR_DEVIATION = 0.075;
+/** 平滑曲线与直线的归一化最大偏差，参数优化与最终观测验收使用同一契约。 */
+export const MAX_CONTOUR_DEVIATION = 0.075;
 
 function contourDistance(point: FitPoint, contour: readonly FitPoint[]): number {
   let best = Infinity;
@@ -222,3 +219,4 @@ export function contourDeviation(
       }
     : null;
 }
+import { Matrix, SingularValueDecomposition } from "ml-matrix";

@@ -71,6 +71,7 @@
     "micromark-util-decode-string": "^2.0.1",
     "micromark-util-resolve-all": "^2.0.1",
     "micromark-util-types": "^2.0.2",
+    "ml-matrix": "6.15.0",
     "pdfjs-dist": "^6.3.289",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-history": "^1.5.0",

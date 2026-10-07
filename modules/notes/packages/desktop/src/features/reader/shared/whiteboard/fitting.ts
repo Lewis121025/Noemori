@@ -6,6 +6,13 @@ import {
   type ShapeLabel,
 } from "./recognition";
 import { fitArrow } from "./fitting-arrow";
+import {
+  circleContour,
+  ellipseContour,
+  fitCircleGeometry,
+  fitEllipseGeometry,
+} from "./fitting-conics";
+import { fitLineGeometry, refinePolyline, refineRectangle } from "./fitting-lines";
 import { cornerContour, contourCrossings, regularStar } from "./fitting-corners";
 import { stabilizeTrace } from "./stabilization";
 import {
@@ -13,8 +20,7 @@ import {
   angleAdvance,
   contourDeviation,
   observationsAgree,
-  leastSquares,
-  principalLine,
+  MAX_CONTOUR_DEVIATION,
   contourHull,
   segmentDistance,
   perimeterAdvance,
@@ -31,10 +37,15 @@ type Candidate = {
   points: FitPoint[];
   parameters: number;
   curvedSides?: boolean;
-  sourceCorners?: boolean;
+  /** 角点身份来自优化前的完整轮廓，优化位置不能追认原本不成立的结构证据。 */
+  sourceCorners?: FitPoint[];
 };
-function line(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
-  const fit = principalLine(points);
+function line(
+  points: readonly FitPoint[],
+  trace: readonly FitPoint[],
+  uncertainty: number,
+): FitPoint[] | null {
+  const fit = fitLineGeometry(points, uncertainty);
   if (!fit) return null;
   const dx = Math.cos(fit.angle),
     dy = Math.sin(fit.angle);
@@ -57,17 +68,17 @@ function circle(
   points: readonly FitPoint[],
   arc: boolean,
   trace: readonly FitPoint[],
+  uncertainty: number,
+  observations: readonly FitPoint[],
+  contour: readonly FitPoint[],
 ): FitPoint[] | null {
   if (!arc && !closed(points)) return null;
-  const solution = leastSquares(
-    points.map((p) => [2 * p.x, 2 * p.y, 1]),
-    points.map((p) => p.x * p.x + p.y * p.y),
-  );
-  if (!solution) return null;
-  const [cx, cy, constant] = solution;
-  const radius = Math.sqrt(constant! + cx! * cx! + cy! * cy!);
+  const fitted = fitCircleGeometry(points, uncertainty, observations, contour);
+  if (!fitted) return null;
+  const { x: cx, y: cy } = fitted.center;
+  const radius = fitted.radius;
   if (!Number.isFinite(radius) || radius < 0.08 || radius > 3) return null;
-  const angles = trace.map((p) => Math.atan2(p.y - cy!, p.x - cx!));
+  const angles = trace.map((p) => Math.atan2(p.y - cy, p.x - cx));
   let sweep = angleAdvance(angles);
   if (sweep === null) return null;
   if (
@@ -77,32 +88,22 @@ function circle(
   )
     return null;
   if (!arc) sweep = Math.sign(sweep) * Math.PI * 2;
-  const result = Array.from({ length: 129 }, (_, i) => {
-    const angle = angles[0]! + (sweep * i) / 128;
-    return { x: cx! + radius * Math.cos(angle), y: cy! + radius * Math.sin(angle) };
-  });
-  if (!arc) result[result.length - 1] = result[0]!;
-  return result;
+  return circleContour(fitted, angles[0]!, sweep);
 }
 
-function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPoint[] | null {
+function ellipse(
+  points: readonly FitPoint[],
+  trace: readonly FitPoint[],
+  uncertainty: number,
+  observations: readonly FitPoint[],
+  contour: readonly FitPoint[],
+): FitPoint[] | null {
   if (!closed(points)) return null;
-  const fit = leastSquares(
-    points.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y]),
-    points.map(() => 1),
-  );
+  const fit = fitEllipseGeometry(points, uncertainty, observations, contour);
   if (!fit) return null;
-  const [a, b, c, d, e] = fit;
-  const determinant = a! * c! - (b! * b!) / 4;
-  if (a! <= 0 || c! <= 0 || determinant <= 1e-8) return null;
-  const cx = ((b! * e!) / 2 - c! * d!) / (2 * determinant);
-  const cy = ((b! * d!) / 2 - a! * e!) / (2 * determinant);
-  const scale = 1 + a! * cx * cx + b! * cx * cy + c! * cy * cy;
-  const discriminant = Math.hypot(a! - c!, b!);
-  const major = Math.sqrt(scale / ((a! + c! - discriminant) / 2));
-  const minor = Math.sqrt(scale / ((a! + c! + discriminant) / 2));
+  const { x: cx, y: cy } = fit.center;
+  const { major, minor, angle: rotation } = fit;
   if (![major, minor].every(Number.isFinite) || minor < 0.04 || major > 1.5) return null;
-  const rotation = Math.atan2(b!, a! - c!) / 2 + Math.PI / 2;
   const dx = Math.cos(rotation),
     dy = Math.sin(rotation);
   const angleAt = (p: FitPoint) =>
@@ -113,17 +114,10 @@ function ellipse(points: readonly FitPoint[], trace: readonly FitPoint[]): FitPo
   const start = angleAt(points[0]!);
   const sweep = angleAdvance(trace.map(angleAt));
   if (sweep === null || Math.abs(Math.abs(sweep) - Math.PI * 2) > 0.4) return null;
-  const result = Array.from({ length: 129 }, (_, i) => {
-    const angle = start + (Math.sign(sweep) * 2 * Math.PI * i) / 128;
-    const x = major * Math.cos(angle),
-      y = minor * Math.sin(angle);
-    return { x: cx + x * dx - y * dy, y: cy + x * dy + y * dx };
-  });
-  result[result.length - 1] = result[0]!;
-  return result;
+  return ellipseContour(fit, start, Math.sign(sweep) * 2 * Math.PI);
 }
 
-function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
+function rectangle(points: readonly FitPoint[], uncertainty: number): FitPoint[] | null {
   if (!closed(points)) return null;
   let area = Infinity,
     result: FitPoint[] | null = null;
@@ -166,7 +160,7 @@ function rectangle(points: readonly FitPoint[]): FitPoint[] | null {
       [left, top],
     ].map(([x, y]) => ({ x: x! * dx - y! * dy, y: x! * dy + y! * dx }));
   }
-  return result;
+  return result ? refineRectangle(points, result, uncertainty) : null;
 }
 
 /** 角点只提供结构候选；简单闭合边界须完整绕行一周，自交轮廓交给访问步长约束。 */
@@ -268,8 +262,20 @@ function prepareFit(
 
 /** 各族独立产生候选，结构推导不提前禁止其它有效拟合。 */
 function fitCandidates(frame: FitFrame): Candidate[] {
-  const { sampled, trace, isClosed, corners } = frame;
+  const { sampled, trace, isClosed, corners, radius, observed, source } = frame;
   const candidates: Candidate[] = [];
+  const addPolygon = (contour: FitPoint[], sourceCorners: boolean) => {
+    const original = polygonCandidate(contour, trace, isClosed);
+    if (!original) return;
+    const refined = refinePolyline(sampled, contour, radius);
+    for (const outline of refined ? [contour, refined] : [contour]) {
+      const candidate = polygonCandidate(outline, trace, isClosed);
+      if (candidate)
+        candidates.push(
+          sourceCorners && original ? { ...candidate, sourceCorners: contour } : candidate,
+        );
+    }
+  };
   const add = (
     label: ShapeLabel,
     fitted: FitPoint[] | null,
@@ -278,13 +284,13 @@ function fitCandidates(frame: FitFrame): Candidate[] {
   ) => {
     if (fitted) candidates.push({ label, points: fitted, parameters, curvedSides });
   };
-  add("line", line(sampled, trace), 4);
+  add("line", line(sampled, trace, radius), 4);
   if (isClosed) {
     // 所有几何族先独立拟合，再校验结构与残差；不让不可靠角点提前排除有效曲线。
-    add("circle", circle(sampled, false, trace), 3);
-    const elongated = ellipse(sampled, trace);
+    add("circle", circle(sampled, false, trace, radius, observed, source), 3);
+    const elongated = ellipse(sampled, trace, radius, observed, source);
     if (elongated) add("ellipse", elongated, 5);
-    add("rectangle", rectangle(sampled), 5);
+    add("rectangle", rectangle(sampled, radius), 5);
     // 凸边界提供不受局部回描和采样往返影响的整体角点；完整原始轨迹仍验证绕行与覆盖。
     const hull = contourHull(sampled);
     if (hull.length >= 3) {
@@ -299,13 +305,11 @@ function fitCandidates(frame: FitFrame): Candidate[] {
               boundary.slice(1).some((end, i) => segmentDistance(point, boundary[i]!, end) <= 0.04),
             ));
       if (boundary && supports) {
-        const polygon = polygonCandidate(boundary, trace, true);
-        if (polygon) candidates.push(polygon);
+        addPolygon(boundary, false);
       }
     }
     if (corners) {
-      const polygon = polygonCandidate(corners, trace, true);
-      if (polygon) candidates.push({ ...polygon, sourceCorners: true });
+      addPolygon(corners, true);
       if (contourCrossings(corners) > 0) {
         const count = corners.length - 1;
         for (let step = 2; step < count / 2; step++) {
@@ -325,10 +329,9 @@ function fitCandidates(frame: FitFrame): Candidate[] {
       }
     }
   } else {
-    add("arc", circle(sampled, true, trace), 5);
+    add("arc", circle(sampled, true, trace, radius, observed, source), 5);
     if (corners) {
-      const polyline = polygonCandidate(corners, trace, false);
-      if (polyline) candidates.push(polyline);
+      addPolygon(corners, true);
     }
   }
   if (corners || !isClosed || angleAdvance(trace.map((p) => Math.atan2(p.y, p.x))) === null)
@@ -341,7 +344,7 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
   const { source, observed, radius } = frame;
   const eligible = candidates.flatMap((candidate) => {
     const error = contourDeviation(source, candidate.points);
-    const maximum = candidate.curvedSides ? 0.12 : 0.075,
+    const maximum = candidate.curvedSides ? 0.12 : MAX_CONTOUR_DEVIATION,
       rms = candidate.curvedSides ? 0.055 : 0.028;
     if (
       !error ||
@@ -350,7 +353,15 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
       !observationsAgree(observed, candidate.points, maximum)
     )
       return [];
-    return [{ ...candidate, error }];
+    const cornerSource = candidate.sourceCorners;
+    const witness = cornerSource ? contourDeviation(source, cornerSource) : null;
+    const cornersSupported =
+      cornerSource !== undefined &&
+      witness !== null &&
+      witness.maximum <= maximum &&
+      witness.rms <= rms &&
+      observationsAgree(observed, cornerSource, maximum);
+    return [{ ...candidate, error, cornersSupported }];
   });
   if (eligible.length === 0) return null;
   const noise = Math.max(
@@ -361,12 +372,15 @@ function chooseCandidate(candidates: Candidate[], frame: FitFrame): Candidate | 
   const straightBoundary = eligible.some(
     (candidate) =>
       (candidate.label === "polygon" || candidate.label === "triangle") &&
-      (candidate.sourceCorners || candidate.error.rms <= radius),
+      candidate.cornersSupported,
   );
+  // 已验证的三分支连接是拓扑证据；自由折线不能用额外顶点的较低残差抹掉连接点身份。
+  const branched = eligible.some((candidate) => candidate.label === "arrow");
   const ranked = eligible
     .filter(
       (candidate) =>
-        !straightBoundary || (candidate.label !== "circle" && candidate.label !== "ellipse"),
+        (!straightBoundary || (candidate.label !== "circle" && candidate.label !== "ellipse")) &&
+        (!branched || candidate.label !== "polyline"),
     )
     .map((candidate) => ({
       ...candidate,
