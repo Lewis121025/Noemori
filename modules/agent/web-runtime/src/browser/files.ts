@@ -25,7 +25,7 @@ export class BrowserFiles {
    * @param download 当前上下文触发的下载。
    * @returns 立即返回；下载读取失败留在对应 DownloadState.error，不冒充完成。
    */
-  receive(download: Download): void {
+  receive(download: Download, page?: string): void {
     if (this.closed || this.entries.size >= 100) {
       void download.cancel();
       return;
@@ -33,6 +33,7 @@ export class BrowserFiles {
     const id = randomUUID();
     const entry = {
       state: {
+        ...(page === undefined ? {} : { page }),
         id,
         name: basename(download.suggestedFilename()),
         status: "running",

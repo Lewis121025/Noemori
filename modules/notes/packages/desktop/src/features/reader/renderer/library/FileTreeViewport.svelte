@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack, type Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import type { FileTreeRow } from "./file-tree";
+  import type { WorkspaceTreeRow } from "./workspace-tree";
   import type { FileTreePosition } from "../../shared/file-browser";
 
   let {
@@ -16,7 +16,7 @@
     onEmptyFocus,
     children,
   }: {
-    rows: FileTreeRow[];
+    rows: WorkspaceTreeRow[];
     focused: string | null;
     dragging: string | null;
     selected: ReadonlySet<string>;
@@ -25,17 +25,19 @@
     position: FileTreePosition | null;
     onPosition: (position: FileTreePosition | null) => void;
     onEmptyFocus: () => void;
-    children: Snippet<[FileTreeRow]>;
+    children: Snippet<[WorkspaceTreeRow]>;
   } = $props();
   let element: HTMLDivElement;
+  let labelElement: HTMLDivElement;
+  let keyboardLabel = $state<{ path: string; text: string } | null>(null);
   let height = $state(0);
   let coarse = $state(false);
-  let previousRows: readonly FileTreeRow[] = [];
-  const positions = $derived(new Map(rows.map((row, index) => [row.node.path, index])));
+  let previousRows: readonly WorkspaceTreeRow[] = [];
+  const positions = $derived(new Map(rows.map((row, index) => [row.key, index])));
   const geometry = $derived.by(() => {
     let top = 0;
     return rows.map((row) => {
-      const height = excerpts.has(row.node.path) ? 46 : coarse ? 44 : 28;
+      const height = excerpts.has(row.key) ? 48 : coarse ? 44 : 30;
       const item = { top, height };
       top += height;
       return item;
@@ -69,9 +71,36 @@
     return [...indexes].sort((a, b) => a - b);
   });
 
+  // 原生 title 仅响应悬停；键盘浏览被截断的名称时也需要看到完整路径。
+  function showKeyboardLabel(event: FocusEvent): void {
+    const button = event.target;
+    if (!(button instanceof HTMLButtonElement) || !button.matches(":focus-visible")) return;
+    const name = button.querySelector<HTMLElement>(".name");
+    keyboardLabel = button.dataset.path && button.title && name && name.scrollWidth > name.clientWidth
+      ? { path: button.dataset.path, text: button.title }
+      : null;
+  }
+  $effect(() => {
+    const label = keyboardLabel;
+    const button = label && positions.has(label.path)
+      ? Array.from(element.querySelectorAll<HTMLButtonElement>("button[data-path]"))
+          .find((button) => button.dataset.path === label.path)
+      : null;
+    if (!label || !button?.isConnected) {
+      labelElement.hidePopover();
+      return;
+    }
+    labelElement.showPopover();
+    const bounds = button.getBoundingClientRect();
+    const hint = labelElement.getBoundingClientRect();
+    labelElement.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - hint.width - 8))}px`;
+    labelElement.style.top = `${Math.max(8, Math.min(bounds.bottom + 5, window.innerHeight - hint.height - 8))}px`;
+  });
+
   onMount(() => {
     const measure = () => {
       height = element.clientHeight;
+      keyboardLabel = null;
     };
     const pointer = matchMedia("(pointer: coarse)");
     const updatePointer = () => {
@@ -89,6 +118,12 @@
   });
   $effect(() => {
     element.scrollTop = scrollTop;
+    untrack(() => {
+      if (rows.length > 0 && height > 0) rememberPosition();
+    });
+  });
+  $effect(() => {
+    // 高度变化只核对浏览器的实际位置，不能回放尚未收到 scroll 事件前的旧锚点。
     if (rows.length > 0 && height > 0) untrack(rememberPosition);
   });
   $effect.pre(() => {
@@ -102,8 +137,8 @@
       positions.has(active.dataset.path)
     )
       return;
-    const index = previous.findIndex((row) => row.node.path === active.dataset.path);
-    const survives = (row: FileTreeRow) => positions.has(row.node.path);
+    const index = previous.findIndex((row) => row.key === active.dataset.path);
+    const survives = (row: WorkspaceTreeRow) => positions.has(row.key);
     const next =
       previous.slice(index + 1).find(survives) ??
       previous.slice(0, index).findLast(survives) ??
@@ -116,7 +151,7 @@
         (document.activeElement !== active && document.activeElement !== document.body)
       )
         return;
-      if (next) void focusPath(next.node.path);
+      if (next) void focusPath(next.key);
       else onEmptyFocus();
     });
     return () => {
@@ -127,9 +162,7 @@
     const index = rowAt(element.scrollTop),
       row = rows[index];
     onPosition(
-      row
-        ? { path: row.node.path, offset: Math.max(0, element.scrollTop - geometry[index]!.top) }
-        : null,
+      row ? { path: row.key, offset: Math.max(0, element.scrollTop - geometry[index]!.top) } : null,
     );
   }
   /**
@@ -148,9 +181,7 @@
             : key === "ArrowUp"
               ? index - 1
               : null;
-    return next === null
-      ? null
-      : (rows[Math.max(0, Math.min(rows.length - 1, next))]?.node.path ?? null);
+    return next === null ? null : (rows[Math.max(0, Math.min(rows.length - 1, next))]?.key ?? null);
   }
   /**
    * 先挂载目标行再交接焦点；变高的正文摘录不影响滚动锚点。
@@ -174,19 +205,29 @@
   }
 </script>
 
+<!-- 网格通过行按钮管理唯一游走焦点，容器只接收冒泡事件，不额外占用 Tab 入口。 -->
+<!-- svelte-ignore a11y_interactive_supports_focus -->
 <div
   class="file-tree"
   class:empty-tree={rows.length === 0}
   role="treegrid"
-  aria-label="文件系统"
+  aria-label="文件与对话"
   aria-rowcount={rows.length}
   aria-colcount="1"
   aria-multiselectable="true"
   bind:this={element}
-  onscroll={rememberPosition}
+  onfocusin={showKeyboardLabel}
+  onfocusout={() => (keyboardLabel = null)}
+  onkeydown={(event) => {
+    if (event.key === "Escape") keyboardLabel = null;
+  }}
+  onscroll={() => {
+    keyboardLabel = null;
+    rememberPosition();
+  }}
 >
   <div class="extent" aria-hidden="true" style:height="{extent}px"></div>
-  {#each visible as index (rows[index]!.node.path)}
+  {#each visible as index (rows[index]!.key)}
     {@const row = rows[index]!}
     <div
       class="tree-row"
@@ -195,16 +236,21 @@
       aria-level={row.depth + 1}
       aria-posinset={row.position}
       aria-setsize={row.siblings}
-      aria-expanded={row.node.kind === "directory" ? expanded.has(row.node.path) : undefined}
+      aria-expanded={row.children.length > 0 || row.kind === "directory"
+        ? expanded.has(row.key)
+        : undefined}
       style:top="{geometry[index]!.top}px"
       style:height="{geometry[index]!.height}px"
       style:--tree-depth={row.depth}
     >
-      <div role="gridcell" aria-colindex="1" aria-selected={selected.has(row.node.path)}>
+      <div role="gridcell" aria-colindex="1" aria-selected={selected.has(row.key)}>
         {@render children(row)}
       </div>
     </div>
   {/each}
+  <div class="reader-popover keyboard-label" role="tooltip" popover="manual" bind:this={labelElement}>
+    {keyboardLabel?.text ?? ""}
+  </div>
 </div>
 
 <style>
@@ -231,5 +277,15 @@
   .tree-row > div {
     height: 100%;
     min-width: 0;
+  }
+  .keyboard-label {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    max-width: min(360px, calc(100vw - 16px));
+    padding: 7px 10px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    pointer-events: none;
   }
 </style>

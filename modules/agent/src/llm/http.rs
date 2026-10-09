@@ -128,7 +128,8 @@ impl Model for HttpModel {
             let bounded = ExecutionContext::new(context.cancellation.clone(), model.config.request_timeout)?;
             context.deadline = context.deadline.min(bounded.deadline);
             let response = model.send(&request, &context).await?;
-            if !model.config.capabilities.streaming {
+            // stream 是请求偏好；网关明确返回完整 JSON 时，以实际响应格式解码。
+            if !model.config.capabilities.streaming || is_json_response(&response) {
                 let bytes = transport::read_body(response, context, model.config.max_response_bytes).await?;
                 let body = serde_json::from_slice(&bytes).map_err(|error| Error::Protocol(format!("响应不是 JSON：{error}")))?;
                 yield ModelEvent::finished(providers::response(&model.config, body)?);
@@ -152,6 +153,19 @@ impl Model for HttpModel {
             yield event;
         })
     }
+}
+
+fn is_json_response(response: &reqwest::Response) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| {
+            let media_type = value.trim().to_ascii_lowercase();
+            media_type == "application/json"
+                || (media_type.starts_with("application/") && media_type.ends_with("+json"))
+        })
 }
 
 fn validate_terminal(event: &ModelEvent) -> Result<(), Error> {

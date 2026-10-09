@@ -1,0 +1,14 @@
+{
+  "text": {
+    "red": { "label": "红色", "light": "#b44343", "dark": "#ee9b99" },
+    "green": { "label": "绿色", "light": "#34765b", "dark": "#96c9ad" },
+    "blue": { "label": "蓝色", "light": "#356a9a", "dark": "#96bfe7" },
+    "purple": { "label": "紫色", "light": "#7850a0", "dark": "#c5a7df" }
+  },
+  "highlight": {
+    "yellow": { "label": "黄色", "light": "#f6e7a3", "dark": "#685827" },
+    "green": { "label": "绿色", "light": "#cde7cd", "dark": "#31533f" },
+    "blue": { "label": "蓝色", "light": "#cde1f5", "dark": "#304f69" },
+    "pink": { "label": "粉色", "light": "#f2d2df", "dark": "#653e54" }
+  }
+}

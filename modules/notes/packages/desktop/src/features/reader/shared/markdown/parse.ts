@@ -208,6 +208,13 @@ function mapPhrase(
   switch (node.type) {
     case "text":
       return text(node.value, marks);
+    case "textStyle": {
+      const mark = documentSchema.mark(
+        node.style.kind,
+        "color" in node.style ? { color: node.style.color } : null,
+      );
+      return mapPhrasing(node.children, definitions, mark.addToSet(marks), table);
+    }
     case "strong":
     case "emphasis":
     case "delete":
@@ -220,7 +227,7 @@ function mapPhrase(
             : node.type === "delete"
               ? "strike"
               : "highlight";
-      return mapPhrasing(node.children, definitions, [...marks, documentSchema.mark(name)], table);
+      return mapPhrasing(node.children, definitions, documentSchema.mark(name).addToSet(marks), table);
     }
     case "comment":
       return [documentSchema.node("comment_inline", { source: node.value }).mark(marks)];

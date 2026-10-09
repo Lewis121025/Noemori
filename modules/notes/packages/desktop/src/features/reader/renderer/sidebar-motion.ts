@@ -1,67 +1,102 @@
+import { tick } from "svelte";
 import type { Action } from "svelte/action";
+import { advanceMotion, type MotionCoordinate } from "./spatial-motion";
 
-/** 窄屏抽屉覆盖正文，只有桌面侧栏开合才需要衔接正文横向位置。 */
-type SidebarLayout = { collapsed: boolean; narrow: boolean };
+/** 侧栏只发布开合状态；宽度拖动和窗口尺寸变化直接跟随真实布局。 */
+export type SidebarLayout = { collapsed: boolean; narrow: boolean; agentOpen?: boolean };
 
 /**
- * 侧栏状态改变后只排版一次，再以位移衔接正文容器，避免长文逐帧换行。
- * @param node 侧栏旁的内容容器；本动作独占该容器的 translate 动画。
- * @param value 当前侧栏状态；拖宽和窗口缩放不播放追赶动画。
- * @returns 更新及清理钩子；快速反向从当前呈现位置续接，减少动态效果立即取消。
- * @throws DOM 测量和浏览器动画异常原样传播。
+ * 每栏按正文实际横向位置衔接左右侧栏开合，长文只在终点排版一次。
+ * @param node 本栏滚动区的容器；正文锚点为 .main 的直接子元素。
+ * @param value 左右侧栏状态；窄屏覆盖正文时不追加位移。
+ * @returns 更新及清理钩子；首次绘制前建立动效，快速反向保留位置与速度。
+ * @throws DOM 测量、无效几何和浏览器动画异常原样传播。
  */
 export const sidebarMotion: Action<HTMLElement, SidebarLayout> = (node, value) => {
-  const view = node.ownerDocument.defaultView;
-  if (!view) return;
+  const owner = node.ownerDocument.defaultView;
+  if (!owner) return;
+  const view = owner;
   const media = view.matchMedia("(prefers-reduced-motion: reduce)");
   let current = value;
-  let left = node.offsetLeft;
+  let left = measure();
+  let width = node.offsetWidth;
   let windowWidth = view.innerWidth;
-  let frame = 0;
+  let pending = false;
+  let active = true;
+  let position: MotionCoordinate = { position: 0, velocity: 0 };
   let animation: Animation | null = null;
 
-  function cancel(): void {
-    if (animation) {
-      animation.onfinish = null;
-      animation.cancel();
-      animation = null;
-    }
+  function measure(): number {
+    return (node.querySelector<HTMLElement>(".main > div") ?? node).getBoundingClientRect().left;
   }
 
-  const align = (): void => {
-    view.cancelAnimationFrame(frame);
-    frame = 0;
-    cancel();
-    left = node.offsetLeft;
-    windowWidth = view.innerWidth;
-  };
+  function cancel(): void {
+    if (!animation) return;
+    animation.onfinish = null;
+    animation.cancel();
+    animation = null;
+  }
 
-  const play = (): void => {
-    frame = 0;
-    const style = view.getComputedStyle(node);
-    const offset = Number.parseFloat(style.translate) || 0;
-    const from = left + offset;
+  function align(): void {
     cancel();
-    left = node.offsetLeft;
+    position = { position: 0, velocity: 0 };
+    left = measure();
+    width = node.offsetWidth;
+    windowWidth = view.innerWidth;
+  }
+
+  function play(): void {
+    pending = false;
+    if (!active) return;
+    const elapsed = typeof animation?.currentTime === "number" ? animation.currentTime : 0;
+    const shown = advanceMotion(position, 0, Math.max(0, elapsed) / 1000);
+    const presented = animation ? Number.parseFloat(view.getComputedStyle(node).translate) || 0 : 0;
+    cancel();
+    const next = measure();
     const resized = windowWidth !== view.innerWidth;
     windowWidth = view.innerWidth;
-    if (current.narrow || media.matches || resized || Math.abs(from - left) < 0.5) return;
-    const duration = Number.parseFloat(style.getPropertyValue("--motion-enter"));
-    if (!Number.isFinite(duration) || duration <= 0) return;
-    animation = node.animate([{ translate: `${from - left}px 0` }, { translate: "0px 0" }], {
-      duration,
-      easing: style.getPropertyValue("--motion-ease").trim() || "ease-out",
+    width = node.offsetWidth;
+    // 位置取浏览器实际插值结果，速度取解析解，避免采样关键帧带来亚像素跳变。
+    position = { position: left + presented - next, velocity: shown.velocity };
+    left = next;
+    if (
+      current.narrow ||
+      media.matches ||
+      resized ||
+      !node.isConnected ||
+      typeof node.animate !== "function" ||
+      node.closest("[hidden]") ||
+      (Math.abs(position.position) < 0.1 && Math.abs(position.velocity) < 1)
+    ) {
+      align();
+      return;
+    }
+    const frames: Keyframe[] = [{ translate: `${position.position}px 0` }];
+    let step = 0;
+    let sample = position;
+    // 仅采样位移交给合成线程；不缩放文字，不逐帧写继承样式或重排长文。
+    while (Math.abs(sample.position) >= 0.1 || Math.abs(sample.velocity) >= 1) {
+      sample = advanceMotion(position, 0, ++step / 120);
+      frames.push({ translate: `${sample.position}px 0` });
+    }
+    frames[frames.length - 1] = { translate: "0px 0" };
+    animation = node.animate(frames, {
+      duration: (step / 120) * 1000,
+      easing: "linear",
       fill: "both",
     });
-    animation.onfinish = cancel;
-  };
+    animation.onfinish = align;
+  }
 
   const observer = new ResizeObserver(() => {
-    // 状态更新的测量必须等本轮 Svelte DOM 更新结束，观察器不能提前覆盖旧位置。
-    if (frame !== 0) return;
-    if (windowWidth !== view.innerWidth || left !== node.offsetLeft) cancel();
-    left = node.offsetLeft;
-    windowWidth = view.innerWidth;
+    if (pending || !active) return;
+    const offset = Number.parseFloat(view.getComputedStyle(node).translate) || 0;
+    if (
+      windowWidth !== view.innerWidth ||
+      width !== node.offsetWidth ||
+      Math.abs(measure() - offset - left) >= 0.5
+    )
+      align();
   });
   observer.observe(node);
   const preferenceChanged = () => {
@@ -70,19 +105,22 @@ export const sidebarMotion: Action<HTMLElement, SidebarLayout> = (node, value) =
   media.addEventListener("change", preferenceChanged);
   return {
     update(next) {
-      if (next.collapsed === current.collapsed && next.narrow === current.narrow) return;
-      const changedViewport = next.narrow !== current.narrow;
-      current = next;
-      if (changedViewport || next.narrow || media.matches) {
-        align();
+      if (
+        next.collapsed === current.collapsed &&
+        next.narrow === current.narrow &&
+        next.agentOpen === current.agentOpen
+      )
         return;
-      }
-      if (!frame) frame = view.requestAnimationFrame(play);
+      current = next;
+      if (pending) return;
+      pending = true;
+      // RAF 会把终点布局先绘制一帧；tick 在 DOM 更新完成后、绘制前提交起点。
+      void tick().then(play);
     },
     destroy() {
+      active = false;
       observer.disconnect();
       media.removeEventListener("change", preferenceChanged);
-      view.cancelAnimationFrame(frame);
       cancel();
     },
   };

@@ -14,6 +14,21 @@ const document = (...children: PmNode[]) => schema.node("doc", null, children);
 const decode = (bytes: Uint8Array) => new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
 
 describe("Markdown 空白布局的持久化契约", () => {
+  it("紧凑列表中新增空子列表时补足段落边界，不能把正文变成标题", () => {
+    const source = "- 甲\n  > 乙";
+    const session = createMarkdownSession(source);
+    let state = EditorState.create({ doc: session.doc });
+    const item = state.doc.firstChild!.firstChild!;
+    const child = schema.node("bullet_list", null, [schema.node("list_item", null, [paragraph()])]);
+    const replacement = item.type.create(item.attrs, [item.firstChild!, child]);
+    const tr = state.tr.replaceWith(1, 1 + item.nodeSize, replacement);
+    session.track(tr);
+    state = state.apply(tr);
+    const saved = decode(session.snapshot(state.doc).bytes);
+    expect(parseMarkdown(saved).firstChild?.firstChild?.child(1).type.name).toBe("bullet_list");
+    expect(parseMarkdown(saved).textContent).toBe("甲");
+  });
+
   it.each([
     ["", document(paragraph())],
     ["\n", document(paragraph(), paragraph())],

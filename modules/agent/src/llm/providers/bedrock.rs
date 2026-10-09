@@ -1,5 +1,5 @@
 use super::*;
-use crate::ToolCall;
+use crate::{ToolCall, llm::ReasoningEffort};
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     validate_images(request)?;
@@ -32,7 +32,34 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     if !options.is_empty() {
         body["inferenceConfig"] = json!(options);
     }
+    if let Some(effort) = &config.reasoning_effort {
+        body["additionalModelRequestFields"] = reasoning_fields(&config.model, effort);
+    }
     Ok(body)
+}
+
+/// 仅按 AWS 模型命名空间选择原生字段，不从型号或版本猜测可用档位。
+fn reasoning_fields(model: &str, effort: &ReasoningEffort) -> Value {
+    // 基础模型与跨区域 profile 的 ARN 都把模型身份放在最后一段资源路径。
+    let resource = model.rsplit('/').next().unwrap_or(model);
+    let model_id = ["us.", "eu.", "apac.", "global."]
+        .iter()
+        .find_map(|prefix| resource.strip_prefix(prefix))
+        .unwrap_or(resource);
+    if model_id.starts_with("anthropic.") {
+        match effort {
+            ReasoningEffort::None => json!({"thinking": {"type": "disabled"}}),
+            _ => json!({"output_config": {"effort": effort}}),
+        }
+    } else if model_id.starts_with("amazon.nova-") {
+        match effort {
+            ReasoningEffort::None => json!({"reasoningConfig": {"type": "disabled"}}),
+            _ => json!({"reasoningConfig": {"type": "enabled", "maxReasoningEffort": effort}}),
+        }
+    } else {
+        // 自定义网关也按官方 OpenAI 字段透传；不预判其模型或档位支持情况。
+        json!({"reasoning_effort": effort})
+    }
 }
 
 fn message_parts(group: &[Message]) -> Result<Vec<Value>, Error> {

@@ -3,7 +3,8 @@ import { EditorState, TextSelection, type Command } from "prosemirror-state";
 import { history, redo, undo } from "prosemirror-history";
 import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
 import { parseMarkdown } from "@reader/shared/markdown/parse";
-import { moveTableCell, tableCommands } from "@reader/renderer/editor/table/table";
+import { insertTable, moveTableCell, tableCommands } from "@reader/renderer/editor/table/table";
+import { documentAccess } from "@reader/renderer/editor/read-only";
 import { tableLineBreak } from "@reader/renderer/editor/table/table-input";
 
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
@@ -53,6 +54,112 @@ function sessionFor(text: string, needle: string) {
 }
 
 describe("表格编辑与源码保真", () => {
+  it.each(["left", "center", "right"] as const)(
+    "按指定行列和%s对齐插入，首行为表头，保存重开与一次撤销保持一致",
+    (align) => {
+      const session = sessionFor("前文 _保留_\n\n后文", "前文");
+      const command = insertTable({ rows: 4, columns: 5, align });
+      expect(command(session.state())).toBe(true);
+      expect(session.save()).toBe("前文 _保留_\n\n后文");
+      expect(session.apply(command)).toBe(true);
+      const table = session.state().doc.child(1);
+      expect(table.type.name).toBe("table");
+      expect(table.childCount).toBe(4);
+      for (const [index, row] of table.content.content.entries()) {
+        expect(row.childCount).toBe(5);
+        for (const cell of row.content.content) {
+          expect(cell.type.name).toBe(index === 0 ? "table_header" : "table_cell");
+          expect(cell.attrs["align"]).toBe(align);
+        }
+      }
+      expect(session.state().selection.$from.parent.type.name).toBe("table_header");
+      session.verifyRoundTrip();
+      expect(session.apply(undo)).toBe(true);
+      expect(session.save()).toBe("前文 _保留_\n\n后文");
+      expect(session.apply(undo)).toBe(false);
+    },
+  );
+
+  it("仅表头的一行一列表格可以保存重开", () => {
+    const session = sessionFor("正文", "正文");
+    expect(session.apply(insertTable({ rows: 1, columns: 1, align: "left" }))).toBe(true);
+    expect(session.state().doc.child(1).childCount).toBe(1);
+    session.verifyRoundTrip();
+  });
+
+  it.each([
+    [0, 3], [21, 3], [1.5, 3], [NaN, 3], [Infinity, 3],
+    [3, 0], [3, 13], [3, 1.5], [3, NaN],
+  ])("拒绝无效尺寸 %s 行 %s 列", (rows, columns) => {
+    expect(() => insertTable({ rows, columns, align: "left" })).toThrow(RangeError);
+  });
+
+  it("只读、跨段、代码和已有表格位置不能创建表格", () => {
+    const command = insertTable({ rows: 3, columns: 3, align: "center" });
+    const locked = EditorState.create({ doc: parseMarkdown("正文"), plugins: [documentAccess(true)] });
+    expect(command(locked)).toBe(false);
+    const across = sessionFor("前文\n\n后文", "前文");
+    across.select(1, across.state().doc.content.size - 1);
+    expect(across.apply(command)).toBe(false);
+    const code = sessionFor("```\n代码\n```", "代码");
+    expect(code.apply(command)).toBe(false);
+    const existing = sessionFor(source, "甲");
+    expect(existing.apply(command)).toBe(false);
+    expect(existing.save()).toBe(source);
+  });
+
+  it("移动正文行保留原始字节和格式，选区跟随单元格并可撤销", () => {
+    const session = sessionFor(source, "B");
+    const at = session.state().selection.from;
+    session.select(at + 1, at);
+    expect(session.apply(tableCommands.moveRowDown)).toBe(true);
+    expect(session.state().selection.$from.parent.textContent).toBe("B");
+    expect(session.state().selection.anchor).toBeGreaterThan(session.state().selection.head);
+    expect(session.save()).toBe(source.replace("| A    | __B__  |\r\n| C    | D      |", "| C    | D      |\r\n| A    | __B__  |"));
+    session.verifyRoundTrip();
+  });
+
+  it("移动列连同表头、对齐与内容一起移动，选区跟随原内容", () => {
+    const session = sessionFor(source, "B");
+    const at = session.state().selection.from;
+    session.select(at, at + 1);
+    expect(session.apply(tableCommands.moveColumnLeft)).toBe(true);
+    expect(session.state().selection.$from.parent.textContent).toBe("B");
+    expect(session.state().selection.to - session.state().selection.from).toBe(1);
+    expect(session.save()).toBe("\uFEFF前文 _原样_\r\n\r\n| 乙     | 甲   |\r\n| ----: | :---- |\r\n| __B__  | A    |\r\n| D      | C    |\r\n\r\n后文");
+    session.verifyRoundTrip();
+  });
+
+  it("表头和边界不能越界移动，能力查询不修改内容", () => {
+    for (const name of ["moveRowUp", "moveRowDown"] as const) {
+      const header = sessionFor(source, "甲");
+      expect(header.apply(tableCommands[name])).toBe(false);
+      expect(header.save()).toBe(source);
+    }
+    for (const [needle, name] of [["A", "moveRowUp"], ["C", "moveRowDown"], ["A", "moveColumnLeft"], ["B", "moveColumnRight"]] as const) {
+      const session = sessionFor(source, needle);
+      expect(tableCommands[name](session.state())).toBe(false);
+      expect(session.apply(tableCommands[name])).toBe(false);
+      expect(session.save()).toBe(source);
+    }
+    const session = sessionFor(source, "A");
+    expect(tableCommands.moveRowDown(session.state())).toBe(true);
+    expect(session.save()).toBe(source);
+  });
+
+  it("缺少尾部单元格时移动整列补齐矩形，跨单元格选区不猜测移动目标", () => {
+    const session = sessionFor("| 甲 | 乙 |\n| :--- | ---: |\n| _保留_ |", "甲");
+    expect(session.apply(tableCommands.moveColumnRight)).toBe(true);
+    expect(session.save()).toContain("| 乙 | 甲 |");
+    expect(session.save()).toContain("|  | _保留_ |");
+    session.verifyRoundTrip();
+    const across = sessionFor(source, "A");
+    const at = across.state().selection.from;
+    across.select(at, at + 3);
+    expect(across.apply(tableCommands.moveRowDown)).toBe(false);
+    expect(across.apply(tableCommands.moveColumnRight)).toBe(false);
+  });
+
   it("软换行使用 <br> 保存，保留当前单元格的强调写法和其他源码", () => {
     const session = sessionFor(source, "B");
     session.apply(tableLineBreak);
@@ -70,7 +177,7 @@ describe("表格编辑与源码保真", () => {
   });
   it("带 BOM 的正文中新建表格并连续输入、增加行列后可以逐步保存", () => {
     const session = sessionFor("\uFEFF前文 _原样_\r\n\r\n后文", "前文");
-    session.apply(tableCommands.insert);
+    session.apply(insertTable({ rows: 2, columns: 2, align: "left" }));
     session.save();
     session.type("项目");
     session.apply(moveTableCell("next"));
@@ -108,7 +215,7 @@ describe("表格编辑与源码保真", () => {
   });
   it("在正文后插入表格，不替换选中文字，光标落入首个表头", () => {
     const session = sessionFor("前文 _保留_\n\n后文", "前文");
-    expect(session.apply(tableCommands.insert)).toBe(true);
+    expect(session.apply(insertTable({ rows: 2, columns: 2, align: "left" }))).toBe(true);
     expect(session.state().selection.$from.parent.type.name).toBe("table_header");
     expect(session.save()).toContain("前文 _保留_\n\n");
     expect(session.save()).toMatch(/\n\n后文$/);

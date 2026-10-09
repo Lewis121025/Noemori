@@ -8,6 +8,7 @@ import type {
 export function createArticleAgentActions(
   api: AgentApi,
   open: ArticleAgentActions["open"],
+  attached: () => Promise<void> = async () => {},
 ): ArticleAgentActions {
   const preview = (item: AgentConversation): ArticleConversationPreview => ({
     id: item.id,
@@ -33,7 +34,10 @@ export function createArticleAgentActions(
   return {
     open,
     api: {
-      attachVault: (root) => api.attachVault(root),
+      attachVault: async (root) => {
+        await api.attachVault(root);
+        await attached();
+      },
       list: () => api.list(),
       createArticle: async (request) => preview(await api.createArticle(request)),
       snapshot: async (id) => preview(await api.snapshot(id)),

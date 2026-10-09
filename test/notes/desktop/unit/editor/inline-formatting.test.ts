@@ -34,6 +34,7 @@ it("一次读取多种叠加样式，互不干扰", () => {
   expect(readInlineMarkStates(state)).toEqual({
     strong: "mixed",
     em: "mixed",
+    underline: false,
     strike: "mixed",
     highlight: "mixed",
     code: "mixed",

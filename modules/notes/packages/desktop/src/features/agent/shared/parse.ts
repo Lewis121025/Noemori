@@ -1,3 +1,6 @@
+import { record, text, boolean, integer, nullableText, array } from "./values";
+export { record, text, boolean, integer } from "./values";
+import { parseUi } from "./ui";
 import type {
   AgentApproval,
   AgentRun,
@@ -15,43 +18,9 @@ import type {
   TerminalPage,
 } from "./api";
 
-/** 固定窗口协议的对象边界；数组、null 和非对象均被拒绝。 */
-export function record(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw new Error("Agent 协议需要对象");
-  return value;
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-/** 读取已声明的字符串，缺失字段不会默认为空值。 */
-export function text(value: Record<string, unknown>, key: string): string {
-  const result = value[key];
-  if (typeof result !== "string") throw new Error(`Agent 字段 ${key} 需要字符串`);
-  return result;
-}
-/** 布尔字段不接受字符串或数字代替。 */
-export function boolean(value: Record<string, unknown>, key: string): boolean {
-  const result = value[key];
-  if (typeof result !== "boolean") throw new Error(`Agent 字段 ${key} 需要布尔值`);
-  return result;
-}
-/** 非负整数保持 JS 安全整数边界。 */
-export function integer(value: Record<string, unknown>, key: string): number {
-  const result = value[key];
-  if (typeof result !== "number" || !Number.isSafeInteger(result) || result < 0)
-    throw new Error(`Agent 字段 ${key} 需要非负安全整数`);
-  return result;
-}
-function nullableText(value: Record<string, unknown>, key: string): string | null {
-  return value[key] === null ? null : text(value, key);
-}
 // Rust TerminalInfo 的未确定字段会省略；在协议解码边界投影为窗口 API 声明的 null。
 function optionalText(value: Record<string, unknown>, key: string): string | null {
   return value[key] === undefined ? null : nullableText(value, key);
-}
-function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error("Agent 协议需要数组");
-  return value;
 }
 function strings(value: unknown): string[] {
   return array(value).map((item) => {
@@ -132,6 +101,20 @@ function approval(value: unknown): AgentApproval {
   const request = record(item["request"]);
   const details = record(request["request"]);
   const type = text(request, "type");
+  if (type === "ui")
+    return {
+      id: text(item, "id"),
+      request: {
+        type,
+        request: {
+          app: text(details, "app"),
+          window: text(details, "window"),
+          reason: text(details, "reason"),
+          app_name: text(details, "app_name"),
+          window_title: text(details, "window_title"),
+        },
+      },
+    };
   if (type === "browser")
     return {
       id: text(item, "id"),
@@ -242,6 +225,7 @@ export function parseSnapshot(serialized: string): AgentSnapshot {
     throw new Error("Agent 末轮与当前运行不一致");
   return {
     browser: parseBrowser(item["browser"]),
+    ui: parseUi(item["ui"]),
     id: text(item, "id"),
     workspace: text(item, "workspace"),
     revision: integer(item, "revision"),
@@ -453,11 +437,14 @@ export function parseModelSettings(value: unknown): ModelSettingsUpdate {
 export function parseApprovalReply(value: unknown): ApprovalReply {
   const item = record(value);
   const type = text(item, "type");
-  if (type !== "terminal" && type !== "network" && type !== "browser")
+  if (type !== "terminal" && type !== "network" && type !== "browser" && type !== "ui")
     throw new Error("审批回复类型无效");
   const reply = record(item["decision"]);
   const decision = text(reply, "decision");
-  if ((decision === "allow_once" && type !== "browser") || decision === "allow_for_session")
+  if (
+    (decision === "allow_once" && type !== "browser" && type !== "ui") ||
+    decision === "allow_for_session"
+  )
     return { type, decision: { decision } };
   if (decision === "deny") return { type, decision: { decision, details: text(reply, "details") } };
   if (

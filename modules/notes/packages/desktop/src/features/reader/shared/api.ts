@@ -271,7 +271,7 @@ export type ReaderSpace = "writing" | "library" | "connections";
 /** 工作台目的地与文档类型独立，打开白板也属于文档页面。 */
 export type WorkspaceDestination = "document" | "library";
 /** 左侧内容选择；目录随当前文档，搜索结果与文档同时显示。 */
-export type SidebarView = "outline" | "search";
+export type SidebarView = "files" | "outline" | "search";
 /** @returns 是否为已知工作台目的地；未知值由恢复层迁移或回退。 */
 export function isWorkspaceDestination(value: unknown): value is WorkspaceDestination {
   return value === "document" || value === "library";
@@ -299,6 +299,8 @@ export type PaneLayout = {
   filesCollapsed: boolean;
   /** 文件栏宽度（像素）。 */
   leftWidth: number;
+  /** Agent 侧栏宽度，旧会话缺省使用 380 像素。 */
+  rightWidth?: number;
 };
 
 /** 已提交的库根与完整目录；界面以同一次响应发布，避免二次读取导致半切换。 */

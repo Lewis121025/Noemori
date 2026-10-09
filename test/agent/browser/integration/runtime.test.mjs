@@ -53,6 +53,83 @@ function ref(observation, name) {
   return { page: observation.page, observation: observation.id, ref: element.ref };
 }
 
+test("人工输入绑定本次接管和页面，旧输入不能穿过交还或导航", async (t) => {
+  const f = await fixture(t, '<input autofocus aria-label="姓名">');
+  await f.run({ action: "handoff" });
+  const prior = await f.run({ action: "preview", page: f.id });
+  await f.run({ action: "resume" });
+  await f.run({ action: "handoff" });
+  await f.page.locator("input").focus();
+  const stale = await f.run({ action: "human_input", page: f.id, token: prior.input_token ?? "old-control", input: { type: "text", text: "不应输入" } });
+  assert.equal(stale.outcome, "not_executed");
+  assert.equal(await f.page.locator("input").inputValue(), "");
+  const current = await f.run({ action: "preview", page: f.id });
+  const refreshed = await f.run({ action: "preview", page: f.id });
+  assert.equal(refreshed.input_token, current.input_token, "只刷新画面不撤销同一接管凭据");
+  await f.page.goto('data:text/html,<input autofocus>');
+  const navigated = await f.run({ action: "human_input", page: f.id, token: current.input_token, input: { type: "text", text: "不应输入" } });
+  assert.equal(navigated.outcome, "not_executed");
+  assert.equal(await f.page.locator("input").inputValue(), "");
+});
+
+test("文件选择器更换后，迟到的选择不能上传到另一个控件", async (t) => {
+  const f = await fixture(t, '<input type="file" id="first"><input type="file" id="second">');
+  await f.run({ action: "handoff" });
+  let chooser = f.page.waitForEvent("filechooser");
+  await f.page.locator("#first").click();
+  await chooser;
+  const first = await f.run({ action: "preview", page: f.id });
+  chooser = f.page.waitForEvent("filechooser");
+  await f.page.locator("#second").click();
+  await chooser;
+  await writeFile(join(f.root, "upload.txt"), "不能发送");
+  const stale = await f.run({ action: "human_input", page: f.id, token: first.input_token, input: { type: "files", paths: ["upload.txt"] } });
+  assert.equal(stale.outcome, "not_executed");
+  assert.equal(await f.page.locator("#second").evaluate((input) => input.files.length), 0);
+});
+
+test("后台预览不改变模型观察，接管不激活系统浏览器窗口", async (t) => {
+  const f = await fixture(t, '<title>测试页面</title><input aria-label="姓名">');
+  const first = await f.observe();
+  let activated = false;
+  f.page.bringToFront = async () => { activated = true; };
+  const preview = await f.run({ action: "preview", page: f.id });
+  assert.equal(preview.outcome, "observed");
+  assert.equal(preview.image?.format, "jpeg");
+  assert.equal(preview.observation, undefined);
+  const filled = await f.run({ action: "fill", ...ref(first.observation, "姓名"), text: "后台输入" });
+  assert.equal(filled.outcome, "executed");
+  await f.run({ action: "handoff" });
+  assert.equal(activated, false);
+  assert.equal(f.engine.tabs()[0].title, "测试页面");
+  const humanPreview = await f.run({ action: "preview", page: f.id });
+  assert.equal(humanPreview.outcome, "observed");
+  const input = await f.run({ action: "human_input", page: f.id, token: humanPreview.input_token, input: { type: "text", text: "本人" } });
+  assert.equal(input.outcome, "executed");
+  await f.run({ action: "resume" });
+  const denied = await f.run({ action: "human_input", page: f.id, token: humanPreview.input_token, input: { type: "text", text: "不应输入" } });
+  assert.equal(denied.outcome, "not_executed");
+  assert.equal(await f.page.locator("input").inputValue(), "后台输入本人");
+});
+
+test("人工在后台浏览器处理网页弹窗和文件选择，不需要系统浏览器窗口", async (t) => {
+  const f = await fixture(t, '<input type="file"><button onclick="window.answer=prompt(\'姓名\')">询问</button>');
+  await f.run({ action: "handoff" });
+  const bounds = await f.page.locator("button").boundingBox();
+  const clicked = await f.run({ action: "human_input", page: f.id, token: (await f.run({ action: "preview", page: f.id })).input_token, input: { type: "pointer", x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 } });
+  assert.equal(clicked.outcome, "unknown");
+  const answered = await f.run({ action: "human_input", page: f.id, token: (await f.run({ action: "preview", page: f.id })).input_token, input: { type: "dialog", accept: true, text: "测试" } });
+  assert.equal(answered.outcome, "executed");
+  assert.equal(await f.page.evaluate(() => window.answer), "测试");
+  await writeFile(join(f.root, "upload.txt"), "测试文件");
+  const chooser = f.page.waitForEvent("filechooser");
+  await f.page.locator('input[type="file"]').click();
+  await chooser;
+  const selected = await f.run({ action: "human_input", page: f.id, token: (await f.run({ action: "preview", page: f.id })).input_token, input: { type: "files", paths: ["upload.txt"] } });
+  assert.equal(selected.outcome, "executed", JSON.stringify(selected));
+  assert.equal(await f.page.locator("input").evaluate((input) => input.files[0].name), "upload.txt");
+});
+
 test("表单跨调用保留状态，工具结果包含执行后的真实页面", async (t) => {
   const f = await fixture(
     t,
@@ -634,7 +711,7 @@ test("截图后出现同位置遮挡层时，不能把坐标点击发送给新�
   assert.equal(await f.page.evaluate(() => window.wrong), undefined);
 });
 
-test("人工接管显示当前工作页，重复接管不能再抢走用户焦点", async (t) => {
+test("人工接管与重复接管均不改变系统焦点", async (t) => {
   const f = await fixture(t, "<h1>第一页面</h1>");
   const second = await f.page.context().newPage();
   await second.setContent("<h1>第二页面</h1>");
@@ -653,7 +730,7 @@ test("人工接管显示当前工作页，重复接管不能再抢走用户焦�
   }
   await f.run({ action: "handoff" });
   await f.run({ action: "handoff" });
-  assert.deepEqual(activated, ["second"]);
+  assert.deepEqual(activated, []);
 });
 
 test("选项标签和另一项 value 相同时，选择模式必须明确，不能选错数量", async (t) => {

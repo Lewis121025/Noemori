@@ -1,0 +1,38 @@
+[package]
+name = "noemori-macos-ui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Noemori macOS 界面能力与受审计的原生 FFI 边界"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+
+[dependencies]
+noemori-agent = { path = ".." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-app-kit = "=0.3.2"
+objc2-foundation = "=0.3.2"
+objc2-application-services = "=0.3.2"
+objc2-screen-capture-kit = "=0.3.2"
+objc2-core-graphics = "=0.3.2"
+objc2-core-foundation = "=0.3.2"
+objc2-image-io = "=0.3.2"
+block2 = "0.6"
+
+[[bin]]
+name = "noemori-computer-helper"
+path = "src/main.rs"
+
+[[test]]
+name = "input_routing"
+path = "../../../test/agent/ui/unit/input-routing.rs"

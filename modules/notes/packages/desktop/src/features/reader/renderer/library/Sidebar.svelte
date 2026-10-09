@@ -12,11 +12,22 @@
     onWidth: (width: number) => void;
     children: Snippet;
     hidden?: boolean;
-    /** 文件管理已包含目录，只保留应用入口窄栏。 */
-    compact?: boolean;
+    side?: "left" | "right";
+    minWidth?: number;
+    maxWidth?: number;
+    defaultWidth?: number;
   };
 
-  let { width, onWidth, children, hidden = false, compact = false }: Props = $props();
+  let {
+    width,
+    onWidth,
+    children,
+    hidden = false,
+    side = "left",
+    minWidth = SIDEBAR_LAYOUT.minWidth,
+    maxWidth = SIDEBAR_LAYOUT.maxWidth,
+    defaultWidth = SIDEBAR_LAYOUT.leftWidth,
+  }: Props = $props();
   let resize = $state<{
     pointerId: number;
     startX: number;
@@ -25,7 +36,7 @@
   } | null>(null);
 
   function clampWidth(value: number): number {
-    return Math.min(SIDEBAR_LAYOUT.maxWidth, Math.max(SIDEBAR_LAYOUT.minWidth, Math.round(value)));
+    return Math.min(maxWidth, Math.max(minWidth, Math.round(value)));
   }
   function onPointerDown(event: PointerEvent): void {
     if (event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return;
@@ -35,7 +46,9 @@
   }
   function onPointerMove(event: PointerEvent): void {
     if (resize?.pointerId !== event.pointerId) return;
-    resize.width = clampWidth(resize.startWidth + event.clientX - resize.startX);
+    resize.width = clampWidth(
+      resize.startWidth + (event.clientX - resize.startX) * (side === "right" ? -1 : 1),
+    );
   }
   function onPointerUp(event: PointerEvent): void {
     if (resize?.pointerId !== event.pointerId) return;
@@ -48,13 +61,13 @@
   function onKeydown(event: KeyboardEvent): void {
     const next =
       event.key === "ArrowLeft"
-        ? width - 10
+        ? width + (side === "right" ? 10 : -10)
         : event.key === "ArrowRight"
-          ? width + 10
+          ? width + (side === "right" ? -10 : 10)
           : event.key === "Home"
-            ? SIDEBAR_LAYOUT.minWidth
+            ? minWidth
             : event.key === "End"
-              ? SIDEBAR_LAYOUT.maxWidth
+              ? maxWidth
               : null;
     if (next === null) return;
     event.preventDefault();
@@ -66,24 +79,23 @@
   {hidden}
   inert={hidden}
   class="file-sidebar"
-  class:compact
+  class:right={side === "right"}
   class:resizing={resize !== null}
-  style:--sidebar-width="{compact ? 54 : (resize?.width ?? width)}px"
-  aria-label="文件栏"
+  style:--sidebar-width="{resize?.width ?? width}px"
+  aria-label={side === "right" ? "Agent 侧栏" : "文件栏"}
 >
   <div class="body">{@render children()}</div>
   <!-- 按 WAI-ARIA 分隔条模式，带范围值的 separator 需要键盘焦点；Svelte 将该角色一律归为静态元素。 -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="resize"
-    hidden={compact}
     class:resizing={resize !== null}
     role="separator"
     tabindex="0"
-    aria-label="调整侧栏宽度"
+    aria-label={side === "right" ? "调整 Agent 侧栏宽度" : "调整侧栏宽度"}
     aria-orientation="vertical"
-    aria-valuemin={SIDEBAR_LAYOUT.minWidth}
-    aria-valuemax={SIDEBAR_LAYOUT.maxWidth}
+    aria-valuemin={minWidth}
+    aria-valuemax={maxWidth}
     aria-valuenow={resize?.width ?? width}
     title="拖动调整宽度，双击恢复默认；也可使用左右方向键"
     onpointerdown={onPointerDown}
@@ -96,11 +108,36 @@
       resize = null;
     }}
     onkeydown={onKeydown}
-    ondblclick={() => onWidth(SIDEBAR_LAYOUT.leftWidth)}
+    ondblclick={() => onWidth(defaultWidth)}
   ></div>
 </aside>
 
 <style>
+  .file-sidebar.right {
+    border-right: 0;
+    border-left: 1px solid var(--border);
+    max-width: 50%;
+  }
+  .right .resize {
+    left: 0;
+    right: auto;
+  }
+  .right .body {
+    width: 100%;
+  }
+  .file-sidebar.right[hidden] {
+    translate: 100% 0;
+  }
+  @media (max-width: 1000px) {
+    .file-sidebar.right {
+      position: absolute;
+      inset: 0 0 0 auto;
+      max-width: calc(100% - 40px);
+      z-index: 18;
+      box-shadow: -8px 0 24px var(--shadow);
+    }
+  }
+
   .file-sidebar[hidden] {
     display: none;
     position: absolute;
@@ -128,7 +165,10 @@
     transition: none;
   }
   @starting-style {
-    .file-sidebar:not([hidden]) {
+    .file-sidebar.right:not([hidden]) {
+      translate: 100% 0;
+    }
+    .file-sidebar:not([hidden]):not(.right) {
       translate: -100% 0;
       opacity: 0;
     }
@@ -157,9 +197,6 @@
     touch-action: none;
     outline-offset: -2px;
   }
-  .resize[hidden] {
-    display: none;
-  }
   .resize:hover,
   .resize:focus-visible,
   .resize.resizing {
@@ -167,12 +204,6 @@
   }
 
   @media (max-width: 640px) {
-    .file-sidebar.compact {
-      position: relative;
-      inset: auto;
-      max-width: none;
-      box-shadow: none;
-    }
     .file-sidebar {
       position: absolute;
       inset: 0 auto 0 0;
@@ -193,7 +224,7 @@
       max-width: calc(100vw - 3rem);
     }
     @starting-style {
-      .file-sidebar:not([hidden]) {
+      .file-sidebar:not([hidden]):not(.right) {
         width: var(--sidebar-width);
         opacity: 1;
         translate: -100% 0;

@@ -1,33 +1,73 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { selectionIndicator } from "../selection-indicator";
+  import { revealOnChange } from "../motion";
   import type { ReaderWorkspaceController } from "./state.svelte";
   import { READER_COMMANDS, shortcutLabel } from "../../shared/commands";
   let {
     workspace,
     preferences,
+    modelPreferences,
+    beforeModelLeave,
     onOpenVault,
   }: {
     workspace: ReaderWorkspaceController;
     preferences: Snippet;
+    modelPreferences?: Snippet;
+    beforeModelLeave?: () => Promise<boolean>;
     onOpenVault: () => Promise<void>;
   } = $props();
   let dialog: HTMLDialogElement;
   let returnFocus: HTMLElement | null = null;
-  let section = $state<"appearance" | "vault" | "shortcuts">("appearance");
+  type SettingsSection = "appearance" | "vault" | "shortcuts" | "models";
+  let section = $state<SettingsSection>("appearance");
+  let opened = $state(false);
+  let changing = $state(false);
+  let direction = $state<-1 | 1>(1);
   const mac = navigator.userAgent.includes("Mac");
 
   /**
    * 打开唯一设置窗口，并保留原操作位置。
+   * @param target 可选分类；省略时保留上次查看的分类。
    * @returns 无返回值；重复打开只将焦点交回现有窗口。
    * @throws 原生对话框打开失败时保留浏览器异常。
    */
-  export function open(): void {
+  export function open(target?: SettingsSection): void {
     if (!dialog.open) {
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       dialog.showModal();
+      opened = true;
     }
+    if (target !== undefined) void navigate(target);
     dialog.querySelector<HTMLButtonElement>(".close-settings")?.focus();
+  }
+  /** 配置离开确认也供应用关闭复用；取消或保存中返回 false，不丢弃表单。 */
+  export function confirmLeave(): Promise<boolean> {
+    return opened && section === "models" && beforeModelLeave
+      ? beforeModelLeave()
+      : Promise.resolve(true);
+  }
+  async function navigate(next: SettingsSection): Promise<void> {
+    if (section === next || changing) return;
+    changing = true;
+    try {
+      if (await confirmLeave()) {
+        const sections: SettingsSection[] = ["appearance", "vault", "shortcuts", "models"];
+        direction = sections.indexOf(next) > sections.indexOf(section) ? 1 : -1;
+        section = next;
+      }
+    } finally {
+      changing = false;
+    }
+  }
+  async function close(): Promise<void> {
+    if (changing) return;
+    changing = true;
+    try {
+      if (await confirmLeave()) dialog.close();
+    } finally {
+      changing = false;
+    }
   }
 </script>
 
@@ -35,7 +75,12 @@
   class="settings-window"
   aria-labelledby="settings-title"
   bind:this={dialog}
+  oncancel={(event) => {
+    event.preventDefault();
+    void close();
+  }}
   onclose={() => {
+    opened = false;
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }}
 >
@@ -46,7 +91,8 @@
       type="button"
       aria-label="关闭设置"
       title="关闭设置（Esc）"
-      onclick={() => dialog.close()}>×</button
+      disabled={changing}
+      onclick={() => void close()}>×</button
     >
   </header>
   <div class="settings-body">
@@ -55,26 +101,39 @@
         type="button"
         class="reader-button"
         aria-pressed={section === "appearance"}
-        onclick={() => (section = "appearance")}>外观与阅读</button
+        disabled={changing}
+        onclick={() => void navigate("appearance")}>外观与阅读</button
       >
       <button
         type="button"
         class="reader-button"
         aria-pressed={section === "vault"}
-        onclick={() => (section = "vault")}>笔记库</button
+        disabled={changing}
+        onclick={() => void navigate("vault")}>笔记库</button
       >
       <button
         type="button"
         class="reader-button"
         aria-pressed={section === "shortcuts"}
-        onclick={() => (section = "shortcuts")}>快捷键</button
+        disabled={changing}
+        onclick={() => void navigate("shortcuts")}>快捷键</button
       >
+      {#if modelPreferences}<button
+          type="button"
+          class="reader-button"
+          aria-pressed={section === "models"}
+          disabled={changing}
+          onclick={() => void navigate("models")}>LLM</button
+        >{/if}
     </nav>
-    <div class="settings-content">
-      <section data-motion="reveal" hidden={section !== "appearance"} aria-label="外观与阅读设置">
+    <div
+      class="settings-content"
+      use:revealOnChange={{ key: section, kind: "navigation", direction }}
+    >
+      <section hidden={section !== "appearance"} aria-label="外观与阅读设置">
         {@render preferences()}
       </section>
-      <section data-motion="reveal" hidden={section !== "vault"} aria-label="笔记库设置">
+      <section hidden={section !== "vault"} aria-label="笔记库设置">
         <h2>当前笔记库</h2>
         <p class="vault-path">{workspace.vaultRoot ?? "尚未打开笔记库"}</p>
         <button
@@ -88,7 +147,7 @@
             {workspace.message}
           </p>{/if}
       </section>
-      <section data-motion="reveal" hidden={section !== "shortcuts"} aria-label="快捷键说明">
+      <section hidden={section !== "shortcuts"} aria-label="快捷键说明">
         <h2>常用快捷键</h2>
         <dl>
           {#each READER_COMMANDS.filter((command) => command.shortcut !== null) as command (command.id)}<div
@@ -98,6 +157,10 @@
             </div>{/each}
         </dl>
       </section>
+      {#if opened && section === "models" && modelPreferences}<section aria-label="LLM 设置">
+          <h2>LLM 供应商</h2>
+          {@render modelPreferences()}
+        </section>{/if}
     </div>
   </div>
 </dialog>

@@ -5,7 +5,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { _electron as electron } from "playwright-core";
-import { noteAction } from "../support/workspace-actions";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
@@ -49,9 +48,9 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.locator(".ProseMirror").waitFor();
     const original = await page.locator(".ProseMirror").elementHandle();
-    await page.getByRole("button", { name: "插入", exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "插入附件…", exact: true }).click();
+    await page.getByRole("button", { name: "插入", exact: true }).click();
+    await page.getByRole("menuitem", { name: "插入附件…", exact: true }).click();
     await (
       await chooser
     ).setFiles([
@@ -101,27 +100,6 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
       await unfold.locator("span").evaluate((element) => element.getAnimations().length),
     ).toBeGreaterThan(0);
     await unfold.click();
-    await noteAction(page, "笔记属性…");
-    const details = page.locator(".properties");
-    await details.locator("summary").click();
-    // Chromium 不在 Element.getAnimations 中枚举 details-content 的内部动画；读取真实逐帧高度。
-    const heights = await details.evaluate(async (element) => {
-      const samples: number[] = [];
-      for (let frame = 0; frame < 6; frame += 1) {
-        await new Promise(requestAnimationFrame);
-        samples.push(element.getBoundingClientRect().height);
-      }
-      return samples;
-    });
-    expect(heights.at(-1)).toBeGreaterThan(heights[0]!);
-    await page.getByRole("textbox", { name: "新属性键", exact: true }).focus();
-    expect(
-      await page
-        .getByRole("textbox", { name: "新属性键", exact: true })
-        .evaluate((element) => getComputedStyle(element).boxShadow),
-    ).not.toBe("none");
-    await page.keyboard.press("Escape");
-
     await page.getByRole("button", { name: "文内查找", exact: true }).click();
     const query = page.getByRole("searchbox", { name: "查找", exact: true });
     await query.fill("森林");
@@ -136,7 +114,7 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     expect(
       await original?.evaluate((element) => element === document.querySelector(".ProseMirror")),
     ).toBe(true);
-    await page.getByRole("button", { name: "文件系统", exact: true }).click();
+    await page.getByRole("button", { name: "文件与对话", exact: true }).click();
     await page
       .getByRole("treegrid")
       .getByRole("button", { name: "森林.md", exact: true })

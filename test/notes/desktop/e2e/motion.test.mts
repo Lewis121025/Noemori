@@ -145,7 +145,7 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
     await settle(page);
 
     const toggle = page.getByRole("button", { name: "显示或隐藏文件栏", exact: true });
-    const sidebar = page.locator(".file-sidebar");
+    const sidebar = page.locator(".file-sidebar:not(.right)");
     const width = await sidebar.evaluate((element) => element.getBoundingClientRect().width);
     await toggle.click();
     const collapsing = await midpoint(sidebar);
@@ -185,7 +185,7 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
     );
 
     await sidebarComponent(page, "搜索");
-    await page.getByRole("searchbox", { name: "搜索文件和全文" }).fill("连续");
+    await page.getByRole("searchbox", { name: "搜索笔记库" }).fill("连续");
     await sidebarComponent(page, "目录");
     await openLibrary(page);
     await sidebarComponent(page, "目录");
@@ -194,7 +194,7 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
       await identity?.evaluate((node) => node === document.querySelector(".ProseMirror")),
     ).toBe(true);
     await sidebarComponent(page, "搜索");
-    expect(await page.getByRole("searchbox", { name: "搜索文件和全文" }).inputValue()).toBe("连续");
+    expect(await page.getByRole("searchbox", { name: "搜索笔记库" }).inputValue()).toBe("连续");
 
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]!.setContentSize(640, 800),

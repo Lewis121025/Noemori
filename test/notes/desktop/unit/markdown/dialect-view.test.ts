@@ -42,6 +42,22 @@ function mountEditor(
 }
 
 describe("标注视图", () => {
+  it("编辑已有标注标题作用于当前块，保留其他内容、类型与初始折叠状态", () => {
+    const view = mountEditor("正文\n\n> [!tip]- 第一处\n> 内容\n\n> [!note]- 第二处\n> 正文", calloutNodeViews);
+    const original = view.state.doc;
+    const callouts = view.dom.querySelectorAll<HTMLElement>(".callout");
+    const title = callouts[1]!.querySelector<HTMLInputElement>(".callout-title")!;
+    title.focus();
+    expect(view.state.doc.eq(original)).toBe(true);
+    expect(callouts[1]!.classList.contains("collapsed")).toBe(true);
+    title.value = "修改后的标题";
+    title.dispatchEvent(new Event("input"));
+    expect(view.state.doc.child(1).attrs["kind"]).toBe("tip");
+    expect(view.state.doc.child(2).attrs).toEqual({ kind: "note", fold: "-", title: "修改后的标题" });
+    expect(view.state.doc.child(2).content.eq(original.child(2).content)).toBe(true);
+    expect(callouts[1]!.classList.contains("collapsed")).toBe(true);
+  });
+
   it("显示标题与折叠开关，`-` 初始收起，折叠不改写文档", () => {
     const view = mountEditor("> [!warning]- 小心\n> 正文\n", calloutNodeViews);
     const callout = view.dom.querySelector<HTMLElement>(".callout")!;

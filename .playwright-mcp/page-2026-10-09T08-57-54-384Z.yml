@@ -1,0 +1,115 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - generic:
+      - link "跳到主要内容" [ref=e2] [cursor=pointer]
+      - link "无障碍功能帮助" [ref=e3] [cursor=pointer]:
+        - /url: https://support.google.com/websearch/answer/181196?hl=zh-CN
+  - generic [ref=e8]:
+    - search [ref=e9]:
+      - generic [ref=e11]:
+        - link [ref=e13] [cursor=pointer]:
+          - /url: https://www.google.com/webhp?hl=zh-CN&ictx=2&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8QPXoECAYQBA
+          - img "详细了解 2026 年世界太空周" [ref=e14]
+        - generic [ref=e16]:
+          - combobox "搜索" [ref=e18]: site:developers.openai.com/codex/app terminal steering follow-up site:developers.openai.com/codex/app terminal steering follow-up
+          - generic [ref=e19]:
+            - button "清除" [ref=e23] [cursor=pointer]
+            - generic [ref=e28]:
+              - button "按语音搜索" [ref=e31] [cursor=pointer]
+              - button "按图搜索" [ref=e36] [cursor=pointer]
+    - generic [ref=e39]:
+      - button "设置" [ref=e41] [cursor=pointer]
+      - button "分享" [ref=e46] [cursor=pointer]
+      - generic [ref=e52]:
+        - button "Google 应用" [ref=e54] [cursor=pointer]
+        - link "登录" [ref=e59] [cursor=pointer]:
+          - /url: https://accounts.google.com/ServiceLogin?hl=zh-CN&passive=true&continue=https://www.google.com/search%3Fq%3Dsite%253Adevelopers.openai.com%252Fcodex%252Fapp%2Bterminal%2Bsteering%2Bfollow-up&ec=futura_srp_og_si_72236_p
+  - generic [ref=e62]:
+    - navigation [ref=e68]:
+      - generic [ref=e74]:
+        - list [ref=e75]:
+          - listitem [ref=e76]:
+            - link "AI 模式" [ref=e79] [cursor=pointer]:
+              - /url: /search?q=site:developers.openai.com/codex/app+terminal+steering+follow-up&sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&udm=50&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&vsint=&aep=1&ntc=1&cs=0&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8Q2J8OegQIEhAD
+          - listitem [ref=e83]:
+            - link "全部" [disabled] [ref=e84]
+          - listitem [ref=e87]:
+            - link "图片" [ref=e88] [cursor=pointer]:
+              - /url: /search?sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&udm=2&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&q=site:developers.openai.com/codex/app+terminal+steering+follow-up&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8QtKgLegQIFBAB
+          - listitem [ref=e91]:
+            - link "购物" [ref=e92] [cursor=pointer]:
+              - /url: /search?sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&udm=28&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&q=site:developers.openai.com/codex/app+terminal+steering+follow-up&ved=1t:220175&ictx=111
+          - listitem [ref=e95]:
+            - link "视频" [ref=e96] [cursor=pointer]:
+              - /url: /search?sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&udm=vids&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&q=site:developers.openai.com/codex/app+terminal+steering+follow-up&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8QtKgLegQIGBAB
+          - listitem [ref=e99]:
+            - link "短视频" [ref=e100] [cursor=pointer]:
+              - /url: /search?sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&udm=39&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&q=site:developers.openai.com/codex/app+terminal+steering+follow-up&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8Qs6gLegQIFxAB
+          - listitem [ref=e103]:
+            - link "新闻" [ref=e104] [cursor=pointer]:
+              - /url: /search?sca_esv=afb89ae158309890&sxsrf=APpeQnthsEWPShXS2_magba1hpOLvxWo9A:1791536273847&q=site:developers.openai.com/codex/app+terminal+steering+follow-up&tbm=nws&source=lnms&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgOm668fbRC_a7Vhb8DCgbMq8eqV8bT1VY7Sa-SsVne4NkpLkz0HZk_YZmMHm1pm89LCRSdMAYFTXeLTYtVyQTqQyTHKrI_qrJ_RLrcR98PycvuORfQSJUyFxqZEuCFBlfSADeYbgmf2-z3OS6rr84cab2x8t0aF8v631njRSxPPkmdv86HRo1I3s8MjYxD43Mkjf_HoQ&sa=X&ved=2ahUKEwjHmdHZyKyXAxVM1DgGHdaREu8Q0pQJegQIFhAB
+          - listitem [ref=e107]:
+            - button [ref=e108] [cursor=pointer]:
+              - generic "更多过滤条件" [ref=e109]: 更多
+        - button "工具" [ref=e116] [cursor=pointer]
+    - heading "搜索结果" [level=1] [ref=e123]
+    - main [ref=e129]:
+      - generic [ref=e133]:
+        - generic [ref=e136]:
+          - heading "Web results" [level=2] [ref=e137]
+          - generic [ref=e138]:
+            - generic [ref=e141]:
+              - link "Codex App Server openai.com https://developers.openai.com › codex › app..." [ref=e143] [cursor=pointer]:
+                - /url: /goto?url=CAESaQHrOzAVwtrPWehxmw0YInQjAUnzRjoqNUXOvGf5IPc0ot2pvBnS2iesYHU9ZPU92_Jz-M5LwgmLFk2IekiHk8hNVgtTqS63elslHsi1Ml9tcqoEYETyeQNAaQNzRP1pwsgqycjKdGaOdQ
+                - heading "Codex App Server" [level=3] [ref=e144]
+                - generic [ref=e150]:
+                  - generic [ref=e151]: openai.com
+                  - generic [ref=e153]: https://developers.openai.com › codex › app...
+              - generic [ref=e155]:
+                - generic [ref=e156]: ·
+                - link "翻译此页" [ref=e157] [cursor=pointer]:
+                  - /url: /goto?url=CAESuAEB6zswFeOZEZl-es0OmmVB4sFv1vEnxF-Cvx4GIwJIN5OLosOLz7ePwx6GeIhiTmYM-5H-Bergoqn7qjWEZhmBSObw5vRQU8t37OswpMKQeKLZ10JPQUSUPKJ3qa9uHoQEiBwc2Rxop29hTDlRTz7QRiQNbHSNQzl1-TqaLE3I9ZQoJYHkZdnT99f4NuyB7SoQfRcpbmcgD3229m-bQKs58CZVc9Wv-imLGCP39gmEEPF3Mu5f7Q7x
+              - button "关于这条结果的详细信息" [ref=e162] [cursor=pointer]
+            - generic [ref=e169]:
+              - emphasis [ref=e170]: Connect the CLI terminal UI
+              - text: . Remote terminal UI mode lets you run app-server on one machine and connect the Codex CLI terminal interface from another. Start ...
+        - generic [ref=e174]:
+          - generic [ref=e177]:
+            - link "ChatGPT desktop app openai.com https://developers.openai.com › codex › app" [ref=e179] [cursor=pointer]:
+              - /url: /goto?url=CAESYgHrOzAVnRv8ESuzHUXb3NpXxYCIi9ZtP7t7nNGsdw9CfcOk8NAFnVVFZg7ThT8T5UrtwS843wWi6X02HH0a5EqdrMnC3hZhHN_s-iQULrQeLsaallBacqwtl2OOjRPE0UDg
+              - heading "ChatGPT desktop app" [level=3] [ref=e180]
+              - generic [ref=e186]:
+                - generic [ref=e187]: openai.com
+                - generic [ref=e189]: https://developers.openai.com › codex › app
+            - generic [ref=e191]:
+              - generic [ref=e192]: ·
+              - link "翻译此页" [ref=e193] [cursor=pointer]:
+                - /url: /goto?url=CAESsQEB6zswFdWg_-5McXwWgfY7jgnBDbvETp7QevOPyMuieakT6VnPdDbuO68VmRBRu8mp2FUfxNJKFQLyuTL6nB8ue_bBXbOQq7XhoEufjUUpJc1GQITL4MEK4lWgo5O_6ft0Ed_CIAu7XeeszOFAY9DJEVJ9_qZLLtyDTqcp1f18Xt7baN6_a6dX0C-5TVrQeMdaC9rjbQc1opXeRYUM4WUy4WFRCpEhtWvVz5D--hdPX5Q
+            - button "关于这条结果的详细信息" [ref=e198] [cursor=pointer]
+          - generic [ref=e203]: 1. Install the ChatGPT desktop app. Download ChatGPT for macOS, Windows, or Linux. · 2. Open ChatGPT and sign in. Open the app, then sign in with your ChatGPT ...
+      - generic:
+        - generic:
+          - navigation
+      - navigation
+    - contentinfo [ref=e205]:
+      - heading "页脚链接" [level=1] [ref=e206]
+      - generic [ref=e210]:
+        - generic [ref=e212]:
+          - text: 新加坡
+          - generic [ref=e214]:
+            - button "新加坡 - 是根据您的 IP 地址推断出来的" [ref=e216] [cursor=pointer]:
+              - generic [ref=e217]: 新加坡
+              - generic [ref=e219]:
+                - text: "-"
+                - generic [ref=e220]: 是根据您的 IP 地址推断出来的
+            - text: "-"
+            - button "更新位置信息" [ref=e222] [cursor=pointer]
+        - generic [ref=e225]:
+          - link "帮助" [ref=e226] [cursor=pointer]:
+            - /url: https://support.google.com/websearch/?p=ws_results_help&hl=zh-CN&fg=1
+          - link "发送反馈" [ref=e227] [cursor=pointer]:
+            - /url: "#"
+          - link "隐私权" [ref=e228] [cursor=pointer]:
+            - /url: https://policies.google.com/privacy?hl=zh-CN&fg=1
+          - link "条款" [ref=e229] [cursor=pointer]:
+            - /url: https://policies.google.com/terms?hl=zh-CN&fg=1

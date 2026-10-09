@@ -34,7 +34,23 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
       output.end(
         input.url === "/cancel"
           ? "<title>取消批量验收</title><label>姓名<input oninput=\"fetch('/filled')\"></label><button disabled>保存</button>"
-          : "<title>浏览器验收页面</title><label>姓名<input></label><button onclick=\"document.querySelector('output').textContent='已保存：'+document.querySelector('input').value\">保存</button><output></output>",
+          : `<title>阅读清单</title>
+            <style>
+              * { box-sizing: border-box; } body { margin: 0; color: #374b40; background: #f5f7f2; font: 22px -apple-system, sans-serif; }
+              main { max-width: 1040px; margin: 70px auto; } .eyebrow { font-size: 17px; letter-spacing: 3px; color: #819182; }
+              h1 { margin: 18px 0; font-size: 48px; font-weight: 500; letter-spacing: -1px; }
+              .intro { color: #7b887c; line-height: 1.8; } article { margin: 42px 0 26px; padding: 34px 40px; border: 1px solid #dce4d8; border-radius: 20px; background: #fdfefa; }
+              h2 { margin: 12px 0; font-size: 28px; font-weight: 500; } article p { color: #7b887c; line-height: 1.9; }
+              .tag { display: inline-block; border-radius: 20px; padding: 7px 14px; color: #697f68; background: #ebf0e5; font-size: 16px; }
+              .form { display: flex; align-items: center; gap: 14px; padding: 24px 30px; border-radius: 16px; background: #eaf0e5; font-size: 18px; }
+              input { margin-left: 12px; padding: 10px 14px; border: 1px solid #cad5c5; border-radius: 8px; font: inherit; color: inherit; background: #fdfefa; }
+              button { padding: 10px 20px; border: 0; border-radius: 8px; font: inherit; color: white; background: #778d70; } output { margin-left: auto; color: #7c8f76; font-size: 16px; }
+            </style>
+            <main><div class="eyebrow">READING NOTES</div><h1>留一点时间，理解一个想法。</h1>
+              <p class="intro">把值得再次翻阅的内容，整理在同一个地方。</p>
+              <article><span class="tag">本周阅读</span><h2>从观察开始，慢慢建立自己的理解</h2><p>阅读的时候，留意那些让你停顿的句子。<br>记录一个问题、一段联系，或是一个还没成形的想法。</p></article>
+              <div class="form"><label>姓名<input></label><button onclick="document.querySelector('output').textContent='已保存：'+document.querySelector('input').value">保存</button><output></output></div>
+            </main>`,
       );
       return;
     }
@@ -48,15 +64,15 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
       const last = request.messages.filter((message) => message.role === "tool").at(-1);
       const result: {
         output: {
-          observation?: {
+          prints?: { observation?: {
             page: string;
             id: string;
             text: string;
             elements: { ref: string; description: string }[];
-          };
+          } }[];
         };
       } | null = last && typeof last.content === "string" ? JSON.parse(last.content) : null;
-      const observation = result?.output.observation;
+      const observation = result?.output.prints?.at(-1)?.observation;
       if (observation) pageId = observation.page;
       const element = (name: string) => {
         if (!observation) throw new Error("模型未收到页面观察");
@@ -102,7 +118,7 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
               {
                 id: `browser-${calls}`,
                 type: "function",
-                function: { name: "browser", arguments: JSON.stringify(action) },
+                function: { name: "ui_repl", arguments: JSON.stringify({type:"run",code:`var uiResult=await (await browser.get('managed')).action(${JSON.stringify(action)}); print(uiResult); if(uiResult.image) emitImage(uiResult);`}) },
               },
             ],
           }
@@ -163,10 +179,12 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, workspace);
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
-  await page.getByRole("button", { name: "＋ 新会话", exact: true }).click();
+  await page.getByRole("button", { name: "新建对话", exact: true }).click();
   const creation = page.getByRole("dialog", { name: "新建对话", exact: true });
-  await creation.getByRole("button", { name: "选择文件夹…", exact: true }).click();
+  await creation.getByRole("button", { name: "关联文件夹…", exact: true }).click();
   await creation.getByRole("button", { name: "创建对话", exact: true }).click();
+  await page.getByRole("button", { name: "选择对话模型", exact: true }).click();
+  await page.getByRole("button", { name: "browser-fixture", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Agent 用户任务" })
     .fill("在验收页面填写并保存姓名，再检查截图");
@@ -198,7 +216,7 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
     ),
   }).toMatchObject({ calls: 6, sawImage: true });
   expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
-    "浏览器验收页面",
+    "阅读清单",
   );
   const artifacts = process.env["NOEMORI_QUALITY_ARTIFACTS"];
   if (artifacts) {
@@ -207,6 +225,59 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
   }
   await page.getByRole("button", { name: "接管浏览器", exact: true }).click();
   await page.getByRole("button", { name: "交还助手", exact: true }).waitFor();
+  await expect.poll(() => page.evaluate(() =>
+    document.querySelector<HTMLImageElement>(".agent-preview img")?.naturalWidth
+      ? "ready" : document.querySelector(".agent-preview")?.textContent || "没有浮窗",
+  ), { timeout: 10000 }).toBe("ready");
+  await expect.poll(() => page.locator(".agent-preview img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  const previewResult = await page.evaluate(async () => {
+    const session = (await window.noemori.agent.list()).items[0]!;
+    const state = await window.noemori.agent.snapshot(session.id);
+    return Promise.race([
+      window.noemori.agent.uiPreview(session.id, { backend: "managed", page: state.browser.tabs[0]!.id }).then((frame) => frame.image?.slice(0, 30)),
+      new Promise<string>((resolve) => setTimeout(() => resolve("预览请求超时"), 12000)),
+    ]);
+  });
+  expect(previewResult).toMatch(/^data:image\/jpeg;base64,/);
+  if (artifacts) {
+    await page.mouse.move(40, 60);
+    await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+    await page.screenshot({ path: join(artifacts, "browser", "background-preview.png") });
+  }
+  const previewSize = await page.locator(".agent-preview").boundingBox();
+  expect(previewSize).not.toBeNull();
+  await page.mouse.move(previewSize!.x + previewSize!.width - 3, previewSize!.y + previewSize!.height - 3);
+  await page.mouse.down();
+  await page.mouse.move(previewSize!.x + previewSize!.width + 57, previewSize!.y + previewSize!.height + 27, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.width).toBeGreaterThan(previewSize!.width);
+  const beforeDrag = await page.locator(".agent-preview").boundingBox();
+  const handle = await page.getByRole("button", { name: "拖动画面窗口", exact: true }).boundingBox();
+  expect(handle).not.toBeNull();
+  await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle!.x + handle!.width / 2 - 30, handle!.y + handle!.height / 2 + 40, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.x).toBeCloseTo(beforeDrag!.x - 30, 0);
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.y).toBeCloseTo(beforeDrag!.y + 40, 0);
+  const resized = await page.locator(".agent-preview").boundingBox();
+  await page.getByRole("button", { name: "放大画面", exact: true }).click();
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.width).toBeGreaterThan(previewSize!.width);
+  await page.getByRole("button", { name: "恢复画面大小", exact: true }).click();
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.x).toBeCloseTo(resized!.x, 0);
+  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.y).toBeCloseTo(resized!.y, 0);
+  if (artifacts) {
+    await page.locator(".agent-preview").evaluate((node) => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && node.contains(focused)) focused.blur();
+    });
+    await page.mouse.move(40, 60);
+    await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+    await page.screenshot({ path: join(artifacts, "browser", "resized-preview.png") });
+  }
+  await page.locator(".agent-preview").hover();
+  await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  await page.getByRole("button", { name: "关闭画面", exact: true }).click();
   await page.getByRole("button", { name: "交还助手", exact: true }).click();
   await page.getByRole("textbox", { name: "Agent 用户任务" }).fill("检查刚才的页面");
   await page.getByRole("button", { name: "发送", exact: true }).click();

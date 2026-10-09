@@ -70,6 +70,8 @@ pub struct HostTerminal {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", content = "request", rename_all = "snake_case")]
 pub enum HostApprovalRequest {
+    /// 原生前台接管，不代表批准系统权限授予或具体业务操作。
+    Ui(crate::tool::ui::computer::UiAccessRequest),
     /// 当前浏览器会话的精确网络来源。
     Browser(crate::tool::browser::BrowserAccessRequest),
     /// 命令及文件资源。
@@ -96,6 +98,8 @@ pub struct HostApproval {
     deny_unknown_fields
 )]
 pub enum HostApprovalReply {
+    /// 仅对当前有效窗口申请作出决定。
+    Ui(crate::tool::ui::computer::UiAccessDecision),
     /// 浏览器来源授权，不接受终端命令前缀。
     Browser(crate::tool::browser::BrowserAccessDecision),
     /// 命令及文件决定。
@@ -107,6 +111,8 @@ pub enum HostApprovalReply {
 /// 桌面会话可恢复的只读投影；读取不消费模型输出、终端日志或审批。
 #[derive(Clone, Debug, Serialize)]
 pub struct HostSnapshot {
+    /// 当前 UI 执行与连接状态，不包含系统句柄或连接密钥。
+    pub ui: crate::tool::ui::UiSnapshot,
     /// 对话持有的浏览器状态，独立于模型运行生命周期。
     pub browser: crate::tool::browser::BrowserSnapshot,
     /// 宿主生成的会话标识。

@@ -1,0 +1,210 @@
+- generic [active] [ref=f5e1]:
+  - generic [ref=f5e2]:
+    - text: For the complete documentation index, see
+    - link "llms.txt" [ref=f5e3] [cursor=pointer]:
+      - /url: /llms.txt
+    - text: . Markdown versions of documentation pages are available by appending
+    - code [ref=f5e4]: .md
+    - text: to the page URL.
+  - banner [ref=f5e5]:
+    - generic [ref=f5e6]:
+      - link "ChatGPT" [ref=f5e7] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f5e12]:
+        - link "Try ChatGPT" [ref=f5e16] [cursor=pointer]:
+          - /url: https://chatgpt.com/
+        - button "Toggle light and dark theme" [ref=f5e21] [cursor=pointer]
+        - button "Search the docs" [ref=f5e24] [cursor=pointer]
+      - navigation [ref=f5e27]:
+        - link "Home" [ref=f5e29] [cursor=pointer]:
+          - /url: /
+        - link "Docs" [ref=f5e31] [cursor=pointer]:
+          - /url: /docs
+        - link "Use cases" [ref=f5e33] [cursor=pointer]:
+          - /url: /use-cases
+        - link "Training" [ref=f5e35] [cursor=pointer]:
+          - /url: /training
+        - link "Resources" [ref=f5e37] [cursor=pointer]:
+          - /url: /resources
+  - navigation "Docs sections" [ref=f5e39]:
+    - link "Overview" [ref=f5e40] [cursor=pointer]:
+      - /url: /docs
+    - link "Features" [ref=f5e42] [cursor=pointer]:
+      - /url: /docs/features
+    - link "Configuration" [ref=f5e44] [cursor=pointer]:
+      - /url: /docs/configuration
+    - link "Developers" [ref=f5e46] [cursor=pointer]:
+      - /url: /docs/developers
+    - link "Security" [ref=f5e49] [cursor=pointer]:
+      - /url: /docs/security-administration
+    - link "Administration" [ref=f5e51] [cursor=pointer]:
+      - /url: /docs/administration
+  - generic [ref=f5e54]:
+    - navigation [ref=f5e56]:
+      - list [ref=f5e58]:
+        - listitem [ref=f5e59]:
+          - link "Overview" [ref=f5e60] [cursor=pointer]:
+            - /url: /docs/developers
+      - generic [ref=f5e62]:
+        - heading "Development workflows" [level=3] [ref=f5e63]
+        - list [ref=f5e64]:
+          - listitem [ref=f5e65]:
+            - link "Code review" [ref=f5e66] [cursor=pointer]:
+              - /url: /docs/code-review
+          - listitem [ref=f5e68]:
+            - link "Integrated terminal" [ref=f5e69] [cursor=pointer]:
+              - /url: /docs/integrated-terminal
+      - generic [ref=f5e71]:
+        - heading "Extend and automate" [level=3] [ref=f5e72]
+        - list [ref=f5e73]:
+          - listitem [ref=f5e74]:
+            - link "Build skills" [ref=f5e75] [cursor=pointer]:
+              - /url: /docs/build-skills
+          - listitem [ref=f5e77]:
+            - link "Site tools (WebMCP)" [ref=f5e78] [cursor=pointer]:
+              - /url: /docs/webmcp
+          - listitem [ref=f5e80]:
+            - link "Annotations Extensibility" [ref=f5e81] [cursor=pointer]:
+              - /url: /docs/annotations-extensibility
+          - listitem [ref=f5e83]:
+            - link "Hooks" [ref=f5e84] [cursor=pointer]:
+              - /url: /docs/hooks
+      - generic [ref=f5e86]:
+        - heading "Environments" [level=3] [ref=f5e87]
+        - list [ref=f5e88]:
+          - listitem [ref=f5e89]:
+            - link "Modes" [ref=f5e90] [cursor=pointer]:
+              - /url: /docs/environments/modes
+          - listitem [ref=f5e92]:
+            - link "Local environments" [ref=f5e93] [cursor=pointer]:
+              - /url: /docs/environments/local-environment
+          - listitem [ref=f5e95]:
+            - link "Git worktrees" [ref=f5e96] [cursor=pointer]:
+              - /url: /docs/environments/git-worktrees
+      - generic [ref=f5e98]:
+        - heading "Codex Cloud" [level=3] [ref=f5e99]
+        - list [ref=f5e100]:
+          - listitem [ref=f5e101]:
+            - link "Cloud environments" [ref=f5e102] [cursor=pointer]:
+              - /url: /docs/environments/cloud-environments
+      - generic [ref=f5e104]:
+        - heading "Build with Codex" [level=3] [ref=f5e105]
+        - list [ref=f5e106]:
+          - listitem [ref=f5e107]:
+            - link "Codex SDK" [ref=f5e108] [cursor=pointer]:
+              - /url: /docs/codex-sdk
+          - listitem [ref=f5e110]:
+            - link "App Server" [ref=f5e111] [cursor=pointer]:
+              - /url: /docs/app-server
+          - listitem [ref=f5e113]:
+            - link "GitHub Action" [ref=f5e114] [cursor=pointer]:
+              - /url: /docs/github-action
+          - listitem [ref=f5e116]:
+            - link "Non-interactive mode" [ref=f5e117] [cursor=pointer]:
+              - /url: /docs/non-interactive-mode
+      - generic [ref=f5e119]:
+        - heading "Third-party integrations" [level=3] [ref=f5e120]
+        - list [ref=f5e121]:
+          - listitem [ref=f5e122]:
+            - link "GitHub" [ref=f5e123] [cursor=pointer]:
+              - /url: /docs/third-party/github
+          - listitem [ref=f5e125]:
+            - link "GitLab (Beta)" [ref=f5e126] [cursor=pointer]:
+              - /url: /docs/third-party/gitlab
+          - listitem [ref=f5e128]:
+            - link "Slack" [ref=f5e129] [cursor=pointer]:
+              - /url: /docs/third-party/slack
+          - listitem [ref=f5e131]:
+            - link "Linear" [ref=f5e132] [cursor=pointer]:
+              - /url: /docs/third-party/linear
+      - generic [ref=f5e134]:
+        - heading "Reference" [level=3] [ref=f5e135]
+        - list [ref=f5e136]:
+          - listitem [ref=f5e137]:
+            - link "CLI customization" [ref=f5e138] [cursor=pointer]:
+              - /url: /docs/cli-customization
+          - listitem [ref=f5e140]:
+            - link "Developer commands" [ref=f5e141] [cursor=pointer]:
+              - /url: /docs/developer-commands
+          - listitem [ref=f5e143]:
+            - link "Developer settings" [ref=f5e144] [cursor=pointer]:
+              - /url: /docs/developer-settings
+    - main [ref=f5e146]:
+      - generic [ref=f5e149]:
+        - generic [ref=f5e151]:
+          - heading "Integrated terminal" [level=1] [ref=f5e153]
+          - paragraph [ref=f5e154]: Run commands and inspect output without leaving your chat
+          - button "Copy Page" [ref=f5e158] [cursor=pointer]
+        - article [ref=f5e163]:
+          - paragraph [ref=f5e164]:
+            - text: Each chat in the ChatGPT desktop app includes a terminal scoped to its current project or worktree. Select
+            - strong [ref=f5e165]: New tab
+            - text: ", then"
+            - strong [ref=f5e166]: Terminal
+            - text: ", or press Ctrl+`."
+          - img "Integrated terminal drawer open beneath a ChatGPT chat" [ref=f5e172]:
+            - generic [ref=f5e176]:
+              - generic [ref=f5e177]:
+                - generic [ref=f5e178]: Ask Codex anything, @ to add files, / for commands
+                - generic [ref=f5e180]:
+                  - generic [ref=f5e183]: 6 Sol
+                  - generic [ref=f5e187]: Medium
+              - generic [ref=f5e194]:
+                - generic [ref=f5e195]: Local
+                - generic [ref=f5e196]: Worktree
+                - generic [ref=f5e197]: Cloud
+                - generic [ref=f5e198]: main
+              - generic [ref=f5e199]:
+                - generic [ref=f5e200]:
+                  - text: Terminal
+                  - generic [ref=f5e201]: /bin/zsh
+                - generic [ref=f5e204]:
+                  - generic [ref=f5e205]: ➜ photobooth git:(main) × npm run dev
+                  - generic [ref=f5e206]: "> my-app@0.1.0 dev"
+                  - generic [ref=f5e207]: "> next dev"
+                  - generic [ref=f5e208]: ▲ Next.js 16.1.5 (Turbopack)
+                  - generic [ref=f5e209]: "- Local: http://localhost:3000"
+                  - generic [ref=f5e210]: "- Network: http://127.0.2.2:3000"
+                  - generic [ref=f5e211]: ✓ Starting...
+                  - generic [ref=f5e212]: ✓ Ready in 598ms
+          - heading "Run and validate your project Copy link to Run and validate your project" [level=2] [ref=f5e213]:
+            - generic [ref=f5e214]: Run and validate your project
+            - button "Copy link to Run and validate your project" [ref=f5e215] [cursor=pointer]
+          - paragraph [ref=f5e218]: Use the terminal to validate changes, run scripts, and perform Git operations without switching apps. ChatGPT can read the current terminal output, so it can check a running development server or refer to a failed build while it works with you.
+          - paragraph [ref=f5e219]: "Common commands include:"
+          - list [ref=f5e220]:
+            - listitem [ref=f5e221]:
+              - code [ref=f5e222]: git status
+            - listitem [ref=f5e223]:
+              - code [ref=f5e224]: git pull --rebase
+            - listitem [ref=f5e225]:
+              - code [ref=f5e226]: pnpm test
+              - text: or
+              - code [ref=f5e227]: npm test
+            - listitem [ref=f5e228]:
+              - code [ref=f5e229]: pnpm run lint
+              - text: or another project-specific check
+          - heading "Create reusable actions Copy link to Create reusable actions" [level=2] [ref=f5e230]:
+            - generic [ref=f5e231]: Create reusable actions
+            - button "Copy link to Create reusable actions" [ref=f5e232] [cursor=pointer]
+          - paragraph [ref=f5e235]:
+            - text: If you run a command regularly, define an action in your
+            - link "local environment" [ref=f5e236] [cursor=pointer]:
+              - /url: /docs/environments/local-environment#actions
+            - text: . Actions appear as shortcuts in the ChatGPT desktop app and run in the integrated terminal.
+          - paragraph [ref=f5e237]: Cmd+K opens the app command palette; it doesn’t clear the terminal. To clear the terminal, press Ctrl+L.
+      - navigation [ref=f5e240]:
+        - link "Previous Code review" [ref=f5e242] [cursor=pointer]:
+          - /url: /docs/code-review
+          - generic [ref=f5e245]:
+            - generic [ref=f5e246]: Previous
+            - generic [ref=f5e247]: Code review
+  - generic:
+    - button "Ask AI" [ref=f5e248] [cursor=pointer]
+    - dialog [ref=f5e250]:
+      - banner [ref=f5e251]:
+        - heading "Docs agent" [level=2] [ref=f5e252]
+        - generic [ref=f5e253]:
+          - button "Start a new docs agent chat" [ref=f5e254] [cursor=pointer]
+          - button "Close docs agent" [ref=f5e257] [cursor=pointer]
+      - paragraph [ref=f5e261]: Loading docs agent...

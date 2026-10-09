@@ -13,8 +13,6 @@
   const doc = $derived(pane.document);
   const navigation = $derived(pane.navigation);
   const busy = $derived(pane.switching || pane.copying || workspace.isComposing);
-  let noteMenu: HTMLDivElement;
-  let noteMenuButton: HTMLButtonElement | undefined = $state();
   const saveStatus = $derived(
     pane.copying
       ? "正在保存副本…"
@@ -28,16 +26,6 @@
               ? "未保存"
               : "已保存",
   );
-  function openDocumentPanel(id: string): void {
-    const panel = document.getElementById(id);
-    if (!(panel instanceof HTMLElement)) return;
-    noteMenu.hidePopover();
-    noteMenuButton?.focus();
-    panel.style.setProperty("position-anchor", `--pane-menu-${pane.id}`);
-    panel.showPopover();
-    panel.tabIndex = -1;
-    panel.focus({ preventScroll: true });
-  }
 </script>
 
 <div class="document-bar" role="group" aria-labelledby="document-name-{pane.id}">
@@ -68,19 +56,12 @@
       type="button"
       aria-label="笔记操作"
       title="文档操作"
-      style:anchor-name="--pane-menu-{pane.id}"
-      bind:this={noteMenuButton}
       popovertarget="note-menu-{pane.id}"
       disabled={busy || !doc.path}>⋯</button
     >
   </div>
 </div>
-<div
-  id="note-menu-{pane.id}"
-  bind:this={noteMenu}
-  popover="auto"
-  class="reader-popover action-popover note-menu"
->
+<div id="note-menu-{pane.id}" popover="auto" class="reader-popover action-popover note-menu">
   <button
     class="reader-button"
     type="button"
@@ -91,14 +72,6 @@
       if (doc.path !== null) workspace.requestExport({ kind: "selection", paths: [doc.path] });
     }}>导出…</button
   >
-  {#if doc.content?.kind === "markdown"}
-    {#if pane.viewMode !== "source"}<button
-        class="reader-button"
-        type="button"
-        onclick={() => openDocumentPanel(`properties-editor-formatting-${pane.id}`)}
-        >笔记属性…</button
-      >{/if}
-  {/if}
   {#if doc.content?.kind === "markdown" && doc.canEdit}
     <button
       class="reader-button"

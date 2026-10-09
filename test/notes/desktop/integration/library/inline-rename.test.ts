@@ -52,7 +52,7 @@ beforeEach(async () => {
   document.body.append(target);
   component = mount(LibraryBrowser, {
     target,
-    props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
+    props: { workspace, onEdit: vi.fn(), onOpen: vi.fn() },
   });
   flushSync();
 });
@@ -96,7 +96,7 @@ describe("文件树原位重命名", () => {
   });
 
   it("目录改名保留子文档，根目录中的选择跟随新名称", async () => {
-    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "全部文件")!.click();
+    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "笔记库根目录")!.click();
     flushSync();
     row("项目").click();
     flushSync();

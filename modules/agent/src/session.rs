@@ -20,6 +20,7 @@ struct Inner {
     runs: Mutex<Runs>,
     terminals: Manager,
     browser: crate::tool::browser::Manager,
+    ui: crate::tool::ui::Manager,
     #[cfg(unix)]
     approvals: crate::tool::terminal::SessionApprovals,
     #[cfg(unix)]
@@ -63,6 +64,7 @@ impl AgentSession {
             runs: Mutex::new(Runs::default()),
             terminals: Manager::new(limits),
             browser: Default::default(),
+            ui: Default::default(),
             approvals: Default::default(),
             networks: Default::default(),
         })))
@@ -90,8 +92,12 @@ impl AgentSession {
         self.0.approvals.close();
         #[cfg(unix)]
         self.0.networks.close();
-        let (terminal, browser) = tokio::join!(self.0.terminals.close(), self.0.browser.close());
-        let errors: Vec<_> = [terminal, browser]
+        let (terminal, browser, ui) = tokio::join!(
+            self.0.terminals.close(),
+            self.0.browser.close(),
+            self.0.ui.close()
+        );
+        let errors: Vec<_> = [terminal, browser, ui]
             .into_iter()
             .filter_map(Result::err)
             .collect();
@@ -110,9 +116,18 @@ impl AgentSession {
         &self.0.browser
     }
 
+    pub(crate) fn ui(&self) -> &crate::tool::ui::Manager {
+        &self.0.ui
+    }
+
     /// 读取会话浏览器状态与迟到回执；不会启动浏览器或消费任何观察。
     pub fn browser_snapshot(&self) -> crate::tool::browser::BrowserSnapshot {
         self.0.browser.snapshot()
+    }
+
+    /// 获取 UI 执行与连接的独立快照，不启动进程或恢复历史句柄。
+    pub fn ui_snapshot(&self) -> crate::tool::ui::UiSnapshot {
+        self.0.ui.snapshot()
     }
 
     #[cfg(unix)]

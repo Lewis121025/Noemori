@@ -82,51 +82,9 @@ test("属性与正文分离：隐藏配置，编辑与源码往返保持属性�
     await page.keyboard.press("Backspace");
     await page.keyboard.press("ControlOrMeta+s");
     expect(await readFile(join(vault, "笔记.md"), "utf8")).toBe(original);
-    await noteAction(page, "笔记属性…");
-    const properties = page.locator(".properties");
-    await expect
-      .poll(() => properties.locator(".row .key").allTextContents())
-      .toEqual(["cssclasses", "status", "tags", "author"]);
-    // 块级结构只读，引导走源码模式。
-    expect(await properties.locator(".nested").allTextContents()).toEqual(["嵌套结构", "嵌套结构"]);
-
-    // 改值：尾注释保留，其余行不动。
-    const statusInput = properties.getByLabel("属性 status 的值");
-    await statusInput.fill("done");
-    await statusInput.press("Enter");
-    // 增键：插在闭合围栏前。
-    await properties.getByLabel("新属性键").fill("due");
-    const valueInput = properties.getByLabel("新属性值");
-    await valueInput.fill("明天");
-    await valueInput.press("Enter");
-    // 删键：整行移除。
-    await properties.getByLabel("删除属性 tags").click();
-
-    await page.keyboard.press("ControlOrMeta+s");
-    await expect
-      .poll(() => readFile(join(vault, "笔记.md"), "utf8"))
-      .toBe(
-        [
-          "---",
-          "cssclasses:",
-          "  - nndl-bilingual",
-          "status: done # 进行中",
-          "author:",
-          "  name: 张三",
-          "due: 明天",
-          "---",
-          "",
-          "# 标题",
-          "",
-          "正文。",
-          "",
-        ].join("\r\n"),
-      );
-
-    // 面板与文档同步：删除的键消失，新键出现。
-    await expect
-      .poll(() => properties.locator(".row .key").allTextContents())
-      .toEqual(["cssclasses", "status", "author", "due"]);
+    await page.getByRole("button", { name: "笔记操作", exact: true }).click();
+    expect(await page.getByRole("button", { name: "笔记属性…", exact: true }).count()).toBe(0);
+    expect(await page.locator('[aria-label="笔记属性"]').count()).toBe(0);
     const beforeBodyEdit = await readFile(join(vault, "笔记.md"), "utf8");
     const prefix = beforeBodyEdit.slice(0, beforeBodyEdit.indexOf("# 标题"));
 

@@ -322,6 +322,34 @@ fn tree_position(value: &Value) -> Value {
     }
 }
 
+// 合成身份与文件路径独立校验；对话节点永远不会进入文件选择和文件路径重映射。
+fn tree_key(key: &str) -> bool {
+    key.encode_utf16().count() <= 16_384
+        && (entry_path(key)
+            || ["\0conversation:", "\0source:", "\0workspace:"].iter().any(|prefix| {
+                key.strip_prefix(prefix).is_some_and(|id| !id.is_empty() && !id.contains('\0'))
+            }))
+}
+
+fn discussions(value: &Value) -> Option<Value> {
+    let expanded = value["expanded"].as_array()?;
+    if !expanded.iter().all(|key| key.as_str().is_some_and(tree_key)) {
+        return None;
+    }
+    let archived = value["archived"].as_bool()?;
+    let scroll = value.get("scroll")?;
+    let scroll = if scroll.is_null() {
+        Value::Null
+    } else {
+        let key = scroll["key"].as_str().filter(|key| tree_key(key))?;
+        let offset = scroll["offset"].as_f64()?;
+        json!({"key": key, "offset": offset.clamp(0.0, 500.0)})
+    };
+    let mut seen = HashSet::new();
+    let expanded: Vec<_> = expanded.iter().filter(|key| seen.insert(key.to_string())).collect();
+    Some(json!({"expanded": expanded, "archived": archived, "scroll": scroll}))
+}
+
 fn file_tree(value: &Value) -> Value {
     if !value.is_object() {
         return Value::Null;
@@ -347,6 +375,9 @@ fn file_tree(value: &Value) -> Value {
     }
     if value.get("navigationScroll").is_some() {
         result["navigationScroll"] = tree_position(&value["navigationScroll"]);
+    }
+    if let Some(discussions) = discussions(&value["discussions"]) {
+        result["discussions"] = discussions;
     }
     let browse = &value["browse"];
     if browse["query"].is_string()
@@ -403,12 +434,11 @@ pub fn normalize(value: &Value) -> Value {
         }
         _ => {}
     }
-    match reader["sidebarView"].as_str() {
-        Some("files") => r["sidebarView"] = json!("outline"),
-        Some("outline" | "search") => {
-            r["sidebarView"] = reader["sidebarView"].clone();
-        }
-        _ => {}
+    if let Some("files" | "outline" | "search") = reader["sidebarView"].as_str() {
+        r["sidebarView"] = reader["sidebarView"].clone();
+    }
+    if let Some(width) = reader["rightWidth"].as_f64() {
+        r["rightWidth"] = json!((width + 0.5).floor().clamp(320.0, 640.0));
     }
     if reader["searchQuery"].is_string() {
         r["searchQuery"] = reader["searchQuery"].clone();
@@ -507,6 +537,16 @@ fn remap_reader(reader: &mut Value, from: &str, to: Option<&str>) {
             } else {
                 directory
             };
+        }
+        let discussions = &mut tree["discussions"];
+        if discussions.is_object() {
+            map_list(&mut discussions["expanded"], true);
+            if discussions["scroll"].is_object() {
+                discussions["scroll"]["key"] = map(&discussions["scroll"]["key"]);
+                if discussions["scroll"]["key"].is_null() {
+                    discussions["scroll"] = Value::Null;
+                }
+            }
         }
         for field in ["scroll", "navigationScroll"] {
             if tree[field].is_object() {

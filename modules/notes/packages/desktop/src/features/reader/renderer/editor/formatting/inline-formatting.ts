@@ -1,6 +1,12 @@
 import type { EditorState } from "prosemirror-state";
+import {
+  isTextColor,
+  isHighlightColor,
+  type TextColor,
+  type HighlightColor,
+} from "../../../shared/markdown/text-style";
 
-const markNames = ["strong", "em", "strike", "highlight", "code"] as const;
+const markNames = ["strong", "em", "underline", "strike", "highlight", "code"] as const;
 
 /** 行内格式的选区状态；mixed 表示可格式化内容中仅有一部分带该样式。 */
 export type InlineMarkStates = Record<(typeof markNames)[number], boolean | "mixed">;
@@ -14,6 +20,7 @@ export function readInlineMarkStates(state: EditorState): InlineMarkStates {
   const result: InlineMarkStates = {
     strong: false,
     em: false,
+    underline: false,
     strike: false,
     highlight: false,
     code: false,
@@ -51,4 +58,48 @@ export function readInlineMarkStates(state: EditorState): InlineMarkStates {
   for (const name of markNames)
     result[name] = present.has(name) ? (missing.has(name) ? "mixed" : true) : false;
   return result;
+}
+
+/** 选区的统一文字色和高亮色；mixed 表示存在多种颜色或仅部分内容着色。 */
+export type InlineColors = {
+  text: TextColor | "mixed" | null;
+  highlight: HighlightColor | "mixed" | null;
+};
+
+/** 一次读取两个配色状态；光标优先读取待输入样式，边缘空白不影响菜单勾选。 */
+export function readInlineColors(state: EditorState): InlineColors {
+  const text = new Set<TextColor | null>();
+  const highlight = new Set<HighlightColor | null>();
+  const add = (marks: typeof state.storedMarks): void => {
+    const foreground: unknown = marks?.find((mark) => mark.type.name === "text_color")?.attrs[
+      "color"
+    ];
+    const background: unknown = marks?.find((mark) => mark.type.name === "highlight")?.attrs[
+      "color"
+    ];
+    text.add(isTextColor(foreground) ? foreground : null);
+    highlight.add(isHighlightColor(background) ? background : null);
+  };
+  if (state.selection.empty) add(state.storedMarks ?? state.selection.$from.marks());
+  else
+    for (const range of state.selection.ranges)
+      state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos, parent) => {
+        if (!node.isInline || !parent?.type.allowsMarkType(state.schema.marks["highlight"]!))
+          return;
+        if (
+          node.isText &&
+          /^\s*$/.test(
+            node.textBetween(
+              Math.max(0, range.$from.pos - pos),
+              Math.min(node.nodeSize, range.$to.pos - pos),
+            ),
+          )
+        )
+          return;
+        add(node.marks);
+      });
+  return {
+    text: text.size > 1 ? "mixed" : (text.values().next().value ?? null),
+    highlight: highlight.size > 1 ? "mixed" : (highlight.values().next().value ?? null),
+  };
 }

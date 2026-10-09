@@ -1,6 +1,38 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { closeHistory } from "prosemirror-history";
 import { TextSelection, type Command, type EditorState, type Transaction } from "prosemirror-state";
+import { StepMap } from "prosemirror-transform";
+import { canUseEditingTools } from "../read-only";
+
+/** 单次创建的行列边界；浮层和事务共用校验，避免越界配置进入文档。 */
+export const tableInsertLimits = { rows: 20, columns: 12 } as const;
+
+/** 表格创建配置；行数包含不可单独删除的首行表头，对齐作用于所有列。 */
+export type TableInsertOptions = {
+  /** 包含首行表头的行数。 */
+  rows: number;
+  /** 所有行共用的列数，创建时保持矩形。 */
+  columns: number;
+  /** 所有列的初始文字对齐；插入后可以逐列调整。 */
+  align: "left" | "center" | "right";
+};
+
+/**
+ * 校验创建配置，不修改文档或修正用户输入。
+ * @param options 用户选择的行列和对齐。
+ * @returns 尺寸为边界内整数、对齐受支持时返回 true；无效配置返回 false。
+ */
+export function validTableInsertOptions(options: TableInsertOptions): boolean {
+  return (
+    Number.isInteger(options.rows) &&
+    options.rows >= 1 &&
+    options.rows <= tableInsertLimits.rows &&
+    Number.isInteger(options.columns) &&
+    options.columns >= 1 &&
+    options.columns <= tableInsertLimits.columns &&
+    ["left", "center", "right"].includes(options.align)
+  );
+}
 
 type TableContext = { table: PmNode; position: number; row: number; column: number };
 type TableAction =
@@ -52,6 +84,13 @@ function emptyRow(header: PmNode): PmNode {
   );
 }
 
+function cellStart(position: number, table: PmNode, row: number, column: number): number {
+  let at = position + 2;
+  for (let index = 0; index < row; index++) at += table.child(index).nodeSize;
+  for (let index = 0; index < column; index++) at += table.child(row).child(index).nodeSize;
+  return at + 1;
+}
+
 function selectCell(
   transaction: Transaction,
   position: number,
@@ -59,10 +98,55 @@ function selectCell(
   row: number,
   column: number,
 ): Transaction {
-  let at = position + 2;
-  for (let index = 0; index < row; index++) at += table.child(index).nodeSize;
-  for (let index = 0; index < column; index++) at += table.child(row).child(index).nodeSize;
-  return transaction.setSelection(TextSelection.create(transaction.doc, at + 1)).scrollIntoView();
+  return transaction
+    .setSelection(TextSelection.create(transaction.doc, cellStart(position, table, row, column)))
+    .scrollIntoView();
+}
+
+function move(axis: "row" | "column", direction: -1 | 1): Command {
+  return (state, dispatch) => {
+    const location = context(state);
+    if (location === null || !state.selection.$from.sameParent(state.selection.$to)) return false;
+    const { table, position, row, column } = location;
+    const from = axis === "row" ? row : column;
+    const to = from + direction;
+    const count =
+      axis === "row"
+        ? table.childCount
+        : Math.max(...table.content.content.map((item) => item.childCount));
+    if (to < (axis === "row" ? 1 : 0) || to >= count || (axis === "row" && row === 0)) return false;
+    if (dispatch === undefined) return true;
+    const rows = rectangularRows(table);
+    if (axis === "row") [rows[from], rows[to]] = [rows[to]!, rows[from]!];
+    else {
+      for (let index = 0; index < rows.length; index++) {
+        const current = rows[index]!;
+        const cells = [...current.content.content];
+        [cells[from], cells[to]] = [cells[to]!, cells[from]!];
+        rows[index] = current.type.create(current.attrs, cells, current.marks);
+      }
+    }
+    const next = table.type.create(table.attrs, rows, table.marks);
+    const transaction = closeHistory(state.tr).replaceWith(
+      position,
+      position + table.nodeSize,
+      next,
+    );
+    const nextStart = cellStart(
+      position,
+      next,
+      axis === "row" ? to : row,
+      axis === "column" ? to : column,
+    );
+    // 整表替换的普通映射会丢失旧选区；移动的是同一单元格，只平移其选区书签。
+    const bookmark = state.selection
+      .getBookmark()
+      .map(StepMap.offset(nextStart - state.selection.$from.start()));
+    transaction.setSelection(bookmark.resolve(transaction.doc));
+    if (state.storedMarks) transaction.setStoredMarks(state.storedMarks);
+    dispatch(transaction.scrollIntoView());
+    return true;
+  };
 }
 
 function change(action: TableAction): Command {
@@ -127,29 +211,71 @@ function change(action: TableAction): Command {
   };
 }
 
-const insert: Command = (state, dispatch) => {
+/**
+ * 判断当前正文能否无损创建表格；只读、代码、跨段和已有表格位置不可插入。
+ * @param state 所属编辑器当前状态。
+ * @returns 能替换空段落或在当前段落后创建表格时返回 true，不构造或派发事务。
+ */
+export function canInsertTable(state: EditorState): boolean {
   const { $from, $to } = state.selection;
-  if (!$from.sameParent($to) || !["paragraph", "heading"].includes($from.parent.type.name))
+  const type = state.schema.nodes["table"];
+  if (
+    !canUseEditingTools(state) ||
+    !type ||
+    !$from.sameParent($to) ||
+    !["paragraph", "heading"].includes($from.parent.type.name)
+  )
     return false;
-  const schema = state.schema;
-  const table = schema.node("table", null, [
-    schema.node("table_row", null, [schema.node("table_header"), schema.node("table_header")]),
-    schema.node("table_row", null, [schema.node("table_cell"), schema.node("table_cell")]),
-  ]);
   const parent = $from.node(-1);
   const index = $from.index(-1);
-  const replaceEmpty =
-    $from.parent.content.size === 0 && parent.canReplaceWith(index, index + 1, table.type);
-  if (!replaceEmpty && !parent.canReplaceWith(index + 1, index + 1, table.type)) return false;
-  if (dispatch !== undefined) {
+  return (
+    ($from.parent.content.size === 0 && parent.canReplaceWith(index, index + 1, type)) ||
+    parent.canReplaceWith(index + 1, index + 1, type)
+  );
+}
+
+/**
+ * 按确认的配置创建矩形表格；保留选中文字，光标进入首个表头，一次撤销恢复原文。
+ * @param options 行数包含表头；所有单元格使用同一初始对齐。
+ * @returns 遵循编辑权限与能力查询契约的命令；不可插入时返回 false。
+ * @throws RangeError 配置无效时抛出中文错误；模型或事务异常继续抛出。
+ */
+export function insertTable(options: TableInsertOptions): Command {
+  if (!validTableInsertOptions(options))
+    throw new RangeError(
+      `表格行数须为 1–${tableInsertLimits.rows}，列数须为 1–${tableInsertLimits.columns} 的整数，并选择有效对齐方式`,
+    );
+  const { rows, columns, align } = options;
+  return (state, dispatch) => {
+    if (!canInsertTable(state)) return false;
+    if (dispatch === undefined) return true;
+    const { $from } = state.selection;
+    const schema = state.schema;
+    const table = schema.node(
+      "table",
+      null,
+      Array.from({ length: rows }, (_, row) =>
+        schema.node(
+          "table_row",
+          null,
+          Array.from({ length: columns }, () =>
+            schema.node(row === 0 ? "table_header" : "table_cell", { align }),
+          ),
+        ),
+      ),
+    );
+    const parent = $from.node(-1);
+    const index = $from.index(-1);
+    const replaceEmpty =
+      $from.parent.content.size === 0 && parent.canReplaceWith(index, index + 1, table.type);
     const position = replaceEmpty ? $from.before() : $from.after();
     const end = replaceEmpty ? $from.after() : position;
     dispatch(
       selectCell(closeHistory(state.tr).replaceWith(position, end, table), position, table, 0, 0),
     );
-  }
-  return true;
-};
+    return true;
+  };
+}
 
 const remove: Command = (state, dispatch) => {
   const location = context(state);
@@ -175,12 +301,15 @@ const remove: Command = (state, dispatch) => {
  * 能力查询不派发事务；最后一列、表头行不能单独删除，整表使用 remove。
  */
 export const tableCommands = {
-  insert,
   remove,
   addRow: change("addRow"),
   deleteRow: change("deleteRow"),
   addColumn: change("addColumn"),
   deleteColumn: change("deleteColumn"),
+  moveRowUp: move("row", -1),
+  moveRowDown: move("row", 1),
+  moveColumnLeft: move("column", -1),
+  moveColumnRight: move("column", 1),
   alignLeft: change("left"),
   alignCenter: change("center"),
   alignRight: change("right"),

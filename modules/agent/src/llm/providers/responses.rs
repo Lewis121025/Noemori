@@ -39,6 +39,9 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         }
     }
     let mut body = json!({"model":config.model,"input":input,"stream":config.capabilities.streaming,"store":false,"include":["reasoning.encrypted_content"]});
+    if let Some(effort) = &config.reasoning_effort {
+        body["reasoning"] = json!({"effort":effort});
+    }
     if !request.tools.is_empty() {
         body["tools"] = json!(request.tools.iter().map(|tool|json!({"type":"function","name":tool.name,"description":tool.description,"parameters":tool.input_schema,"strict":false})).collect::<Vec<_>>());
     }

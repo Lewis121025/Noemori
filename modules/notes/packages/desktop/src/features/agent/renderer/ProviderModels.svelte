@@ -4,38 +4,39 @@
     $props();
 </script>
 
-<section aria-label="模型列表">
+<section aria-label="模型目录">
   <header>
-    <h4>模型列表</h4>
+    <h4>模型目录 · {models.length}</h4>
     <button
       type="button"
       onclick={() => {
         models.push(newProviderModel());
         changed();
-      }}>添加模型</button
+      }}>手动添加模型</button
     >
   </header>
   {#each models as model, index (model)}
     <div class="model-row">
-      <div class="model-id">
-        <label
-          >模型标识<input
-            aria-label={`模型标识 ${index + 1}`}
-            bind:value={model.id}
-            placeholder="服务商提供的模型 ID"
-            required
-          /></label
-        >
-        <button
-          type="button"
-          aria-label={`移除模型 ${index + 1}`}
-          disabled={models.length === 1}
-          onclick={() => {
-            models.splice(index, 1);
-            changed();
-          }}>移除</button
-        >
-      </div>
+      <label
+        >模型标识<input
+          aria-label={`模型标识 ${index + 1}`}
+          bind:value={model.id}
+          oninput={() => {
+            delete model.reasoning;
+            delete model.reasoningEffort;
+          }}
+          placeholder="服务商提供的模型 ID"
+          required
+        /></label
+      >
+      <button
+        type="button"
+        aria-label={`移除模型 ${index + 1}`}
+        onclick={() => {
+          models.splice(index, 1);
+          changed();
+        }}>移除</button
+      >
       <fieldset>
         <legend>该模型支持的能力</legend>
         <label><input type="checkbox" bind:checked={model.tools} />工具调用</label>
@@ -46,7 +47,7 @@
       </fieldset>
     </div>
   {/each}
-  <p>使用服务商实际支持的模型标识和能力。同名模型可属于不同供应商。</p>
+  <p>模型在对话中选择。接口不支持获取列表时，可在此手动添加。</p>
 </section>
 
 <style>
@@ -55,24 +56,20 @@
     gap: 12px;
   }
   header,
-  .model-id {
+  .model-row {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
     align-items: center;
+  }
+  header {
     justify-content: space-between;
   }
   h4 {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
   }
-  .model-row {
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    display: grid;
-    gap: 10px;
-  }
-  .model-id > label {
+  .model-row > label {
     flex: 1;
     min-width: 0;
     display: grid;
@@ -93,14 +90,11 @@
     cursor: pointer;
     font-size: 12px;
   }
-  button:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
   fieldset {
+    width: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
     border: 0;
     padding: 0;
   }
@@ -110,14 +104,12 @@
     gap: 4px;
     font-size: 12px;
   }
-  legend {
+  legend,
+  p {
     font-size: 11px;
     color: var(--muted);
-    margin-bottom: 6px;
   }
   p {
-    font-size: 12px;
-    color: var(--muted);
     margin: 0;
   }
 </style>

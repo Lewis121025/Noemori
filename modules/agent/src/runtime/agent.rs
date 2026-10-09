@@ -109,6 +109,23 @@ impl Agent {
     /// # 错误
     /// 输入不合法在启动前返回；启动后的失败保留在最终运行报告中。
     pub fn stream(&self, input: RunInput) -> Result<AgentStream, Error> {
+        self.prepare_stream(input, None)
+    }
+
+    /// 桌面宿主为同一轮提供补充通道；普通运行不创建或共享输入队列。
+    pub(crate) fn stream_with_control(
+        &self,
+        input: RunInput,
+        control: super::RunControl,
+    ) -> Result<AgentStream, Error> {
+        self.prepare_stream(input, Some(control))
+    }
+
+    fn prepare_stream(
+        &self,
+        input: RunInput,
+        control: Option<super::RunControl>,
+    ) -> Result<AgentStream, Error> {
         ModelRequest {
             messages: super::browser_history::for_model(
                 &input.messages,
@@ -121,7 +138,7 @@ impl Agent {
         let context =
             ExecutionContext::new(input.cancellation.child_token(), self.options.timeout)?;
         let lease = input.session.register(context.cancellation.clone())?;
-        Ok(runner::drive(self.clone(), input, context, lease))
+        Ok(runner::drive(self.clone(), input, context, lease, control))
     }
 
     /// 消费与 stream 相同的执行路径，返回完整运行报告。

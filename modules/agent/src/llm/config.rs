@@ -47,6 +47,73 @@ pub enum ChatTokenLimit {
     MaxTokens,
 }
 
+/// 显式推理档位；各协议映射到原生字段，支持情况由服务商校验，未选择时省略参数。
+#[derive(Clone, Debug)]
+pub enum ReasoningEffort {
+    /// 显式关闭推理，与省略参数后采用服务商默认不同。
+    None,
+    /// 最低推理强度，按当前协议的原生参数发送。
+    Minimal,
+    /// 低强度，具体预算由供应商决定。
+    Low,
+    /// 中等强度，具体预算由供应商决定。
+    Medium,
+    /// 高强度，具体预算由供应商决定。
+    High,
+    /// 超高强度，不在客户端预判模型支持情况。
+    Xhigh,
+    /// 最大强度，是否接受由供应商返回结果决定。
+    Max,
+    /// 接口报告的其他官方名称，原样保留并交给网关判断。
+    Named(String),
+}
+
+impl ReasoningEffort {
+    /// 返回服务商参数名称；保留接口报告的大小写，不翻译或降级，不抛出异常。
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+            Self::Named(value) => value,
+        }
+    }
+}
+
+impl serde::Serialize for ReasoningEffort {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ReasoningEffort {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value.len() > 128
+            || !value.starts_with(|c: char| c.is_ascii_alphabetic())
+            || !value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+        {
+            return Err(serde::de::Error::custom("推理强度名称无效"));
+        }
+        Ok(match value.as_str() {
+            "none" => Self::None,
+            "minimal" => Self::Minimal,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
+            _ => Self::Named(value),
+        })
+    }
+}
+
 /// 动态认证边界；可实现凭据刷新或对最终 URL、请求体进行云签名。
 #[async_trait]
 pub trait RequestAuthenticator: Send + Sync {
@@ -120,6 +187,8 @@ pub struct ModelConfig {
     pub headers: HeaderMap,
     /// 调用方明确声明的模型能力，不根据模型名称推断。
     pub capabilities: Capabilities,
+    /// 各协议映射为官方原生字段；Option::None 使用服务商默认，不发送推理参数。
+    pub reasoning_effort: Option<ReasoningEffort>,
     /// Chat 协议采用的输出预算字段，其他协议忽略此设置。
     pub chat_token_limit: ChatTokenLimit,
     /// Chat 服务是否接受 stream_options.include_usage。
@@ -151,6 +220,7 @@ impl ModelConfig {
                 audio: false,
                 video: false,
             },
+            reasoning_effort: None,
             chat_token_limit: ChatTokenLimit::default(),
             include_stream_usage: true,
             request_timeout: Duration::from_secs(120),

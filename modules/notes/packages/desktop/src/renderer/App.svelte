@@ -7,19 +7,63 @@
   import ReadingPaletteOptions from "./ReadingPaletteOptions.svelte";
   import { createArticleAgentActions } from "./article-agent";
   import AgentPanel from "../features/agent/renderer/AgentPanel.svelte";
+  import ModelSettings from "../features/agent/renderer/ModelSettings.svelte";
   import {
     DEFAULT_READING_PALETTE,
     type ReadingPalette,
   } from "../features/reader/shared/reading-palette";
   import type { HistoryAction, HistoryAvailability } from "../features/reader/shared/api";
+  import type { AgentConversationInfo } from "../features/agent/shared/api";
+  import type { WorkspaceConversations } from "../features/reader/shared/workspace-conversations";
+  import type { ReaderCommand } from "../features/reader/shared/commands";
   import { InputHistory } from "./input-history";
 
   const { app, reader: readerApi } = window.noemori;
   let reader: ReaderWorkspace | undefined = $state();
   let showAgent = $state(false);
   let selectedConversation = $state<string | null>(null);
+  let conversationItems = $state<AgentConversationInfo[]>([]);
+  const conversations: WorkspaceConversations = {
+    get items() {
+      return conversationItems;
+    },
+    get selected() {
+      return selectedConversation;
+    },
+    async open(id) {
+      showAgent = true;
+      if (!(await agentPanel?.selectConversation(id))) return;
+      const item = conversationItems.find((item) => item.id === id);
+      if (
+        item?.article &&
+        item.workspace !== null &&
+        !item.article.removed &&
+        item.article.status !== "article-missing" &&
+        reader?.vaultRoot() === item.workspace
+      )
+        await reader.openArticle(item.workspace, item.article.path, item.article.markerId);
+      await tick();
+      agentPanel?.focusComposer(id);
+    },
+    async create(directory) {
+      showAgent = true;
+      await tick();
+      await agentPanel?.createConversation(directory);
+    },
+    async manage(id, action) {
+      showAgent = true;
+      await tick();
+      await agentPanel?.manageConversation(id, action);
+    },
+  };
   let articleFilter = $state<{ root: string; path: string } | null>(null);
-  const articleAgent = createArticleAgentActions(window.noemori.agent, openArticleAgent);
+  const articleAgent = createArticleAgentActions(
+    window.noemori.agent,
+    openArticleAgent,
+    async () => {
+      await agentPanel?.refreshList();
+    },
+  );
   async function prepareAgentRun(): Promise<void> {
     if (!(await reader?.flushBeforeClose())) throw new Error("请先处理文章保存问题，再发送消息");
   }
@@ -27,42 +71,36 @@
     id: string | null,
     article: { root: string; path: string },
   ): Promise<void> {
-    if ((await agentPanel?.prepareToLeave()) === false) return;
-    await agentPanel?.flushDraft();
     await prepareAgentRun();
     await window.noemori.agent.attachVault(article.root);
-    showAgent = false;
-    await tick();
-    selectedConversation = id;
-    articleFilter = article;
     showAgent = true;
+    if (await agentPanel?.openArticleConversation(id, article)) {
+      await tick();
+      if (selectedConversation) agentPanel?.focusComposer(selectedConversation);
+    }
   }
   async function returnToArticle(root: string, path: string, marker: string): Promise<void> {
-    if ((await agentPanel?.prepareToLeave()) === false) return;
     await agentPanel?.flushDraft();
     await reader?.openArticle(root, path, marker);
-    showAgent = false;
     await tick();
     reader?.focusDocument();
   }
   let agentPanel: AgentPanel | undefined = $state();
+  let modelSettings: ModelSettings | undefined = $state();
+  let modelCatalogVersion = $state(0);
   let closeError = $state("");
   async function toggleAgent(): Promise<void> {
     try {
       if (showAgent) {
-        if ((await agentPanel?.prepareToLeave()) === false) return;
-        await agentPanel?.flushDraft();
-        await window.noemori.agent.flush();
+        if ((await agentPanel?.prepareToHide()) === false) return;
       }
       showAgent = !showAgent;
-      articleFilter = null;
       closeError = "";
     } catch (cause) {
       closeError = cause instanceof Error ? cause.message : String(cause);
     }
   }
   async function closeAgent(): Promise<void> {
-    if ((await agentPanel?.prepareToLeave()) === false) return;
     showAgent = false;
     await tick();
     document.querySelector<HTMLButtonElement>('.window-toolbar [aria-label="工作区助手"]')?.focus();
@@ -71,7 +109,7 @@
   let historyContext = $state(0);
   let publishedHistory: HistoryAvailability | null = null;
   const inputHistory = new InputHistory(
-    () => showAgent || reader?.historyAvailability() === null,
+    () => agentHasFocus() || reader?.historyAvailability() === null,
     refreshHistoryContext,
   );
 
@@ -79,15 +117,22 @@
     historyContext += 1;
   }
 
+  function agentHasFocus(): boolean {
+    return (
+      document.activeElement instanceof Element &&
+      document.activeElement.closest(".agent-panel") !== null
+    );
+  }
+
   function executeHistory(action: HistoryAction): void {
-    if (showAgent || !reader?.executeHistory(action)) inputHistory.apply(action);
+    if (agentHasFocus() || !reader?.executeHistory(action)) inputHistory.apply(action);
     refreshHistoryContext();
   }
 
   $effect(() => {
     // 文档事务由响应式 API 跟踪，辅助输入由各控件历史通知；菜单只投影可用性。
     void historyContext;
-    const next = showAgent
+    const next = agentHasFocus()
       ? inputHistory.availability()
       : (reader?.historyAvailability() ?? inputHistory.availability());
     if (publishedHistory?.undo === next.undo && publishedHistory.redo === next.redo) return;
@@ -95,27 +140,24 @@
     app.historyChanged(next);
   });
 
-  onMount(() =>
-    app.subscribeCommand((command) => {
-      if (command === "undo" || command === "redo") {
-        executeHistory(command);
-      } else if (showAgent) {
-        void (async () => {
-          try {
-            if (command !== "save" && (await agentPanel?.prepareToLeave()) === false) return;
-            await agentPanel?.flushDraft();
-            await window.noemori.agent.flush();
-            if (command !== "save") {
-              await closeAgent();
-              reader?.executeCommand(command);
-            }
-          } catch (cause) {
-            closeError = cause instanceof Error ? cause.message : String(cause);
-          }
-        })();
-      } else reader?.executeCommand(command);
-    }),
-  );
+  function executeCommand(command: ReaderCommand | HistoryAction): void {
+    if (command === "undo" || command === "redo") {
+      executeHistory(command);
+      return;
+    }
+    if (command === "save") {
+      void (async () => {
+        try {
+          await agentPanel?.flushDraft();
+          await window.noemori.agent.flush();
+          reader?.executeCommand(command);
+        } catch (cause) {
+          closeError = cause instanceof Error ? cause.message : String(cause);
+        }
+      })();
+    } else reader?.executeCommand(command);
+  }
+  onMount(() => app.subscribeCommand(executeCommand));
 
   onMount(() => inputHistory.bind(document, executeHistory));
 
@@ -127,10 +169,6 @@
 
   async function requestClose(): Promise<void> {
     try {
-      if ((await agentPanel?.prepareToLeave()) === false) {
-        await app.closeBlocked();
-        return;
-      }
       await agentPanel?.flushDraft();
       await window.noemori.agent.flush();
       const ready = (await reader?.flushBeforeClose()) ?? false;
@@ -150,8 +188,27 @@
   onselectionchange={refreshHistoryContext}
 />
 
+{#snippet agentContent()}
+  <AgentPanel
+    bind:articleFilter
+    beforeSend={prepareAgentRun}
+    onOpenArticle={returnToArticle}
+    bind:this={agentPanel}
+    bind:selected={selectedConversation}
+    api={window.noemori.agent}
+    {modelCatalogVersion}
+    onConfigure={() => reader?.openModelSettings()}
+    onList={(items) => (conversationItems = items)}
+    close={() => void closeAgent().catch((cause) => (closeError = String(cause)))}
+    openLink={readerApi.openExternal}
+  />
+{/snippet}
 <ReaderWorkspace
   {articleAgent}
+  {conversations}
+  onCommand={executeCommand}
+  agentPanel={agentContent}
+  beforeModelLeave={() => modelSettings?.confirmLeave() ?? Promise.resolve(true)}
   api={readerApi}
   palette={readingPalette}
   bind:this={reader}
@@ -168,17 +225,14 @@
       }}
     />
   {/snippet}
+  {#snippet modelPreferences()}
+    <ModelSettings
+      bind:this={modelSettings}
+      api={window.noemori.agent}
+      saved={() => (modelCatalogVersion += 1)}
+    />
+  {/snippet}
 </ReaderWorkspace>
-{#if showAgent}<AgentPanel
-    bind:articleFilter
-    beforeSend={prepareAgentRun}
-    onOpenArticle={returnToArticle}
-    bind:this={agentPanel}
-    bind:selected={selectedConversation}
-    api={window.noemori.agent}
-    close={() => void closeAgent()}
-    openLink={readerApi.openExternal}
-  />{/if}
 {#if closeError}<p class="close-error" role="alert">{closeError}</p>{/if}
 
 <style>

@@ -18,3 +18,4 @@ const target = process.env.CARGO_TARGET_DIR ? resolve(directory, process.env.CAR
 const executable = process.platform === "win32" ? "noemori-terminal-sandbox.exe" : "noemori-terminal-sandbox";
 copyFileSync(join(target, release ? "release" : "debug", executable), join(directory, "runtime", executable));
 run(process.execPath, [join(directory, "scripts", "prepare-browser.mjs")]);
+run(process.execPath, [join(directory, "scripts", "prepare-ui.mjs"), ...(release ? ["--release"] : [])]);

@@ -60,7 +60,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     const commit = (text: string) => cdp.send("Input.insertText", { text });
 
     await page.keyboard.press("ControlOrMeta+Shift+f");
-    const fileSearch = page.getByRole("searchbox", { name: "搜索文件和全文" });
+    const fileSearch = page.getByRole("searchbox", { name: "搜索笔记库" });
     await fileSearch.fill("");
     await compose("输入");
     await page.keyboard.press("Escape");
@@ -106,7 +106,7 @@ test("组词确认和取消不提交弹窗、不跳转查找、不退出源码�
     await link.waitFor({ state: "hidden" });
     expect(await editor.locator(".wiki-link").innerText()).toBe("中文链接");
     expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
-    await page.getByRole("button", { name: "文件系统", exact: true }).click();
+    await page.getByRole("button", { name: "文件与对话", exact: true }).click();
     await page.locator('.library [data-path="输入.md"]').dblclick();
     await page.getByRole("heading", { name: "输入验收" }).waitFor();
 

@@ -31,8 +31,8 @@ const model: ModelSettings = {
 
 it.each([
   { mode: "hidden", headless: true },
-  { mode: undefined, headless: false },
-])("窗口模式 $mode 下，Agent 浏览器遵循同一显示契约", ({ mode, headless }) => {
+  { mode: undefined, headless: true },
+])("窗口模式 $mode 下，Agent 浏览器始终后台运行", ({ mode, headless }) => {
   vi.stubEnv("NOEMORI_TEST_WINDOW", mode);
   createNativeSession("/state", "/runtime/launcher", "/workspace", model, () => {});
   expect(JSON.parse(native.configuration)).toMatchObject({ browser: { headless } });

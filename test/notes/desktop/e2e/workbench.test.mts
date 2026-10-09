@@ -65,13 +65,13 @@ test("统一工作台：侧栏搜索、文内工具、分栏与目录状态形�
     await page.locator(".ProseMirror").waitFor();
     await resize(1100);
     await documentTools(page);
-    const sidebar = page.locator(".file-sidebar");
+    const sidebar = page.locator(".file-sidebar:not(.right)");
     const controls = page.locator(".topbar-document:not([hidden])");
     expect(await page.locator(".mode-switch").count()).toBe(0);
     expect(
       await page.locator(".pane-column .document-bar, .pane-column [role=toolbar]").count(),
     ).toBe(0);
-    expect(await page.locator(".pane-column button").count()).toBe(0);
+    expect(await page.locator(".pane-column button:visible").count()).toBe(0);
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).waitFor();
     await expect.poll(() => sidebar.isVisible()).toBe(false);
@@ -83,10 +83,10 @@ test("统一工作台：侧栏搜索、文内工具、分栏与目录状态形�
     await controls.getByRole("button", { name: "下一处", exact: true }).click();
     expect(await page.locator(".main .search-panel").count()).toBe(0);
     await controls.getByRole("button", { name: "关闭查找", exact: true }).click();
-    await page.getByRole("button", { name: "搜索", exact: true }).click();
-    await page.getByRole("searchbox", { name: "搜索文件和全文", exact: true }).fill("苹果");
-    await page.locator(".search-content .hit").waitFor();
-    await page.locator(".search-content .hit").click();
+    await sidebarComponent(page, "搜索");
+    await page.getByRole("searchbox", { name: "搜索笔记库", exact: true }).fill("苹果");
+    await page.locator('.library .file[data-path="乙.md"]').waitFor();
+    await page.locator('.library .file[data-path="乙.md"]').click();
     await expect.poll(() => controls.locator(".document-name").textContent()).toBe("乙.md");
     await sidebarComponent(page, "目录");
     await documentTools(page);
@@ -121,13 +121,13 @@ test("统一工作台：侧栏搜索、文内工具、分栏与目录状态形�
       );
     }
 
-    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await sidebarComponent(page, "搜索");
     await expect
       .poll(
         async () =>
           JSON.parse(await readFile(join(state, "session.json"), "utf8")).reader.sidebarView,
       )
-      .toBe("search");
+      .toBe("files");
     expect(await pane.locator(".ProseMirror").isVisible()).toBe(true);
     if (process.env.NOEMORI_WORKBENCH_SCREENSHOT) {
       await page.screenshot({ path: process.env.NOEMORI_WORKBENCH_SCREENSHOT });
@@ -140,13 +140,12 @@ test("统一工作台：侧栏搜索、文内工具、分栏与目录状态形�
     page.on("pageerror", (e) => errors.push(e.message));
     await page.locator(".pane-column.active .ProseMirror").waitFor();
     await resize(2400);
-    expect(await page.getByRole("searchbox", { name: "搜索文件和全文" }).inputValue()).toBe("苹果");
+    expect(await page.getByRole("searchbox", { name: "搜索笔记库" }).inputValue()).toBe("苹果");
     const restored = page.locator(".topbar-document:not([hidden])");
     expect(await restored.locator(".document-name").textContent()).toBe("甲.md");
     expect(
       await page
-        .getByRole("toolbar", { name: "组件栏" })
-        .getByRole("button", { name: "搜索", exact: true })
+        .getByRole("button", { name: "文件目录", exact: true })
         .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(errors).toEqual([]);

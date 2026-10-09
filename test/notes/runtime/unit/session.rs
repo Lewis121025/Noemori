@@ -299,3 +299,27 @@ fn file_presentation_survives_restart_and_path_remap() {
     }}}}));
     assert!(invalid["reader"]["fileTree"].get("presentation").is_none());
 }
+
+#[test]
+fn unified_workspace_preserves_navigation_and_discussion_identity_after_restart() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(data.path());
+    store.patch_reader(&json!({
+        "sidebarView": "files", "rightWidth": 420,
+        "fileTree": {"expanded": ["old"], "selected": ["old/a.md"], "focused": "old/a.md", "scroll": null,
+          "discussions": {"expanded": ["old/a.md", "\u{0}conversation:chat"], "archived": true,
+            "scroll": {"key": "\u{0}conversation:chat", "offset": 12.5}}}
+    })).unwrap();
+    store.remap("old", Some("new")).unwrap();
+    let reader = SessionStore::new(data.path()).load()["reader"].clone();
+    assert_eq!(reader["sidebarView"], "files");
+    assert_eq!(reader["rightWidth"].as_f64(), Some(420.0));
+    assert_eq!(reader["fileTree"]["selected"], json!(["new/a.md"]));
+    assert_eq!(reader["fileTree"]["discussions"], json!({
+        "expanded": ["new/a.md", "\u{0}conversation:chat"], "archived": true,
+        "scroll": {"key": "\u{0}conversation:chat", "offset": 12.5}
+    }));
+    store.remap("new/a.md", None).unwrap();
+    let reader = store.load()["reader"].clone();
+    assert_eq!(reader["fileTree"]["discussions"]["expanded"], json!(["\u{0}conversation:chat"]));
+}

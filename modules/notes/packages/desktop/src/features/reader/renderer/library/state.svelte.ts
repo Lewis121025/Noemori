@@ -83,6 +83,10 @@ export class ReaderFileTree {
       left === right ||
       (left.length === right.length && left.every((path, index) => path === right[index]));
     if (
+      next.discussions?.archived === this.value.discussions?.archived &&
+      next.discussions?.scroll?.key === this.value.discussions?.scroll?.key &&
+      next.discussions?.scroll?.offset === this.value.discussions?.scroll?.offset &&
+      samePaths(next.discussions?.expanded ?? [], this.value.discussions?.expanded ?? []) &&
       next.presentation?.layout === this.value.presentation?.layout &&
       next.presentation?.sort === this.value.presentation?.sort &&
       next.presentation?.preview === this.value.presentation?.preview &&
@@ -109,7 +113,7 @@ export class ReaderFileTree {
    * @returns 不返回值；未恢复的会话不操作，持久化失败经既有错误通道报告。
    */
   enterDirectory(path: string): void {
-    if (!this.initialized) return;
+    if (!this.initialized && this.root() !== null) return;
     this.searchOrigin = null;
     const ancestors = path === "" ? [] : [...ancestorDirectories(path), path];
     this.update({
@@ -121,6 +125,9 @@ export class ReaderFileTree {
       selected: [],
       focused: null,
       scroll: null,
+      ...(this.value.discussions
+        ? { discussions: { ...this.value.discussions, scroll: null } }
+        : {}),
     });
   }
 
@@ -139,10 +146,10 @@ export class ReaderFileTree {
   /**
    * 搜索临时接管选择与滚动；退出时恢复浏览现场，改名和删除同步映射该现场。
    * @param query 已完成输入法组词的查询文本；空白退出搜索。
-   * @returns 无返回值；未恢复时不操作，持久化错误由既有报告通道处理。
+   * @returns 无返回值；库恢复期间不操作，无库时仅维护独立对话的查询，不写盘。
    */
   setQuery(query: string): void {
-    if (!this.initialized || query === this.value.browse?.query) return;
+    if ((!this.initialized && this.root() !== null) || query === this.value.browse?.query) return;
     const browse = this.value.browse ?? { query: "", section: "files", directory: "" };
     if (!browse.query.trim() && query.trim()) this.searchOrigin = structuredClone(this.value);
     if (!query.trim() && this.searchOrigin) {
@@ -153,6 +160,7 @@ export class ReaderFileTree {
         selected: origin.selected,
         focused: origin.focused,
         scroll: origin.scroll,
+        ...(origin.discussions ? { discussions: origin.discussions } : {}),
         browse: { ...(origin.browse ?? browse), query: "", section: "files" },
       });
     } else {

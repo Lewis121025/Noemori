@@ -10,7 +10,7 @@ import { documentTools, openLibrary, sidebarComponent } from "../support/workspa
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保留查询及正文", async (t) => {
+test("导航固定在侧栏顶部，滚动与键盘可达，面板切换保留查询及正文", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-components-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -66,10 +66,10 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
     const editor = page.locator(".ProseMirror");
     await editor.waitFor();
     const original = await editor.elementHandle();
-    const bar = page.getByRole("toolbar", { name: "组件栏", exact: true });
-    const sidebar = page.locator(".file-sidebar");
+    const bar = page.locator(".navigation-heading");
+    const sidebar = page.locator(".file-sidebar:not(.right)");
     expect((await bar.boundingBox())!.y).toBeLessThan((await sidebar.boundingBox())!.y + 10);
-    expect(await bar.getByRole("button").count()).toBe(3);
+    expect(await bar.locator(".panel-toggle").allTextContents()).toEqual(["文件", "大纲"]);
 
     const resize = page.getByRole("separator", { name: "调整侧栏宽度", exact: true });
     const savedWidth = async () =>
@@ -89,71 +89,30 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
     await expect.poll(savedWidth).toBe(260);
 
     await sidebarComponent(page, "搜索");
-    const search = page.getByRole("searchbox", { name: "搜索文件和全文", exact: true });
+    const search = page.getByRole("searchbox", { name: "搜索笔记库", exact: true });
     await search.fill("组件切换");
-    await page.locator(".search-content .hit").waitFor();
+    await page.locator('.library .file[data-path="想法.md"]').waitFor();
     await sidebarComponent(page, "目录");
-    await page
-      .locator(".outline-sidebar")
-      .getByRole("button", { name: "第一节", exact: true })
-      .waitFor();
-    expect(await page.locator(".quick-navigation").isVisible()).toBe(false);
-    expect(await page.locator(".editor-tools").isVisible()).toBe(true);
-    await sidebarComponent(page, "目录");
-    await sidebarComponent(page, "搜索");
+    await page.locator(".outline-sidebar").getByRole("button", { name: "第一节", exact: true }).waitFor();
+    await sidebarComponent(page, "笔记库");
     expect(await search.inputValue()).toBe("组件切换");
-    expect(await editor.evaluate((node, original) => node === original, original)).toBe(true);
-
-    await openLibrary(page);
-    expect(await page.locator(".folder-navigation").count()).toBe(0);
-    expect(await page.locator(".file-sidebar").evaluate((el) => el.clientWidth)).toBeLessThan(70);
-    const grid = page.getByRole("treegrid", { name: "文件系统", exact: true });
-    expect(await grid.getAttribute("aria-colcount")).toBe("1");
-    const a = await grid.locator('[data-path="想法.md"]').boundingBox();
-    const b = await grid.locator('[data-path="资料"]').boundingBox();
-    expect(a!.y).not.toBe(b!.y);
-    expect(a!.x).toBe(b!.x);
+    expect(await original!.evaluate(node => node.isConnected)).toBe(true);
+    await search.press("Escape");
+    const grid = page.getByRole("treegrid", { name: "文件与对话", exact: true });
     await grid.getByRole("button", { name: "资料", exact: true }).click();
     await grid.getByRole("button", { name: "里面.md", exact: true }).waitFor();
     await grid.getByRole("button", { name: "子目录", exact: true }).press("Enter");
     await grid.getByRole("button", { name: "深处.md", exact: true }).waitFor();
-    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
-    await page.locator(".root-label").click();
-    await grid.getByRole("button", { name: "阅读.md", exact: true }).waitFor();
-    expect(await page.locator(".quick-navigation").isVisible()).toBe(false);
-    expect(
-      await bar.getByRole("button", { name: "文件系统", exact: true }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    await sidebarComponent(page, "搜索");
-    expect(await search.isVisible()).toBe(true);
-    expect(await search.inputValue()).toBe("组件切换");
-    expect(await grid.isVisible()).toBe(true);
-    expect(await search.evaluate((node) => node === document.activeElement)).toBe(true);
-    await sidebarComponent(page, "文件系统");
-    await page.locator(".library").getByRole("button", { name: "书签", exact: true }).click();
-    await page.locator(".library .bookmarks").waitFor();
-    await sidebarComponent(page, "目录");
-    expect(await editor.evaluate((node, original) => node === original, original)).toBe(true);
-
-    expect(await bar.getByRole("button").count()).toBe(3);
-    expect(await page.getByRole("button", { name: "所有组件", exact: true }).count()).toBe(0);
-    await sidebarComponent(page, "目录");
-    await page.locator(".outline-sidebar").waitFor();
-    expect(
-      await bar.getByRole("button", { name: "目录", exact: true }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    await bar.getByRole("button", { name: "目录", exact: true }).focus();
-    await page.keyboard.press("Home");
-    expect(
-      await bar
-        .getByRole("button", { name: "目录", exact: true })
-        .evaluate((node) => node === document.activeElement),
-    ).toBe(true);
-    await page.keyboard.press("ArrowRight");
+    expect(await original!.evaluate(node => node.isConnected)).toBe(true);
+    const outlineButton = bar.getByRole("button", { name: "文章大纲", exact: true });
+    const filesButton = bar.getByRole("button", { name: "文件目录", exact: true });
+    await outlineButton.focus();
     await page.keyboard.press("Enter");
-    expect(await search.isVisible()).toBe(true);
-    expect(await search.inputValue()).toBe("组件切换");
-
+    expect(await outlineButton.getAttribute("aria-pressed")).toBe("true");
+    expect(await outlineButton.evaluate(node => node === document.activeElement)).toBe(true);
+    await filesButton.focus();
+    await page.keyboard.press("Space");
+    expect(await filesButton.getAttribute("aria-pressed")).toBe("true");
     await documentTools(page);
     expect(await page.locator(".mode-switch").count()).toBe(0);
     await page.getByRole("toolbar", { name: "编辑工具栏", exact: true }).waitFor();
@@ -177,8 +136,8 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
     await sidebarComponent(page, "目录");
     await sidebarComponent(page, "文件系统");
     expect(
-      await bar.getByRole("button", { name: "文件系统", exact: true }).getAttribute("aria-pressed"),
-    ).toBe("true");
+      await outlineButton.getAttribute("aria-pressed"),
+    ).toBe("false");
     await sidebarComponent(page, "目录");
     expect(await page.getByRole("button", { name: /图谱/u }).count()).toBe(0);
     await page.getByRole("button", { name: "双链", exact: true }).click();
@@ -230,17 +189,12 @@ test("组件栏固定在侧栏顶部，滚动与键盘可达，面板切换保�
       await page.screenshot({ path: process.env.NOEMORI_COMPONENTS_SCREENSHOT });
     }
     await page.setViewportSize({ width: 600, height: 700 });
-    await page.getByRole("button", { name: "收起文件栏", exact: true }).waitFor();
-    await sidebarComponent(page, "文件系统");
-    await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
+    await openLibrary(page);
     await page.locator(".library .root-label").click();
     await grid.getByRole("button", { name: "资料", exact: true }).dblclick();
-    await expect.poll(() => page.evaluate(() => ({
-      libraryHidden: document.querySelector<HTMLElement>(".library")?.hidden,
-      scrimHidden: document.querySelector<HTMLElement>(".files-scrim")?.hidden,
-      selected: document.querySelector('.component-button[aria-pressed="true"]')?.getAttribute("data-component"),
-    }))).toEqual({ libraryHidden: false, scrimHidden: true, selected: "open-library" });
     expect(await grid.getByRole("button", { name: "里面.md", exact: true }).isVisible()).toBe(true);
+    await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
+    await expect.poll(() => page.locator(".content-space").evaluate(node => node instanceof HTMLElement && node.inert)).toBe(false);
     expect(errors).toEqual([]);
   } finally {
     await app.close();

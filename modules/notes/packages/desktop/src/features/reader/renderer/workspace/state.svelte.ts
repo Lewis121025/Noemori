@@ -10,11 +10,8 @@ import type {
 } from "../../shared/export";
 import { parseReadingBookmark } from "../../shared/reading-position";
 import type {
-  Bookmark,
   NoteKeys,
   ReaderApi,
-  SidebarView,
-  TagCount,
   VaultEntry,
   RenameOutcome,
 } from "../../shared/api";
@@ -32,7 +29,6 @@ import { ReaderPane, type PaneHost, type ViewMode } from "./pane.svelte";
 import type { ReaderHistory } from "../navigation/history.svelte";
 import { ReaderSearch } from "../search/state.svelte";
 import { createBrowserMediaIo, type MediaIo } from "../preview/media";
-import { ReaderBookmarks } from "../bookmarks/state.svelte";
 import { ReaderFileTree } from "../library/state.svelte";
 import { createSessionWrite, type SessionWrite } from "../session-write";
 import {
@@ -151,26 +147,9 @@ export class ReaderWorkspaceController {
   }
   /** 全库搜索；结果属于当前库，切库必须丢弃。 */
   readonly search: ReaderSearch;
-  /** 文件管理采用字面正文检索，与高级搜索的查询、取消和分页各自独立。 */
-  readonly librarySearch: ReaderSearch;
   /** 所有阅读与预览表面共用同一库内资源访问能力。 */
   readonly mediaIo: MediaIo;
-  /** 左栏面板独立于文档焦点，文件选择与浏览位置统一归属 fileTree。 */
-  sidebarView = $state<SidebarView>("outline");
   private openingOther = false;
-
-  /** 侧栏切换保留查询结果，恢复时可禁止重复写入。 */
-  setSidebarView(view: SidebarView): void {
-    this.sidebarView = view;
-    this.onLayoutChange();
-  }
-  /** 查询输入由唯一检索实例防抖和取消；布局队列保存原文。 */
-  setSearchInput(text: string, composing = false): void {
-    this.search.setInput(text, composing);
-    this.onLayoutChange();
-  }
-  /** 当前库的书签；随目录刷新重读，改名后的路径由内核同步改写。 */
-  readonly bookmarks: ReaderBookmarks;
   /** 文件树的跨重启现场，文件操作与外部清单刷新均经此迁移。 */
   readonly fileTree: ReaderFileTree;
   /** 可编辑分栏，1–2 个；下标即栏位，永不为空。 */
@@ -223,8 +202,6 @@ export class ReaderWorkspaceController {
   /** @param api 外壳注入的阅读器能力；构造不订阅事件，挂载时由 start 订阅。 */
   constructor(
     private readonly api: ReaderApi,
-    /** 模式提交后由布局宿主串行保存偏好；恢复阶段不触发写入。 */
-    private readonly onLayoutChange: () => void = () => {},
     private readonly onEntriesChanged?: (
       root: string,
       changes: { from: string; to: string | null }[],
@@ -238,15 +215,6 @@ export class ReaderWorkspaceController {
     });
     this.mediaIo = createBrowserMediaIo(api);
     this.search = new ReaderSearch(api, (message) => this.report(message));
-    this.librarySearch = new ReaderSearch(
-      api,
-      (message) => this.report(message),
-      (text) => ({
-        expr: { kind: "term", value: text.trim() },
-        limit: 100,
-      }),
-    );
-    this.bookmarks = new ReaderBookmarks(api);
     this.fileTree = new ReaderFileTree(
       () => this.root,
       (root, state) => api.sessionSetFileTree(root, state),
@@ -572,7 +540,7 @@ export class ReaderWorkspaceController {
     const unsubscribe = this.api.subscribeVaultChanged((event) => {
       // 检索结果的版本立即失效，不能等输入法、写盘或正文重载的门禁释放。
       this.search.markStale();
-      this.librarySearch.markStale();
+
       if (event.status === "changed") {
         if (event.healthy) this.backgroundError = "";
         void this.onVaultChanged();
@@ -589,7 +557,7 @@ export class ReaderWorkspaceController {
     return () => {
       this.documentSession.dispose();
       this.search.reset();
-      this.librarySearch.reset();
+
       this.fileTree.reset();
       for (const pane of this.paneList) pane.dispose();
       unsubscribe();
@@ -605,8 +573,7 @@ export class ReaderWorkspaceController {
       if (restored === null) return;
       this.root = restored.root;
       this.search.reset();
-      this.librarySearch.reset();
-      this.bookmarks.reset();
+
       this.publishEntries(restored.entries);
       // 视图记忆先于打开文档装表，loadFile 才能按记忆恢复视图。
       this.clearViewModes();
@@ -674,10 +641,8 @@ export class ReaderWorkspaceController {
           this.paneList = [new ReaderPane(0, this.api, this.host, false)];
           this.activeId = 0;
           this.search.reset();
-          this.librarySearch.reset();
+
           this.search.input = "";
-          this.sidebarView = "outline";
-          this.bookmarks.reset();
           this.candidateSelection = null;
           this.deadLink = null;
           this.clearViewModes();
@@ -814,52 +779,7 @@ export class ReaderWorkspaceController {
   };
 
   /**
-   * 标签面板的清单：全库标签及计数。
-   *
-   * 失败不抛给界面调用方，返回原因文本由面板展示——浏览辅助能力
-   * 不打断写作，与检索错误同一口径。
-   */
-  /** 收藏或取消收藏活动栏的文件；结果作为活动栏的确认提示。 */
-  bookmarkCurrentFile = async (): Promise<void> => {
-    const path = this.document.path;
-    if (path === null) return;
-    const pane = this.activePane;
-    const added = await this.bookmarks.toggle({ kind: "file", path, title: null });
-    if (this.bookmarks.error === null) this.announceFor(pane, added ? "已加入书签" : "已移出书签");
-  };
-
-  /** 收藏或取消收藏光标所在的标题；源码视图或光标在首个标题之前时提示原因。 */
-  bookmarkCurrentHeading = async (): Promise<void> => {
-    const path = this.document.path;
-    if (path === null) return;
-    const pane = this.activePane;
-    const heading = pane.navigation.currentHeading();
-    if (heading === null) {
-      this.report("光标不在任何标题下；请在排版或阅读视图里把光标放进要收藏的章节。");
-      return;
-    }
-    const added = await this.bookmarks.toggle({ kind: "heading", path, heading, title: null });
-    if (this.bookmarks.error === null)
-      this.announceFor(pane, added ? `已收藏标题「${heading}」` : `已取消收藏标题「${heading}」`);
-  };
-
-  /** 在活动栏打开文件或标题书签；标题失效时由分栏可见提示。 */
-  openBookmark = async (bookmark: Bookmark): Promise<void> => {
-    if (bookmark.kind === "file") await this.activePane.openFile(bookmark.path);
-    else if (bookmark.kind === "heading")
-      await this.activePane.openResolved(bookmark.path, bookmark.heading);
-  };
-
-  listTags = async (): Promise<{ tags: TagCount[]; error: string | null }> => {
-    try {
-      return { tags: await this.api.indexTags(), error: null };
-    } catch (error) {
-      return { tags: [], error: `标签暂不可用：${errorText(error)}` };
-    }
-  };
-
-  /**
-   * 快速切换器与别名补全的笔记身份；失败口径与标签清单一致，返回原因文本。
+   * 快速切换器与别名补全的笔记身份；失败时返回原因文本。
    */
   listNoteKeys = async (): Promise<{ keys: NoteKeys[]; error: string | null }> => {
     try {
@@ -1401,7 +1321,6 @@ export class ReaderWorkspaceController {
     this.fileTree.reconcile(files);
     this.revision += 1;
     this.refreshNoteKeys();
-    void this.bookmarks.reload();
   }
 
   /**

@@ -53,7 +53,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     const editor = page.locator(".ProseMirror");
     const quickFormat = page.getByRole("toolbar", { name: "编辑工具栏", exact: true });
     await editor.waitFor();
-    expect(await quickFormat.isVisible()).toBe(false);
+    expect(await quickFormat.isVisible()).toBe(true);
     await page.locator(".math-inline mjx-container").waitFor();
     const screenshots = process.env.NOEMORI_INTERACTION_SCREENSHOTS;
     if (screenshots)
@@ -79,7 +79,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
           await page.mouse.move(start.x + 2, start.y + start.height / 2);
           await page.mouse.down();
           await page.mouse.move(end.x + end.width - 2, end.y + end.height / 2, { steps: 12 });
-          expect(await quickFormat.isVisible()).toBe(false);
+          expect(await quickFormat.isVisible()).toBe(true);
           await page.waitForTimeout(100);
           await page.mouse.up();
           await page.waitForTimeout(50);
@@ -220,14 +220,14 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selection);
     await page.keyboard.press("Alt+F10");
     await quickFormat.getByRole("button", { name: "插入", exact: true }).click();
-    await page.getByRole("button", { name: "链接…", exact: true }).click();
+    await page.getByRole("menuitem", { name: "链接…", exact: true }).click();
     await page.getByRole("dialog", { name: "插入链接" }).waitFor();
     expect(await quickFormat.isVisible()).toBe(true);
     await page.keyboard.press("Escape");
     await quickFormat.waitFor();
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selection);
     await page.getByRole("toolbar", { name: "编辑工具栏", exact: true }).waitFor();
-    await page.getByRole("combobox", { name: "段落格式" }).focus();
+    await page.getByRole("button", { name: "段落格式", exact: true }).focus();
     await expect.poll(() => quickFormat.isVisible()).toBe(true);
     await page.keyboard.press("Escape");
     await editor.focus();
@@ -243,7 +243,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
-      .getByRole("treeitem", { name: "笔记.md", exact: true })
+      .getByRole("button", { name: "笔记.md", exact: true })
       .click();
     await link.click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("heading", { name: "参考资料" }).waitFor();
@@ -251,7 +251,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
-      .getByRole("treeitem", { name: "长文.md", exact: true })
+      .getByRole("button", { name: "长文.md", exact: true })
       .click();
     const firstParagraph = editor.locator(":scope > p").first();
     await firstParagraph.click();
@@ -270,7 +270,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
     await page.setViewportSize({ width: 480, height: 800 });
     await documentTools(page);
     await page.emulateMedia({ colorScheme: "dark" });
-    const narrowBar = await quickFormat.boundingBox();
+    const narrowBar = await page.locator(".window-document-tools").boundingBox();
     expect(narrowBar).not.toBeNull();
     expect(narrowBar!.x).toBeGreaterThanOrEqual(0);
     expect(narrowBar!.x + narrowBar!.width).toBeLessThanOrEqual(480);
@@ -280,7 +280,7 @@ test("连续阅读与编辑时，链接不误跳转、源码不抢焦点且能�
         scale: "css",
       });
     await page.keyboard.press("Escape");
-    expect(await quickFormat.isVisible()).toBe(false);
+    expect(await quickFormat.isVisible()).toBe(true);
     expect(errors).toEqual([]);
   } catch (error) {
     // 失败可能正处于保存门禁；只终止本用例拥有的临时实例，避免关闭等待掩盖原始断言。

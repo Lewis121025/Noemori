@@ -1,25 +1,31 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import LibraryFrame from "./LibraryFrame.svelte";
+  import LibraryOptions from "./LibraryOptions.svelte";
   import FileTreeViewport from "./FileTreeViewport.svelte";
-  import { libraryTreeRows, libraryTitle } from "./library-tree";
+  import { libraryTitle } from "./library-tree";
+  import {
+    buildWorkspaceTree,
+    workspaceTreeRows,
+    conversationKey,
+    type WorkspaceTreeRow,
+  } from "./workspace-tree";
+  import type {
+    WorkspaceConversations,
+    WorkspaceConversation,
+  } from "../../shared/workspace-conversations";
+  import TreeContextMenu from "./TreeContextMenu.svelte";
+  import SearchResults from "../search/SearchResults.svelte";
+  import SearchStatus from "../search/SearchStatus.svelte";
   import HighlightedText from "./HighlightedText.svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import type { ArticleAgentActions } from "../../shared/article-conversations";
   import InlineRename from "./InlineRename.svelte";
   import FileBatchDialog from "./FileBatchDialog.svelte";
   import { selectFileRows } from "./file-selection";
-  import {
-    DEFAULT_FILE_PRESENTATION,
-    type FileTreePosition,
-    type FilePresentation,
-  } from "../../shared/file-browser";
+  import { type FileTreePosition } from "../../shared/file-browser";
   import type { EntryBatchResult } from "../../shared/entry-batch";
-  import TagBrowser from "../tags/TagBrowser.svelte";
-  import BookmarksPane from "../bookmarks/BookmarksPane.svelte";
   import type { EntryDialogAction } from "./FileEntryDialog.svelte";
   import FileMenu, { type FileMenuAction } from "./FileMenu.svelte";
-  import type { Bookmark, VaultEntry } from "../../shared/api";
+  import type { VaultEntry } from "../../shared/api";
   import type { ReaderWorkspaceController } from "../workspace/state.svelte";
   import { isCompositionKey } from "../../shared/composition";
   import {
@@ -33,61 +39,70 @@
 
   let {
     workspace,
-    readFile,
+    conversations,
     onEdit,
     onOpen,
     hidden = false,
-    onSearch = () => {},
-    onNewWhiteboard,
-    onOpenVault,
-    articleAgent,
-    articleCounts = {},
-    onConversations,
   }: {
     workspace: ReaderWorkspaceController;
-    readFile: (path: string) => Promise<Uint8Array>;
+    conversations?: WorkspaceConversations;
     onEdit: (
       action: EntryDialogAction | "file" | "directory",
       entry: VaultEntry | null,
       parent: string,
     ) => void;
-    onOpen: () => void;
+    onOpen: (focus?: boolean) => void;
     hidden?: boolean;
-    onSearch?: (query: string) => void;
-    onNewWhiteboard?: (parent: string) => void;
-    onOpenVault?: () => void;
-    articleAgent?: ArticleAgentActions;
-    articleCounts?: Record<string, number>;
-    onConversations?: (path: string) => void;
   } = $props();
-  let previewOpen = $state(false);
-  let readingFocused = $state(false);
-  let previewTab = $state<"article" | "chat">("article");
   const browser = $derived(workspace.fileTree);
-  const presentation = $derived(browser.state.presentation ?? DEFAULT_FILE_PRESENTATION);
-  const sort = $derived(presentation.sort);
+  const conversationExpandedKeys = $derived(browser.state.discussions?.expanded);
+  const conversationExpanded = $derived(new Set(conversationExpandedKeys ?? []));
+  const discussionPosition = $derived(browser.state.discussions?.scroll);
+  const treePosition = $derived(
+    discussionPosition
+      ? { path: discussionPosition.key, offset: discussionPosition.offset }
+      : browser.state.scroll,
+  );
+  function setConversationExpanded(next: ReadonlySet<string>): void {
+    browser.update({
+      discussions: {
+        archived: showArchived,
+        scroll: browser.state.discussions?.scroll ?? null,
+        expanded: [...next],
+      },
+    });
+  }
+  let conversationFocus = $state<string | null>(null);
+  const showArchived = $derived(browser.state.discussions?.archived ?? false);
+  let conversationMenu: TreeContextMenu;
+  let menuConversation = $state<WorkspaceConversation | null>(null);
+  const conversationActions = $derived([
+    { id: "fork", label: "分叉对话…" },
+    { id: "rename", label: "重命名…" },
+    {
+      id: menuConversation?.archived ? "restore" : "archive",
+      label: menuConversation?.archived ? "恢复对话" : "归档对话…",
+    },
+    { id: "remove", label: "删除对话…", danger: true, separator: true },
+  ]);
   const browse = $derived(browser.state.browse);
   const query = $derived(browse?.query ?? "");
   const currentDirectory = $derived(browse?.directory ?? "");
   const selectedPaths = $derived(browser.state.selected);
   const selected = $derived(new Set(selectedPaths));
   const focused = $derived(browser.state.focused);
+  let detailPath = $state<string | null>(null);
   let selectionAnchor = $state<string | null>(null);
   let filteredScroll = $state.raw<FileTreePosition | null>(null);
   let renaming = $state.raw<VaultEntry | null>(null);
   let renameIssue = $state("");
   const renameErrorId = $props.id();
-  // 标签与书签会卸载目录树，异步焦点交接必须允许视口已经消失。
   let treeViewport: FileTreeViewport | undefined = $state();
-  let recoveryElement: HTMLElement | undefined = $state();
   let searchInput: HTMLInputElement;
   let menu: FileMenu;
   let batchDialog: FileBatchDialog;
   let draggedEntries = $state.raw<VaultEntry[]>([]);
   let batchFallback: string | null = null;
-  let bookmarksPane: BookmarksPane | undefined = $state();
-  /** 资料管理主体；查询与分类随目录现场恢复，结果按当前索引重建。 */
-  const paneMode = $derived(browser.state.browse?.section ?? "files");
   let dragging = $state<VaultEntry | null>(null);
   let dropTarget = $state<string | null>(null);
   let previousRoot: string | null | undefined;
@@ -101,7 +116,7 @@
   );
   const searching = $derived(query.trim() !== "");
   const searchClosed = new SvelteSet<string>();
-  const contentSearch = $derived(workspace.librarySearch);
+  const contentSearch = $derived(workspace.search);
   const nameMatches = $derived(
     new Set(
       workspace.entries
@@ -125,21 +140,37 @@
     ),
   );
   const expandedPaths = $derived(browser.state.expanded);
-  const expanded = $derived(
-    searching
-      ? new Set(
-          [...matchingPaths].flatMap(ancestorDirectories).filter((path) => !searchClosed.has(path)),
-        )
-      : new Set(expandedPaths),
+  const hierarchy = $derived(
+    buildWorkspaceTree(
+      workspace.entries,
+      conversations?.items ?? [],
+      workspace.vaultRoot,
+      showArchived,
+    ),
+  );
+  const expanded = $derived(new Set([...expandedPaths, ...conversationExpanded]));
+  const displayRows = $derived(
+    workspaceTreeRows(hierarchy, expanded, query, matchingPaths, searchClosed),
   );
   const rows = $derived(
-    libraryTreeRows(
-      workspace.entries,
-      expanded,
-      sort,
-      searching ? matchingPaths : undefined,
-      searchClosed,
+    displayRows.flatMap((row) =>
+      row.file
+        ? [
+            {
+              node: row.file,
+              depth: row.depth,
+              parent: row.parent,
+              position: row.position,
+              siblings: row.siblings,
+            },
+          ]
+        : [],
     ),
+  );
+  const expandedRows = $derived(
+    searching
+      ? new Set(displayRows.filter((row) => !searchClosed.has(row.key)).map((row) => row.key))
+      : expanded,
   );
   const resultCount = $derived(
     searching
@@ -150,11 +181,11 @@
   );
   $effect(() => {
     void workspace.vaultRoot;
-    const text = query,
-      suspended = hidden;
+    const text = query;
     untrack(() => {
-      contentSearch.setInput(text, suspended);
+      contentSearch.setInput(text, workspace.vaultRoot === null);
       searchClosed.clear();
+      detailPath = null;
     });
     return () => contentSearch.reset();
   });
@@ -165,20 +196,18 @@
   const activeRecovery = $derived(
     workspace.entries.some((entry) => entry.recoveryOnly && entry.path === active),
   );
-  const busy = $derived(workspace.switching || workspace.copying);
-  function present(patch: Partial<FilePresentation>): void {
-    browser.update({
-      presentation: { ...presentation, ...patch },
-      ...(patch.sort === undefined ? {} : { scroll: null }),
-    });
-    if (patch.sort !== undefined) filteredScroll = null;
-  }
+  const busy = $derived(workspace.copying);
   const focusable = $derived(
     rows.some((row) => row.node.path === focused)
       ? focused
       : rows.some((row) => row.node.kind === "file" && row.node.path === active)
         ? active
         : (rows.find((row) => row.node.kind === "file")?.node.path ?? rows[0]?.node.path ?? null),
+  );
+  const treeFocus = $derived(
+    conversationFocus && displayRows.some((row) => row.key === conversationFocus)
+      ? conversationFocus
+      : (focusable ?? displayRows[0]?.key ?? null),
   );
 
   $effect(() => {
@@ -219,6 +248,7 @@
   });
 
   function selectOnly(path: string | null): void {
+    conversationFocus = null;
     const node = findFileTreeNode(tree, path);
     browser.update({
       selected: path === null ? [] : [path],
@@ -254,8 +284,6 @@
    * @returns 不返回值；目录持久化失败由工作区统一报告。
    */
   export function enterDirectory(path: string): void {
-    previewOpen = false;
-    readingFocused = false;
     filteredScroll = null;
     renaming = null;
     renameIssue = "";
@@ -263,31 +291,45 @@
     browser.enterDirectory(path);
     selectOnly(path || null);
   }
-  /** 查询、分类与目录一次提交到会话，避免视图切换后恢复过时的浏览位置。 */
-  function showPane(mode: typeof paneMode, text = ""): void {
-    previewOpen = false;
-    readingFocused = false;
-    if (browser.ready) {
-      browser.setQuery(text);
-      browser.update({ browse: { ...browser.state.browse!, section: mode } });
-    }
-  }
   async function focusPath(path: string, select = true): Promise<void> {
-    previewOpen = false;
-    readingFocused = false;
-    if (select) selectOnly(path);
-    else browser.update({ focused: path });
+    const row = displayRows.find((row) => row.key === path);
+    if (row && !row.file) conversationFocus = path;
+    else {
+      conversationFocus = null;
+      if (select) selectOnly(path);
+      else browser.update({ focused: path });
+    }
     await tick();
     await treeViewport?.focusPath(path);
   }
-  /** 关闭窄窗口预览后使原焦点条目可见并接续键盘操作，保留选择与查询。 */
-  async function closePreview(): Promise<void> {
-    previewOpen = false;
-    readingFocused = false;
+  async function moreFiles(
+    event: MouseEvent & { currentTarget: HTMLButtonElement },
+  ): Promise<void> {
+    const button = event.currentTarget;
+    const owned = document.activeElement === button;
+    const previous = new Set(contentSearch.hits.map((hit) => hit.path));
+    const request = contentSearch.query;
+    await contentSearch.loadMore();
     await tick();
-    if (hidden) return;
-    if (focusable !== null) await treeViewport?.focusPath(focusable);
-    else searchInput.focus();
+    const next = contentSearch.hits.find((hit) => !previous.has(hit.path));
+    if (
+      next &&
+      request === contentSearch.query &&
+      owned &&
+      (document.activeElement === button || document.activeElement === document.body)
+    )
+      await focusPath(next.path, false);
+  }
+  async function openEntry(path: string, focus = false): Promise<void> {
+    const hit = hitByPath.get(path);
+    const pane = workspace.activePane;
+    const match = hit?.matches[0] ?? hit?.evidence?.find((item) => item.location !== null);
+    if (searching && hit && match)
+      await pane.navigation.openSearchMatch(hit, match, pane.openFile, (message) =>
+        workspace.report(message),
+      );
+    else await pane.openFile(path);
+    if (workspace.activePane === pane && pane.document.path === path) onOpen(focus);
   }
   async function activate(entry: VaultEntry): Promise<void> {
     selectOnly(entry.recoveryOnly ? null : entry.path);
@@ -295,40 +337,22 @@
       enterDirectory(entry.path);
       await focusPath(entry.path, false);
     } else {
-      await workspace.openFile(entry.path);
-      if (workspace.document.path === entry.path) onOpen();
+      await openEntry(entry.path, true);
     }
-  }
-  async function locate(): Promise<void> {
-    if (active === null) return;
-    enterDirectory(parentDirectory(active));
-    if (activeRecovery) {
-      await focusRecovery(active);
-      return;
-    }
-    selectOnly(active);
-    await focusPath(active);
-  }
-  async function focusRecovery(path: string): Promise<void> {
-    await tick();
-    Array.from(recoveryElement?.querySelectorAll<HTMLButtonElement>("[data-path]") ?? [])
-      .find((element) => element.dataset.path === path)
-      ?.focus();
-  }
-  function entryBookmark(entry: VaultEntry): Bookmark {
-    return { kind: entry.kind === "directory" ? "folder" : "file", path: entry.path, title: null };
   }
   function action(kind: FileMenuAction, entry: VaultEntry | null): void {
     if (kind === "conversations") {
-      if (entry && articleAgent) {
-        selectOnly(entry.path);
-        previewTab = "chat";
-        previewOpen = true;
-      } else if (entry) onConversations?.(entry.path);
-      return;
-    }
-    if (kind === "bookmark") {
-      if (entry !== null) void workspace.bookmarks.toggle(entryBookmark(entry));
+      if (entry) {
+        setConversationExpanded(new Set([...conversationExpanded, entry.path]));
+        const first = conversations?.items.find(
+          (item) =>
+            item.workspace === workspace.vaultRoot &&
+            item.article?.path === entry.path &&
+            !item.article.removed &&
+            !item.archived,
+        );
+        if (first) void openConversation(first.id);
+      }
       return;
     }
     if (busy) return;
@@ -394,7 +418,7 @@
   }
   async function reflectBatch(result: EntryBatchResult): Promise<void> {
     await tick();
-    showPane("files");
+    browser.setQuery("");
     const paths =
       result.remaining.length > 0
         ? result.remaining
@@ -423,8 +447,6 @@
   }
   /** 聚焦资料搜索并选中现有查询；调用方须先进入资料管理空间。 */
   export async function focusSearch(): Promise<void> {
-    previewOpen = false;
-    readingFocused = false;
     await tick();
     searchInput.focus();
     searchInput.select();
@@ -438,7 +460,7 @@
     // 等待活动文档的更新完成，避免它的自动定位覆盖用户刚整理的条目。
     await tick();
     const path = change.action === "trash" ? parentDirectory(change.entry.path) : change.entry.path;
-    showPane("files");
+    browser.setQuery("");
     enterDirectory(change.action === "trash" ? currentDirectory : parentDirectory(path));
     const next =
       rows.find((row) => row.node.path === path)?.node.path ?? rows[0]?.node.path ?? null;
@@ -450,42 +472,21 @@
   /** 清空搜索，恢复之前的目录选择与滚动位置。 */
   function clearSearch(): void {
     if (workspace.isComposing) return;
-    showPane("files");
+    browser.setQuery("");
     searchInput.focus();
-  }
-  /** 标签条件交给独立的全文搜索，保留文件管理的浏览位置。 */
-  function pickTag(tag: string): void {
-    onSearch(`tag:${tag}`);
-  }
-  /** 切到书签后把键盘焦点交给第一条，不改变浏览目录。 */
-  export async function showBookmarks(): Promise<void> {
-    showPane("bookmarks");
-    await tick();
-    bookmarksPane?.focusFirst();
-  }
-  /** 文件与标题在活动栏打开；文件夹进入对应目录；搜索交给全文搜索。 */
-  async function openBookmark(bookmark: Bookmark): Promise<void> {
-    if (bookmark.kind === "search") {
-      onSearch(bookmark.query);
-    } else if (bookmark.kind === "folder") {
-      enterDirectory(bookmark.path);
-    } else {
-      await workspace.openBookmark(bookmark);
-      if (workspace.document.path === bookmark.path) onOpen();
-    }
   }
   function searchKeydown(event: KeyboardEvent): void {
     if (busy || isCompositionKey(event) || workspace.isComposing) return;
     if (event.key === "Enter" && query.trim()) {
       event.preventDefault();
-      void contentSearch.run(query);
+      if (workspace.vaultRoot !== null) void contentSearch.run(query);
     } else if (event.key === "Escape" && query !== "") {
       event.preventDefault();
       event.stopPropagation();
       clearSearch();
-    } else if (event.key === "ArrowDown" && rows[0]) {
+    } else if (event.key === "ArrowDown" && displayRows[0]) {
       event.preventDefault();
-      void focusPath(focusable ?? rows[0].node.path);
+      void focusPath(treeFocus ?? displayRows[0].key);
     }
   }
   function context(event: MouseEvent, entry: VaultEntry): void {
@@ -562,21 +563,30 @@
       (event.key === "ArrowRight" || event.key === "ArrowLeft")
     ) {
       event.preventDefault();
-      if (event.key === "ArrowRight" && row.node.kind === "directory") {
-        if (!expanded.has(row.node.path)) toggleFolder(row.node.path);
-        else if (rows[rows.indexOf(row) + 1]?.parent === row.node.path)
-          void focusPath(rows[rows.indexOf(row) + 1]!.node.path);
+      const item = displayRows.find((item) => item.key === row.node.path);
+      if (
+        event.key === "ArrowRight" &&
+        item &&
+        (item.children.length || item.kind === "directory")
+      ) {
+        if (!expandedRows.has(item.key)) toggleNode(item);
+        else {
+          const child = displayRows[displayRows.indexOf(item) + 1];
+          if (child?.parent === item.key) void focusPath(child.key);
+        }
       } else if (event.key === "ArrowLeft") {
-        if (row.node.kind === "directory" && expanded.has(row.node.path))
-          toggleFolder(row.node.path);
+        if (item?.children.length && expandedRows.has(item.key)) toggleNode(item);
         else if (row.parent) void focusPath(row.parent);
       }
       return;
     }
     const next = treeViewport?.nextPath(row.node.path, event.key) ?? undefined;
     if (next !== undefined && next !== null) {
-      if (event.shiftKey) selectRow(next, event.metaKey || event.ctrlKey ? "extend" : "range");
-      else if (!event.metaKey && !event.ctrlKey) selectOnly(next);
+      const target = displayRows.find((row) => row.key === next);
+      if (target?.file) {
+        if (event.shiftKey) selectRow(next, event.metaKey || event.ctrlKey ? "extend" : "range");
+        else if (!event.metaKey && !event.ctrlKey) selectOnly(next);
+      }
       event.preventDefault();
       void focusPath(next, false);
       return;
@@ -606,29 +616,141 @@
       });
   }
   function collapseAll(): void {
-    const folders = rows.filter((row) => row.node.kind === "directory").map((row) => row.node.path);
+    const folders = displayRows
+      .filter((row) => row.children.length || row.kind === "directory")
+      .map((row) => row.key);
     if (searching) {
       if (searchClosed.size) searchClosed.clear();
       else folders.forEach((path) => searchClosed.add(path));
-    } else
+    } else {
+      const collapse = expanded.size > 0;
+      const directories: string[] = [];
+      const discussions: string[] = [];
+      const pending = [...hierarchy];
+      while (pending.length) {
+        const node = pending.pop()!;
+        if (node.kind === "directory") directories.push(node.key);
+        else if (node.children.length) discussions.push(node.key);
+        pending.push(...node.children);
+      }
       browser.update({
-        expanded: browser.state.expanded.length
-          ? []
-          : [
-              ...new Set(
-                workspace.entries.flatMap((entry) => [
-                  ...ancestorDirectories(entry.path),
-                  ...(entry.kind === "directory" ? [entry.path] : []),
-                ]),
-              ),
-            ],
+        expanded: collapse ? [] : directories,
+        discussions: {
+          expanded: collapse ? [] : discussions,
+          archived: showArchived,
+          scroll: browser.state.discussions?.scroll ?? null,
+        },
       });
+    }
   }
+
   function inputQuery(event: Event & { currentTarget: HTMLInputElement }): void {
     if (event instanceof InputEvent && event.isComposing) return;
     browser.setQuery(event.currentTarget.value);
     filteredScroll = null;
   }
+  async function openConversation(id: string): Promise<void> {
+    try {
+      await conversations?.open(id);
+    } catch (error) {
+      workspace.report(String(error));
+    }
+  }
+  function toggleNode(row: WorkspaceTreeRow): void {
+    if (row.kind === "directory") {
+      toggleFolder(row.key);
+      return;
+    }
+    if (searching) {
+      if (searchClosed.has(row.key)) searchClosed.delete(row.key);
+      else searchClosed.add(row.key);
+    } else {
+      const next = new SvelteSet(conversationExpanded);
+      if (next.has(row.key)) next.delete(row.key);
+      else next.add(row.key);
+      setConversationExpanded(next);
+    }
+  }
+  async function openConversationMenu(
+    event: MouseEvent,
+    item: WorkspaceConversation,
+  ): Promise<void> {
+    event.preventDefault();
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+    menuConversation = item;
+    await conversationMenu.open(event.clientX, event.clientY);
+  }
+  function conversationKeydown(event: KeyboardEvent, row: WorkspaceTreeRow): void {
+    if (event.defaultPrevented || isCompositionKey(event)) return;
+    const next = treeViewport?.nextPath(row.key, event.key);
+    if (next) {
+      event.preventDefault();
+      void focusPath(next);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (!row.children.length) return;
+      if (!expandedRows.has(row.key)) toggleNode(row);
+      else if (row.children[0]) void focusPath(row.children[0].key);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (row.children.length && expandedRows.has(row.key)) toggleNode(row);
+      else if (row.parent) void focusPath(row.parent);
+    } else if (
+      row.conversation &&
+      (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+    ) {
+      event.preventDefault();
+      menuConversation = row.conversation;
+      const rect =
+        event.currentTarget instanceof HTMLElement
+          ? event.currentTarget.getBoundingClientRect()
+          : null;
+      if (rect) void conversationMenu.open(rect.left + 20, rect.bottom);
+    } else if (row.conversation && event.key === "F2") {
+      event.preventDefault();
+      void conversations
+        ?.manage(row.conversation.id, "rename")
+        .catch((error) => workspace.report(String(error)));
+    } else if (
+      row.conversation &&
+      !event.repeat &&
+      !event.altKey &&
+      !event.shiftKey &&
+      ((!event.metaKey && !event.ctrlKey && event.key === "Delete") ||
+        (event.metaKey && !event.ctrlKey && event.key === "Backspace"))
+    ) {
+      event.preventDefault();
+      void conversations
+        ?.manage(row.conversation.id, "remove")
+        .catch((error) => workspace.report(String(error)));
+    }
+  }
+  $effect(() => {
+    const id = conversations?.selected;
+    void workspace.vaultRoot;
+    void browser.ready;
+    if (!id) return;
+    untrack(() => {
+      const find = (nodes: typeof hierarchy, ancestors: string[]): boolean => {
+        for (const node of nodes) {
+          if (node.key === conversationKey(id)) {
+            for (const key of ancestors) {
+              const file = findFileTreeNode(tree, key);
+              if (file?.kind === "directory" && !browser.state.expanded.includes(key))
+                browser.update({ expanded: [...browser.state.expanded, key] });
+              else setConversationExpanded(new Set([...conversationExpanded, key]));
+            }
+            return true;
+          }
+          if (find(node.children, [...ancestors, node.key])) return true;
+        }
+        return false;
+      };
+      find(hierarchy, []);
+    });
+  });
   function allowDrop(event: DragEvent, directory: string): void {
     if (
       busy ||
@@ -661,320 +783,377 @@
 
 {#snippet entryIcon(row: FileTreeRow)}
   <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
-    {#if row.node.kind === "directory"}<path
-        d={expanded.has(row.node.path) ? "m5 7 5 5 5-5" : "m7 5 5 5-5 5"}
-      />
+    {#if row.node.kind === "directory"}<path d="M2 5h6l2 2h8v10H2z" />
     {:else if row.node.path.endsWith(".noemoriboard")}<path d="M3 4h14v12H3zM7 4v12M7 9h10" />
     {:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4M8 10h4M8 13h4" />{/if}
   </svg>
 {/snippet}
 
-<LibraryFrame
-  {workspace}
-  {hidden}
-  {readFile}
-  bind:previewOpen
-  bind:previewTab
-  bind:focused={readingFocused}
-  onFollowLink={(kind, raw, from) => {
-    void workspace.openLink(kind, raw, from).then(onOpen);
-  }}
-  entry={findFileTreeNode(tree, focusable)}
-  {...articleAgent ? { articleAgent } : {}}
-  query={searching ? query : ""}
-  onClosePreview={() => void closePreview()}
-  {...onOpenVault === undefined ? {} : { onOpenVault }}
-  onCreate={(kind) => onEdit(kind, null, currentDirectory)}
-  onOpen={(entry) => void activate(entry)}
-  {...onNewWhiteboard === undefined
-    ? {}
-    : { onNewWhiteboard: () => onNewWhiteboard?.(currentDirectory) }}
->
-  <nav class="list" aria-label="文件列表">
-    <div class="search-wrap">
-      <div class="search">
-        <svg viewBox="0 0 20 20" aria-hidden="true"
-          ><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg
-        >
-        <input
-          type="text"
-          role="searchbox"
-          aria-label="搜索笔记库"
-          placeholder="搜索笔记库…"
-          disabled={busy}
-          bind:this={searchInput}
-          value={query}
-          oninput={inputQuery}
-          oncompositionend={inputQuery}
-          onkeydown={searchKeydown}
-        />
-        {#if query !== ""}<button
-            type="button"
-            class="clear-search"
-            aria-label="清除搜索"
-            title="清除搜索（Esc）"
-            disabled={busy}
-            onclick={clearSearch}
-            ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8m0-8-8 8" /></svg></button
-          >{/if}
-      </div>
-    </div>
-    <div class="view-options">
-      <button
-        class="root-label"
-        type="button"
-        aria-label="全部文件"
-        title="全部文件"
-        class:drop-target={dropTarget === ""}
-        onclick={() => enterDirectory("")}
-        ondragover={(event) => allowDrop(event, "")}
-        ondrop={(event) => void drop(event, "")}>全部文件</button
+{#snippet disclosure(item: WorkspaceTreeRow)}
+  {#if item.children.length || item.kind === "directory"}
+    <button
+      type="button"
+      class="tree-toggle"
+      tabindex="-1"
+      aria-label={`${expandedRows.has(item.key) ? "收起" : "展开"} ${item.title}`}
+      aria-expanded={expandedRows.has(item.key)}
+      title={expandedRows.has(item.key) ? "收起子项" : "展开子项"}
+      disabled={busy || renaming?.path === item.key}
+      onclick={() => {
+        toggleNode(item);
+        void focusPath(item.key, false);
+      }}
+      ><svg viewBox="0 0 20 20" aria-hidden="true"
+        ><path d={expandedRows.has(item.key) ? "m5 7 5 5 5-5" : "m7 5 5 5-5 5"} /></svg
+      ></button
+    >
+  {:else}<span class="tree-spacer" aria-hidden="true"></span>{/if}
+{/snippet}
+
+<nav class="list" aria-label="文件列表" {hidden}>
+  <div class="view-options">
+    <button
+      class="root-label"
+      type="button"
+      aria-label="笔记库根目录"
+      title={workspace.vaultRoot ?? "笔记库"}
+      class:drop-target={dropTarget === ""}
+      onclick={() => enterDirectory("")}
+      ondragover={(event) => allowDrop(event, "")}
+      ondrop={(event) => void drop(event, "")}
+      ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 5h6l2 2h8v10H2z" /></svg>
+      <span>{workspace.vaultRoot?.split("/").at(-1) ?? "笔记库"}</span></button
+    >
+    <LibraryOptions
+      expanded={searching ? searchClosed.size === 0 : expanded.size > 0}
+      disabled={busy}
+      archived={showArchived}
+      onExpand={collapseAll}
+      {...conversations
+        ? {
+            onArchive: () =>
+              browser.update({
+                discussions: {
+                  expanded: [...conversationExpanded],
+                  scroll: browser.state.discussions?.scroll ?? null,
+                  archived: !showArchived,
+                },
+              }),
+          }
+        : {}}
+    />
+  </div>
+  <div class="search-wrap">
+    <div class="search">
+      <svg viewBox="0 0 20 20" aria-hidden="true"
+        ><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg
       >
-      <span class="result-count" aria-live="polite"
-        >{resultCount}{contentSearch.hasMore && searching ? "+" : ""}</span
-      >
-      <div class="tools">
-        <button
-          type="button"
-          aria-label="浏览标签"
-          title="标签"
-          aria-pressed={paneMode === "tags"}
-          disabled={busy || workspace.vaultRoot === null}
-          onclick={() => showPane(paneMode === "tags" ? "files" : "tags")}
-        >
-          <svg viewBox="0 0 20 20" aria-hidden="true"
-            ><path d="M8 3 6.5 17M14 3l-1.5 14M4 7.5h12M3.5 12.5h12" /></svg
-          ></button
-        >
-        <button
-          type="button"
-          aria-label="书签"
-          title="书签"
-          aria-pressed={paneMode === "bookmarks"}
-          disabled={busy || workspace.vaultRoot === null}
-          onclick={() => showPane(paneMode === "bookmarks" ? "files" : "bookmarks")}
-        >
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 3h9v14l-4.5-3.5L5.5 17z" /></svg
-          ></button
-        >
-        <button
-          type="button"
-          aria-label="定位当前文件"
-          title="定位当前文件"
-          disabled={busy || workspace.isComposing || active === null}
-          onclick={() => void locate()}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"
-            ><circle cx="10" cy="10" r="5" /><path d="M10 2v4m0 8v4M2 10h4m8 0h4" /></svg
-          ></button
-        >
-        <label class="sort" title="排序"
-          ><svg viewBox="0 0 20 20" aria-hidden="true"
-            ><path d="M4 3v14m-3-3 3 3 3-3M10 5h7M10 9h5M10 13h3" /></svg
-          >
-          <select
-            aria-label="文件排序"
-            value={sort === "modified" ? "modified" : "name"}
-            onchange={(event) => {
-              const value = event.currentTarget.value;
-              if (value === "name" || value === "modified") present({ sort: value });
-            }}
-            ><option value="name">标题顺序</option><option value="modified">最近修改</option
-            ></select
-          >
-        </label>
-        <button
-          type="button"
-          aria-label={(searching ? searchClosed.size === 0 : expanded.size > 0)
-            ? "折叠全部目录"
-            : "展开全部目录"}
-          title={(searching ? searchClosed.size === 0 : expanded.size > 0)
-            ? "折叠全部目录"
-            : "展开全部目录"}
-          disabled={busy}
-          onclick={collapseAll}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"
-            ><path d="m6 3 4 4 4-4M4 10h12m-10 7 4-4 4 4" /></svg
-          ></button
-        >
-      </div>
-    </div>
-    {#if paneMode === "tags"}<TagBrowser {workspace} onPick={pickTag} />
-    {:else if paneMode === "bookmarks"}<BookmarksPane
-        bind:this={bookmarksPane}
-        {workspace}
-        {busy}
-        onActivate={(bookmark) => void openBookmark(bookmark)}
+      <input
+        type="text"
+        role="searchbox"
+        aria-label="搜索笔记库"
+        placeholder={conversations ? "搜索文件与对话…" : "搜索文件…"}
+        disabled={busy}
+        bind:this={searchInput}
+        value={query}
+        oninput={inputQuery}
+        oncompositionend={inputQuery}
+        onkeydown={searchKeydown}
       />
-    {:else}
-      {#if searching && contentSearch.busy}<p class="search-status" role="status">正在搜索…</p>{/if}
-      {#if searching && contentSearch.error}<div class="search-error" role="alert">
-          {contentSearch.error}
-          <button type="button" onclick={() => void contentSearch.run(query)}>重试</button>
-        </div>{/if}
-      {#if recoveries.length > 0}<section
-          class="recovery"
-          aria-label="待恢复的笔记"
-          bind:this={recoveryElement}
-        >
-          <h2>待恢复的笔记</h2>
-          {#each recoveries as entry (entry.path)}<button
-              type="button"
-              class="recovery-entry"
-              data-path={entry.path}
-              aria-current={entry.path === active ? "page" : undefined}
-              title={entry.path}
-              disabled={busy}
-              onclick={() => void activate(entry)}>{entry.path}</button
-            >{/each}
-        </section>{/if}
-      <FileTreeViewport
-        bind:this={treeViewport}
-        {rows}
-        focused={focusable}
-        {selected}
-        {expanded}
-        excerpts={excerptPaths}
-        dragging={dragging?.path ?? null}
-        position={searching ? filteredScroll : browser.state.scroll}
-        onPosition={(position) => {
-          if (searching) filteredScroll = position;
-          else browser.update({ scroll: position });
+      {#if query !== ""}<button
+          type="button"
+          class="clear-search"
+          aria-label="清除搜索"
+          title="清除搜索（Esc）"
+          disabled={busy}
+          onclick={clearSearch}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8m0-8-8 8" /></svg></button
+        >{/if}
+    </div>
+  </div>
+  {#if searching}<SearchStatus
+      search={contentSearch}
+      fileCount={resultCount}
+      conversationCount={displayRows.filter((row) => row.kind === "conversation").length}
+    />{/if}
+  {#if recoveries.length > 0}<section class="recovery" aria-label="待恢复的笔记">
+      <h2>待恢复的笔记</h2>
+      {#each recoveries as entry (entry.path)}<button
+          type="button"
+          class="recovery-entry"
+          data-path={entry.path}
+          aria-current={entry.path === active ? "page" : undefined}
+          title={entry.path}
+          disabled={busy}
+          onclick={() => void activate(entry)}>{entry.path}</button
+        >{/each}
+    </section>{/if}
+  <FileTreeViewport
+    bind:this={treeViewport}
+    rows={displayRows}
+    focused={treeFocus}
+    {selected}
+    expanded={expandedRows}
+    excerpts={excerptPaths}
+    dragging={dragging?.path ?? null}
+    position={searching ? filteredScroll : treePosition}
+    onPosition={(position) => {
+      if (searching) filteredScroll = position;
+      else
+        browser.update({
+          scroll: position?.path.startsWith("\0") ? null : position,
+          discussions: {
+            expanded: [...conversationExpanded],
+            archived: showArchived,
+            scroll: position ? { key: position.path, offset: position.offset } : null,
+          },
+        });
+    }}
+    onEmptyFocus={() => searchInput.focus()}
+  >
+    {#snippet children(item)}
+      {#if item.file}
+        {@const row = {
+          node: item.file,
+          depth: item.depth,
+          parent: item.parent,
+          position: item.position,
+          siblings: item.siblings,
         }}
-        onEmptyFocus={() => searchInput.focus()}
-      >
-        {#snippet children(row)}
-          <div
-            class="file-row"
-            class:folder={row.node.kind === "directory"}
-            class:active={row.node.path === focusable}
-            class:selected={selected.has(row.node.path)}
-            class:dragging={dragging?.path === row.node.path}
-            class:drop-target={dropTarget === row.node.path}
-          >
-            {#if renaming?.path === row.node.path}
-              {@const entry = renaming}
-              <div class="file renaming" data-path={row.node.path} aria-label={row.node.name}>
-                {@render entryIcon(row)}
-                <InlineRename
-                  {entry}
-                  entries={workspace.entries}
-                  errorId={renameErrorId}
-                  onRename={(from, to) => workspace.renameEntry(from, to)}
-                  onIssue={(issue) => {
-                    renameIssue = issue;
-                  }}
-                  onFinish={(destination, focus) => void finishRename(entry, destination, focus)}
-                />
-              </div>
-            {:else}
+        <div
+          class="file-row"
+          class:folder={row.node.kind === "directory"}
+          class:active={row.node.kind === "file" && row.node.path === active}
+          class:nested={item.depth > 0}
+          class:selected={selected.has(row.node.path)}
+          class:dragging={dragging?.path === row.node.path}
+          class:drop-target={dropTarget === row.node.path}
+        >
+          {@render disclosure(item)}
+          {#if renaming?.path === row.node.path}
+            {@const entry = renaming}
+            <div class="file renaming" data-path={row.node.path} aria-label={row.node.name}>
+              {@render entryIcon(row)}
+              <InlineRename
+                {entry}
+                entries={workspace.entries}
+                errorId={renameErrorId}
+                onRename={(from, to) => workspace.renameEntry(from, to)}
+                onIssue={(issue) => {
+                  renameIssue = issue;
+                }}
+                onFinish={(destination, focus) => void finishRename(entry, destination, focus)}
+              />
+            </div>
+          {:else}
+            <button
+              type="button"
+              class="file"
+              data-path={row.node.path}
+              tabindex={treeFocus === row.node.path ? 0 : -1}
+              aria-label={row.node.name}
+              aria-keyshortcuts="F2 Delete Meta+Backspace"
+              aria-current={row.node.kind === "file" && row.node.path === active
+                ? "page"
+                : undefined}
+              title={row.node.path}
+              disabled={busy}
+              draggable={!busy}
+              onfocus={() => {
+                conversationFocus = null;
+                browser.update({ focused: row.node.path });
+              }}
+              onclick={(event) => {
+                if (event.shiftKey)
+                  selectRow(row.node.path, event.metaKey || event.ctrlKey ? "extend" : "range");
+                else if (event.metaKey || event.ctrlKey) selectRow(row.node.path, "toggle");
+                else {
+                  selectOnly(row.node.path);
+                  if (row.node.kind === "directory") toggleFolder(row.node.path);
+                  else void openEntry(row.node.path);
+                }
+              }}
+              ondblclick={() => void activate(row.node)}
+              onkeydown={(event) => keydown(event, row)}
+              oncontextmenu={(event) => context(event, row.node)}
+              ondragstart={(event) => {
+                if (!selected.has(row.node.path)) selectOnly(row.node.path);
+                draggedEntries = selectedEntries;
+                dragging = row.node;
+                event.dataTransfer?.setData(
+                  "text/plain",
+                  draggedEntries.map((entry) => entry.path).join("\n"),
+                );
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+              }}
+              ondragend={() => {
+                dragging = null;
+                draggedEntries = [];
+                dropTarget = null;
+              }}
+              ondragover={(event) => {
+                if (row.node.kind === "directory") allowDrop(event, row.node.path);
+              }}
+              ondragleave={() => {
+                dropTarget = null;
+              }}
+              ondrop={(event) => {
+                if (row.node.kind === "directory") void drop(event, row.node.path);
+              }}
+            >
+              {@render entryIcon(row)}
+              <span class="file-copy"
+                ><span class="name"><HighlightedText text={libraryTitle(row.node)} {query} /></span>
+                {#if excerptPaths.has(row.node.path)}<span class="excerpt"
+                    ><HighlightedText
+                      text={hitByPath.get(row.node.path)?.snippet ?? ""}
+                      snippet
+                    /></span
+                  >{/if}
+              </span>
+            </button>
+            {#if searching && hitByPath.has(item.key)}
+              {@const hit = hitByPath.get(item.key)!}
               <button
                 type="button"
-                class="file"
-                data-path={row.node.path}
-                tabindex={focusable === row.node.path ? 0 : -1}
-                aria-label={row.node.name}
-                aria-keyshortcuts="F2 Delete Meta+Backspace"
-                aria-current={row.node.kind === "file" && row.node.path === active
-                  ? "page"
-                  : undefined}
-                title={row.node.path}
-                disabled={busy}
-                draggable={!busy}
-                onfocus={() => browser.update({ focused: row.node.path })}
-                onclick={(event) => {
-                  if (event.shiftKey)
-                    selectRow(row.node.path, event.metaKey || event.ctrlKey ? "extend" : "range");
-                  else if (event.metaKey || event.ctrlKey) selectRow(row.node.path, "toggle");
-                  else {
-                    selectOnly(row.node.path);
-                    if (row.node.kind === "directory") toggleFolder(row.node.path);
-                  }
-                }}
-                ondblclick={() => void activate(row.node)}
-                onkeydown={(event) => keydown(event, row)}
-                oncontextmenu={(event) => context(event, row.node)}
-                ondragstart={(event) => {
-                  if (!selected.has(row.node.path)) selectOnly(row.node.path);
-                  draggedEntries = selectedEntries;
-                  dragging = row.node;
-                  event.dataTransfer?.setData(
-                    "text/plain",
-                    draggedEntries.map((entry) => entry.path).join("\n"),
-                  );
-                  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-                }}
-                ondragend={() => {
-                  dragging = null;
-                  draggedEntries = [];
-                  dropTarget = null;
-                }}
-                ondragover={(event) => {
-                  if (row.node.kind === "directory") allowDrop(event, row.node.path);
-                }}
-                ondragleave={() => {
-                  dropTarget = null;
-                }}
-                ondrop={(event) => {
-                  if (row.node.kind === "directory") void drop(event, row.node.path);
-                }}
+                class="match-toggle"
+                aria-label={`查看 ${hit.title} 的命中详情`}
+                title="命中详情"
+                aria-expanded={detailPath === item.key}
+                onclick={() => (detailPath = detailPath === item.key ? null : item.key)}
+                >{hit.matchCount || "···"}</button
               >
-                {@render entryIcon(row)}
-                <span class="file-copy"
-                  ><span class="name"
-                    ><HighlightedText text={libraryTitle(row.node)} {query} /></span
-                  >
-                  {#if excerptPaths.has(row.node.path)}<span class="excerpt"
-                      ><HighlightedText
-                        text={hitByPath.get(row.node.path)?.snippet ?? ""}
-                        snippet
-                      /></span
-                    >{/if}
-                </span>
-              </button>
-              {#if articleCounts[row.node.path]}<button
-                  type="button"
-                  class="article-conversations"
-                  aria-label={`${libraryTitle(row.node)}：${articleCounts[row.node.path]} 条对话`}
-                  title="文章对话"
-                  onclick={() => {
-                    selectOnly(row.node.path);
-                    previewTab = "chat";
-                    previewOpen = true;
-                  }}
-                >
-                  <svg viewBox="0 0 20 20" aria-hidden="true"
-                    ><path d="M17 9a7 7 0 0 1-10 6.3L3 17l1-4A7 7 0 1 1 17 9Z" /></svg
-                  ></button
-                >{/if}
             {/if}
-          </div>
-        {/snippet}
-      </FileTreeViewport>
-      {#if searching && contentSearch.hasMore}<button
-          class="load-more"
+          {/if}
+        </div>
+      {:else}
+        <div
+          class="file-row conversation-row"
+          class:nested={item.depth > 0}
+          class:current-conversation={item.conversation?.id === conversations?.selected}
+          class:archived={item.conversation?.archived}
+        >
+          {@render disclosure(item)}
+          <button
+            class="file"
+            type="button"
+            data-path={item.key}
+            tabindex={treeFocus === item.key ? 0 : -1}
+            title={item.conversation
+              ? (item.conversation.workspace ? `${item.title} · ${item.conversation.workspace}` : item.title)
+              : item.title}
+            aria-label={item.kind === "source" ? `${item.title}（来源历史）` : item.title}
+            aria-pressed={item.conversation
+              ? item.conversation.id === conversations?.selected
+              : undefined}
+            onfocus={() => (conversationFocus = item.key)}
+            onclick={() => {
+              if (item.conversation) void openConversation(item.conversation.id);
+              else toggleNode(item);
+            }}
+            oncontextmenu={(event) => {
+              if (item.conversation) void openConversationMenu(event, item.conversation);
+            }}
+            onkeydown={(event) => conversationKeydown(event, item)}
+          >
+            <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
+              {#if item.conversation?.origin}<path d="M6 3v10a3 3 0 0 0 6 0V7M4 3h4M10 7h4M4 17h4" />
+              {:else if item.kind === "conversation"}<path d="M3 3.5h14v10H8l-5 3zM6 7h8M6 10h5" />
+              {:else if item.kind === "source"}<path d="M5 3h7l3 3v11H5zM8 10h4M8 13h4" />
+              {:else}<path d="M2 5h6l2 2h8v10H2z" />{/if}
+            </svg>
+            <span class="name"
+              ><HighlightedText
+                text={item.kind === "workspace"
+                  ? item.title.split(/[\\/]/).at(-1) || item.title
+                  : item.title}
+                {query}
+              /></span
+            >
+            {#if item.kind === "source"}<span class="row-meta">来源历史</span>{/if}
+            {#if item.conversation?.status === "running"}<span
+                class="run-indicator"
+                aria-label="运行中"
+                title="运行中"
+              ></span>{/if}
+            {#if item.conversation?.archived}<span class="row-meta">已归档</span>{/if}
+          </button>
+          {#if item.conversation?.id === conversations?.selected}<span class="current-status">对话中</span>{/if}
+        </div>
+      {/if}
+    {/snippet}
+  </FileTreeViewport>
+  {#if searching && contentSearch.hasMore}<button
+      class="load-more"
+      type="button"
+      disabled={contentSearch.loadingMore || contentSearch.stale}
+      onclick={(event) => void moreFiles(event)}
+      >{contentSearch.loadingMore ? "正在加载…" : "更多结果"}</button
+    >{/if}
+  {#if renameIssue}<p class="rename-error" id={renameErrorId} role="alert">
+      {renameIssue}
+    </p>{/if}
+  {#if displayRows.length === 0 && recoveries.length === 0 && !contentSearch.busy}<p class="empty">
+      {searching ? "无匹配结果" : "暂无文件"}
+    </p>{/if}
+  {#if searching && detailPath && hitByPath.has(detailPath)}<section
+      class="search-details"
+      aria-label="命中详情"
+    >
+      <header>
+        <span>命中详情</span><button
           type="button"
-          disabled={contentSearch.loadingMore || contentSearch.stale}
-          onclick={() => void contentSearch.loadMore()}
-          >{contentSearch.loadingMore ? "正在加载…" : "更多结果"}</button
-        >{/if}
-      {#if renameIssue}<p class="rename-error" id={renameErrorId} role="alert">
-          {renameIssue}
-        </p>{/if}
-      {#if rows.length === 0 && recoveries.length === 0 && !contentSearch.busy}<p class="empty">
-          {searching ? "无匹配结果" : "暂无文件"}
-        </p>{/if}
-    {/if}
-    {#if selected.size > 1}<div class="selection-status" aria-live="polite">
-        已选 {selected.size} 项
-      </div>{/if}
-  </nav>
-</LibraryFrame>
+          aria-label="关闭命中详情"
+          onclick={() => (detailPath = null)}>×</button
+        >
+      </header>
+      <SearchResults
+        search={contentSearch}
+        onlyPath={detailPath}
+        activePath={active}
+        onActivate={(hit, match) => {
+          const pane = workspace.activePane;
+          void pane.navigation.openSearchMatch(
+            hit,
+            match ?? hit.matches[0],
+            pane.openFile,
+            (message) => workspace.report(message),
+          );
+        }}
+        onExit={() => {
+          detailPath = null;
+          searchInput.focus();
+        }}
+        onFocusSearch={() => searchInput.focus()}
+      />
+    </section>{/if}
+  {#if selected.size > 1}<div class="selection-status" aria-live="polite">
+      已选 {selected.size} 项
+    </div>{/if}
+</nav>
 <FileMenu
-  articleConversations={onConversations !== undefined}
+  articleConversations={conversations !== undefined}
   bind:this={menu}
   onAction={action}
   selectionCount={selected.size}
-  bookmarked={(entry) => workspace.bookmarks.has(entryBookmark(entry))}
+/>
+<TreeContextMenu
+  bind:this={conversationMenu}
+  items={conversationActions}
+  label="对话操作"
+  onAction={(action) => {
+    if (!menuConversation || !conversations) return;
+    if (
+      action === "rename" ||
+      action === "archive" ||
+      action === "remove" ||
+      action === "fork" ||
+      action === "restore"
+    )
+      void conversations
+        .manage(menuConversation.id, action)
+        .catch((error) => workspace.report(String(error)));
+  }}
 />
 <FileBatchDialog
   bind:this={batchDialog}
@@ -984,19 +1163,69 @@
 />
 
 <style>
+  .search-details {
+    display: flex;
+    flex-direction: column;
+    max-height: 45%;
+    min-height: 100px;
+    border-top: 1px solid var(--border);
+  }
+  .search-details header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .search-details header button {
+    font-size: 18px;
+  }
+  .match-toggle {
+    padding: 0 5px;
+    color: var(--muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .list[hidden] {
+    display: none;
+  }
+  .conversation-row .name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-meta {
+    color: var(--muted);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .run-indicator {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .archived {
+    color: var(--muted);
+  }
+
   .list {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    height: 100%;
+    flex: 1;
     background: var(--sidebar);
   }
   .search-wrap {
     display: flex;
     align-items: center;
-    padding: 6px 12px;
-    min-height: 47px;
+    padding: 2px 10px 9px;
+    min-height: 41px;
     box-sizing: border-box;
   }
   .search {
@@ -1004,10 +1233,10 @@
     align-items: center;
     gap: 7px;
     width: 100%;
-    min-height: 33px;
+    min-height: 31px;
     padding: 0 8px;
     box-sizing: border-box;
-    background: var(--bg);
+    background: color-mix(in srgb, var(--fg) 4%, var(--sidebar));
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--muted);
@@ -1019,8 +1248,12 @@
     background: transparent;
     border: 0;
     font: inherit;
-    font-size: 13px;
+    font-size: 12px;
     outline: none;
+  }
+  input::placeholder {
+    color: var(--muted);
+    opacity: 1;
   }
   .search:focus-within {
     outline: 2px solid var(--accent);
@@ -1066,70 +1299,41 @@
   .view-options {
     display: flex;
     align-items: center;
-    min-height: 31px;
-    padding: 0 10px;
+    min-height: 41px;
+    padding: 6px 10px 3px;
     gap: 6px;
-    border-bottom: 1px solid var(--border);
-    font-size: 11px;
     color: var(--muted);
   }
   .root-label {
-    padding: 4px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+    padding: 5px 6px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+  }
+  .root-label span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .result-count {
-    font-variant-numeric: tabular-nums;
-  }
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 1px;
-    margin-left: auto;
-  }
-  .tools button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 25px;
-    min-height: 27px;
-    padding: 3px;
-  }
-  .tools [aria-pressed="true"] {
-    color: var(--fg);
-    background: var(--selected);
-  }
-  .sort {
-    display: flex;
-    align-items: center;
-    position: relative;
-    min-width: 26px;
-    height: 27px;
-    justify-content: center;
-  }
-  .sort select {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    width: 100%;
-    cursor: pointer;
-  }
-  .sort:focus-within {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-    border-radius: 4px;
   }
   .file-row {
     display: flex;
     height: 100%;
     align-items: center;
-    border-radius: 4px;
-    margin-left: calc(var(--tree-depth) * 14px);
+    border-radius: 5px;
+    margin-left: min(calc(var(--tree-depth) * 16px), 32%);
     position: relative;
   }
-  .file-row::before {
+  .file-row.nested::before {
     content: "";
     position: absolute;
-    left: -7px;
+    left: -8px;
     top: 0;
     bottom: 0;
     border-left: 1px solid var(--border);
@@ -1137,9 +1341,19 @@
   }
   .file-row.active {
     background: var(--selected);
-  }
-  .file-row.selected:not(.folder) {
     box-shadow: inset 2px 0 var(--accent);
+  }
+  .file-row.active .name {
+    font-weight: 500;
+  }
+  .file-row.selected:not(.active) {
+    background: color-mix(in srgb, var(--selected) 55%, transparent);
+  }
+  .current-status {
+    flex-shrink: 0;
+    margin: 0 6px 0 3px;
+    font-size: 11px;
+    color: var(--accent);
   }
   .file-row.dragging {
     opacity: 0.5;
@@ -1155,9 +1369,9 @@
     flex: 1;
     min-width: 0;
     height: 100%;
-    padding: 2px 6px;
+    padding: 2px 5px 2px 2px;
     text-align: left;
-    font-size: 12px;
+    font-size: 13px;
   }
   .file .entry-icon {
     color: var(--muted);
@@ -1166,10 +1380,6 @@
   }
   .folder .file {
     color: var(--muted);
-  }
-  .folder .entry-icon {
-    width: 11px;
-    height: 11px;
   }
   .file-copy {
     min-width: 0;
@@ -1187,18 +1397,22 @@
     color: var(--muted);
     font-size: 11px;
   }
-  .article-conversations {
+  .tree-toggle,
+  .tree-spacer {
+    flex: 0 0 19px;
+    width: 19px;
+  }
+  .tree-toggle {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 27px;
     height: 100%;
-    color: var(--accent);
-    padding: 3px;
+    color: var(--muted);
+    padding: 0;
   }
-  .article-conversations svg {
-    width: 12px;
-    height: 12px;
+  .tree-toggle svg {
+    width: 11px;
+    height: 11px;
   }
   .selection-status {
     padding: 6px 13px;
@@ -1206,24 +1420,15 @@
     border-top: 1px solid var(--border);
     font-size: 11px;
   }
-  .empty,
-  .search-status {
+  .empty {
     padding: 12px;
     font-size: 12px;
     color: var(--muted);
   }
-  .search-status {
-    padding: 4px 12px;
-    margin: 0;
-  }
-  .search-error,
   .rename-error {
     padding: 8px 12px;
     color: var(--danger);
     font-size: 12px;
-  }
-  .search-error button {
-    margin-left: 8px;
   }
   .load-more {
     min-height: 30px;
@@ -1250,12 +1455,14 @@
     overflow-wrap: anywhere;
   }
   @media (pointer: coarse) {
-    .tools button,
-    .article-conversations,
-    .clear-search,
-    .sort {
+    .tree-toggle,
+    .clear-search {
       min-width: 44px;
       min-height: 44px;
+    }
+    .tree-spacer {
+      flex-basis: 44px;
+      width: 44px;
     }
     .view-options {
       flex-wrap: wrap;

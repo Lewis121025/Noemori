@@ -11,6 +11,7 @@ pub(super) fn drive(
     input: RunInput,
     context: ExecutionContext,
     lease: crate::session::RunLease,
+    control: Option<super::RunControl>,
 ) -> AgentStream {
     Box::pin(async_stream::stream! {
         // 流被丢弃时取消子任务；调用方的父信号不受影响。
@@ -18,6 +19,7 @@ pub(super) fn drive(
         let mut state = RunState::new(input.messages);
         let mut retries = 0;
         let status = 'running: loop {
+            if let Some(control) = &control { state.history.extend(control.drain()); }
             if let Err(error) = context.check() { break RunStatus::from_error(error); }
             if state.model_calls >= agent.options.max_model_calls { break RunStatus::BudgetExhausted; }
             state.begin_model();
@@ -64,8 +66,9 @@ pub(super) fn drive(
             drop(tools);
             if let Err(error) = context.check() { break RunStatus::from_error(error); }
             if let Err(error) = state.commit() { break RunStatus::from_error(error); }
-            if calls.is_empty() { break RunStatus::Completed; }
+            if calls.is_empty() && control.as_ref().is_none_or(super::RunControl::complete_if_empty) { break RunStatus::Completed; }
         };
+        if let Some(control) = &control { state.history.extend(control.finish()); }
         yield AgentEvent::Finished(Box::new(state.finish(status)));
     })
 }

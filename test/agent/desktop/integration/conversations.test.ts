@@ -30,8 +30,10 @@ function conversation(): ConversationRecord {
     archived: false,
     origin: null,
     article: null,
+    linkedWorkspace: "/workspace",
     draft: "继续整理",
     model: "fixture",
+    modelSelection: { providerId: "provider", modelId: "fixture", reasoningEffort: "high" },
     checkpoint: JSON.stringify({ version: 1, workspace: "/workspace", history: [] }),
     snapshot: {
       id,
@@ -43,6 +45,15 @@ function conversation(): ConversationRecord {
       messages: [{ role: "user", content: [{ type: "text", value: "研究计划" }] }],
       approvals: [],
       terminals: [],
+      ui: {
+        status: "idle",
+        generation: 0,
+        call: null,
+        error: null,
+        control: null,
+        connections: [],
+        receipts: [],
+      },
       browser: { status: "idle", tabs: [], receipts: [], error: null },
     },
   };
@@ -111,10 +122,11 @@ it("旧版无轮次记录原样保留消息，升级时不推断虚假的分叉�
   );
   const loaded = await store.load();
   expect(loaded.issues).toEqual([]);
-  expect(loaded.records).toEqual([item]);
+  expect(loaded.records).toEqual([{ ...item, modelSelection: null }]);
+  expect(loaded.legacyIds).toEqual([item.id]);
 });
 
-it("文章历史随库保存且不携带认证，迁入另一设备后可使用该设备的全局配置", async (test) => {
+it("文章历史随库保存且不携带认证，迁入另一设备后保留选择身份等待显式重选", async (test) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-article-store-"));
   test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
   const item = conversation();
@@ -131,4 +143,34 @@ it("文章历史随库保存且不携带认证，迁入另一设备后可使用�
   expect(migrated.issues).toEqual([]);
   expect(migrated.records[0]?.article).toEqual(item.article);
   expect(migrated.records[0]?.model).toBe("fixture");
+});
+
+it("未运行对话以空检查点保存选择和草稿，已有历史缺少检查点则拒绝", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-empty-conversation-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory);
+  const item = conversation();
+  item.model = null;
+  item.checkpoint = null;
+  item.snapshot.messages = [];
+  await store.save(item);
+  expect((await store.load()).records).toEqual([item]);
+  item.snapshot.messages.push({ role: "user", content: [{ type: "text", value: "不能丢失" }] });
+  await store.save(item);
+  expect((await store.load()).issues[0]).toContain("不能缺少检查点");
+});
+
+it("旧版已有目录的对话保留显式关联，不把已保存模型选择当作待迁移默认", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-v5-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory);
+  const item = conversation();
+  await store.save(item);
+  const saved = { version: 5, ...item };
+  Reflect.deleteProperty(saved, "linkedWorkspace");
+  await writeFile(join(directory, "conversations", `${item.id}.json`), JSON.stringify(saved));
+  const loaded = await store.load();
+  expect(loaded.issues).toEqual([]);
+  expect(loaded.records).toEqual([item]);
+  expect(loaded.legacyIds).toEqual([]);
 });

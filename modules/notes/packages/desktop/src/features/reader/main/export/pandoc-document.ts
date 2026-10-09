@@ -2,6 +2,8 @@ import { join } from "node:path";
 import type { Node as PmNode } from "prosemirror-model";
 import type { PreparedExportDocument } from "./documents";
 import { exportResourceHash } from "./resources";
+import { isTextColor, isHighlightColor } from "../../shared/markdown/text-style";
+import { wordTextStyle } from "../../shared/markdown/word-text-style";
 
 /** Pandoc 的 JSON 值；只由受控文档映射生成，不接受原始 OpenXML 注入。 */
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -46,6 +48,20 @@ export function toPandoc(
   }
   function inline(parent: PmNode): PandocNode[] {
     return parent.content.content.flatMap((node): PandocNode[] => {
+      const textColor: unknown = node.marks.find((mark) => mark.type.name === "text_color")?.attrs[
+        "color"
+      ];
+      const highlightColor: unknown = node.marks.find((mark) => mark.type.name === "highlight")
+        ?.attrs["color"];
+      if (textColor !== undefined && !isTextColor(textColor)) throw new Error("未知文字颜色");
+      if (highlightColor !== undefined && !isHighlightColor(highlightColor))
+        throw new Error("未知高亮颜色");
+      const code = node.marks.some((mark) => mark.type.name === "code");
+      const style = wordTextStyle(
+        isTextColor(textColor) ? textColor : null,
+        isHighlightColor(highlightColor) ? highlightColor : null,
+        code,
+      );
       let content: PandocNode[];
       switch (node.type.name) {
         case "text":
@@ -97,6 +113,12 @@ export function toPandoc(
         default:
           throw new Error(`DOCX 不支持此行内结构：${node.type.name}`);
       }
+      // 代码中的空白是原文内容；组合样式已承载代码字体，须以完整文字写入，不能拆成 Space。
+      if (code)
+        content = style
+          ? [make("Str", node.textContent)]
+          : [make("Code", [emptyAttr, node.textContent])];
+      if (style) content = [make("Span", [["", [], [["custom-style", style]]], content])];
       for (const mark of [...node.marks].reverse()) {
         switch (mark.type.name) {
           case "strong":
@@ -109,10 +131,11 @@ export function toPandoc(
             content = [make("Strikeout", content)];
             break;
           case "highlight":
-            content = [make("Span", [["", [], [["custom-style", "NoemoriHighlight"]]], content])];
-            break;
+          case "text_color":
           case "code":
-            content = [make("Code", [emptyAttr, node.textContent])];
+            break;
+          case "underline":
+            content = [make("Underline", content)];
             break;
           case "link":
             content = [

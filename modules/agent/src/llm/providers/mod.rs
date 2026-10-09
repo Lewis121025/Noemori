@@ -77,6 +77,7 @@ fn merge_nested_options(
         }
         (Protocol::Ollama, "options") => &["temperature", "top_p", "num_predict"],
         (Protocol::Bedrock, "inferenceConfig") => &["temperature", "topP", "maxTokens"],
+        (Protocol::Bedrock, "additionalModelRequestFields") => &[],
         _ => return Ok(false),
     };
     let extensions = value

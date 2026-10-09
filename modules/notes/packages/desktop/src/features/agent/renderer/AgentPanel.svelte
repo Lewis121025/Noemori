@@ -10,13 +10,13 @@
   import { canResumeRun } from "../shared/run-actions";
   import ForkConversationDialog from "./ForkConversationDialog.svelte";
   import ConversationRelations from "./ConversationRelations.svelte";
-  import ConversationList from "./ConversationList.svelte";
   import ConversationMessages from "./ConversationMessages.svelte";
   import ConversationActions, { type ConversationAction } from "./ConversationActions.svelte";
   import NewConversationDialog from "./NewConversationDialog.svelte";
-  import ModelSettings from "./ModelSettings.svelte";
+  import ConversationModel from "./ConversationModel.svelte";
   import AgentTerminal from "./AgentTerminal.svelte";
   import AgentBrowser from "./AgentBrowser.svelte";
+  import AgentUi from "./AgentUi.svelte";
   import { createCompositionGuard } from "../../reader/shared/composition";
   let {
     api,
@@ -26,38 +26,37 @@
     articleFilter = $bindable<{ root: string; path: string } | null>(null),
     beforeSend,
     onOpenArticle,
+    onList,
+    onConfigure,
+    modelCatalogVersion = 0,
   }: {
     selected?: string | null;
     articleFilter?: { root: string; path: string } | null;
     beforeSend?: () => Promise<void>;
     onOpenArticle?: (root: string, path: string, markerId: string) => Promise<void>;
+    onList?: (items: AgentConversationInfo[]) => void;
+    onConfigure?: () => void;
+    modelCatalogVersion?: number;
     api: AgentApi;
     close: () => void;
     openLink: (url: string) => Promise<void>;
   } = $props();
   let items = $state<AgentConversationInfo[]>([]);
+  let panelElement: HTMLElement;
   let current = $state<AgentConversation | null>(null);
   let prompt = $state("");
   let savedDraft = $state("");
   let error = $state("");
   let issues = $state<string[]>([]);
-  let settings = $state(false);
-  let modelSettings: ModelSettings | undefined = $state();
-  let pendingCreate = false;
+  let modelAvailable = $state(false);
   let loading = $state(true);
   let sending = $state(false);
   let stoppingIds = $state<string[]>([]);
   let continuingIds = $state<string[]>([]);
   let approving = $state(false);
   let closing = $state(false);
-  let listShown = $state(false);
-  let windowWidth = $state(1100);
-  let headerHeight = $state(74);
-  let listToggle: HTMLButtonElement;
-  const drawerOpen = $derived(listShown && windowWidth <= 800);
-  let listArchived = $state(false);
-  let listQuery = $state("");
   let terminalShown = $state(false);
+  let uiShown = $state(false);
   let terminalId = $state<string | null>(null);
   let selectionVersion = 0;
   let refreshVersion = 0;
@@ -70,7 +69,11 @@
   let messagesView: ConversationMessages | undefined = $state();
   let actionDialog: ConversationActions;
   let moreMenu: HTMLDivElement | undefined = $state();
-  const workspaces = $derived([...new Set(items.map((item) => item.workspace))]);
+  let toolsMenu: HTMLDivElement | undefined = $state();
+  const panelId = $props.id();
+  const workspaces = $derived([
+    ...new Set(items.flatMap((item) => (item.workspace ? [item.workspace] : []))),
+  ]);
   const terminal = $derived(
     current?.terminals.find((entry) => entry.process.session_id === terminalId) ??
       current?.terminals.at(-1) ??
@@ -90,16 +93,39 @@
   function report(cause: unknown): void {
     if (live) error = cause instanceof Error ? cause.message : String(cause);
   }
-  async function list(): Promise<void> {
+  /** 读取目录投影并丢弃迟到结果；供库加载完成后显式刷新。 */
+  export async function refreshList(): Promise<void> {
     const version = ++listVersion;
     const result = await api.list();
     if (!live || version !== listVersion) return;
-    items = result.items;
+    // 流式消息不改变导航元数据时保留数组身份，避免每个 token 重建整个笔记库目录。
+    if (JSON.stringify(items) !== JSON.stringify(result.items)) items = result.items;
     issues = result.issues;
+    onList?.(items);
+    // 首次有效列表负责恢复，过期启动响应不能提前结束恢复，也不能覆盖用户主动选择。
+    if (selectionVersion === 0) {
+      const first =
+        items.find((item) => item.id === selected) ??
+        items.find(
+          (item) =>
+            !item.archived &&
+            (!articleFilter ||
+              (item.workspace === articleFilter.root && item.article?.path === articleFilter.path)),
+        );
+      if (first) await selectConversation(first.id);
+    }
   }
   async function refresh(id: string): Promise<void> {
-    await list();
-    if (selected !== id || !items.some((item) => item.id === id)) return;
+    await refreshList();
+    if (selected !== id) return;
+    if (!items.some((item) => item.id === id)) {
+      selectionVersion += 1;
+      selected = null;
+      current = null;
+      prompt = "";
+      savedDraft = "";
+      return;
+    }
     const version = ++refreshVersion;
     const selection = selectionVersion;
     const snapshot = await api.snapshot(id);
@@ -124,47 +150,39 @@
       void flushDraft().catch(report);
     }, 400);
   }
-  async function select(id: string): Promise<void> {
-    if (!(await prepareToLeave())) return;
+  /** 切换在草稿提交与快照读取成功后才发布身份，失败时保留原会话。 */
+  export async function selectConversation(id: string): Promise<boolean> {
+    if (current?.id === id) return true;
     const version = ++selectionVersion;
     loading = true;
     error = "";
     try {
       await flushDraft();
       const snapshot = await api.snapshot(id);
-      if (!live || selectionVersion !== version) return;
+      if (!live || selectionVersion !== version) return false;
       selected = id;
+      articleFilter = null;
       current = snapshot;
-      listArchived = snapshot.archived;
       prompt = snapshot.draft;
       savedDraft = prompt;
-      settings = false;
-      listShown = false;
       terminalShown = false;
+      uiShown = false;
       terminalId = null;
+      return true;
     } catch (cause) {
       report(cause);
+      return false;
     } finally {
       if (live && selectionVersion === version) loading = false;
     }
   }
   async function initialize(): Promise<void> {
     try {
-      await list();
-      const first =
-        items.find((item) => item.id === selected) ??
-        items.find(
-          (item) =>
-            !item.archived &&
-            (!articleFilter ||
-              (item.workspace === articleFilter.root && item.article?.path === articleFilter.path)),
-        );
-      if (first) listArchived = first.archived;
-      if (first) await select(first.id);
+      await refreshList();
     } catch (cause) {
       report(cause);
     } finally {
-      if (live) loading = false;
+      if (live && selectionVersion === 0) loading = false;
     }
   }
   onMount(() => {
@@ -191,66 +209,54 @@
     }
   }
   async function selectRelation(id: string, turnId?: string | null): Promise<void> {
-    listQuery = "";
-    await select(id);
+    await selectConversation(id);
     await tick();
     if (selected === id && turnId) messagesView?.focusTurn(turnId);
   }
-  async function beginCreate(): Promise<void> {
+  /** 新建只打开名称与可选关联表单；独立入口不继承另一条对话的目录。 */
+  export async function createConversation(directory: string | null = null): Promise<void> {
     try {
-      if (!(await prepareToLeave())) return;
       await flushDraft();
-      if ((await api.settingsGet()) === null) {
-        pendingCreate = true;
-        settings = true;
-        error = "请先配置模型接口，再创建对话。";
-        return;
-      }
-      await createDialog.open(current?.workspace ?? workspaces[0] ?? "");
+      await createDialog.open(directory);
     } catch (cause) {
       report(cause);
     }
   }
   async function created(item: AgentConversation): Promise<void> {
-    listArchived = false;
-    listQuery = "";
-    await list();
-    await select(item.id);
-  }
-  async function settingsSaved(): Promise<void> {
-    error = "";
-    if (pendingCreate) {
-      pendingCreate = false;
-      settings = false;
-      await createDialog.open(current?.workspace ?? workspaces[0] ?? "");
+    await refreshList();
+    if (await selectConversation(item.id)) {
+      await tick();
+      focusComposer(item.id);
     }
+  }
+  /** 显式进入对话后交还输入焦点；迟到的其他会话请求不得抢占当前输入。 */
+  export function focusComposer(id: string): void {
+    if (current?.id === id)
+      panelElement.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }
+  /** 所有收起入口共用保存门禁；失败抛出，调用方必须保留当前面板。 */
+  export async function prepareToHide(): Promise<boolean> {
+    await flushDraft();
+    await api.flush();
+    return true;
   }
   async function closePanel(): Promise<void> {
     if (closing) return;
     closing = true;
     try {
-      if (!(await prepareToLeave())) return;
-      await flushDraft();
-      await api.flush();
-      close();
+      if (await prepareToHide()) close();
     } catch (cause) {
       report(cause);
     } finally {
       closing = false;
     }
   }
-  /**
-   * 应用关闭、切换会话与文章跳转在丢弃配置页前确认未保存输入。
-   * @returns 配置页允许离开时返回 true，取消或保存中返回 false；不发送模型请求。
-   */
-  export function prepareToLeave(): Promise<boolean> {
-    return settings && modelSettings ? modelSettings.confirmLeave() : Promise.resolve(true);
-  }
   async function send(): Promise<void> {
     const item = current;
     if (
       !item ||
       item.archived ||
+      !modelAvailable ||
       sending ||
       loading ||
       composition.active ||
@@ -297,6 +303,7 @@
       !item ||
       !run ||
       item.archived ||
+      !modelAvailable ||
       loading ||
       sending ||
       stoppingIds.includes(item.id) ||
@@ -350,35 +357,59 @@
     }
   }
   async function managed(action: ConversationAction, id: string): Promise<void> {
-    if (action !== "rename" && selected === id) {
+    if (action === "remove" && selected === id) {
+      selectionVersion += 1;
       selected = null;
       current = null;
       prompt = "";
       savedDraft = "";
     }
-    await list();
-    if (action === "rename") await refresh(id);
-    else {
-      const next = items.find(
-        (item) =>
-          !item.archived &&
-          (!articleFilter ||
-            (item.workspace === articleFilter.root && item.article?.path === articleFilter.path)),
-      );
-      if (next) {
-        listArchived = false;
-        listQuery = "";
-        await select(next.id);
-      }
-    }
+    await refreshList();
+    if (selected === id) await refresh(id);
+  }
+  /** 统一树的管理入口捕获目标，不因右键另一条对话而切换正在编辑的草稿。 */
+  export async function manageConversation(
+    id: string,
+    action: ConversationAction | "fork" | "restore",
+  ): Promise<void> {
+    await flushDraft();
+    const item = await api.snapshot(id);
+    if (action === "restore") {
+      await api.archive(id, false);
+      await refresh(id);
+    } else if (action === "fork") await forkDialog.open(item, null);
+    else await actionDialog.open(action, item);
+  }
+  /** 文中入口复用右栏；无会话的文章显示空态，不借用其他文章的对话。 */
+  export async function openArticleConversation(
+    id: string | null,
+    article: { root: string; path: string },
+  ): Promise<boolean> {
+    if (id) return selectConversation(id);
+    await refreshList();
+    const first = items.find(
+      (item) =>
+        !item.archived &&
+        item.workspace === article.root &&
+        item.article?.path === article.path &&
+        !item.article.removed,
+    );
+    if (first) return selectConversation(first.id);
+    await flushDraft();
+    selectionVersion += 1;
+    articleFilter = article;
+    selected = null;
+    current = null;
+    prompt = "";
+    savedDraft = "";
+    loading = false;
+    return true;
   }
   async function restore(): Promise<void> {
     if (!current) return;
     const id = current.id;
     try {
       await api.archive(id, false);
-      listArchived = false;
-      listQuery = "";
       await refresh(id);
     } catch (cause) {
       report(cause);
@@ -401,75 +432,34 @@
   }
 </script>
 
-<svelte:window
-  bind:innerWidth={windowWidth}
-  onkeydown={(event) => {
-    if (
-      drawerOpen &&
-      event.key === "Escape" &&
-      !event.defaultPrevented &&
-      !composition.active &&
-      !document.querySelector("dialog[open]")
-    ) {
-      event.preventDefault();
-      listShown = false;
-      listToggle.focus();
-    }
-  }}
-/>
-<aside
-  class="agent-panel"
-  aria-label="工作区助手"
-  style:--conversation-header-height={`${headerHeight}px`}
->
-  {#if drawerOpen}<button
-      type="button"
-      class="list-scrim"
-      aria-label="收起对话列表"
-      onclick={() => {
-        listShown = false;
-        listToggle.focus();
-      }}
-    ></button>{/if}
-  <div class="conversation-sidebar" class:shown={listShown}>
-    <ConversationList
-      {articleFilter}
-      onClearArticle={() => (articleFilter = null)}
-      {items}
-      {selected}
-      {loading}
-      bind:archived={listArchived}
-      bind:query={listQuery}
-      onSelect={(id) => void select(id)}
-      onCreate={() => void beginCreate()}
-      onSettings={() => {
-        settings = true;
-        listShown = false;
-      }}
-    />
-  </div>
+<aside class="agent-panel" aria-label="工作区助手" bind:this={panelElement}>
   <main class="conversation-main">
-    <header class="conversation-header" bind:offsetHeight={headerHeight}>
-      <button
-        class="reader-button list-toggle"
-        bind:this={listToggle}
-        type="button"
-        aria-label="显示对话列表"
-        aria-expanded={listShown}
-        onclick={() => (listShown = !listShown)}>对话</button
-      >
+    <header class="conversation-header">
       <div class="conversation-heading">
-        <h1>{settings ? "模型接口" : (current?.title ?? "工作区助手")}</h1>
-        {#if !settings && current}<p title={current.workspace}>{current.workspace}</p>{/if}
+        <h1>{current?.title ?? "工作区助手"}</h1>
+        {#if current?.workspace}<p title={current.workspace}>
+            {current.workspace.split(/[\\/]/).at(-1) || current.workspace}
+          </p>{/if}
       </div>
-      {#if current && !settings}<span class="model-badge" title={current.model}
-          >{current.model}</span
-        >
+      <button
+        class="reader-button conversation-icon"
+        type="button"
+        aria-label="新建对话"
+        title="新建对话"
+        onclick={() => void createConversation()}
+        ><svg viewBox="0 0 20 20" aria-hidden="true"
+          ><path d="M10 4H4v12h12v-6M9 11l1-4 6-6 3 3-6 6-4 1Z" /></svg
+        ></button
+      >
+      {#if current}
         <button
-          class="reader-button"
+          class="reader-button conversation-icon"
           type="button"
           popovertarget="conversation-menu"
-          aria-label="对话操作">•••</button
+          aria-label="对话操作"
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M4 10h.01M10 10h.01M16 10h.01" stroke-width="3" /></svg
+          ></button
         >
         <div
           id="conversation-menu"
@@ -497,10 +487,10 @@
         type="button"
         aria-label="关闭助手"
         disabled={closing}
-        onclick={() => void closePanel()}>返回笔记</button
+        onclick={() => void closePanel()}>×</button
       >
     </header>
-    <div class="conversation-content" inert={drawerOpen}>
+    <div class="conversation-content">
       {#if issues.length > 0}<details class="storage-issues">
           <summary>有 {issues.length} 条记录需要处理</summary>{#each issues as issue (issue)}<p>
               {issue}
@@ -521,45 +511,43 @@
             onclick={() =>
               void api
                 .flush()
-                .then(() => (selected ? refresh(selected) : list()))
+                .then(() => (selected ? refresh(selected) : refreshList()))
                 .catch(report)}>重试保存</button
           >
         </div>{/if}
-      {#if settings}<div class="settings-page">
-          <ModelSettings
-            bind:this={modelSettings}
-            {api}
-            saved={() => void settingsSaved().catch(report)}
-            close={() => (settings = false)}
-          />
-        </div>
-      {:else if current}
-        {#if current.article}<div class="article-source">
-            <div><strong>{current.article.title}</strong><span>{current.article.path}</span></div>
-            {#if current.article.status === "located"}<span
-                >{current.article.heading ?? "正文"} · 第 {current.article.line} 行</span
-              >
-            {:else}<span
-                >{current.article.error ??
-                  (current.article.status === "article-missing"
-                    ? "来源文章已移除 · 历史保留"
-                    : current.article.status === "ambiguous"
-                      ? "文章中有重复入口，请核对位置"
-                      : "文中入口已移除 · 历史保留")}</span
-              >{/if}
+      {#if current}
+        {#if current.article && current.workspace}<div class="article-source">
             {#if onOpenArticle}<button
-                class="reader-button"
+                class="article-link"
                 type="button"
-                disabled={current.article.status === "article-missing"}
+                title={`${current.article.path}${current.article.line ? ` · 第 ${current.article.line} 行` : ""}`}
+                disabled={current.article.status === "article-missing" ||
+                  current.article.status === "unavailable"}
                 onclick={() => {
                   const item = current;
-                  if (item?.article)
+                  if (item?.article && item.workspace)
                     void onOpenArticle?.(
                       item.workspace,
                       item.article.path,
                       item.article.markerId,
                     ).catch(report);
-                }}>返回原段落</button
+                }}
+                ><svg viewBox="0 0 20 20" aria-hidden="true"
+                  ><path d="M5 3h7l3 3v11H5zM12 3v4h3M8 10h4M8 13h4" /></svg
+                ><span>{current.article.title}</span></button
+              >
+            {:else}<strong>{current.article.title}</strong>{/if}
+            {#if current.article.status === "located"}<span
+                class="article-location"
+                title={current.article.heading ?? "正文"}>第 {current.article.line} 行</span
+              >
+            {:else}<span class="article-location"
+                >{current.article.error ??
+                  (current.article.status === "article-missing"
+                    ? "来源已移除"
+                    : current.article.status === "ambiguous"
+                      ? "入口重复"
+                      : "入口已移除")}</span
               >{/if}
           </div>{/if}
         <ConversationRelations
@@ -592,7 +580,8 @@
               <button
                 class="reader-button"
                 type="button"
-                disabled={loading ||
+                disabled={!modelAvailable ||
+                  loading ||
                   sending ||
                   stoppingIds.includes(current.id) ||
                   continuingIds.includes(current.id)}
@@ -602,7 +591,16 @@
             {/if}
           </div>{/if}
         {#if current.browser.status !== "idle"}<div class="browser-region">
-            <AgentBrowser {api} session={current.id} browser={current.browser} />
+            {#key current.id}<AgentBrowser
+                {api}
+                session={current.id}
+                browser={current.browser}
+              />{/key}
+          </div>{/if}
+        {#if uiShown || current.ui.status !== "idle" || current.ui.connections.length || current.ui.receipts.length}<div
+            class="browser-region"
+          >
+            {#key current.id}<AgentUi {api} session={current.id} ui={current.ui} />{/key}
           </div>{/if}
         {#if terminalShown}<section class="terminal-drawer" aria-label="会话终端">
             <header>
@@ -645,8 +643,8 @@
             <textarea
               bind:value={prompt}
               aria-label="Agent 用户任务"
-              placeholder="描述想完成的任务…"
-              rows="3"
+              placeholder="聊聊你的想法，或交给助手一件事…"
+              rows="1"
               disabled={loading || sending}
               oninput={draftChanged}
               onkeydown={(event) => {
@@ -663,30 +661,80 @@
             ></textarea>
             <div class="composer-actions">
               <button
-                class="reader-button"
+                class="reader-button composer-tool"
                 type="button"
-                aria-expanded={terminalShown}
-                onclick={() => (terminalShown = !terminalShown)}>终端</button
+                aria-label="对话工具"
+                title="对话工具"
+                popovertarget={`${panelId}-tools`}
+                ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg
+                ></button
               >
-              <span class="composer-hint"
-                >{prompt
-                  ? prompt === savedDraft
-                    ? "草稿已保存"
-                    : "正在保存草稿…"
-                  : "Enter 发送 · Shift+Enter 换行"}</span
+              <div
+                id={`${panelId}-tools`}
+                popover="auto"
+                class="reader-popover tools-menu"
+                bind:this={toolsMenu}
               >
-              {#if current.run?.status === "running"}<button
-                  class="reader-button"
+                <button
                   type="button"
+                  aria-pressed={terminalShown}
+                  onclick={() => {
+                    terminalShown = !terminalShown;
+                    toolsMenu?.hidePopover();
+                  }}
+                  ><svg viewBox="0 0 20 20" aria-hidden="true"
+                    ><path d="m4 5 5 5-5 5M11 15h5" /></svg
+                  >终端</button
+                >
+                <button
+                  type="button"
+                  aria-pressed={uiShown}
+                  onclick={() => {
+                    uiShown = !uiShown;
+                    toolsMenu?.hidePopover();
+                  }}
+                  ><svg viewBox="0 0 20 20" aria-hidden="true"
+                    ><rect x="3" y="3" width="14" height="11" rx="2" /><path
+                      d="M7 17h6M10 14v3"
+                    /></svg
+                  >浏览器与应用</button
+                >
+              </div>
+              {#key current.id}<ConversationModel
+                  {api}
+                  conversationId={current.id}
+                  selection={current.modelSelection}
+                  running={current.run?.status === "running"}
+                  bind:available={modelAvailable}
+                  catalogVersion={modelCatalogVersion}
+                  configure={() => onConfigure?.()}
+                  changed={(selection) => {
+                    if (!current) return;
+                    refreshVersion += 1;
+                    current.modelSelection = selection;
+                    if (current.run?.status !== "running") current.model = selection.modelId;
+                  }}
+                />{/key}
+              {#if current.run?.status === "running"}<button
+                  class="reader-button composer-send"
+                  type="button"
+                  aria-label={stoppingIds.includes(current.id) ? "正在停止…" : "停止生成"}
+                  title="停止生成"
                   disabled={stoppingIds.includes(current.id)}
                   onclick={() => void interruptRun()}
-                  >{stoppingIds.includes(current.id) ? "正在停止…" : "停止生成"}</button
+                  ><svg viewBox="0 0 20 20" aria-hidden="true"
+                    ><rect x="6" y="6" width="8" height="8" rx="1" /></svg
+                  ></button
                 >
               {:else}<button
-                  class="reader-button primary"
+                  class="reader-button primary composer-send"
                   type="submit"
-                  disabled={loading || sending || !prompt.trim()}
-                  >{sending ? "正在发送…" : "发送"}</button
+                  aria-label={sending ? "正在发送…" : "发送"}
+                  title="Enter 发送 · Shift+Enter 换行"
+                  disabled={!modelAvailable || loading || sending || !prompt.trim()}
+                  ><svg viewBox="0 0 20 20" aria-hidden="true"
+                    ><path d="M10 15V5m-5 5 5-5 5 5" /></svg
+                  ></button
                 >{/if}
             </div>
           </form>{/if}
@@ -702,13 +750,13 @@
               }}>返回文章</button
             >
           {:else}
-            <span class="empty-symbol" aria-hidden="true">✦</span>
-            <h2>和助手一起推进工作</h2>
-            <p>每条对话都有独立的工作目录。创建会话后，可以讨论想法、整理文件，或完成具体任务。</p>
-            <button class="reader-button primary" type="button" onclick={() => void beginCreate()}
-              >开始新对话</button
+            <h2>Agent</h2>
+            <p>从笔记库选择对话，或创建新对话。</p>
+            <button
+              class="reader-button primary"
+              type="button"
+              onclick={() => void createConversation()}>开始新对话</button
             >
-            <p class="quiet">对话和草稿保存在本机，重启后可以继续。</p>
           {/if}
         </section>{/if}
     </div>
@@ -737,32 +785,70 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.6rem;
-    padding: 0.65rem 1.5rem;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--sidebar);
     font-size: 0.75rem;
     color: var(--muted);
   }
-  .article-source div {
+  .article-link {
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: center;
+    gap: 6px;
     flex: 1;
     min-width: 0;
-  }
-  .article-source strong {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
     color: var(--fg);
-    font-weight: 500;
+    cursor: pointer;
   }
-  .article-source span {
-    overflow-wrap: anywhere;
+  .article-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .article-link svg {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+  }
+  .article-link:disabled {
+    cursor: default;
+    color: var(--muted);
+  }
+  .article-location {
+    font-size: 11px;
   }
   .agent-panel {
-    position: fixed;
-    inset: 44px 0 0;
-    z-index: 60;
-    display: grid;
-    grid-template-columns: 244px minmax(0, 1fr);
+    /* 对话是阅读内容层，局部配色不继承外层深色文件栏，也不影响工作区其他区域。 */
+    --bg: light-dark(#fafbf8, #222722);
+    --surface: light-dark(#ffffff, #272e28);
+    --fg: light-dark(#2d3830, #e6ece4);
+    --muted: light-dark(#657268, #aab9ac);
+    --border: light-dark(#e0e7dd, #3c493e);
+    --sidebar: light-dark(#f0f4ed, #2f3b31);
+    --selected: light-dark(#e5eee1, #384c3b);
+    --accent: light-dark(#365f43, #b9d6ad);
+    --accent-fill: light-dark(#365f43, #b9d6ad);
+    --accent-text: light-dark(#ffffff, #203423);
+    --danger: light-dark(#aa4238, #efa49c);
+    --shadow: light-dark(#233d2414, #00000040);
+    --glass-sheen: none;
+    --glass-solid: var(--surface);
+    --glass-overlay: var(--surface);
+    --glass-control: var(--bg);
+    --glass-edge: var(--border);
+    --glass-rim: none;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
     background: var(--bg);
     color: var(--fg);
     font-family: "Inter Variable", "Noto Sans SC Variable", sans-serif;
@@ -773,34 +859,20 @@
     flex: 1;
     min-height: 0;
   }
-  .list-scrim {
-    position: absolute;
-    inset: var(--conversation-header-height) 0 0;
-    z-index: 3;
-    border: 0;
-    background: var(--scrim);
-  }
-  .conversation-sidebar {
-    min-height: 0;
-    min-width: 0;
-    display: flex;
-  }
-  .conversation-sidebar :global(.conversations) {
-    flex: 1;
-  }
   .conversation-main {
     display: flex;
     flex-direction: column;
     min-height: 0;
     min-width: 0;
+    background: var(--surface);
   }
   .conversation-header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.85rem 1.5rem;
+    gap: 6px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
-    min-height: 65px;
+    min-height: 52px;
     flex: 0 0 auto;
   }
   .conversation-heading {
@@ -809,8 +881,8 @@
   }
   h1 {
     margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -822,16 +894,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .model-badge {
-    font-size: 0.68rem;
-    color: var(--muted);
-    padding: 0.25rem 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    max-width: 9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .conversation-menu {
     padding: 0.35rem;
@@ -850,23 +912,90 @@
   .danger {
     color: var(--danger);
   }
-  .list-toggle {
-    display: none;
-  }
   .return-notes {
     white-space: nowrap;
     font-size: 0.75rem;
   }
+  .conversation-icon,
+  .composer-tool,
+  .composer-send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .conversation-icon,
+  .composer-tool {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--muted);
+  }
+  .conversation-icon:hover,
+  .composer-tool:hover {
+    background: var(--selected);
+    color: var(--fg);
+  }
+  .agent-panel svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .composer-send {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+  .composer .composer-send.primary {
+    background: var(--accent-fill);
+    box-shadow: none;
+  }
+  .composer-tool {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+  }
+  .tools-menu {
+    position-area: top span-right;
+    width: 190px;
+  }
+  .tools-menu button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .tools-menu button:hover,
+  .tools-menu button[aria-pressed="true"] {
+    background: var(--selected);
+  }
   .composer {
-    width: calc(100% - 3rem);
+    width: calc(100% - 24px);
+    box-sizing: border-box;
     max-width: 46rem;
     align-self: center;
-    margin: 0.6rem 1.5rem 1.3rem;
+    margin: 10px 12px 12px;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--surface);
-    padding: 0.7rem;
-    box-shadow: 0 3px 14px var(--shadow);
+    padding: 10px 8px 8px;
   }
   .composer:focus-within {
     border-color: var(--accent);
@@ -874,28 +1003,24 @@
   textarea {
     display: block;
     width: 100%;
-    min-height: 4rem;
-    max-height: 12rem;
-    resize: vertical;
+    min-height: 44px;
+    max-height: 160px;
+    resize: none;
     field-sizing: content;
     background: transparent;
     color: var(--fg);
     border: 0;
     outline: none;
-    padding: 0.3rem;
+    padding: 4px 6px 8px;
     font: inherit;
     font-size: 0.86rem;
-    line-height: 1.7;
+    line-height: 1.55;
   }
   .composer-actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-  }
-  .composer-hint {
-    flex: 1;
-    color: var(--muted);
-    font-size: 0.65rem;
+    gap: 6px;
+    margin-top: 8px;
   }
   .panel-error,
   .archived-notice,
@@ -903,7 +1028,7 @@
     display: flex;
     align-items: center;
     gap: 0.65rem;
-    padding: 0.6rem 1.5rem;
+    padding: 8px 12px;
     font-size: 0.78rem;
     line-height: 1.5;
   }
@@ -929,19 +1054,10 @@
   .storage-issues {
     color: var(--danger);
     font-size: 0.75rem;
-    padding: 0.6rem 1.5rem;
+    padding: 8px 12px;
   }
   .storage-issues p {
     overflow-wrap: anywhere;
-  }
-  .settings-page {
-    min-height: 0;
-    overflow: auto;
-    padding: 1.5rem;
-  }
-  .settings-page :global(.model-settings) {
-    max-width: 64rem;
-    margin: 0 auto;
   }
   .agent-empty {
     margin: auto;
@@ -949,33 +1065,24 @@
     max-width: 35rem;
     line-height: 1.8;
   }
-  .empty-symbol {
-    display: block;
-    color: var(--accent);
-    font-size: 2rem;
-  }
   .agent-empty h2 {
     margin: 0.5rem 0;
-    font-size: 1.5rem;
+    font-size: 18px;
     font-weight: 500;
   }
   .agent-empty p {
     color: var(--muted);
     font-size: 0.86rem;
   }
-  .agent-empty .quiet {
-    font-size: 0.73rem;
-    margin-top: 1.2rem;
-  }
   .browser-region {
-    padding: 0 1.5rem;
+    padding: 0 12px;
     max-height: 25%;
     overflow: auto;
   }
   .terminal-drawer {
     max-height: 40%;
     overflow: auto;
-    padding: 0.5rem 1.5rem;
+    padding: 8px 12px;
     border-top: 1px solid var(--border);
   }
   .terminal-drawer > header {
@@ -1000,39 +1107,13 @@
     font-size: 0.75rem;
     color: var(--muted);
   }
-  @media (max-width: 800px) {
-    .agent-panel {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .conversation-sidebar {
-      display: none;
-      position: absolute;
-      left: 0;
-      top: var(--conversation-header-height);
-      bottom: 0;
-      width: min(280px, 80vw);
-      z-index: 4;
-      box-shadow: 12px 0 30px var(--shadow);
-    }
-    .conversation-sidebar.shown {
-      display: flex;
-    }
-    .list-toggle {
-      display: block;
-    }
-    .conversation-header {
-      padding: 0.75rem;
-      gap: 0.5rem;
-    }
-    .model-badge {
-      display: none;
-    }
-    .composer {
-      width: calc(100% - 1.5rem);
-      margin: 0.5rem 0.75rem 0.75rem;
-    }
-    .composer-hint {
-      font-size: 0.6rem;
-    }
+  .conversation-main {
+    flex: 1;
+  }
+  .return-notes {
+    border: 0;
+    padding: 3px 6px;
+    background: transparent;
+    font-size: 17px;
   }
 </style>

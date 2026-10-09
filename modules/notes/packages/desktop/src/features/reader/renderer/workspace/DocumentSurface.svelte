@@ -67,7 +67,8 @@
       open: async (id) => {
         if (!(await pane.flushBeforeLeave())) throw new Error("请先处理文章保存问题");
         const item = await preview(id);
-        await bridge.open(id, { root: item.workspace, path: item.article?.path ?? path });
+        // 独立对话的文中链接只提供导航来源，不把当前文章变成对话关联。
+        await bridge.open(id, { root: item.workspace ?? root, path: item.article?.path ?? path });
       },
       report: (message) => workspace.report(message),
     };

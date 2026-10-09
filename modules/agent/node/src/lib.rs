@@ -10,14 +10,18 @@ use serde::Deserialize;
 use std::{
     path::PathBuf,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Options {
+    #[serde(default)]
+    ui: Option<UiOptions>,
+    #[serde(default)]
+    ui_label: String,
     #[serde(default)]
     browser: Option<BrowserOptions>,
     workspace: PathBuf,
@@ -29,6 +33,16 @@ struct Options {
     readable_paths: Vec<PathBuf>,
     #[serde(default)]
     environment: Environment,
+}
+
+/// 运行资产和连接目录来自可信主进程，模型不能替换。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UiOptions {
+    executable: PathBuf,
+    broker_directory: PathBuf,
+    extension_id: String,
+    computer_helper: Option<PathBuf>,
 }
 
 /// 浏览器进程、入口及显示模式由可信桌面宿主冻结，模型不能替换执行环境。
@@ -113,6 +127,20 @@ impl NativeAgentSession {
                     headless: browser.headless,
                     private_origins: Vec::new(),
                 });
+        options.ui_label = config.ui_label;
+        if let Some(ui) = config.ui {
+            options.ui = Some(noemori_agent::tool::ui::UiConfig {
+                executable: ui.executable,
+                broker: noemori_agent::tool::ui::broker::UiBroker::open(
+                    ui.broker_directory,
+                    ui.extension_id,
+                    changed.clone(),
+                )
+                .map_err(to_napi)?,
+                computer_helper: ui.computer_helper,
+                workspace: options.workspace.clone(),
+            });
+        }
         let inner = within_runtime_if_available(|| DesktopSession::new(model, options, changed))
             .map_err(to_napi)?;
         Ok(Self { inner })
@@ -122,6 +150,40 @@ impl NativeAgentSession {
     #[napi]
     pub fn snapshot(&self) -> Result<String> {
         serde_json::to_string(&self.inner.snapshot()).map_err(to_napi)
+    }
+
+    /// 读取当前会话浮窗画面；参数必须是固定目标结构，返回画面和输入凭据的 JSON 或错误。
+    #[napi]
+    pub async fn ui_preview(&self, target: String) -> Result<String> {
+        if target.len() > 2048 { return Err(Error::from_reason("预览目标超限")); }
+        let frame = self.inner.ui_preview(serde_json::from_str(&target).map_err(to_napi)?).await.map_err(to_napi)?;
+        serde_json::to_string(&frame).map_err(to_napi)
+    }
+
+    /// 转发用户接管后的有界浏览器输入；无效目标或控制状态使 Promise 拒绝。
+    #[napi]
+    pub async fn browser_input(&self, page: String, token: String, input: String) -> Result<()> {
+        if page.len() > 128 || token.is_empty() || token.len() > 128 || input.len() > 65536 { return Err(Error::from_reason("人工输入超限")); }
+        self.inner.browser_input(page, token, serde_json::from_str(&input).map_err(to_napi)?).await.map_err(to_napi)
+    }
+
+    /// 可信主进程切换 UI 控制权；不会自动启动或恢复模型生成。
+    /// 后端、窗口身份、运行状态或确认回执无效时拒绝 Promise。
+    #[napi]
+    pub async fn ui_control(&self, backend: String, resume: bool) -> Result<String> {
+        serde_json::to_string(
+            &self
+                .inner
+                .ui_control(&backend, resume)
+                .await
+                .map_err(to_napi)?,
+        )
+        .map_err(to_napi)
+    }
+    /// 用户明确检查时读取原生权限状态，不代替用户授权。
+    #[napi]
+    pub async fn ui_permissions(&self) -> Result<String> {
+        serde_json::to_string(&self.inner.ui_permissions().await.map_err(to_napi)?).map_err(to_napi)
     }
 
     /// 中断明确的运行并等待终态；旧运行标识、超时或关闭错误会拒绝 Promise。
@@ -177,6 +239,14 @@ impl NativeAgentSession {
         self.inner
             .start_configured(model, binding, text, context)
             .map_err(to_napi)
+    }
+
+    /// 取消当前运行和审批，不自动重放命令。
+    /// 当前运行接收补充文字，在下一次模型请求中生效，不新建轮次。
+    /// run_id 必须匹配当前运行；text 非空且至多 128 KiB；失效、停止或输入超限返回错误。
+    #[napi]
+    pub fn steer(&self, run_id: String, text: String) -> Result<String> {
+        self.inner.steer(&run_id, text).map_err(to_napi)
     }
 
     /// 取消当前运行和审批，不自动重放命令。

@@ -171,7 +171,7 @@ test("白板模式与工具栏：正文插入、手势编辑、保存重启、�
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
     await expect.poll(() => page.locator(".whiteboard [data-stroke-id]").count()).toBe(3);
     expect(await readFile(boardPath, "utf8")).toBe(saved);
-    if (!(await page.locator(".file-sidebar").isVisible()))
+    if (!(await page.locator(".file-sidebar:not(.right)").isVisible()))
       await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
     await documentTools(page);
     await page.getByRole("button", { name: "笔记操作", exact: true }).click();

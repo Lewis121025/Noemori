@@ -50,4 +50,7 @@ if (typeof document !== "undefined") {
   if (typeof HTMLElement.prototype.hidePopover !== "function") {
     HTMLElement.prototype.hidePopover = function (): void {};
   }
+  if (typeof HTMLElement.prototype.showPopover !== "function") {
+    HTMLElement.prototype.showPopover = function (): void {};
+  }
 }

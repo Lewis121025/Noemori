@@ -120,6 +120,13 @@ class CalloutView implements NodeView {
   private bindTitle(): void {
     const composition = createCompositionGuard();
     composition.bind(this.title);
+    this.title.addEventListener("focus", () => {
+      const pos = this.getPos();
+      if (pos === undefined) return;
+      const { state } = this.view;
+      // 标题属于此标注；同步文档上下文，工具栏才不会误操作先前的正文位置。
+      this.view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(pos + 1))));
+    });
     this.title.addEventListener("input", () => {
       const pos = this.getPos();
       if (!this.view.editable || !canUseEditingTools(this.view.state)) {

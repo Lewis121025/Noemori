@@ -20,6 +20,7 @@
   let previewHeight = $state(230);
   let preview = $state.raw<ArticleConversationPreview | null>(null);
   let previewError = $state("");
+  let popover: HTMLElement | undefined = $state();
   const hover = createHoverController<{ id: string; element: HTMLAnchorElement }>({
     show: (hit) => {
       shown = { ...hit, rect: hit.element.getBoundingClientRect() };
@@ -32,6 +33,11 @@
 
   /** 关闭当前文章对话浮层，不改变正文或会话。 */
   export function dismiss(): void {
+    hover.dismiss();
+  }
+  function leaveContext(event: Event): void {
+    const target = event.target;
+    if (target instanceof Node && (view.dom.contains(target) || popover?.contains(target))) return;
     hover.dismiss();
   }
   function hit(target: EventTarget | null) {
@@ -113,8 +119,14 @@
   });
 </script>
 
-<svelte:window onscroll={() => hover.dismiss()} onresize={() => hover.dismiss()} />
+<svelte:document onfocusin={leaveContext} onpointerdown={leaveContext} />
+<svelte:window
+  onscroll={() => hover.dismiss()}
+  onresize={() => hover.dismiss()}
+  onblur={() => hover.dismiss()}
+/>
 {#if shown}<aside
+    bind:this={popover}
     bind:offsetHeight={previewHeight}
     class="conversation-preview"
     aria-label="文章对话预览"

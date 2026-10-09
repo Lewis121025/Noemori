@@ -7,6 +7,8 @@ export type BrowserStep =
 
 /** 浏览器动作只引用宿主分配的页面与观察；总 JSON 限 1 MiB，超限作为可纠正的输入错误拒绝。 */
 export type BrowserAction =
+  | { action: "preview"; page: string }
+  | { action: "human_input"; page: string; token: string; input: BrowserHumanInput }
   | { action: "allow_origin"; origin: string }
   | { action: "tabs" }
   | { action: "open"; url: string }
@@ -48,9 +50,34 @@ export type BrowserAction =
   | { action: "dialog"; page: string; accept: boolean; text?: string }
   | { action: "upload"; page: string; observation: string; ref: string; paths: string[] }
   | { action: "downloads" }
+  | { action: "arm_download"; page: string }
+  | { action: "await_download"; page: string }
+  | { action: "invalidate" }
   | { action: "save_download"; id: string; path: string }
   | { action: "handoff" }
   | { action: "resume" };
+
+/** 可信预览窗口的人工输入；只在用户接管期间接受，不共享模型观察。 */
+export type BrowserHumanInput =
+  | { type: "dialog"; accept: boolean; text?: string }
+  | { type: "files"; paths: string[] }
+  | { type: "pointer"; x: number; y: number }
+  | { type: "scroll"; x: number; y: number }
+  | { type: "key"; key: string }
+  | { type: "text"; text: string };
+
+/** 校验人工输入的尺寸和文本预算；无效输入在派发前抛出错误。 */
+export function parseHumanInput(value: unknown): BrowserHumanInput {
+  const input = record(value);
+  const type = text(input, "type", 16);
+  if (type === "pointer" || type === "scroll")
+    return { type, x: number(input, "x", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000), y: number(input, "y", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000) };
+  if (type === "dialog") return { type, accept: boolean(input, "accept"), ...(input.text === undefined ? {} : { text: text(input, "text", 16384) }) };
+  if (type === "files") return { type, paths: strings(input, "paths") };
+  if (type === "key") return { type, key: text(input, "key", 100) };
+  if (type === "text") return { type, text: text(input, "text", 16384) };
+  throw new Error("人工输入类型无效");
+}
 
 /** 启动配置由 Rust 宿主提供；工作区、文件与资源边界不能由工具动作改变。 */
 export type BrowserSettings = {
@@ -90,6 +117,7 @@ export type Observation = {
 
 /** 工具结果区分未执行、执行后观察与副作用未知；未知结果不得自动重放。 */
 export type BrowserResult = {
+  input_token?: string;
   steps?: {
     index: number;
     action: string;
@@ -109,6 +137,7 @@ export type BrowserResult = {
 
 /** 下载完成只表示已经落入私有暂存区，显式保存才写入工作区。 */
 export type DownloadState = {
+  page?: string;
   id: string;
   name: string;
   status: "running" | "completed" | "failed";
@@ -166,7 +195,7 @@ function strings(input: Record<string, unknown>, key: string): string[] {
 export function parseAction(value: unknown): BrowserAction {
   const input = record(value);
   // 与 Rust 输入契约一致；聚合超限属于普通动作错误，不能摧毁当前登录态和标签页。
-  if (Buffer.byteLength(JSON.stringify(input)) > 1024 * 1024)
+  if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 1024 * 1024)
     throw new Error("浏览器动作 JSON 超过 1 MiB，请拆分批量步骤或缩短输入");
   const action = text(input, "action", 32);
   switch (action) {
@@ -176,6 +205,7 @@ export function parseAction(value: unknown): BrowserAction {
     case "downloads":
     case "handoff":
     case "resume":
+    case "invalidate":
       return { action };
     case "open":
       return { action, url: text(input, "url") };
@@ -184,6 +214,8 @@ export function parseAction(value: unknown): BrowserAction {
   }
   const page = text(input, "page", 128);
   switch (action) {
+    case "human_input":
+      return { action, page, token: text(input, "token", 128), input: parseHumanInput(input.input) };
     case "navigate":
       return { action, page, url: text(input, "url") };
     case "back":
@@ -192,6 +224,9 @@ export function parseAction(value: unknown): BrowserAction {
     case "close":
     case "observe":
     case "screenshot":
+    case "preview":
+    case "arm_download":
+    case "await_download":
       return { action, page };
     case "read": {
       const offset = input.offset === undefined ? 0 : number(input, "offset", 0, 10_000_000);

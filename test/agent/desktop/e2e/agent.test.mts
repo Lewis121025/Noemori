@@ -1,3 +1,4 @@
+import { newConversation } from "../../../notes/desktop/support/workspace-actions";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,12 +13,14 @@ const require = createRequire(new URL("package.json", desktop));
 
 async function createConversation(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
-  await page.getByRole("button", { name: "＋ 新会话", exact: true }).click();
+  await newConversation(page);
   const dialog = page.getByRole("dialog", { name: "新建对话", exact: true });
   await dialog.getByRole("textbox", { name: "会话名称", exact: true }).fill(title);
-  await dialog.getByRole("button", { name: "选择文件夹…", exact: true }).click();
+  await dialog.getByRole("button", { name: "关联文件夹…", exact: true }).click();
   await dialog.getByRole("button", { name: "创建对话", exact: true }).click();
   await page.getByRole("textbox", { name: "Agent 用户任务" }).waitFor();
+  await page.getByRole("button", { name: "选择对话模型", exact: true }).click();
+  await page.getByRole("button", { name: "fixture", exact: true }).click();
 }
 
 async function current(page: Page) {
@@ -141,6 +144,7 @@ test("实际窗口审批、终端输入与渲染器重载使用同一原生会�
     )
     .toBe(true);
   const before = (await current(page))!.id;
+  await page.getByRole("button", { name: "对话工具", exact: true }).click();
   await page.getByRole("button", { name: "终端", exact: true }).click();
   await page.locator(".terminal-screen").click();
   await page.keyboard.type("line");
@@ -168,6 +172,7 @@ test("实际窗口审批、终端输入与渲染器重载使用同一原生会�
   await page.waitForFunction(() => typeof window.noemori?.agent?.list === "function");
   expect(await current(page)).toMatchObject({ id: before, terminals: [{ tty: true }] });
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
+  await page.getByRole("button", { name: "对话工具", exact: true }).click();
   await page.getByRole("button", { name: "终端", exact: true }).click();
   await page.getByRole("button", { name: "停止", exact: true }).click();
   await expect
@@ -241,8 +246,7 @@ test("真实原生对话跨进程保留上下文和草稿，归档恢复后继�
     .getByRole("dialog", { name: "归档对话", exact: true })
     .getByRole("button", { name: "归档对话", exact: true })
     .click();
-  await page.getByRole("button", { name: "已归档", exact: true }).click();
-  await page.locator(".conversation-item").click();
+  await page.getByText("此对话已归档，历史记录仍可阅读。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "恢复对话", exact: true }).click();
   await restoredPrompt.waitFor();
   expect(requests).toHaveLength(1);

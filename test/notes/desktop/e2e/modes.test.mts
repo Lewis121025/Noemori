@@ -74,7 +74,7 @@ test("统一读写：窗口按钮、独立设置与底部双链各有唯一职�
     expect(await split.count()).toBe(1);
     expect((await split.boundingBox())!.x).toBeGreaterThan(1000);
     await toggle.click();
-    await page.locator(".file-sidebar").waitFor({ state: "hidden" });
+    await page.locator(".file-sidebar:not(.right)").waitFor({ state: "hidden" });
     expect(await toggle.isVisible()).toBe(true);
     await toggle.click();
 
@@ -148,7 +148,7 @@ test("统一读写：窗口按钮、独立设置与底部双链各有唯一职�
     await expect.poll(() => dock.locator(".references").innerText()).toContain("乙");
     expect(await dock.locator("details").count()).toBe(0);
     const dockBox = (await page.locator(".links-dock").boundingBox())!;
-    const sideBox = (await page.locator(".file-sidebar").boundingBox())!;
+    const sideBox = (await page.locator(".file-sidebar:not(.right)").boundingBox())!;
     expect(dockBox.y + dockBox.height).toBeCloseTo(sideBox.y + sideBox.height, 0);
     expect(
       await dock

@@ -133,11 +133,14 @@ export function parsePaneLayout(value: unknown): PaneLayout | null {
         : isWorkspaceDestination(record.destination)
           ? { destination: record.destination }
           : {}),
-    ...(record.sidebarView === "files"
-      ? { sidebarView: "outline" }
-      : record.sidebarView === "outline" || record.sidebarView === "search"
-        ? { sidebarView: record.sidebarView }
-        : {}),
+    ...(record.sidebarView === "files" ||
+    record.sidebarView === "outline" ||
+    record.sidebarView === "search"
+      ? { sidebarView: record.sidebarView }
+      : {}),
+    ...(typeof record.rightWidth === "number" && Number.isFinite(record.rightWidth)
+      ? { rightWidth: Math.min(640, Math.max(320, Math.round(record.rightWidth))) }
+      : {}),
     ...(typeof record.searchQuery === "string" ? { searchQuery: record.searchQuery } : {}),
   };
 }

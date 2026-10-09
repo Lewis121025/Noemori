@@ -100,7 +100,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await formatting.getByRole("button", { name: "插入", exact: true }).click();
     await page
       .locator(".topbar-document:not([hidden])")
-      .getByRole("button", { name: "链接…", exact: true })
+      .getByRole("menuitem", { name: "链接…", exact: true })
       .click();
     const link = page.getByRole("dialog", { name: "插入链接" });
     await link.getByLabel("链接目标").fill("参考.md");
@@ -141,7 +141,6 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true })
       .waitFor();
-    await formatting.getByRole("button", { name: "更多编辑操作", exact: true }).click();
     await page.getByRole("button", { name: "重做", exact: true }).click();
     expect(await editor.locator("strong").innerText()).toBe("关键");
     await page.keyboard.press("ControlOrMeta+s");
@@ -160,7 +159,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
-      .getByRole("treeitem", { name: "文本.txt", exact: true })
+      .getByRole("button", { name: "文本.txt", exact: true })
       .click();
     await ready("文本.txt");
     expect(await formatting.isVisible()).toBe(false);
@@ -178,7 +177,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await sidebarComponent(page, "文件");
     await page
       .getByRole("navigation", { name: "文件列表" })
-      .getByRole("treeitem", { name: "写作.md", exact: true })
+      .getByRole("button", { name: "写作.md", exact: true })
       .click();
     await page.getByRole("heading", { name: "核心写作" }).waitFor();
     await ready("写作.md");
@@ -234,10 +233,10 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-narrow.png") });
     // 窄窗口也通过同一个组件入口操作格式，正文保持无工具栏。
     await documentTools(page);
-    await formatting.getByLabel("段落格式").focus();
+    await formatting.getByRole("button", { name: "段落格式", exact: true }).focus();
     expect(
       await formatting
-        .getByLabel("段落格式")
+        .getByRole("button", { name: "段落格式", exact: true })
         .evaluate((element) => element === document.activeElement),
     ).toBe(true);
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-formatting.png") });
@@ -270,7 +269,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
     await page.keyboard.press("Escape");
     await sidebarComponent(page, "文件");
     const files = page.getByRole("navigation", { name: "文件列表" });
-    await files.getByRole("treeitem", { name: "长文.md", exact: true }).click();
+    await files.getByRole("button", { name: "长文.md", exact: true }).click();
     await ready("长文.md");
     expect(await search.isVisible()).toBe(false);
     await expect.poll(() => files.isVisible()).toBe(false);
@@ -305,7 +304,7 @@ test("从空白笔记写作、任务交互、链接插入、查找替换和重�
       .toBe(true);
     if (screenshots) await page.screenshot({ path: join(screenshots, "writing-long-search.png") });
     await sidebarComponent(page, "文件");
-    await files.getByRole("treeitem", { name: "写作.md", exact: true }).click();
+    await files.getByRole("button", { name: "写作.md", exact: true }).click();
     await ready("写作.md");
     expect(errors).toEqual([]);
     await app.close();

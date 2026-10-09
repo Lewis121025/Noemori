@@ -63,15 +63,46 @@ const provider = {
   models: [model],
 };
 
-it("供应商输入拒绝空模型、重复模型、空凭据和不存在的保留目标", () => {
+it("供应商允许尚未获取模型，仍拒绝重复模型、空凭据和不存在的保留目标", () => {
   expect(parseProviderUpdate(provider)).toEqual(provider);
-  for (const models of [[], [model, model], [{ ...model, id: " " }]]) {
+  expect(parseProviderUpdate({ ...provider, models: [] }).models).toEqual([]);
+  for (const models of [[model, model], [{ ...model, id: " " }]]) {
     expect(() => parseProviderUpdate({ ...provider, models })).toThrow("模型");
   }
   expect(() => parseProviderUpdate({ ...provider, authentication: null })).toThrow("认证");
   expect(() =>
     parseProviderUpdate({ ...provider, authentication: { type: "bearer", value: "" } }),
   ).toThrow("认证");
+});
+
+it("推理档位不受协议或能力元数据拦截，省略时使用服务商默认", () => {
+  const reasoning = { supported: true, efforts: ["low", "high"] };
+  const input = {
+    ...provider,
+    protocol: "anthropic",
+    models: [{ ...model, reasoning, reasoningEffort: "high" }],
+  };
+  expect(parseProviderUpdate(input).models[0].reasoningEffort).toBe("high");
+  expect(
+    parseProviderUpdate({ ...input, models: [{ ...model, reasoning, reasoningEffort: "max" }] })
+      .models[0].reasoningEffort,
+  ).toBe("max");
+  expect(
+    parseProviderUpdate({
+      ...input,
+      models: [
+        { ...model, reasoning: { supported: null, efforts: null }, reasoningEffort: "high" },
+      ],
+    }).models[0].reasoningEffort,
+  ).toBe("high");
+  expect(parseProviderUpdate({ ...input, protocol: "gemini" }).models[0].reasoningEffort).toBe(
+    "high",
+  );
+  const defaults = parseProviderUpdate({
+    ...input,
+    models: [{ ...model, reasoning: { supported: null, efforts: null } }],
+  });
+  expect(defaults.models[0]).not.toHaveProperty("reasoningEffort");
 });
 
 it("认证请求头有明确上限，模型标识必须能无损传给原生 UTF-8 JSON", () => {

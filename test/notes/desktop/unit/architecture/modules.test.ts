@@ -58,7 +58,6 @@ describe("功能模块依赖边界", () => {
       "document/state.svelte": [],
       "navigation/state.svelte": ["document/state.svelte"],
       "search/state.svelte": [],
-      "bookmarks/state.svelte": [],
       "library/state.svelte": [],
       "navigation/history.svelte": [],
       "workspace/pane.svelte": [
@@ -69,7 +68,6 @@ describe("功能模块依赖边界", () => {
       "workspace/state.svelte": [
         "workspace/pane.svelte",
         "search/state.svelte",
-        "bookmarks/state.svelte",
         "navigation/history.svelte",
         "library/state.svelte",
       ],

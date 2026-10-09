@@ -1,6 +1,135 @@
 use super::*;
 
 #[tokio::test]
+async fn bedrock_effort_uses_the_official_model_family_field() {
+    use noemori_agent::llm::ReasoningEffort;
+    for (model_id, field) in [
+        ("anthropic.claude-opus-4-6-v1", "claude"),
+        ("us.anthropic.claude-opus-4-6-v1", "claude"),
+        ("global.anthropic.claude-opus-4-6-v1", "claude"),
+        (
+            "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1",
+            "claude",
+        ),
+        (
+            "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-6-v1",
+            "claude",
+        ),
+        ("openai.gpt-oss-120b-1:0", "openai"),
+        ("amazon.nova-2-lite-v1:0", "nova"),
+        ("us.amazon.nova-2-lite-v1:0", "nova"),
+        ("custom-model", "openai"),
+    ] {
+        for streaming in [false, true] {
+            for effort in [
+                None,
+                Some("none"),
+                Some("minimal"),
+                Some("low"),
+                Some("medium"),
+                Some("high"),
+                Some("xhigh"),
+                Some("max"),
+                Some("ULTRA"),
+            ] {
+                let fixture = if streaming {
+                    bedrock_fixture(&[
+                        ("messageStart", json!({"role":"assistant"})),
+                        (
+                            "contentBlockDelta",
+                            json!({"contentBlockIndex":0,"delta":{"text":"完成"}}),
+                        ),
+                        ("contentBlockStop", json!({"contentBlockIndex":0})),
+                        ("messageStop", json!({"stopReason":"end_turn"})),
+                        (
+                            "metadata",
+                            json!({"usage":{"inputTokens":1,"outputTokens":1}}),
+                        ),
+                    ])
+                } else {
+                    Fixture::json(
+                        json!({"output":{"message":{"role":"assistant","content":[{"text":"完成"}]}},"stopReason":"end_turn"}),
+                    )
+                };
+                let mut server = Server::start(vec![fixture]).await;
+                let mut selected = config(Protocol::Bedrock, &server.url, streaming);
+                selected.model = model_id.into();
+                selected.reasoning_effort = effort
+                    .map(|value| serde_json::from_value::<ReasoningEffort>(json!(value)).unwrap());
+                generate(&HttpModel::new(selected).unwrap(), request(), context())
+                    .await
+                    .unwrap();
+                server.finish().await;
+                let requests = server.requests.lock().unwrap();
+                let expected = effort.map(|value| match field {
+                    "claude" if value == "none" => json!({"thinking":{"type":"disabled"}}),
+                    "claude" => json!({"output_config":{"effort":value}}),
+                    "nova" if value == "none" => json!({"reasoningConfig":{"type":"disabled"}}),
+                    "nova" => {
+                        json!({"reasoningConfig":{"type":"enabled","maxReasoningEffort":value}})
+                    }
+                    _ => json!({"reasoning_effort":value}),
+                });
+                assert_eq!(
+                    requests[0].body.get("additionalModelRequestFields"),
+                    expected.as_ref(),
+                    "{model_id} streaming={streaming}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn bedrock_effort_preserves_other_official_additional_fields() {
+    use noemori_agent::llm::ReasoningEffort;
+    let mut server = Server::start(vec![Fixture::json(json!({"output":{"message":{"role":"assistant","content":[{"text":"完成"}]}},"stopReason":"end_turn"}))]).await;
+    let mut selected = config(Protocol::Bedrock, &server.url, false);
+    selected.model = "anthropic.claude-opus-4-6-v1".into();
+    selected.reasoning_effort = Some(ReasoningEffort::High);
+    let mut input = request();
+    input.options.provider_options.insert(
+        "additionalModelRequestFields".into(),
+        json!({"thinking":{"type":"adaptive"}}),
+    );
+    generate(&HttpModel::new(selected).unwrap(), input, context())
+        .await
+        .unwrap();
+    server.finish().await;
+    assert_eq!(
+        server.requests.lock().unwrap()[0].body["additionalModelRequestFields"],
+        json!({"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}})
+    );
+}
+
+#[tokio::test]
+async fn bedrock_unsupported_effort_reports_the_gateway_error() {
+    use noemori_agent::llm::ReasoningEffort;
+    let mut server = Server::start(vec![Fixture {
+        status: 400,
+        content_type: "application/json",
+        body: br#"{"message":"unsupported effort: max"}"#.to_vec(),
+    }])
+    .await;
+    let mut selected = config(Protocol::Bedrock, &server.url, false);
+    selected.model = "openai.gpt-oss-120b-1:0".into();
+    selected.reasoning_effort = Some(ReasoningEffort::Max);
+    let error = generate(&HttpModel::new(selected).unwrap(), request(), context())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::Http { status: 400, ref message, .. } if message.contains("unsupported effort: max"))
+    );
+    server.finish().await;
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].body["additionalModelRequestFields"]["reasoning_effort"],
+        "max"
+    );
+}
+
+#[tokio::test]
 async fn bedrock_stream_checks_frames_and_finishes_after_metadata() {
     let events = [
         ("messageStart", json!({"role":"assistant"})),

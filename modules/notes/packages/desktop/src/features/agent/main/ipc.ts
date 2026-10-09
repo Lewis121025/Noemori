@@ -1,9 +1,15 @@
 import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import type { AgentService } from "./service";
 import { parseApprovalReply, record, text } from "../shared/parse";
-import { parseModelSelection, parseProviderUpdate } from "../shared/providers";
+import {
+  parseModelSelection,
+  parseProviderConnection,
+  parseProviderUpdate,
+} from "../shared/providers";
 import { isEntryPath } from "../../reader/shared/file-browser";
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute, relative, sep } from "node:path";
+import { parsePreviewTarget, parseBrowserHumanInput } from "../shared/preview";
 
 /** 所有 Agent 请求验证当前主窗口和主框架，导出窗口与嵌入网页不能调用。 */
 export function registerAgentIpc(
@@ -40,7 +46,37 @@ export function registerAgentIpc(
       throw new Error("Agent 会话标识无效");
     return value;
   };
-  ipcMain.handle("agent.settingsGet", (event) => own(event).settingsGet());
+  ipcMain.handle("agent.settingsGet", (event, session: unknown) =>
+    own(event).settingsGet(id(session)),
+  );
+  ipcMain.handle("agent.browserChooseFiles", async (event, session: unknown, page: unknown, token: unknown) => {
+    const service = own(event), owner = id(session), target = id(page), lease = id(token);
+    const chosen = await dialog.showOpenDialog({ title: "选择工作区中的文件", properties: ["openFile", "multiSelections"] });
+    if (own(event) !== service) throw new Error("窗口已改变");
+    await service.browserInput(owner, target, lease, { type: "files", paths: chosen.canceled ? [] : chosen.filePaths });
+  });
+  ipcMain.handle("agent.uiSetup", (event) => own(event).uiSetup());
+  ipcMain.handle("agent.uiPreview", (event, session: unknown, target: unknown) =>
+    own(event).uiPreview(id(session), parsePreviewTarget(target)),
+  );
+  ipcMain.handle("agent.browserInput", (event, session: unknown, page: unknown, token: unknown, input: unknown) =>
+    own(event).browserInput(id(session), id(page), id(token), parseBrowserHumanInput(input)),
+  );
+  ipcMain.handle("agent.uiPermissions", (event, session: unknown) =>
+    own(event).uiPermissions(id(session)),
+  );
+  ipcMain.handle(
+    "agent.uiControl",
+    (event, session: unknown, backend: unknown, resume: unknown) => {
+      if (
+        typeof backend !== "string" ||
+        !["managed", "chrome", "edge", "computer"].includes(backend) ||
+        typeof resume !== "boolean"
+      )
+        throw new Error("界面控制请求无效");
+      return own(event).uiControl(id(session), backend, resume);
+    },
+  );
   ipcMain.handle("agent.attachVault", async (event, value: unknown) => {
     const service = own(event);
     return service.attachVault(await requireVault(value));
@@ -70,36 +106,62 @@ export function registerAgentIpc(
     return service.remapArticles(root, changes);
   });
   ipcMain.handle("agent.providersGet", (event) => own(event).providersGet());
+  ipcMain.handle("agent.providersDiscover", (event, value: unknown) =>
+    own(event).providersDiscover(parseProviderConnection(value)),
+  );
+  ipcMain.handle("agent.providersRefresh", (event, value: unknown) =>
+    own(event).providersRefresh(id(value)),
+  );
   ipcMain.handle("agent.providersSave", (event, value: unknown) =>
     own(event).providersSave(parseProviderUpdate(value)),
   );
-  ipcMain.handle("agent.providersRemove", (event, value: unknown) => own(event).providersRemove(id(value)));
-  ipcMain.handle("agent.modelSelect", (event, value: unknown) => own(event).modelSelect(parseModelSelection(value)));
+  ipcMain.handle("agent.providersRemove", (event, value: unknown) =>
+    own(event).providersRemove(id(value)),
+  );
+  ipcMain.handle("agent.modelSelect", (event, session: unknown, value: unknown) =>
+    own(event).modelSelect(id(session), parseModelSelection(value)),
+  );
   ipcMain.handle("agent.pickWorkspace", async (event) => {
     const service = own(event);
     const window = getWindow();
     if (!window) throw new Error("主窗口不存在");
     const result = await dialog.showOpenDialog(window, {
-      title: "选择 Agent 工作区",
+      title: "关联文件夹",
       properties: ["openDirectory"],
     });
     if (result.canceled) return null;
-    const workspace = result.filePaths[0];
-    if (!workspace) throw new Error("没有选择工作区");
+    const selected = result.filePaths[0];
+    if (!selected) throw new Error("没有选择文件夹");
+    const workspace = await realpath(selected);
+    if (!(await stat(workspace)).isDirectory()) throw new Error("关联目录必须是文件夹");
     if (own(event) !== service) throw new Error("选择工作区期间窗口已改变");
     selectedWorkspaces.add(workspace);
     return workspace;
   });
   ipcMain.handle("agent.create", async (event, workspace: unknown, title: unknown) => {
     const service = own(event);
-    if (typeof workspace !== "string" || workspace.includes("\0") || typeof title !== "string")
+    if (typeof title !== "string") throw new Error("会话名称无效");
+    if (workspace === null) return service.create(null, title);
+    if (typeof workspace !== "string" || !workspace || workspace.includes("\0"))
       throw new Error("会话名称或工作目录无效");
-    const known =
-      selectedWorkspaces.has(workspace) ||
-      (await service.list()).items.some((item) => item.workspace === workspace);
+    // 选择器、库内目录和历史记录共用真实路径身份，别名不应被误判为未确认目录。
+    const destination = await realpath(workspace);
+    if (!(await stat(destination)).isDirectory()) throw new Error("关联目录必须是文件夹");
+    let known =
+      selectedWorkspaces.has(destination) ||
+      (await service.list()).items.some((item) => item.workspace === destination);
+    if (!known) {
+      const root = await currentVault();
+      if (root !== null) {
+        // 当前库及其真实子目录已由文件管理确认；符号链接不能把归属扩大到库外。
+        const base = await realpath(root);
+        const path = relative(base, destination);
+        known = path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+      }
+    }
     if (!known) throw new Error("请先通过文件夹选择器确认工作目录");
     if (own(event) !== service) throw new Error("创建期间窗口已改变");
-    return service.create(workspace, title);
+    return service.create(destination, title);
   });
   ipcMain.handle("agent.fork", (event, session: unknown, value: unknown) => {
     const service = own(event);

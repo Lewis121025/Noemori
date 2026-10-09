@@ -21,6 +21,7 @@ export function createNativeSession(
   workspace: string,
   model: ModelSettings,
   changed: () => void,
+  label = "工作区助手",
 ): NativeAgentSession {
   const root = realpathSync(workspace);
   const readable_paths = [
@@ -46,12 +47,22 @@ export function createNativeSession(
       shell: process.env["SHELL"] ?? "/bin/sh",
       launcher,
       model,
+      ui_label: label,
+      ui: {
+        executable: join(dirname(launcher), "noemori-ui-runtime"),
+        broker_directory: join(userData, "ui"),
+        extension_id: "adeahajhgekfhfgimpaokoahfajebajb",
+        computer_helper:
+          process.platform === "darwin"
+            ? join(dirname(launcher), "NoemoriComputerHelper.app")
+            : null,
+      },
       browser: {
         node: process.execPath,
         worker: join(directory, "browser", "main.js"),
         executable,
-        // 隐藏验收必须覆盖工具启动的浏览器，不能只隐藏 Electron 主窗口。
-        headless: process.env["NOEMORI_TEST_WINDOW"] === "hidden",
+        // 浏览器画面由会话浮窗展示，运行与弹窗均不占用用户桌面焦点。
+        headless: true,
       },
       permission_store: join(userData, "permissions.json"),
       readable_paths,

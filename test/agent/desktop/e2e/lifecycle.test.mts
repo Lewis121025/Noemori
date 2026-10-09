@@ -1,3 +1,4 @@
+import { newConversation, openLibrary } from "../../../notes/desktop/support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,11 +121,13 @@ test("隐藏窗口验证中断继续、历史分叉、来源定位与跨进程�
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
   }, workspace);
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
-  await page.getByRole("button", { name: "＋ 新会话", exact: true }).click();
+  await newConversation(page);
   const creation = page.getByRole("dialog", { name: "新建对话", exact: true });
   await creation.getByRole("textbox", { name: "会话名称", exact: true }).fill("中断和分叉");
-  await creation.getByRole("button", { name: "选择文件夹…", exact: true }).click();
+  await creation.getByRole("button", { name: "关联文件夹…", exact: true }).click();
   await creation.getByRole("button", { name: "创建对话", exact: true }).click();
+  await page.getByRole("button", { name: "选择对话模型", exact: true }).click();
+  await page.getByRole("button", { name: "lifecycle-fixture", exact: true }).click();
   const input = page.getByRole("textbox", { name: "Agent 用户任务" });
   await input.fill("记住第一条思路，并等待审批");
   await input.press("Enter");
@@ -181,7 +184,8 @@ test("隐藏窗口验证中断继续、历史分叉、来源定位与跨进程�
     .poll(() => page.locator(`[data-turn-id="${branchPoint}"]`).getAttribute("class"))
     .toContain("linked");
   expect((await snapshot(page, sourceId))!.messages).toEqual(original.messages);
-  await page.locator(".conversation-item").filter({ hasText: "另一个方向" }).click();
+  await openLibrary(page);
+  await page.getByRole("navigation", { name: "文件列表" }).getByRole("button", { name: "另一个方向", exact: true }).click();
   await input.fill("沿分支继续");
   await input.press("Enter");
   await expect.poll(() => requests.length).toBe(4);
@@ -197,6 +201,10 @@ test("隐藏窗口验证中断继续、历史分叉、来源定位与跨进程�
   await page.waitForLoadState("load");
   await assertHidden();
   await page.getByRole("button", { name: "工作区助手", exact: true }).click();
+  const restoredList = await page.evaluate(() => window.noemori.agent.list());
+  expect(restoredList.issues).toEqual([]);
+  expect(restoredList.items).toHaveLength(2);
+  expect(await page.locator(".panel-error").allTextContents()).toEqual([]);
   await expect
     .poll(() => page.locator(".conversation-heading h1").textContent())
     .toBe("另一个方向");

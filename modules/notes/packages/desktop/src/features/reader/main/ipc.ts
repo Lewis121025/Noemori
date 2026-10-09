@@ -79,6 +79,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
     return {
       filesCollapsed: session.filesCollapsed,
       leftWidth: session.leftWidth,
+      ...(session.rightWidth === undefined ? {} : { rightWidth: session.rightWidth }),
       ...(session.destination === undefined ? {} : { destination: session.destination }),
       ...(session.sidebarView === undefined ? {} : { sidebarView: session.sidebarView }),
       ...(session.searchQuery === undefined ? {} : { searchQuery: session.searchQuery }),

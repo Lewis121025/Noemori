@@ -32,6 +32,16 @@
   export function focusSidebarToggle(): void {
     sidebarToggle.focus({ preventScroll: true });
   }
+  /** 窄窗口的工具横向滚动，键盘焦点须完整可见；顶层菜单和查找浮层自行管理位置。 */
+  function revealTool(event: FocusEvent): void {
+    const target = event.target;
+    if (
+      target instanceof HTMLButtonElement &&
+      target.closest('[role="toolbar"]') &&
+      !target.closest("[popover]")
+    )
+      target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
 </script>
 
 <header class="window-toolbar" class:mac aria-label="窗口工具栏">
@@ -43,7 +53,6 @@
       aria-label="显示或隐藏文件栏"
       title={filesCollapsed ? "展开侧栏" : "收起侧栏"}
       aria-expanded={!filesCollapsed}
-      disabled={agentOpen}
       onclick={onToggleFiles}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -55,7 +64,7 @@
       type="button"
       aria-label="后退"
       title="后退"
-      disabled={busy || agentOpen || !documentVisible || !workspace.history.canBack}
+      disabled={busy || !documentVisible || !workspace.history.canBack}
       onclick={() => void workspace.navigateBack()}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -67,7 +76,7 @@
       type="button"
       aria-label="前进"
       title="前进"
-      disabled={busy || agentOpen || !documentVisible || !workspace.history.canForward}
+      disabled={busy || !documentVisible || !workspace.history.canForward}
       onclick={() => void workspace.navigateForward()}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -79,14 +88,15 @@
     class="window-document-tools"
     role="group"
     aria-label="当前文档工具"
-    hidden={!documentVisible || agentOpen}
+    hidden={!documentVisible}
     onpointerdown={onPrepareDocumentAction}
+    onfocusin={revealTool}
   >
     {@render documentTools()}
   </div>
   <div class="window-actions">
     <WorkspaceFeedback {workspace} />
-    {#if workspace.split && !agentOpen}
+    {#if workspace.split}
       <div class="pane-switch" role="group" aria-label="切换分栏">
         {#each workspace.panes as pane, index (pane.id)}
           <button
@@ -107,7 +117,7 @@
       aria-label={workspace.split ? "关闭双栏" : "在另一栏打开…"}
       title={workspace.split ? "保留当前栏，关闭双栏" : "在另一栏打开文档"}
       aria-pressed={workspace.split}
-      disabled={busy || agentOpen || !documentVisible}
+      disabled={busy || !documentVisible}
       onclick={onToggleSplit}
     >
       <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
@@ -119,13 +129,14 @@
         type="button"
         aria-label="工作区助手"
         aria-pressed={agentOpen}
-        title="工作区助手与对话管理"
+        aria-expanded={agentOpen}
+        title={agentOpen ? "收起 Agent 侧栏" : "展开 Agent 侧栏"}
         onclick={onOpenAgent}
         ><svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
           ><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3V6a2 2 0 0 1 1-2Z" /><path
             d="M8 9h9M8 13h6"
           /></svg
-        ><span>助手</span></button
+        ><span>Agent</span></button
       >{/if}
   </div>
 </header>
@@ -213,8 +224,8 @@
     padding: 0 4px;
   }
   .window-document-tools :global(.formatting-panel) {
-    flex: 1;
-    min-width: 0;
+    flex: 0 0 auto;
+    min-width: max-content;
   }
   .window-document-tools :global(.search-panel) {
     position: fixed;

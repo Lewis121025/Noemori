@@ -159,9 +159,9 @@
           d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"
         /></svg
       >
+      <span class="dock-title">双链</span>
       {#if !expanded}<span class="dock-count"
-          >{@render directionIcon(true)}<span>{incoming}</span>{@render directionIcon(false)}<span
-            >{outgoing}</span
+          ><span>{incoming} 入链</span><span>·</span><span>{outgoing} 出链</span
           ></span
         >{/if}
       <span class="chevron" aria-hidden="true">⌃</span>
@@ -280,6 +280,7 @@
 
 <style>
   .links-dock {
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     flex: 0 0 auto;
@@ -342,6 +343,14 @@
     font-size: 0.7rem;
     color: var(--muted);
     white-space: nowrap;
+  }
+  .dock-title {
+    font-size: 12px;
+  }
+  @container (max-width: 250px) {
+    .dock-count {
+      display: none;
+    }
   }
   .chevron {
     margin-left: auto;

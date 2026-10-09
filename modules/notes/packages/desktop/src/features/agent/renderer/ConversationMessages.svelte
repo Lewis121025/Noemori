@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import type { AgentConversation, AgentApproval } from "../shared/api";
+  import type { AgentConversation, AgentApproval, AgentMessage } from "../shared/api";
   import MessageText from "./MessageText.svelte";
   let {
     current,
@@ -21,6 +21,12 @@
   let viewport: HTMLDivElement;
   let follow = $state(true);
   let linkedTurn = $state<string | null>(null);
+  const roleLabels: Record<AgentMessage["role"], string> = {
+    system: "系统",
+    user: "你",
+    assistant: "助手",
+    tool: "工具",
+  };
   const endingTurns = $derived(
     new Map(current.turns.map((turn, index) => [turn.message_end - 1, { turn, index }])),
   );
@@ -61,17 +67,14 @@
   >
     <div class="message-column">
       {#if current.messages.length === 0}<div class="conversation-start">
-          <h2>准备好开始了</h2>
-          <p>描述你想完成的事情。助手将在上方标明的工作目录中执行任务。</p>
+          <p>发送消息，开始对话。</p>
         </div>{/if}
       {#each current.messages as message, index (index)}
         {#if message.content.length > 0}<article
             class:user={message.role === "user"}
             class:tool={message.role === "tool"}
+            aria-label={roleLabels[message.role]}
           >
-            {#if message.role === "user" || message.role === "assistant"}<div class="author">
-                {message.role === "user" ? "你" : "助手"}
-              </div>{/if}
             {#each message.content as part, partIndex (partIndex)}
               {#if part.type === "text"}{#if message.role === "user"}<div class="user-text">
                     {part.value}
@@ -86,7 +89,9 @@
                       ? "执行终端任务"
                       : part.value.name === "browser"
                         ? "操作浏览器"
-                        : part.value.name}</summary
+                        : part.value.name === "ui_repl"
+                          ? "操作浏览器与桌面"
+                          : part.value.name}</summary
                   >
                   <pre>{JSON.stringify(part.value.arguments, null, 2)}</pre>
                 </details>
@@ -105,11 +110,20 @@
             data-turn-id={ended.turn.run.id}
             tabindex="-1"
           >
-            <span>第 {ended.index + 1} 轮</span>
+            <span class="turn-number">第 {ended.index + 1} 轮</span>
             {#if onFork && ended.turn.run.status !== "running"}<button
                 class="reader-button"
                 type="button"
-                onclick={() => onFork?.(ended.turn.run.id)}>从此轮分叉</button
+                aria-label="从此轮分叉"
+                title={`从第 ${ended.index + 1} 轮分叉`}
+                onclick={() => onFork?.(ended.turn.run.id)}
+                ><svg viewBox="0 0 20 20" aria-hidden="true"
+                  ><circle cx="6" cy="4" r="2" /><circle cx="6" cy="16" r="2" /><circle
+                    cx="15"
+                    cy="5"
+                    r="2"
+                  /><path d="M6 6v8m0-4h4a5 5 0 0 0 5-3" /></svg
+                ></button
               >{/if}
           </div>{/if}
       {/each}
@@ -120,12 +134,19 @@
           <h3>
             {pending.request.type === "browser"
               ? "允许访问这个网站？"
-              : pending.request.type === "network"
-                ? "允许这次网络访问？"
-                : "任务需要额外权限"}
+              : pending.request.type === "ui"
+                ? "允许在后台操作这个窗口？"
+                : pending.request.type === "network"
+                  ? "允许这次网络访问？"
+                  : "任务需要额外权限"}
           </h3>
           {#if pending.request.type === "browser"}<p>{pending.request.request.reason}</p>
             <code>{pending.request.request.origin}</code>
+          {:else if pending.request.type === "ui"}<p>
+              {pending.request.request.app_name} · {pending.request.request.window_title}
+            </p>
+            <p>{pending.request.request.reason}</p>
+            <p>你操作键盘、鼠标或切换窗口时，助手会暂停。</p>
           {:else if pending.request.type === "network"}<p>
               {pending.request.request.target.host}:{pending.request.request.target.port} · {pending
                 .request.request.target.protocol}
@@ -149,7 +170,7 @@
               disabled={approving}
               onclick={() => onApprove(pending, "deny")}>拒绝</button
             >
-            {#if pending.request.type !== "browser"}<button
+            {#if pending.request.type !== "browser" && pending.request.type !== "ui"}<button
                 class="reader-button"
                 type="button"
                 disabled={approving}
@@ -175,14 +196,40 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin: -0.5rem 0 1.5rem;
+    margin: -10px 0 24px;
     color: var(--muted);
     font-size: 0.68rem;
     border-radius: 6px;
   }
   .turn-actions button {
-    font-size: inherit;
-    padding: 0.2rem 0.45rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    box-shadow: none;
+  }
+  .turn-actions button:hover {
+    background: var(--selected);
+    color: var(--fg);
+  }
+  .turn-actions svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+  }
+  .turn-number {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
   .turn-actions.linked {
     outline: 1px solid var(--accent);
@@ -203,25 +250,22 @@
   .message-column {
     max-width: 48rem;
     margin: 0 auto;
-    padding: 1.6rem 2rem;
+    padding: 24px 20px;
   }
   article {
-    margin-bottom: 1.5rem;
+    margin-bottom: 24px;
     min-width: 0;
   }
-  .author {
-    margin-bottom: 0.45rem;
-    color: var(--muted);
-    font-size: 0.72rem;
-    font-weight: 600;
-  }
   .user {
-    margin-left: 12%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    margin-left: 8%;
   }
   .user-text {
     background: var(--sidebar);
-    border: 1px solid var(--border);
-    padding: 0.85rem 1rem;
+    max-width: 100%;
+    padding: 10px 13px;
     border-radius: 12px 12px 3px 12px;
     font-size: 0.88rem;
     line-height: 1.7;
@@ -232,10 +276,8 @@
     margin: -0.6rem 0 1rem;
   }
   details {
-    border: 1px solid var(--border);
-    border-radius: 7px;
     margin: 0.5rem 0;
-    padding: 0.55rem 0.7rem;
+    padding: 4px 0;
     color: var(--muted);
     font-size: 0.76rem;
   }
@@ -257,10 +299,6 @@
   }
   .conversation-start {
     margin: 5vh 0;
-  }
-  .conversation-start h2 {
-    font-size: 1.3rem;
-    font-weight: 500;
   }
   .conversation-start p {
     font-size: 0.86rem;

@@ -2,7 +2,7 @@
 export type ArticleConversationPreview = {
   id: string;
   title: string;
-  workspace: string;
+  workspace: string | null;
   archived: boolean;
   article: { path: string; title: string } | null;
   excerpt: string;

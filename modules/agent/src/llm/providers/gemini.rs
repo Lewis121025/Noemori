@@ -1,5 +1,5 @@
 use super::*;
-use crate::ToolCall;
+use crate::{ToolCall, llm::ReasoningEffort};
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     let mut contents = Vec::new();
@@ -33,7 +33,33 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     if !options.is_empty() {
         body["generationConfig"] = json!(options);
     }
+    if let Some(effort) = &config.reasoning_effort {
+        body["generationConfig"]["thinkingConfig"] = thinking_config(&config.model, effort);
+    }
     Ok(body)
+}
+
+/// 2.5 使用官方兼容档位预算表；其他版本用 REST 枚举，不据此裁剪模型可选档位。
+fn thinking_config(model: &str, effort: &ReasoningEffort) -> Value {
+    let uses_budget = model
+        .strip_prefix("models/")
+        .unwrap_or(model)
+        .starts_with("gemini-2.5-");
+    let budget = match effort {
+        ReasoningEffort::None => Some(0),
+        ReasoningEffort::Minimal | ReasoningEffort::Low if uses_budget => Some(1024),
+        ReasoningEffort::Medium if uses_budget => Some(8192),
+        ReasoningEffort::High if uses_budget => Some(24576),
+        _ => None,
+    };
+    if let Some(budget) = budget {
+        return json!({"thinkingBudget": budget});
+    }
+    let level = match effort {
+        ReasoningEffort::Named(value) => value.clone(),
+        _ => effort.as_str().to_ascii_uppercase(),
+    };
+    json!({"thinkingLevel": level})
 }
 
 // 工具结果与附件分别排列，防止并行调用尚未闭合时夹入用户媒体；说明文字保留附件归属。

@@ -77,6 +77,14 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     if !options.is_empty() {
         body["options"] = json!(options);
     }
+    if let Some(effort) = &config.reasoning_effort {
+        // 原生 think 关闭值是布尔值；命名档位原样发送，不套兼容接口的降档别名。
+        body["think"] = match effort.as_str() {
+            "none" | "false" => json!(false),
+            "true" => json!(true),
+            _ => json!(effort),
+        };
+    }
     Ok(body)
 }
 

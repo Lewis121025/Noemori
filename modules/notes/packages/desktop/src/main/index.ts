@@ -126,6 +126,11 @@ function createWindow(client: CoreClient): void {
     },
   );
   agent = service;
+  // 统一工作台会在渲染启动时恢复会话；等主框架完成加载，才允许 preload 派发 Agent 请求。
+  owner.webContents.on("did-finish-load", () => {
+    if (mainWindow === owner && agent === service && !owner.webContents.isDestroyed())
+      owner.webContents.send("agent.ready");
+  });
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
     void mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);

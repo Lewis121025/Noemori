@@ -61,3 +61,16 @@ it("清空搜索只恢复浏览现场，不撤销搜索期间主动更改的排�
   expect(tree.state.selected).toEqual(["a.md"]);
   tree.reset();
 });
+
+it("对话节点的展开和滚动可独立持久化，文件改名只迁移文章节点，不污染文件选择", async () => {
+  const { parseFileTreeMessage, mapFileTreeState } = await import("@reader/shared/file-browser");
+  const state = parseFileTreeMessage({
+    expanded: ["docs"], selected: ["docs/a.md"], focused: "docs/a.md", scroll: null,
+    discussions: { expanded: ["docs/a.md", "\0conversation:chat"], archived: true, scroll: { key: "\0conversation:chat", offset: 12.5 } },
+  });
+  const next = mapFileTreeState(state, path => path.replace("docs", "moved"));
+  expect(next.selected).toEqual(["moved/a.md"]);
+  expect(next.discussions).toEqual({ expanded: ["moved/a.md", "\0conversation:chat"], archived: true, scroll: { key: "\0conversation:chat", offset: 12.5 } });
+  expect(parseFileTreeMessage(JSON.parse(JSON.stringify(next)))).toEqual(next);
+  expect(() => parseFileTreeMessage({ ...state, selected: ["\0conversation:chat"] })).toThrow("目录会话无效");
+});

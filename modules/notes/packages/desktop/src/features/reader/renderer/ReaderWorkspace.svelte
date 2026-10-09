@@ -7,12 +7,9 @@
   import SettingsWindow from "./workspace/SettingsWindow.svelte";
   import LinksDock from "./links/LinksDock.svelte";
   import LibraryBrowser from "./library/LibraryBrowser.svelte";
-  import QuickNavigation from "./navigation/QuickNavigation.svelte";
-  import {
-    SIDEBAR_COMPONENTS,
-    type SidebarEntry,
-    type SidebarPanel,
-  } from "./navigation/sidebar-components";
+  import WorkspaceNavigation from "./navigation/WorkspaceNavigation.svelte";
+  import Sidebar from "./library/Sidebar.svelte";
+  import type { WorkspaceConversations } from "../shared/workspace-conversations";
   import PaneColumn from "./workspace/PaneColumn.svelte";
   import FileEntryDialog from "./library/FileEntryDialog.svelte";
   import CreateEntryDialog, { type CreateEntryKind } from "./library/CreateEntryDialog.svelte";
@@ -23,12 +20,10 @@
   import type { PaneControls } from "./workspace/pane-controls";
   import { parentDirectory, type FileEntryChange } from "./library/file-tree";
   import { ReaderWorkspaceController } from "./workspace/state.svelte";
-  import { WorkspaceSpaces } from "./workspace/spaces.svelte";
   import { SIDEBAR_LAYOUT, type ReaderApi, type PaneLayout } from "../shared/api";
   import "./styles/controls.css";
   import "./styles/motion.css";
-  import { interactionFeedback } from "./motion";
-  import { sidebarMotion } from "./sidebar-motion";
+  import { interactionFeedback, revealOnChange } from "./motion";
   import { paletteMotion } from "./palette-motion";
   import type { HistoryAction, HistoryAvailability } from "../shared/api";
   import {
@@ -47,78 +42,58 @@
   let {
     api,
     applicationMenu,
+    modelPreferences,
+    beforeModelLeave,
     palette = DEFAULT_READING_PALETTE,
     agentOpen = false,
     onOpenAgent,
     articleAgent,
+    conversations,
+    agentPanel,
+    onCommand,
   }: {
     api: ReaderApi;
     applicationMenu: Snippet;
+    modelPreferences?: Snippet;
+    beforeModelLeave?: () => Promise<boolean>;
     /** 配色只影响样式变量，不重建文档或修改阅读位置。 */
     palette?: ReadingPalette;
     agentOpen?: boolean;
     onOpenAgent?: () => void;
     articleAgent?: ArticleAgentActions;
+    conversations?: WorkspaceConversations;
+    agentPanel?: Snippet;
+    onCommand?: (command: ReaderCommand) => void;
   } = $props();
   // 控制器和资源访问接口共用同一组能力，替换能力时由外壳重新挂载实例。
   const readerApi = untrack(() => api);
-  const workspace = new ReaderWorkspaceController(
-    readerApi,
-    () => layoutWrites.request(),
-    async (root, changes) => {
-      await articleAgent?.api.remapArticles(root, changes);
-    },
-  );
-  let articleCounts = $state<Record<string, number>>({});
+  const workspace = new ReaderWorkspaceController(readerApi, async (root, changes) => {
+    await articleAgent?.api.remapArticles(root, changes);
+  });
   $effect(() => {
     const root = workspace.vaultRoot;
-    const bridge = articleAgent;
-    void workspace.entries;
-    if (!root || !bridge) {
-      articleCounts = {};
-      return;
-    }
-    let live = true;
-    const refresh = async () => {
-      await bridge.api.attachVault(root);
-      const list = await bridge.api.list();
-      if (!live) return;
-      const counts: Record<string, number> = {};
-      for (const item of list.items)
-        if (item.workspace === root && item.article && !item.archived)
-          counts[item.article.path] = (counts[item.article.path] ?? 0) + 1;
-      articleCounts = counts;
-    };
-    void refresh().catch((error) => {
-      if (live) workspace.report(String(error));
-    });
-    const stop = bridge.api.subscribe(() => {
-      void refresh().catch((error) => {
-        if (live) workspace.report(String(error));
-      });
-    });
-    return () => {
-      live = false;
-      stop();
-    };
+    if (root && articleAgent)
+      void articleAgent.api.attachVault(root).catch((error) => workspace.report(String(error)));
   });
-  const spaces = new WorkspaceSpaces(workspace, prepareSpaceInput, persistPanes);
   const mediaIo = workspace.mediaIo;
   // 活动栏文档：命令门禁与重命名等操作的目标随活动栏切换。
   const doc = $derived(workspace.document);
   let filesCollapsed = $state(false);
-  let selectedComponent = $state<SidebarEntry["id"]>("outline");
-  const selectedEntry = $derived(
-    SIDEBAR_COMPONENTS.find((entry) => entry.id === selectedComponent),
-  );
-  const sidebarPanel = $derived(selectedEntry?.kind === "panel" ? selectedEntry.id : "outline");
-  const space = $derived(spaces.space);
+  let sidebarPanel = $state<"files" | "outline">("files");
   let readingSpace: HTMLDivElement | undefined = $state();
-  const changingSpace = $derived(spaces.changing);
   let creatingDocument = false;
   let narrow = $state(false);
-  const sidebarIsDrawer = $derived(narrow && !(space === "library" && sidebarPanel !== "search"));
-  const drawerOpen = $derived(sidebarIsDrawer && !filesCollapsed);
+  const drawerOpen = $derived(narrow && !filesCollapsed);
+  let rightWidth = $state(380);
+  $effect(() => {
+    void conversations?.selected;
+    if (agentOpen && narrow)
+      untrack(() => {
+        filesCollapsed = true;
+        layoutWrites.request();
+      });
+  });
+  const sidebarId = $props.id();
   let leftWidth = $state(SIDEBAR_LAYOUT.leftWidth);
   const layoutWrites = createSessionWrite({
     delayMs: 300,
@@ -127,9 +102,9 @@
         await readerApi.sessionSetPanes({
           filesCollapsed,
           leftWidth,
-          destination: space,
-          sidebarView: workspace.sidebarView,
-          searchQuery: workspace.search.input,
+          destination: "document",
+          sidebarView: sidebarPanel,
+          rightWidth,
         });
     },
     report: reportLayoutFailure,
@@ -137,7 +112,6 @@
   let entryDialog: FileEntryDialog | undefined = $state();
   let createDialog: CreateEntryDialog | undefined = $state();
   let fileList: LibraryBrowser | undefined = $state();
-  let fileNavigation: QuickNavigation | undefined = $state();
   let windowToolbar: WindowToolbar | undefined = $state();
   let settingsWindow: SettingsWindow | undefined = $state();
   const paneControls = new SvelteMap<number, PaneControls>();
@@ -155,7 +129,7 @@
     pickerOpening += 1;
     picker = kind;
   }
-  const documentVisible = $derived(spaces.documentVisible);
+  const documentVisible = true;
   let contentWidth = $state(0);
   let contentElement: HTMLDivElement;
   const compactSplit = $derived(workspace.split && contentWidth < 640);
@@ -201,7 +175,7 @@
   /** 组词与切换期间消费但不执行命令；模态输入框保留自身历史，不修改背后的正文。 */
   export function executeHistory(action: HistoryAction): boolean {
     if (!documentVisible) return false;
-    if (changingSpace || workspace.isComposing || workspace.switching) return true;
+    if (workspace.isComposing || workspace.switching) return true;
     if (document.querySelector("dialog[open]")) return false;
     return workspace.navigation.applyHistory(action);
   }
@@ -209,8 +183,7 @@
   /** 与执行门禁一致的响应式历史投影；null 交由外壳查询当前原生输入控件。 */
   export function historyAvailability(): HistoryAvailability | null {
     if (!documentVisible) return null;
-    if (changingSpace || workspace.isComposing || workspace.switching)
-      return { undo: false, redo: false };
+    if (workspace.isComposing || workspace.switching) return { undo: false, redo: false };
     if (document.querySelector("dialog[open]")) return null;
     return workspace.navigation.historyAvailability;
   }
@@ -218,9 +191,7 @@
   /** 原生菜单和工作区快捷键共享动作；组词及模态操作期间不能跳转或提交。 */
   export function executeCommand(command: ReaderCommand): void {
     if (
-      agentOpen ||
       workspace.isComposing ||
-      changingSpace ||
       workspace.switching ||
       workspace.copying ||
       document.querySelector("dialog[open]") ||
@@ -298,15 +269,6 @@
       case "rename-file":
         beginRename();
         break;
-      case "bookmark-file":
-        void workspace.bookmarkCurrentFile();
-        break;
-      case "bookmark-heading":
-        void workspace.bookmarkCurrentHeading();
-        break;
-      case "show-bookmarks":
-        void showBookmarks();
-        break;
     }
   }
 
@@ -331,17 +293,21 @@
       if (!mounted) return;
       await workspace.restore();
       if (mounted) {
-        spaces.restore(restoredSpace);
-        workspace.sidebarView = restoredSpace.sidebarView ?? "outline";
-        selectedComponent = spaces.space === "library" ? "open-library" : workspace.sidebarView;
-        workspace.search.setInput(restoredSpace.searchQuery ?? "");
+        sidebarPanel =
+          restoredSpace.sidebarView === "outline" && restoredSpace.destination !== "library"
+            ? "outline"
+            : "files";
+        if (
+          restoredSpace.searchQuery &&
+          (!workspace.fileTree.hasStoredState || workspace.fileTree.state.browse === undefined)
+        )
+          workspace.fileTree.setQuery(restoredSpace.searchQuery);
       }
     })();
     return () => {
       mounted = false;
       observer.disconnect();
       layoutWrites.dispose();
-      spaces.dispose();
       dispose();
     };
   });
@@ -351,6 +317,7 @@
       const panes = await readerApi.sessionGetPanes();
       filesCollapsed = panes.filesCollapsed;
       leftWidth = panes.leftWidth;
+      rightWidth = panes.rightWidth ?? 380;
       return panes;
     } catch (error) {
       workspace.report(
@@ -373,41 +340,25 @@
     );
   }
 
-  /** 键盘导航也提交属性输入；输入法组词交给保存门禁拒绝，不能强制确认候选。 */
-  async function prepareSpaceInput(): Promise<void> {
-    if (!workspace.isComposing && document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-      await tick();
-    }
-  }
-
   async function showLibrary(): Promise<void> {
-    if (!(await spaces.showLibrary())) return;
-    selectedComponent = "open-library";
-    prepareDocumentAction();
+    sidebarPanel = "files";
+    filesCollapsed = false;
+    persistPanes();
     await tick();
-    if (space === "library") fileList?.focusSearch();
+    await fileList?.focusSearch();
   }
-
-  async function resumeWriting(): Promise<void> {
-    if (await spaces.resumeWriting()) {
-      if (selectedEntry?.kind === "command") selectedComponent = workspace.sidebarView;
-      focusDocument();
-    }
-  }
-
   async function openVault(): Promise<void> {
     const before = workspace.vaultRoot;
     await workspace.openVault();
     if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) {
-      await resumeWriting();
+      sidebarPanel = "files";
+      filesCollapsed = false;
       persistPanes();
     }
   }
 
-  /** 新建动作以当前浏览位置为准；返回文档后才使用文档所在目录。 */
+  /** 新建默认目录使用侧栏当前选择；表单中仍可确认并修改位置。 */
   function creationDirectory(): string {
-    if (space !== "library") return doc.path === null ? "" : parentDirectory(doc.path);
     return workspace.fileTree.state.browse?.directory ?? "";
   }
 
@@ -417,7 +368,7 @@
     parentOverride?: string,
     suggestedName?: string,
   ): Promise<void> {
-    if (creatingDocument || changingSpace || workspace.isComposing) return;
+    if (creatingDocument || workspace.isComposing) return;
     creatingDocument = true;
     try {
       if (workspace.vaultRoot === null) await workspace.openVault();
@@ -435,9 +386,13 @@
   }
 
   function closeFilesPane(): void {
+    const focus = document.activeElement;
+    const returnFocus =
+      focus instanceof Element && focus.closest(".file-sidebar:not(.right), .files-scrim") !== null;
     filesCollapsed = true;
     persistPanes();
-    void tick().then(() => windowToolbar?.focusSidebarToggle());
+    // 只接回即将隐藏的控件焦点；快捷键收起侧栏时，正文继续接收输入。
+    if (returnFocus) void tick().then(() => windowToolbar?.focusSidebarToggle());
   }
 
   function toggleFilesPane(): void {
@@ -450,7 +405,7 @@
 
   /** 双栏开关关闭非活动栏，保留当前文档；关闭前仍通过该栏的保存门禁。 */
   async function toggleSplit(): Promise<void> {
-    if (changingSpace || workspace.switching || workspace.copying || workspace.isComposing) return;
+    if (workspace.switching || workspace.copying || workspace.isComposing) return;
     if (workspace.split) {
       const other = workspace.panes.find((pane) => pane !== workspace.activePane);
       if (other) await workspace.closePane(other.id);
@@ -462,19 +417,11 @@
     prepareDocumentAction();
   }
 
-  /** 组件切换保留挂载；返回文档工具时先通过已有页面门禁，不重新加载正文。 */
-  async function selectSidebarPanel(panel: SidebarPanel): Promise<void> {
-    if (workspace.isComposing || changingSpace) return;
-    const returning = panel === "outline" && !documentVisible;
-    if (returning) {
-      if (!(await spaces.resumeWriting())) return;
-    }
-    selectedComponent = panel;
-    workspace.setSidebarView(panel);
-    if (panel === "search") await fileNavigation?.focusSearch();
-    else if (returning) focusDocument();
+  function selectSidebarPanel(panel: "files" | "outline"): void {
+    if (workspace.isComposing) return;
+    sidebarPanel = panel;
+    persistPanes();
   }
-
   function prepareDocumentAction(): boolean {
     if (filesCollapsed || !narrow) return false;
     // 原生弹层会在点击事件结束时分配焦点，需要先解除正文的 inert。
@@ -491,30 +438,11 @@
   }
 
   async function searchFiles(): Promise<void> {
-    workspace.setSidebarView("search");
-    selectedComponent = "search";
-    filesCollapsed = false;
-    persistPanes();
-    await fileNavigation?.focusSearch();
-  }
-
-  async function showBookmarks(): Promise<void> {
     await showLibrary();
-    if (space !== "library") return;
-    await fileList?.showBookmarks();
   }
 
-  function finishFileNavigation(): void {
-    spaces.showDocument();
-    if (selectedEntry?.kind === "command") selectedComponent = workspace.sidebarView;
-    focusDocument();
-  }
-
-  /** 文件打开完成才离开浏览页；活动栏变更使原请求失效，不能借用新栏的路径。 */
-  async function openFile(path: string): Promise<void> {
-    const pane = workspace.activePane;
-    await pane.openFile(path);
-    if (workspace.activePane === pane && pane.document.path === path) finishFileNavigation();
+  function finishFileNavigation(focus = true): void {
+    if (focus || narrow) focusDocument();
   }
 
   /** 外壳解除正文 inert 后交还键盘焦点，保留原段落选区。 */
@@ -544,12 +472,11 @@
   async function finishEntryOperation(change: FileEntryChange): Promise<void> {
     const writing =
       change.action === "create" && change.entry.kind === "file" && doc.path === change.entry.path;
-    await fileList?.reflectChange(change, space === "library" && !writing);
+    await fileList?.reflectChange(change, sidebarPanel === "files" && !filesCollapsed && !writing);
     if (writing) finishFileNavigation();
   }
 
   function onWorkspaceShortcut(event: KeyboardEvent): void {
-    if (agentOpen) return;
     if (event.defaultPrevented || isCompositionKey(event) || workspace.isComposing) return;
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     if (
@@ -566,12 +493,14 @@
     const command = commandForKey(event);
     if (command !== null) {
       event.preventDefault();
-      executeCommand(command);
+      if (onCommand) onCommand(command);
+      else executeCommand(command);
     }
   }
 
   /** @returns 当前编辑已安全保存时允许关闭；冲突或写入失败时由应用外壳保留窗口。 */
   export async function flushBeforeClose(): Promise<boolean> {
+    if ((await settingsWindow?.confirmLeave()) === false) return false;
     try {
       await layoutWrites.flush();
     } catch (error) {
@@ -579,6 +508,16 @@
       return false;
     }
     return workspace.flushBeforeClose();
+  }
+
+  /** 对话中的配置入口复用唯一设置窗口，并定位到 LLM 分类，不重建对话。 */
+  export function openModelSettings(): void {
+    settingsWindow?.open("models");
+  }
+
+  /** 当前已提交的笔记库，用于外壳判断是否能在现有工作台定位文章。 */
+  export function vaultRoot(): string | null {
+    return workspace.vaultRoot;
   }
 
   /** 从文章对话返回稳定入口；跨库或来源已移除时明确报错，不打开错误文章。 */
@@ -611,7 +550,7 @@
     {workspace}
     {filesCollapsed}
     {documentVisible}
-    busy={changingSpace || workspace.switching || workspace.copying || workspace.isComposing}
+    busy={workspace.switching || workspace.copying || workspace.isComposing}
     onToggleFiles={toggleFilesPane}
     onToggleSplit={() => void toggleSplit()}
     onPrepareDocumentAction={showDocumentTools}
@@ -633,9 +572,11 @@
     bind:this={settingsWindow}
     {workspace}
     preferences={applicationMenu}
+    {...modelPreferences === undefined ? {} : { modelPreferences }}
+    {...beforeModelLeave === undefined ? {} : { beforeModelLeave }}
     onOpenVault={openVault}
   />
-  <div class="panes" inert={agentOpen} aria-hidden={agentOpen}>
+  <div class="panes">
     <button
       class="files-scrim"
       hidden={!drawerOpen}
@@ -644,67 +585,97 @@
       aria-label="收起文件栏"
       onclick={closeFilesPane}
     ></button>
-    <QuickNavigation
-      bind:this={fileNavigation}
-      {workspace}
-      panel={sidebarPanel}
-      activeEntry={selectedComponent}
-      libraryShown={space === "library"}
-      onSelectPanel={(panel) => void selectSidebarPanel(panel)}
-      hidden={filesCollapsed}
+    <Sidebar
       width={leftWidth}
-      onOpen={(path) => void openFile(path)}
-      onCommand={executeCommand}
-      canRun={(command) => commandAvailable(command, commandContext())}
-      onSearchHit={(hit, match) => {
-        const pane = workspace.activePane;
-        void pane.navigation
-          .openSearchMatch(hit, match ?? hit.matches[0], pane.openFile, (message) =>
-            workspace.report(message),
-          )
-          .then(() => {
-            if (pane.document.path === hit.path && workspace.activePane === pane)
-              finishFileNavigation();
-          });
-      }}
+      hidden={filesCollapsed}
       onWidth={(width) => {
         leftWidth = width;
         layoutWrites.request();
       }}
     >
-      {#snippet documentTools()}
+      <WorkspaceNavigation
+        {sidebarId}
+        selected={sidebarPanel}
+        disabled={workspace.switching || workspace.isComposing}
+        onSelect={selectSidebarPanel}
+        onCreate={(kind) => void startDocument(kind)}
+        {...conversations
+          ? {
+              onConversation: () => {
+                const root = workspace.vaultRoot;
+                const parent = creationDirectory();
+                void conversations
+                  .create(root ? `${root}${parent ? `/${parent}` : ""}` : "")
+                  .catch((error) => workspace.report(String(error)));
+              },
+            }
+          : {}}
+      />
+      <div
+        id={`${sidebarId}-files`}
+        class="sidebar-content library"
+        role="region"
+        aria-label="笔记库"
+        hidden={sidebarPanel !== "files"}
+        use:revealOnChange={{
+          key: sidebarPanel,
+          kind: "navigation",
+          direction: sidebarPanel === "files" ? -1 : 1,
+        }}
+      >
+        <LibraryBrowser
+          {workspace}
+          {...conversations ? { conversations } : {}}
+          bind:this={fileList}
+          hidden={filesCollapsed || sidebarPanel !== "files"}
+          onOpen={finishFileNavigation}
+          onEdit={(action, entry, parent) => {
+            if (action === "file") void startDocument("note", parent);
+            else if (action === "directory") void startDocument("directory", parent);
+            else void entryDialog?.open(action, entry, parent);
+          }}
+        />
+      </div>
+      <div
+        id={`${sidebarId}-outline`}
+        class="sidebar-content outline-content"
+        role="region"
+        aria-label="目录"
+        hidden={sidebarPanel !== "outline"}
+        use:revealOnChange={{
+          key: sidebarPanel,
+          kind: "navigation",
+          direction: sidebarPanel === "files" ? -1 : 1,
+        }}
+      >
         {#each workspace.panes as pane (pane.id)}
           {@const controls = paneControls.get(pane.id)}
           <div
             class="sidebar-document"
             data-pane-tools={pane.id}
-            hidden={!documentVisible || workspace.activePane !== pane}
+            hidden={workspace.activePane !== pane}
           >
             {#if controls}{@render controls.outline()}{/if}
           </div>
         {/each}
-      {/snippet}
-      {#snippet footer()}
-        <LinksDock
-          compact={space === "library" && sidebarPanel !== "search"}
-          {workspace}
-          enabled={documentVisible}
-          onOpenSettings={() => settingsWindow?.open()}
-          onLink={(link) => {
-            prepareDocumentAction();
-            void workspace.openLink(link.kind, link.toRaw);
-          }}
-          onMention={(mention) => {
-            prepareDocumentAction();
-            const pane = workspace.activePane;
-            void pane.navigation.openMention(mention, pane.openFile);
-          }}
-        />
-      {/snippet}
-    </QuickNavigation>
+      </div>
+      <LinksDock
+        {workspace}
+        enabled={documentVisible}
+        onOpenSettings={() => settingsWindow?.open()}
+        onLink={(link) => {
+          prepareDocumentAction();
+          void workspace.openLink(link.kind, link.toRaw);
+        }}
+        onMention={(mention) => {
+          prepareDocumentAction();
+          const pane = workspace.activePane;
+          void pane.navigation.openMention(mention, pane.openFile);
+        }}
+      />
+    </Sidebar>
     <div
       class="content-space"
-      use:sidebarMotion={{ collapsed: filesCollapsed, narrow: sidebarIsDrawer }}
       bind:this={contentElement}
       tabindex="-1"
       inert={drawerOpen}
@@ -727,6 +698,7 @@
               {registerControls}
               onShowTools={showDocumentTools}
               {mediaIo}
+              sidebarLayout={{ collapsed: filesCollapsed, narrow, agentOpen }}
               hidden={compactSplit && workspace.activePane !== pane}
               narrowInert={drawerOpen}
               onRename={() => {
@@ -737,38 +709,21 @@
           {/each}
         </div>
       </div>
-      <LibraryBrowser
-        {...articleAgent ? { articleAgent } : {}}
-        {articleCounts}
-        {...articleAgent
-          ? {
-              onConversations: (path: string) => {
-                const root = workspace.vaultRoot;
-                if (root)
-                  void articleAgent
-                    .open(null, { root, path })
-                    .catch((error) => workspace.report(String(error)));
-              },
-            }
-          : {}}
-        onOpenVault={() => void openVault()}
-        bind:this={fileList}
-        onOpen={finishFileNavigation}
-        {workspace}
-        hidden={space !== "library"}
-        onSearch={(query) => {
-          workspace.setSearchInput(query);
-          void searchFiles();
-        }}
-        readFile={readerApi.fileRead}
-        onEdit={(action, entry, parent) => {
-          if (action === "file") void startDocument("note", parent);
-          else if (action === "directory") void startDocument("directory", parent);
-          else void entryDialog?.open(action, entry, parent);
-        }}
-        onNewWhiteboard={(parent) => void startDocument("whiteboard", parent)}
-      />
     </div>
+    {#if agentPanel}<Sidebar
+        side="right"
+        width={rightWidth}
+        minWidth={320}
+        maxWidth={640}
+        defaultWidth={380}
+        hidden={!agentOpen}
+        onWidth={(width) => {
+          rightWidth = width;
+          layoutWrites.request();
+        }}
+      >
+        {@render agentPanel()}
+      </Sidebar>{/if}
   </div>
   {#key workspace.exportScope}{#if workspace.exportScope !== null}<ExportDialog
         {workspace}
@@ -838,6 +793,19 @@
 </div>
 
 <style>
+  .sidebar-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .outline-content {
+    overflow: auto;
+  }
+  .sidebar-content[hidden] {
+    display: none;
+  }
+
   .app {
     position: relative;
     display: flex;
@@ -896,7 +864,7 @@
     .files-scrim[hidden] {
       display: none;
     }
-    .panes :global(.file-sidebar:not(.compact)) {
+    .panes :global(.file-sidebar:not(.right)) {
       position: absolute;
       left: 0;
       top: 0;

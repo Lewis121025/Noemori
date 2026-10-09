@@ -1,0 +1,231 @@
+/* 工作区共用柔和光照与细线边界，正文作为独立纸面承接注意力。 */
+.app[data-reading-palette] {
+  --stage-floor: light-dark(#dfe2df, #171b18);
+  --stage-light: light-dark(#fafbf8, #2d332e);
+  --stage-line: light-dark(rgb(40 54 44 / 4%), rgb(220 234 220 / 4%));
+  --glass-solid: light-dark(#f0f2ed, #252b26);
+  --glass-fill: light-dark(rgb(245 247 242 / 88%), rgb(30 36 31 / 92%));
+  --glass-overlay: light-dark(rgb(252 253 250 / 97%), rgb(36 42 37 / 97%));
+  --glass-control: light-dark(rgb(255 255 255 / 66%), rgb(255 255 255 / 7%));
+  --glass-edge: light-dark(rgb(44 62 49 / 14%), rgb(221 232 224 / 20%));
+  --glass-highlight: light-dark(rgb(255 255 255 / 72%), rgb(239 247 235 / 18%));
+  --glass-sheen: linear-gradient(
+    145deg,
+    light-dark(rgb(255 255 255 / 32%), rgb(226 235 222 / 5%)),
+    transparent 38%,
+    transparent 72%,
+    light-dark(rgb(255 255 255 / 10%), rgb(226 235 222 / 2%))
+  );
+  --glass-rim: inset 0 1px 0 var(--glass-highlight);
+  --glass-shadow: 0 12px 32px light-dark(rgb(22 40 28 / 5%), rgb(0 0 0 / 24%));
+  --glass-overlay-shadow:
+    0 1px 0 var(--glass-highlight), 0 20px 50px light-dark(rgb(18 26 22 / 16%), rgb(0 0 0 / 42%));
+  --glass-filter: blur(16px) saturate(100%);
+  --radius-control: 4px;
+  --radius-panel: 6px;
+  font-family: "Inter Variable", var(--font-interface);
+  background:
+    linear-gradient(180deg, transparent 40%, var(--stage-floor)),
+    linear-gradient(90deg, var(--stage-line) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(var(--stage-line) 1px, transparent 1px) 0 0 / 32px 32px,
+    radial-gradient(ellipse at 50% 24%, var(--stage-light), transparent 70%),
+    var(--stage-floor);
+}
+
+/* 深绿框架使用有色玻璃，保持原有文字层级在明暗模式下的对比度。 */
+.app[data-reading-palette="green"] {
+  --stage-floor: light-dark(#dce3d8, #142019);
+  --stage-light: light-dark(#f2f6e9, #2a3a2d);
+  --stage-line: light-dark(rgb(43 71 47 / 4%), rgb(206 230 200 / 4%));
+}
+.app[data-reading-palette="green"] :is(.file-sidebar, .window-toolbar, .settings-window nav) {
+  --glass-solid: light-dark(#24483b, #18392c);
+  --glass-fill: light-dark(rgb(28 65 51 / 94%), rgb(18 46 33 / 94%));
+  --glass-overlay: light-dark(rgb(35 73 56 / 96%), rgb(23 52 38 / 97%));
+  --glass-control: rgb(218 240 209 / 9%);
+  --muted: light-dark(#d0ddcc, #c3d4c0);
+  --glass-edge: rgb(224 243 219 / 22%);
+  --glass-highlight: rgb(239 255 228 / 30%);
+  --glass-lowlight: rgb(4 24 14 / 28%);
+  --glass-rim:
+    inset 0 1px 0 var(--glass-highlight), inset 1px 0 0 var(--glass-edge),
+    inset 0 -1px 0 var(--glass-lowlight);
+  --glass-sheen: linear-gradient(
+    145deg,
+    rgb(230 250 221 / 12%),
+    transparent 45%,
+    rgb(178 215 177 / 4%)
+  );
+}
+.app[data-reading-palette="monochrome"] :is(.file-sidebar, .window-toolbar) {
+  --fg: light-dark(#30352f, #e5e9e2);
+  --muted: light-dark(#596257, #b0baaa);
+  --border: light-dark(rgb(54 66 51 / 16%), rgb(211 226 204 / 16%));
+  --selected: light-dark(rgb(255 255 255 / 58%), rgb(221 235 214 / 12%));
+  --accent: light-dark(#374632, #d2e1c9);
+}
+
+/* 面板是连续的一层玻璃；内部导航与消息容器不再用实色把材质盖住。 */
+.app[data-reading-palette] :is(.window-toolbar, .file-sidebar) {
+  isolation: isolate;
+  background: transparent;
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim);
+}
+.app[data-reading-palette] .window-toolbar {
+  position: relative;
+  z-index: 30;
+}
+/* 模糊放在独立的背景伪元素上，避免改变内部 fixed 浮层的定位参照。 */
+.app[data-reading-palette] :is(.window-toolbar, .file-sidebar)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: var(--glass-sheen), var(--glass-solid);
+}
+.app[data-reading-palette] .file-sidebar {
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+.app[data-reading-palette] :is(.file-sidebar .list, .agent-panel, .article-source) {
+  background: transparent;
+}
+.app[data-reading-palette] .main:has(> .document-body > .surface > .markdown-content) {
+  background: transparent;
+}
+
+/* 浮层使用更厚的材质，保证滚动文字或复杂内容位于其下方时仍能清楚阅读。 */
+.app[data-reading-palette]
+  :is(dialog[open], [popover]:popover-open, .conversation-preview, .hover-preview) {
+  background: var(--glass-sheen), var(--glass-solid);
+  border-color: var(--glass-edge);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--glass-rim), var(--glass-overlay-shadow);
+}
+.app[data-reading-palette] dialog::backdrop {
+  background: light-dark(rgb(25 40 54 / 17%), rgb(0 7 16 / 46%));
+}
+
+/* 输入与选中态采用小面积高光，不为目录的每一行单独建立模糊层。 */
+.app[data-reading-palette] :is(.library .search, .agent-panel .composer, .reader-input) {
+  background: var(--glass-sheen), var(--glass-control);
+  border-color: var(--glass-edge);
+  box-shadow:
+    var(--glass-rim),
+    0 2px 8px light-dark(rgb(35 51 68 / 4%), rgb(0 0 0 / 12%));
+}
+.app[data-reading-palette] .library .search {
+  background: color-mix(in srgb, var(--fg) 4%, var(--sidebar));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+.app[data-reading-palette] .agent-panel .composer {
+  border-radius: var(--radius-panel);
+}
+.app[data-reading-palette] :is(.library .search, .agent-panel .composer):focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--glass-edge));
+  outline: 2px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  outline-offset: 1px;
+}
+/* 整个输入容器承担焦点高光，内部文本控件保留清晰的单层边缘。 */
+.app[data-reading-palette]
+  :is(.library .search input, .agent-panel .composer textarea):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.app[data-reading-palette] .window-toolbar .reader-button {
+  border-radius: var(--radius-control);
+}
+.app[data-reading-palette] .window-toolbar .reader-button[aria-pressed="true"] {
+  background: var(--glass-control);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+.app[data-reading-palette] .reader-button.primary {
+  background: var(--accent-fill);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+.app[data-reading-palette] .file-row.active {
+  background: var(--glass-control);
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
+.app[data-reading-palette] .file-row.selected:not(.folder) {
+  box-shadow:
+    inset 2px 0 var(--accent),
+    inset 0 1px 0 var(--glass-edge);
+}
+.app[data-reading-palette] .agent-panel .message-region {
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+}
+
+/* 背景滤镜仅放在框架和顶层浮层，滚动长文时不叠加多层滤镜。 */
+@supports (backdrop-filter: blur(1px)) {
+  .app[data-reading-palette] :is(.window-toolbar, .file-sidebar)::before {
+    background: var(--glass-sheen), var(--glass-fill);
+    backdrop-filter: var(--glass-filter);
+  }
+  .app[data-reading-palette]
+    :is(dialog[open], [popover]:popover-open, .conversation-preview, .hover-preview) {
+    background: var(--glass-sheen), var(--glass-overlay);
+    backdrop-filter: var(--glass-filter);
+  }
+  .app[data-reading-palette] dialog::backdrop {
+    backdrop-filter: blur(4px);
+  }
+}
+
+/* 系统要求减少透明度或提高对比度时，提供稳定实底和清晰轮廓。 */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .app[data-reading-palette]
+    :is(
+      .window-toolbar,
+      .file-sidebar,
+      dialog[open],
+      [popover]:popover-open,
+      .conversation-preview,
+      .hover-preview
+    ) {
+    background: var(--glass-solid);
+    backdrop-filter: none;
+    border-color: var(--border);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .app[data-reading-palette] :is(.library .search, .agent-panel .composer, .reader-input) {
+    background: var(--surface);
+    border-color: var(--muted);
+    box-shadow: none;
+  }
+  .app[data-reading-palette] :is(.window-toolbar, .file-sidebar)::before {
+    background: none;
+    backdrop-filter: none;
+  }
+  .app[data-reading-palette] dialog::backdrop {
+    backdrop-filter: none;
+  }
+  .app[data-reading-palette] .agent-panel .message-region {
+    background: var(--bg);
+  }
+}
+@media (forced-colors: active) {
+  .app[data-reading-palette]
+    :is(
+      .window-toolbar,
+      .file-sidebar,
+      dialog[open],
+      [popover]:popover-open,
+      .conversation-preview,
+      .hover-preview
+    ) {
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .app[data-reading-palette] :is(.window-toolbar, .file-sidebar)::before {
+    background: none;
+    backdrop-filter: none;
+  }
+}

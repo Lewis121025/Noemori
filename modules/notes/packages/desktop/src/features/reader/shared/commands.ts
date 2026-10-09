@@ -25,7 +25,7 @@ export const READER_COMMANDS = [
   { id: "command-palette", label: "命令面板…", shortcut: cmd("p") },
   { id: "open-settings", label: "设置…", shortcut: cmd(",") },
   { id: "open-vault", label: "打开笔记库…", shortcut: cmdShift("o") },
-  { id: "open-library", label: "文件系统", shortcut: cmdShift("l") },
+  { id: "open-library", label: "笔记库", shortcut: cmdShift("l") },
   { id: "new-note", label: "新建笔记", shortcut: cmd("n") },
   { id: "new-whiteboard", label: "新建白板", shortcut: null },
   { id: "insert-whiteboard", label: "插入白板", shortcut: null },
@@ -43,9 +43,6 @@ export const READER_COMMANDS = [
   { id: "toggle-files", label: "显示或隐藏文件栏", shortcut: cmd("\\") },
   { id: "toggle-split", label: "切换单栏 / 双栏", shortcut: null },
   { id: "rename-file", label: "重命名当前文件…", shortcut: null },
-  { id: "bookmark-file", label: "收藏或取消收藏当前文件", shortcut: null },
-  { id: "bookmark-heading", label: "收藏或取消收藏当前标题", shortcut: null },
-  { id: "show-bookmarks", label: "显示书签", shortcut: null },
 ] as const satisfies readonly CommandSpec[];
 
 /** 阅读器提供的用户动作；外壳可以通过菜单调用，不直接接触编辑状态。 */
@@ -160,7 +157,6 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
     case "export-vault":
     case "new-folder":
     case "find-files":
-    case "show-bookmarks":
       return context.vaultOpen;
     case "save":
       return context.canEdit;
@@ -173,11 +169,8 @@ export function commandAvailable(id: ReaderCommand, context: CommandContext): bo
       return context.hasDocument && !context.whiteboard;
     case "rename-file":
     case "export-document":
-    case "bookmark-file":
       return context.hasDocument;
     case "toggle-source":
-      return context.hasDocument && context.markdown;
-    case "bookmark-heading":
       return context.hasDocument && context.markdown;
     case "go-back":
       return context.canBack;

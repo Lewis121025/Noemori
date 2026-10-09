@@ -7,6 +7,7 @@ import {
   navigationUrl,
   parseAction,
   type BrowserAction,
+  type BrowserHumanInput,
   type BrowserResult,
   type BrowserSettings,
   type TabState,
@@ -16,11 +17,11 @@ import {
 export class BrowserEngine {
   readonly files: BrowserFiles;
   private readonly pages = new Map<string, BrowserPage>();
-  private activePage: BrowserPage | undefined;
   private tabRevision = 0;
   private mode: "agent" | "human" = "agent";
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
+  private readonly armedDownloads = new Map<string, Set<string>>();
 
   /**
    * 绑定宿主独占的上下文，登记现有及后续标签页；系统权限由宿主创建上下文时限制。
@@ -48,7 +49,7 @@ export class BrowserEngine {
     return [...this.pages.values()].map((entry) => ({
       id: entry.id,
       url: entry.page.url(),
-      title: entry.observation?.title || "",
+      title: entry.title,
       crashed: entry.crashed,
       file_chooser: entry.fileChooser !== null,
       dialog: entry.dialog,
@@ -67,7 +68,6 @@ export class BrowserEngine {
     page.on("close", () => {
       this.pages.delete(entry.id);
       this.tabRevision++;
-      if (this.activePage === entry) this.activePage = undefined;
       void entry.invalidate();
       this.changed(this.tabs());
     });
@@ -75,7 +75,7 @@ export class BrowserEngine {
     page.on("framenavigated", publish);
     page.on("crash", publish);
     page.on("filechooser", publish);
-    page.on("download", (download) => this.files.receive(download));
+    page.on("download", (download) => this.files.receive(download, entry.id));
     this.changed(this.tabs());
   }
 
@@ -146,6 +146,10 @@ export class BrowserEngine {
   }
 
   private async route(action: BrowserAction, execution: BrowserExecution): Promise<BrowserResult> {
+    if (action.action === "invalidate") {
+      await Promise.all([...this.pages.values()].map((entry) => entry.invalidate()));
+      return this.base("executed");
+    }
     if (action.action === "allow_origin") {
       if (!this.grantOrigin) throw new Error("运行时不支持变更网络来源");
       this.grantOrigin(action.origin);
@@ -159,10 +163,16 @@ export class BrowserEngine {
       if (this.mode === mode) return this.base("executed");
       await Promise.all([...this.pages.values()].map((entry) => entry.dialogs.ready()));
       await Promise.all([...this.pages.values()].map((entry) => entry.invalidate()));
+      for (const entry of this.pages.values()) entry.revokeHumanInput();
       this.mode = mode;
-      if (this.mode === "human")
-        await (this.activePage ?? this.pages.values().next().value)?.page.bringToFront();
       return this.base("executed");
+    }
+    if (action.action === "preview" || action.action === "human_input") {
+      const entry = this.pages.get(action.page);
+      if (!entry || entry.page.isClosed()) throw new Error("预览页面已关闭或不属于当前会话");
+      if (action.action === "preview")
+        return { ...this.base("observed"), ...await entry.preview(this.mode === "human") };
+      return this.humanInput(entry, action.token, action.input, execution);
     }
     if (this.mode === "human") throw new Error("浏览器已交给用户，交还控制前不能执行 Agent 命令");
     if (action.action === "save_download") {
@@ -175,9 +185,52 @@ export class BrowserEngine {
     if (action.action === "open") return this.open(action.url, execution);
     const entry = this.pages.get(action.page);
     if (!entry || entry.page.isClosed()) throw new Error("标签页不属于当前会话或已关闭");
-    this.activePage = entry;
     return this.pageAction(entry, action, execution);
   }
+
+  private async humanInput(
+    entry: BrowserPage,
+    token: string,
+    input: BrowserHumanInput,
+    execution: BrowserExecution,
+  ): Promise<BrowserResult> {
+    if (this.mode !== "human") throw new Error("请先接管浏览器，再从预览窗口输入");
+    entry.requireHumanInput(token);
+    if (input.type === "dialog") {
+      execution.dispatch();
+      await entry.dialogs.reply(input.accept, input.text);
+      return this.base("executed");
+    }
+    if (input.type === "files") {
+      const chooser = entry.fileChooser;
+      if (!chooser) throw new Error("页面没有待处理文件选择器");
+      const files = await this.files.upload(input.paths);
+      await entry.guard((signal) => {
+        entry.requireHumanInput(token);
+        execution.dispatch();
+        return chooser.setFiles(files, { timeout: execution.budget(), signal });
+      }, { timeout: execution.budget(), signal: execution.signal });
+      if (entry.fileChooser === chooser) entry.fileChooser = null;
+      await entry.invalidate();
+      return this.base("executed");
+    }
+    if (input.type === "pointer") {
+      const viewport = entry.page.viewportSize();
+      if (!viewport || input.x >= viewport.width || input.y >= viewport.height)
+        throw new Error("人工点击超出当前页面");
+    }
+    await entry.invalidate();
+    await entry.guard(async () => {
+      entry.requireHumanInput(token);
+      execution.dispatch();
+      if (input.type === "pointer") await entry.page.mouse.click(input.x, input.y);
+      else if (input.type === "scroll") await entry.page.mouse.wheel(input.x, input.y);
+      else if (input.type === "key") await entry.page.keyboard.press(input.key);
+      else await entry.page.keyboard.insertText(input.text);
+    }, { timeout: execution.budget(), signal: execution.signal });
+    return this.base("executed");
+  }
+
 
   private async open(source: string, execution: BrowserExecution): Promise<BrowserResult> {
     const url = navigationUrl(source);
@@ -186,7 +239,6 @@ export class BrowserEngine {
     const page = await this.context.newPage();
     const entry = [...this.pages.values()].find((entry) => entry.page === page);
     if (!entry) throw new Error("新标签页在导航期间关闭");
-    this.activePage = entry;
     await entry.guard(
       (signal) =>
         page.goto(url, { waitUntil: "domcontentloaded", timeout: execution.budget(), signal }),
@@ -197,10 +249,27 @@ export class BrowserEngine {
 
   private async pageAction(
     entry: BrowserPage,
-    action: Extract<BrowserAction, { page: string }>,
+    action: Exclude<Extract<BrowserAction, { page: string }>, { action: "preview" | "human_input" }>,
     execution: BrowserExecution,
   ): Promise<BrowserResult> {
     const page = entry.page;
+    if (action.action === "arm_download") {
+      this.armedDownloads.set(entry.id, new Set(this.files.states().map((download) => download.id)));
+      return this.base("observed");
+    }
+    if (action.action === "await_download") {
+      const prior = this.armedDownloads.get(entry.id);
+      if (!prior) throw new Error("请在触发页面动作前登记下载");
+      for (;;) {
+        execution.check();
+        const downloads = this.files.states().filter((download) => download.page === entry.id && !prior.has(download.id));
+        if (downloads.length && downloads.every((download) => download.status !== "running")) {
+          this.armedDownloads.delete(entry.id);
+          return { ...this.base("observed"), downloads };
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      }
+    }
     await entry.dialogs.ready();
     if (entry.dialog && action.action !== "dialog" && action.action !== "close")
       throw new Error("先处理页面对话框，再继续操作");
@@ -237,18 +306,21 @@ export class BrowserEngine {
         break;
       }
       case "choose_files": {
-        if (!entry.fileChooser) throw new Error("页面没有待处理文件选择器");
-        const files = await this.files.upload(action.paths);
-        execution.dispatch();
         const chooser = entry.fileChooser;
+        if (!chooser) throw new Error("页面没有待处理文件选择器");
+        const files = await this.files.upload(action.paths);
         await entry.guard(
-          (signal) => chooser.setFiles(files, { timeout: execution.budget(), signal }),
+          (signal) => {
+            if (entry.fileChooser !== chooser) throw new Error("文件选择器已经改变，请重新选择");
+            execution.dispatch();
+            return chooser.setFiles(files, { timeout: execution.budget(), signal });
+          },
           {
             signal: execution.signal,
             timeout: execution.budget(),
           },
         );
-        entry.fileChooser = null;
+        if (entry.fileChooser === chooser) entry.fileChooser = null;
         break;
       }
       case "wait": {

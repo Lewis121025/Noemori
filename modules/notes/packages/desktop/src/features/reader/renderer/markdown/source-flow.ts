@@ -1,12 +1,13 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { SourceNode } from "./source-map";
 import { sourceLinePrefix } from "./source-text";
+import { listNeedsParagraphBoundary } from "../../shared/markdown/layout-serialization";
 
 /**
- * 空段参与块间边界：变为正文时补足分隔，删除时同时移除它占用的空行。
+ * 空段与块类型共同决定边界；新增引用必须结束懒延续，删除空段移除它占用的空行。
  * @param source 原始完整源码；未改变的节点及相邻边界逐字复用。
  * @param previous 与原文对应的容器映射。
- * @param current 当前容器；仅处理含空段的同类流式容器。
+ * @param current 当前容器；处理空段、块数量或块类型改变的同类流式容器。
  * @param render 递归生成已映射节点的源码。
  * @param replacement 生成新增节点的源码片段。
  * @returns 局部容器源码；不属于空白布局的修改返回 null，由既有渲染路径处理。
@@ -24,7 +25,8 @@ export function renderFlowLayout(
     !["doc", "blockquote", "list_item", "footnote_def"].includes(current.type.name) ||
     previous.children.length === 0 ||
     (previous.node.childCount === current.childCount &&
-      ![...previous.node.content.content, ...current.content.content].some(isEmptyParagraph))
+      ![...previous.node.content.content, ...current.content.content].some(isEmptyParagraph) &&
+      current.content.content.every((node, index) => node.type === previous.node.child(index).type))
   )
     return null;
   const before = previous.children;
@@ -33,10 +35,26 @@ export function renderFlowLayout(
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const continuation = continuationPrefix(source, previous);
   const boundary = (left: PmNode, right: PmNode) => {
+    const item = right.firstChild;
+    const lead = item?.firstChild;
+    const empty =
+      typeof item?.attrs["checked"] !== "boolean" &&
+      (lead === null ||
+        lead === undefined ||
+        (lead.type.name === "paragraph" && lead.content.size === 0));
+    const listBoundary =
+      left.type.name === "paragraph" &&
+      ["bullet_list", "ordered_list"].includes(right.type.name) &&
+      listNeedsParagraphBoundary(
+        right.type.name === "ordered_list" ? Number(right.attrs["order"]) : null,
+        empty,
+      );
     const tight =
       current.type.name === "list_item" &&
       current.attrs["spread"] !== true &&
       !isEmptyParagraph(right) &&
+      !listBoundary &&
+      !(["blockquote", "callout"].includes(left.type.name) && right.type.name === "paragraph") &&
       !(left.type.name === "paragraph" && right.type.name === "paragraph");
     return (newline + continuation).repeat(isEmptyParagraph(left) || tight ? 1 : 2);
   };
@@ -90,7 +108,7 @@ function isEmptyParagraph(node: PmNode): boolean {
 }
 
 function sameLayout(left: PmNode, right: PmNode): boolean {
-  return isEmptyParagraph(left) === isEmptyParagraph(right);
+  return left.type === right.type && isEmptyParagraph(left) === isEmptyParagraph(right);
 }
 
 function matchChildren(before: SourceNode[], after: readonly PmNode[]): Array<number | undefined> {

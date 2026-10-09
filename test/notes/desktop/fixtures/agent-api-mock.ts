@@ -6,8 +6,13 @@ export function createAgentApiMock(): AgentApi {
     throw new Error("此阅读器测试没有启动 Agent 会话");
   };
   return {
+    uiPreview: unavailable,
+    browserInput: unavailable,
+    browserChooseFiles: unavailable,
     settingsGet: async () => null,
-    providersGet: async () => ({ providers: [], active: null }),
+    providersGet: async () => ({ providers: [] }),
+    providersDiscover: unavailable,
+    providersRefresh: unavailable,
     providersSave: unavailable,
     providersRemove: unavailable,
     modelSelect: unavailable,
@@ -28,6 +33,9 @@ export function createAgentApiMock(): AgentApi {
     saveDraft: unavailable,
     flush: async () => {},
     approve: unavailable,
+    uiControl: unavailable,
+    uiSetup: unavailable,
+    uiPermissions: unavailable,
     browserControl: unavailable,
     terminalRead: unavailable,
     terminalInput: unavailable,

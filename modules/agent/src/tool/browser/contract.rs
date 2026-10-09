@@ -7,6 +7,22 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(extend("type" = "object"))]
 pub enum BrowserInput {
+    /// 可信预览界面只读取画面，不改变模型观察或控制权。
+    #[schemars(skip)]
+    Preview {
+        /// 当前会话已有页面。
+        page: String,
+    },
+    /// 可信界面在人工接管后转发输入，模型 Schema 不提供此入口。
+    #[schemars(skip)]
+    HumanInput {
+        /// 当前会话已有页面。
+        page: String,
+        /// 最近预览授予的人工输入凭据，接管或页面改变后失效。
+        token: String,
+        /// 有界人工输入。
+        input: BrowserHumanInput,
+    },
     /// 对同一稳定观察中的表单控件顺序执行；任一步失败或页面改变时停止，不回滚或重放。
     Batch {
         /// 当前页面。
@@ -310,6 +326,21 @@ pub enum BrowserInput {
     },
     /// 查看下载的真实完成状态。
     Downloads,
+    /// 在明确操作前登记当前页面的下载集合，不触发新的网络请求。
+    ArmDownload {
+        /// 实际页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+    },
+    /// 等待当前页面自登记后产生的下载结算，不重新触发页面动作。
+    AwaitDownload {
+        /// 与登记相同的页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+    },
+    /// 关联原生操作后由宿主使所有页面观察失效，模型不可直接构造此动作。
+    #[schemars(skip)]
+    Invalidate,
     /// 将已完成下载保存到工作区；目标存在时拒绝覆盖。
     SaveDownload {
         /// 下载标识。
@@ -322,6 +353,49 @@ pub enum BrowserInput {
     /// 用户交还后使旧观察失效，后续必须重新观察。
     #[schemars(skip)]
     Resume,
+}
+
+/// 预览窗口的人工输入；运行时再次核验控制者和页面尺寸，拒绝未知字段。
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserHumanInput {
+    /// 用户处理网页的确认或输入对话框。
+    Dialog {
+        /// 是否确认。
+        accept: bool,
+        /// prompt 的输入内容。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    /// 用户在系统文件选择器选中的文件仍须属于已授权工作区。
+    Files {
+        /// 经过可信界面选择的路径。
+        paths: Vec<String>,
+    },
+    /// 在截图的 CSS 像素坐标单击。
+    Pointer {
+        /// 截图横坐标。
+        x: f64,
+        /// 截图纵坐标。
+        y: f64,
+    },
+    /// 在当前页面滚动。
+    Scroll {
+        /// 水平滚动量。
+        x: f64,
+        /// 垂直滚动量。
+        y: f64,
+    },
+    /// 发送受浏览器支持的按键组合。
+    Key {
+        /// 浏览器按键名称。
+        key: String,
+    },
+    /// 输入完整文本，包括中文输入法提交。
+    Text {
+        /// 待输入文本。
+        text: String,
+    },
 }
 
 impl BrowserInput {

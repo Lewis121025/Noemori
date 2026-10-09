@@ -152,6 +152,19 @@ async fn drive(
             frame = channel.next_result(snapshot, changed) => return Err(match frame { Err(error) => error, Ok(_) => "空闲浏览器返回了意外控制帧".into() }),
         };
         let action = serde_json::to_value(&request.action).map_err(|error| error.to_string())?;
+        // 预览轮询不占用模型动作预算，不替换最近操作，也不制造 busy/ready 状态闪烁。
+        if matches!(request.action, BrowserInput::Preview { .. }) {
+            if request.context.check().is_err() || request.reply.is_closed() {
+                continue;
+            }
+            let result = exchange(&mut channel, &request, action, snapshot, changed).await;
+            let failure = result.as_ref().err().cloned();
+            let _ = request.reply.send(result);
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            continue;
+        }
         if let Some((previous, output)) = completed.get(&request.id) {
             let result = if previous == &action {
                 Ok(output.clone())

@@ -11,7 +11,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test ../../../test/agent/web/unit/runtime.test.mjs ../../../test/agent/web/integration/runtime.test.mjs ../../../test/agent/web/integration/network.test.mjs ../../../test/agent/web/integration/challenge.test.mjs",
     "test:e2e": "node --test ../../../test/agent/web/e2e/web.test.mjs",
-    "test:browser": "pnpm build && node --test ../../../test/agent/browser/unit/*.test.mjs ../../../test/agent/browser/integration/*.test.mjs"
+    "test:browser": "pnpm build && node --test ../../../test/agent/browser/unit/*.test.mjs ../../../test/agent/browser/integration/*.test.mjs",
+    "test:ui": "pnpm build && node --test ../../../test/agent/ui/unit/*.test.mjs ../../../test/agent/ui/integration/*.test.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",
@@ -24,6 +25,7 @@
     "turndown-plugin-gfm": "1.0.2"
   },
   "devDependencies": {
+    "@types/chrome": "^0.3.4",
     "@types/jsdom": "^27.0.0",
     "@types/turndown": "^5.0.5"
   }

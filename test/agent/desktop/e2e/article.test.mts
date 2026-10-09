@@ -86,12 +86,12 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
   await paragraph.click();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowRight" : "End");
   await page.getByRole("button", { name: "插入", exact: true }).click();
-  await page.getByRole("button", { name: "插入 Agent 对话…", exact: true }).click();
+  await page.getByRole("menuitem", { name: "插入 Agent 对话…", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "在此处插入对话", exact: true });
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   expect((await page.evaluate(() => window.noemori.agent.list())).items).toHaveLength(0);
   await page.getByRole("button", { name: "插入", exact: true }).click();
-  await page.getByRole("button", { name: "插入 Agent 对话…", exact: true }).click();
+  await page.getByRole("menuitem", { name: "插入 Agent 对话…", exact: true }).click();
   await dialog.getByRole("textbox", { name: "对话名称", exact: true }).fill("理解折射");
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0]!.setContentSize(640, 480),
@@ -114,6 +114,8 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
     heading: "光学",
   });
   expect(await readFile(join(vault, "光学.md"), "utf8")).toContain(`noemori://conversation/${id}`);
+  await page.getByRole("button", { name: "选择对话模型", exact: true }).click();
+  await page.getByRole("button", { name: "article-fixture", exact: true }).click();
   const input = page.getByRole("textbox", { name: "Agent 用户任务" });
   await input.fill("为什么会折射？");
   await input.press("Enter");
@@ -121,7 +123,7 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
   expect(requests[0]).toContain("折射发生在两种介质");
   expect(requests[0]).toContain("article_path");
   expect(requests[0]).toContain("光学.md");
-  await page.getByRole("button", { name: "返回原段落", exact: true }).click();
+  await page.locator(".article-link").click();
   const marker = page.locator(`.ProseMirror a[href="noemori://conversation/${id}"]`);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
   await expect.poll(() => marker.count()).toBe(0);
@@ -132,14 +134,8 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
     BrowserWindow.getAllWindows()[0]!.setContentSize(640, 480),
   );
   await page.waitForFunction(() => innerWidth === 640 && innerHeight === 480);
-  // 窗口尺寸先于 Svelte 的窄屏状态提交，先等待抽屉状态，避免把尚未出现的遮罩误判为关闭。
-  await page.waitForFunction(() =>
-    document.querySelector(".file-sidebar")?.hasAttribute("hidden") ||
-    document.querySelector(".files-scrim")?.hasAttribute("hidden") === false,
-  );
-  const scrim = page.getByRole("button", { name: "收起文件栏", exact: true });
-  if (await scrim.isVisible()) await scrim.click();
-  await scrim.waitFor({ state: "hidden" });
+  await page.locator(".file-sidebar:not(.right)").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "工作区助手", exact: true }).click();
   await marker.hover();
   const preview = page.getByRole("complementary", { name: "文章对话预览", exact: true });
   await preview.getByText("光在不同介质中的传播速度不同。", { exact: true }).waitFor();
@@ -167,7 +163,7 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
     BrowserWindow.getAllWindows()[0]!.setContentSize(1100, 720),
   );
   await page.getByRole("heading", { name: "理解折射", exact: true }).waitFor();
-  await page.getByRole("button", { name: "返回原段落", exact: true }).click();
+  await page.locator(".article-link").click();
   await openLibrary(page);
   const file = page.locator('.library [data-path="光学.md"]');
   await file.click({ button: "right" });
@@ -178,8 +174,7 @@ test("文章对话：插入、悬停、定位、每轮上下文、文件归属�
   await expect.poll(async () => (await snapshot()).article?.path).toBe("折射原理.md");
   await page.locator('.library [data-path="折射原理.md"]').click({ button: "right" });
   await page.getByRole("menuitem", { name: "查看文章对话", exact: true }).click();
-  await expect.poll(() => page.locator(".library-preview .conversation-body").innerText()).toContain("光在不同介质中的传播速度不同");
-  await page.locator(".library-preview").getByRole("button", { name: "继续对话", exact: true }).click();
+  await expect.poll(() => page.getByRole("log", { name: "对话消息" }).innerText()).toContain("光在不同介质中的传播速度不同");
   await page.getByRole("heading", { name: "理解折射", exact: true }).waitFor();
   await input.fill("继续解释这一段。");
   await input.press("Enter");

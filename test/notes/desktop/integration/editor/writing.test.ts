@@ -1,12 +1,13 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EditorState, TextSelection } from "prosemirror-state";
+import { EditorState, TextSelection, type Transaction } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { history, undo } from "prosemirror-history";
 import { baseKeymap } from "prosemirror-commands";
 import { keymap } from "prosemirror-keymap";
 import { parseMarkdown } from "@reader/shared/markdown/parse";
-import { serializeMarkdown } from "@reader/shared/markdown/serialize";
+import { sameMarkdownContent, serializeMarkdown } from "@reader/shared/markdown/serialize";
+import { createMarkdownSession } from "@reader/renderer/markdown/source-session";
 import { writingCommands, writingPlugins } from "@reader/renderer/editor/writing";
 import { insertLink, selectedLink, removeLink } from "@reader/renderer/editor/links/link-editing";
 import { taskItemView } from "@reader/renderer/markdown/views/task-view";
@@ -150,6 +151,13 @@ describe("核心写作操作", () => {
     expect(view.state.doc.textContent).toBe(prefix);
   });
 
+  it("超出 Markdown 九位编号上限的输入保留字面文本，不抛出模型异常", () => {
+    start();
+    type("1000000000. ");
+    expect(view.state.doc.firstChild?.type.name).toBe("paragraph");
+    expect(view.state.doc.textContent).toBe("1000000000. ");
+  });
+
   it("格式化保留选区文字，保存可重读，撤销恢复原文", () => {
     start("重点内容\n");
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)));
@@ -288,4 +296,40 @@ describe("核心写作操作", () => {
     expect(view.state.doc.firstChild?.type.name).toBe("bullet_list");
     expect(view.state.doc.firstChild?.childCount).toBe(2);
   });
+
+  it.each(["bulletList", "orderedList", "taskList", "quote"] as const)(
+    "%s 的事务接入源码会话，保存重开一致，撤销恢复原始字节",
+    (name) => {
+      const source =
+        "\uFEFF前文 _保持_\r\n\r\n* 选中项 **格式**\r\n\r\n选中段\r\n\r\n尾文 &amp;\r\n";
+      const session = createMarkdownSession(source);
+      start(source);
+      view.dispatch(
+        view.state.tr.setSelection(
+          TextSelection.create(
+            view.state.doc,
+            session.positionAt(source.indexOf("选中项")),
+            session.positionAt(source.indexOf("选中段") + "选中段".length),
+          ),
+        ),
+      );
+      const dispatch = (tr: Transaction): void => {
+        session.track(tr);
+        view.dispatch(tr);
+      };
+      expect(writingCommands[name](view.state, dispatch)).toBe(true);
+      const saved = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+        session.snapshot(view.state.doc).bytes,
+      );
+      expect(saved.startsWith("\uFEFF前文 _保持_\r\n\r\n")).toBe(true);
+      expect(saved.endsWith("尾文 &amp;\r\n")).toBe(true);
+      expect(sameMarkdownContent(parseMarkdown(saved), view.state.doc)).toBe(true);
+      expect(undo(view.state, dispatch)).toBe(true);
+      expect(
+        new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+          session.snapshot(view.state.doc).bytes,
+        ),
+      ).toBe(source);
+    },
+  );
 });

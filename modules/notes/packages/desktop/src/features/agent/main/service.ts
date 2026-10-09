@@ -1,4 +1,6 @@
 import { branchCheckpoint, relocateCheckpoint, type NativeAgentSession } from "@noemori/agent-node";
+import { mkdir, realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
   AgentConversation,
@@ -9,14 +11,27 @@ import type {
   ApprovalReply,
   PublicModelSettings,
   TerminalPage,
+  UiPreviewTarget,
+  UiPreviewFrame,
+  BrowserHumanInput,
 } from "../shared/api";
 import { canResumeRun } from "../shared/run-actions";
-import type { ModelSelection, ProviderCatalog, ProviderUpdate } from "../shared/providers";
+import { parseModelSelection } from "../shared/providers";
+import type {
+  DiscoveredModel,
+  ModelSelection,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderUpdate,
+} from "../shared/providers";
 import { parseSnapshot, parseTerminalPage, record, text as readText } from "../shared/parse";
 import { AgentProviderStore } from "./providers";
 import { parsePrivateJson } from "./private-json";
 import { ConversationStore, conversationTitle, type ConversationRecord } from "./conversations";
 import { createNativeSession } from "./native-session";
+import { installUiRuntime } from "./ui-runtime";
+import { emptyUi } from "../shared/ui";
+import { parsePreviewFrame } from "../shared/preview";
 import { ArticleLibrary } from "./articles";
 import {
   articlePrompt,
@@ -32,7 +47,7 @@ export class AgentService {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly mutations = new Map<string, Promise<void>>();
   private readonly settings: AgentProviderStore;
-  private defaultModel: string | null = null;
+  private legacyModelSelection: ModelSelection | null = null;
   private readonly store: ConversationStore;
   private readonly articles: ArticleLibrary;
   private readonly articleLocations = new Map<string, ArticleLocation>();
@@ -58,14 +73,15 @@ export class AgentService {
     try {
       const loaded = await this.store.load();
       this.issues = loaded.issues;
-      for (const item of loaded.records) {
-        item.snapshot = resumedSnapshot(item.snapshot);
-        this.records.set(item.id, item);
-      }
       try {
-        this.defaultModel = (await this.settings.public())?.model ?? null;
+        this.legacyModelSelection = await this.settings.legacySelection();
       } catch (cause) {
         this.issues.push(`供应商配置读取失败：${String(cause)}`);
+      }
+      for (const item of loaded.records) {
+        if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
+        item.snapshot = resumedSnapshot(item.snapshot);
+        this.records.set(item.id, item);
       }
     } catch (cause) {
       this.loadError = cause instanceof Error ? cause : new Error(String(cause));
@@ -74,12 +90,23 @@ export class AgentService {
   }
 
   /** 设置读取只返回无密钥投影。 */
-  settingsGet(): Promise<PublicModelSettings | null> {
-    return this.settings.public();
+  async settingsGet(id: string): Promise<PublicModelSettings | null> {
+    await this.ready;
+    this.ensureOpen();
+    return this.settings.public(this.record(id).modelSelection);
   }
   /** 读取全部供应商的公开配置；不解密，也不启动运行。 */
   providersGet(): Promise<ProviderCatalog> {
     return this.settings.catalog();
+  }
+  /**
+   * @param connection 用户填写的连接草稿，不要求模型 ID。
+   * @returns 当前接口可用模型；失败原样交付，不修改已保存连接。
+   * @throws 服务已关闭、认证或模型接口失败时拒绝。
+   */
+  providersDiscover(connection: ProviderConnection): Promise<DiscoveredModel[]> {
+    this.ensureOpen();
+    return this.settings.discover(connection);
   }
   /** 保存连接，所有会话从下一轮读取新配置；保存失败保留上一份配置。 */
   providersSave(settings: ProviderUpdate): Promise<ProviderCatalog> {
@@ -89,9 +116,29 @@ export class AgentService {
   providersRemove(id: string): Promise<ProviderCatalog> {
     return this.updateProviders(() => this.settings.remove(id));
   }
-  /** 明确选择所有会话下一轮使用的供应商与模型，不中断当前一轮。 */
-  modelSelect(selection: ModelSelection): Promise<ProviderCatalog> {
-    return this.updateProviders(() => this.settings.select(selection));
+  /** 获取保存连接的模型目录；接口失败不修改连接或对话选择。 */
+  providersRefresh(id: string): Promise<ProviderCatalog> {
+    return this.updateProviders(() => this.settings.refresh(id));
+  }
+  /**
+   * 保存单条对话下一轮选择；正在运行的原生资源继续使用派发时的配置。
+   * @param id 目标对话身份。
+   * @param value 供应商、模型与可选推理强度。
+   * @returns 已落盘的选择；回执不携带可能过时的消息或草稿。
+   * @throws 对话或模型缺失、能力不支持或保存失败时拒绝，保留旧选择。
+   */
+  modelSelect(id: string, value: ModelSelection): Promise<ModelSelection> {
+    const selection = parseModelSelection(value);
+    return this.serialize(id, async () => {
+      const item = this.record(id);
+      await this.settings.public(selection);
+      this.capture(id);
+      const next = { ...item, modelSelection: selection };
+      await (await this.recordStore(item)).save(next);
+      item.modelSelection = selection;
+      this.changed(id);
+      return { ...selection };
+    });
   }
   private async updateProviders(
     operation: () => Promise<ProviderCatalog>,
@@ -99,19 +146,18 @@ export class AgentService {
     await this.ready;
     this.ensureOpen();
     const catalog = await operation();
-    this.defaultModel = catalog.active?.modelId ?? null;
     for (const id of this.records.keys()) this.changed(id);
     return catalog;
   }
 
   /**
-   * 确认工作目录和名称后创建；落盘成功才交付，失败回收新建的原生资源。
-   * @param workspace 经 IPC 确认的工作目录。
+   * 确认工作目录和名称后只创建可保存的对话，原生资源留到首次发送。
+   * @param workspace 经 IPC 确认的可选关联目录；null 表示独立对话。
    * @param title 用户输入的会话名称。
    * @returns 具有稳定身份的已保存会话；不发送模型请求。
-   * @throws 模型未配置、目录无效或保存失败时拒绝，并回收新资源。
+   * @throws 目录无效或保存失败时拒绝，不发布未保存记录。
    */
-  create(workspace: string, title: string): Promise<AgentConversation> {
+  create(workspace: string | null, title: string): Promise<AgentConversation> {
     return this.createRecord(workspace, title, null);
   }
 
@@ -134,9 +180,11 @@ export class AgentService {
           continue;
         }
         try {
-          if (item.snapshot.workspace !== root)
+          if (item.snapshot.workspace !== root && item.checkpoint !== null)
             item.checkpoint = await relocateCheckpoint(item.checkpoint, root);
+          if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
           item.snapshot = { ...resumedSnapshot(item.snapshot), workspace: root };
+          item.linkedWorkspace = root;
           this.records.set(item.id, item);
           await this.refreshArticle(item);
         } catch (error) {
@@ -156,54 +204,58 @@ export class AgentService {
   }
 
   private createRecord(
-    workspace: string,
+    workspace: string | null,
     title: string,
     articlePath: string | null,
   ): Promise<AgentConversation> {
     return this.serialize("create", async () => {
       const name = conversationTitle(title);
-      const selected = await this.settings.selected();
-      if (selected === null) throw new Error("请先配置供应商并选择默认模型");
-      const model = selected.settings;
-      this.ensureOpen();
       const id = randomUUID();
-      const session = createNativeSession(this.userData, this.launcher, workspace, model, () =>
-        this.nativeChanged(id),
-      );
-      try {
-        const now = Date.now();
-        const snapshot = { ...parseSnapshot(session.snapshot()), id };
-        const item: ConversationRecord = {
-          id,
-          title: name,
-          createdAt: now,
-          updatedAt: now,
-          archived: false,
-          origin: null,
-          article:
-            articlePath === null
-              ? null
-              : {
-                  path: articlePath,
-                  title: articlePath.split("/").at(-1)!.replace(/\.md$/iu, ""),
-                  markerId: id,
-                },
-          draft: "",
-          model: model.model,
-          snapshot,
-          checkpoint: session.checkpoint(),
-        };
-        const location = await this.articles.location(item);
-        await (await this.recordStore(item)).save(item);
-        this.records.set(id, item);
-        this.sessions.set(id, session);
-        if (location) this.articleLocations.set(id, location);
-        this.changed(id);
-        return this.project(item);
-      } catch (error) {
-        await session.close();
-        throw error;
-      }
+      const root = workspace === null ? this.executionDirectory(id) : await realpath(workspace);
+      if (workspace !== null && !(await stat(root)).isDirectory())
+        throw new Error("工作目录必须是文件夹");
+      const now = Date.now();
+      const snapshot: AgentSnapshot = {
+        id,
+        workspace: root,
+        revision: 0,
+        closed: false,
+        run: null,
+        turns: [],
+        messages: [],
+        terminals: [],
+        approvals: [],
+        browser: { status: "idle", tabs: [], receipts: [], error: null },
+        ui: emptyUi(),
+      };
+      const item: ConversationRecord = {
+        id,
+        title: name,
+        createdAt: now,
+        updatedAt: now,
+        archived: false,
+        origin: null,
+        linkedWorkspace: workspace === null ? null : root,
+        article:
+          articlePath === null
+            ? null
+            : {
+                path: articlePath,
+                title: articlePath.split("/").at(-1)!.replace(/\.md$/iu, ""),
+                markerId: id,
+              },
+        draft: "",
+        model: null,
+        modelSelection: null,
+        snapshot,
+        checkpoint: null,
+      };
+      const location = await this.articles.location(item);
+      await (await this.recordStore(item)).save(item);
+      this.records.set(id, item);
+      if (location) this.articleLocations.set(id, location);
+      this.changed(id);
+      return this.project(item);
     });
   }
 
@@ -226,13 +278,20 @@ export class AgentService {
           throw new Error("此轮尚未结束，请选择较早轮次或分叉当前内容");
       }
       this.capture(id);
-      const derived = record(
-        parsePrivateJson(
-          await branchCheckpoint(source.checkpoint, request.afterTurnId ?? undefined),
-          "对话检查点",
-        ),
-      );
+      const derived =
+        source.checkpoint === null
+          ? null
+          : record(
+              parsePrivateJson(
+                await branchCheckpoint(source.checkpoint, request.afterTurnId ?? undefined),
+                "对话检查点",
+              ),
+            );
       const nextId = randomUUID();
+      const root =
+        source.linkedWorkspace ??
+        (derived === null ? this.executionDirectory(nextId) : await this.managedWorkspace(nextId));
+      const checkpoint = derived === null ? null : readText(derived, "checkpoint");
       const now = Date.now();
       const item: ConversationRecord = {
         id: nextId,
@@ -243,9 +302,20 @@ export class AgentService {
         draft: "",
         origin: { conversationId: source.id, title: source.title, turnId: request.afterTurnId },
         article: source.article ? { ...source.article } : null,
+        linkedWorkspace: source.linkedWorkspace,
         model: source.model,
-        checkpoint: readText(derived, "checkpoint"),
-        snapshot: { ...parseSnapshot(JSON.stringify(derived["snapshot"])), id: nextId },
+        modelSelection: source.modelSelection === null ? null : { ...source.modelSelection },
+        checkpoint:
+          checkpoint !== null && source.linkedWorkspace === null
+            ? await relocateCheckpoint(checkpoint, root)
+            : checkpoint,
+        snapshot: {
+          ...(derived === null
+            ? source.snapshot
+            : parseSnapshot(JSON.stringify(derived["snapshot"]))),
+          id: nextId,
+          workspace: root,
+        },
       };
       const location = await this.articles.location(item);
       await (await this.recordStore(item)).save(item);
@@ -273,8 +343,10 @@ export class AgentService {
           return {
             id: item.id,
             title: item.title,
-            workspace: item.snapshot.workspace,
-            model: status === "running" ? item.model : (this.defaultModel ?? "未选择模型"),
+            workspace: item.linkedWorkspace,
+            model:
+              (status === "running" ? item.model : item.modelSelection?.modelId) ?? "未选择模型",
+            modelSelection: item.modelSelection,
             createdAt: item.createdAt,
             updatedAt: item.updatedAt,
             archived: item.archived,
@@ -361,8 +433,8 @@ export class AgentService {
     const article = this.articleLocations.get(item.id);
     if (article?.status === "unavailable") throw new Error(`无法核对文章内容：${article.error}`);
     // 历史落盘和文章读取都可能等待；紧贴派发边界读取，避免期间保存的新配置被错过。
-    const selected = await this.settings.selected();
-    if (!selected) throw new Error("请先配置供应商并选择默认模型");
+    const selected = await this.settings.selected(item.modelSelection);
+    if (!selected) throw new Error("请为此对话选择模型");
     const run = session.startConfigured(
       JSON.stringify(selected.settings),
       selected.binding,
@@ -457,7 +529,9 @@ export class AgentService {
     if (this.loadError) throw this.loadError;
     await Promise.all(this.mutations.values());
     await this.settings.flush();
-    await Promise.all([...this.records.keys()].map((id) => this.persist(id)));
+    await Promise.all(
+      [...this.records.keys()].map((id) => this.serialize(id, () => this.persist(id))),
+    );
   }
 
   /**
@@ -473,6 +547,40 @@ export class AgentService {
       throw new Error(
         typeof result["error"] === "string" ? result["error"] : "浏览器控制权未能切换",
       );
+  }
+  /** 只读取已启动会话的独立画面；不持久化图片，原生失败原样传播。 */
+  async uiPreview(id: string, target: UiPreviewTarget): Promise<UiPreviewFrame> {
+    return parsePreviewFrame(JSON.parse(await this.get(id).uiPreview(JSON.stringify(target))));
+  }
+  /** 输入仅交给已接管的专用浏览器；页面和控制权由资源所有者再次核验。 */
+  browserInput(id: string, page: string, token: string, input: BrowserHumanInput): Promise<void> {
+    return this.get(id).browserInput(page, token, JSON.stringify(input));
+  }
+  /** 用户切换真实连接控制权；只有后端确认执行才完成。 */
+  async uiControl(id: string, backend: string, resume: boolean): Promise<void> {
+    const result = record(JSON.parse(await this.get(id).uiControl(backend, resume)));
+    if (result["outcome"] !== "executed")
+      throw new Error(typeof result["error"] === "string" ? result["error"] : "界面控制权未能切换");
+  }
+  /** 用户明确启用浏览器连接时安装本人 Native Messaging 清单，不修改系统权限。 */
+  async uiSetup() {
+    this.ensureOpen();
+    return installUiRuntime(this.userData, this.launcher);
+  }
+  /** 用户检查原生权限时激活会话并读取真实状态；不自动授权。 */
+  async uiPermissions(id: string) {
+    await this.ready;
+    const session = await this.activate(this.record(id));
+    const result = record(JSON.parse(await session.uiPermissions()));
+    if (result["outcome"] !== "observed")
+      throw new Error(
+        typeof result["error"] === "string" ? result["error"] : "原生权限状态未能读取",
+      );
+    return {
+      accessibility: result["accessibility"] === true,
+      screen_recording: result["screen_recording"] === true,
+      input_monitoring: result["input_monitoring"] === true,
+    };
   }
 
   /** 决定只能作用于仍有效的申请。 */
@@ -533,17 +641,25 @@ export class AgentService {
   private async activate(item: ConversationRecord): Promise<NativeAgentSession> {
     const current = this.sessions.get(item.id);
     if (current) return current;
-    const configured = (await this.settings.selected())?.settings;
-    if (!configured) throw new Error("请先配置供应商并选择默认模型");
+    const configured = (await this.settings.selected(item.modelSelection))?.settings;
+    if (!configured) throw new Error("请为此对话选择模型");
+    // 无目录关联时只授权该对话的私有运行目录；重启或分叉不借用其他对话目录。
+    const workspace = item.linkedWorkspace ?? (await this.managedWorkspace(item.id));
+    if (item.snapshot.workspace !== workspace) {
+      if (item.checkpoint !== null)
+        item.checkpoint = await relocateCheckpoint(item.checkpoint, workspace);
+      item.snapshot = { ...item.snapshot, workspace };
+    }
     const session = createNativeSession(
       this.userData,
       this.launcher,
-      item.snapshot.workspace,
+      workspace,
       configured,
       () => this.nativeChanged(item.id),
+      item.title,
     );
     try {
-      session.restore(item.checkpoint);
+      if (item.checkpoint !== null) session.restore(item.checkpoint);
     } catch (error) {
       await session.close();
       throw error;
@@ -568,8 +684,12 @@ export class AgentService {
     return {
       ...snapshot,
       id: item.id,
+      workspace: item.linkedWorkspace,
       title: item.title,
-      model: snapshot.run?.status === "running" ? item.model : (this.defaultModel ?? "未选择模型"),
+      model:
+        (snapshot.run?.status === "running" ? item.model : item.modelSelection?.modelId) ??
+        "未选择模型",
+      modelSelection: item.modelSelection,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       archived: item.archived,
@@ -591,7 +711,9 @@ export class AgentService {
       id,
       setTimeout(() => {
         this.timers.delete(id);
-        void this.saveProgress(id);
+        void this.serialize(id, () => this.saveProgress(id)).catch((error: unknown) => {
+          console.error("Agent 对话进度保存失败", error);
+        });
       }, 200),
     );
   }
@@ -636,6 +758,16 @@ export class AgentService {
     this.timers.delete(id);
   }
 
+  private executionDirectory(id: string): string {
+    return join(this.userData, "agent-workspaces", id);
+  }
+
+  private async managedWorkspace(id: string): Promise<string> {
+    const directory = this.executionDirectory(id);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    return realpath(directory);
+  }
+
   private recordStore(item: ConversationRecord): Promise<ConversationStore> {
     return item.article
       ? this.articles.store(item.snapshot.workspace)
@@ -669,9 +801,13 @@ export class AgentService {
           const binding = item.article;
           if (
             binding &&
-            change.to !== null &&
+            !binding.removed &&
             (binding.path === change.from || binding.path.startsWith(`${change.from}/`))
           ) {
+            if (change.to === null) {
+              item.article = { ...binding, removed: true };
+              continue;
+            }
             const path = change.to + binding.path.slice(change.from.length);
             item.article = {
               ...binding,
@@ -734,6 +870,7 @@ function resumedSnapshot(snapshot: AgentSnapshot): AgentSnapshot {
     approvals: [],
     terminals: [],
     browser: { status: "idle", tabs: [], receipts: [], error: null },
+    ui: emptyUi(),
     run: interrupted(snapshot.run),
     turns: snapshot.turns.map((turn) => ({ ...turn, run: interrupted(turn.run) ?? turn.run })),
   };

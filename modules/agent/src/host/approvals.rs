@@ -73,9 +73,9 @@ impl TerminalApprover for Gate {
             .await?
         {
             HostApprovalReply::Terminal(decision) => Ok(decision),
-            HostApprovalReply::Network(_) | HostApprovalReply::Browser(_) => {
-                Err("审批类型不符".into())
-            }
+            HostApprovalReply::Network(_)
+            | HostApprovalReply::Browser(_)
+            | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
         }
     }
 }
@@ -91,9 +91,9 @@ impl TerminalNetworkApprover for Gate {
             .await?
         {
             HostApprovalReply::Network(decision) => Ok(decision),
-            HostApprovalReply::Terminal(_) | HostApprovalReply::Browser(_) => {
-                Err("审批类型不符".into())
-            }
+            HostApprovalReply::Terminal(_)
+            | HostApprovalReply::Browser(_)
+            | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
         }
     }
 }
@@ -110,9 +110,23 @@ impl crate::tool::browser::BrowserApprover for Gate {
             .await?
         {
             HostApprovalReply::Browser(decision) => Ok(decision),
-            HostApprovalReply::Terminal(_) | HostApprovalReply::Network(_) => {
-                Err("审批类型不符".into())
-            }
+            HostApprovalReply::Terminal(_)
+            | HostApprovalReply::Network(_)
+            | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::tool::ui::computer::UiApprover for Gate {
+    async fn approve(
+        &self,
+        request: crate::tool::ui::computer::UiAccessRequest,
+        context: ExecutionContext,
+    ) -> Result<crate::tool::ui::computer::UiAccessDecision, String> {
+        match self.wait(HostApprovalRequest::Ui(request), context).await? {
+            HostApprovalReply::Ui(decision) => Ok(decision),
+            _ => Err("审批类型不符".into()),
         }
     }
 }

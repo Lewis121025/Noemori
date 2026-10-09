@@ -3,8 +3,25 @@ import { describe, expect, it } from "vitest";
 import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { parseExportHtml, parseInlineExportHtml } from "@reader/renderer/export/html";
 import { portableMarkdown } from "@reader/main/export/documents";
+import { DOMParser as PmParser, DOMSerializer } from "prosemirror-model";
+import { documentSchema } from "@reader/shared/markdown/schema";
 
 describe("导出行内 HTML 的完整上下文", () => {
+  it("受控颜色和下划线在标准 HTML 导出及剪贴板往返中保留", () => {
+    const source = '<u><span style="color: #b44343"><mark style="background-color: #cde1f5">**[组合](note.md)** `代码`</mark></span></u>';
+    const doc = parseMarkdown(source);
+    const html = document.createElement("div");
+    html.append(DOMSerializer.fromSchema(documentSchema).serializeFragment(doc.content));
+    expect(PmParser.fromSchema(documentSchema).parse(html).eq(doc)).toBe(true);
+    // 导出解析只接受单一受控声明；Clipboard 的主题变量由 schema DOM 解析，不经导出清理。
+    expect(parseExportHtml('<u><span style="color: #b44343"><mark style="background-color: #cde1f5"><strong>文字</strong></mark></span></u>').firstChild?.firstChild?.marks.map((mark) => mark.type.name))
+      .toEqual(["strong", "underline", "highlight", "text_color"]);
+    const output = portableMarkdown({ path: "a.md", output: "a.md", doc, anchors: [], locations: new Map(), formulaLocations: new Map() });
+    expect(output).toContain('style="color: #b44343"');
+    expect(output).toContain('style="background-color: #cde1f5"');
+    expect(parseMarkdown(output).eq(doc)).toBe(true);
+  });
+
   it("无表头与多表头表格迁移为标准 HTML，不能改变数据行的身份", () => {
     for (const headers of ["", "<tr><th>第一层</th></tr><tr><th>第二层</th></tr>"]) {
       const doc = parseExportHtml(

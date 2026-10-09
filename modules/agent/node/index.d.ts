@@ -16,6 +16,17 @@ export declare class NativeAgentSession {
   constructor(configuration: string, changed: () => void)
   /** 快照不消费输出；供应商原生签名和认证配置不包含在结果中。 */
   snapshot(): string
+  /** 读取当前会话浮窗画面；参数必须是固定目标结构，返回画面和输入凭据的 JSON 或错误。 */
+  uiPreview(target: string): Promise<string>
+  /** 转发用户接管后的有界浏览器输入；无效目标或控制状态使 Promise 拒绝。 */
+  browserInput(page: string, token: string, input: string): Promise<void>
+  /**
+   * 可信主进程切换 UI 控制权；不会自动启动或恢复模型生成。
+   * 后端、窗口身份、运行状态或确认回执无效时拒绝 Promise。
+   */
+  uiControl(backend: string, resume: boolean): Promise<string>
+  /** 用户明确检查时读取原生权限状态，不代替用户授权。 */
+  uiPermissions(): Promise<string>
   /** 中断明确的运行并等待终态；旧运行标识、超时或关闭错误会拒绝 Promise。 */
   interrupt(runId: string): Promise<void>
   /** 返回仅可信主进程可持久化的闭合历史，不包含认证或可复用的进程句柄。 */

@@ -1,4 +1,4 @@
-import { chainCommands, exitCode, setBlockType, toggleMark, wrapIn } from "prosemirror-commands";
+import { chainCommands, exitCode, setBlockType, toggleMark } from "prosemirror-commands";
 import {
   InputRule,
   inputRules,
@@ -8,14 +8,9 @@ import {
 } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
 import { editingCommand } from "./read-only";
-import {
-  liftListItem,
-  sinkListItem,
-  splitListItemKeepMarks,
-  wrapInList,
-} from "prosemirror-schema-list";
+import { liftListItem, sinkListItem, splitListItemKeepMarks } from "prosemirror-schema-list";
 import type { Command, EditorState, Plugin, Transaction } from "prosemirror-state";
-import { liftTarget } from "prosemirror-transform";
+import { listFormattingCommand, quoteFormattingCommand } from "./block-formatting";
 import { documentSchema } from "../../shared/markdown/schema";
 import { leaveTable, moveTableCell } from "./table/table";
 import { tableClipboard, tableLineBreak } from "./table/table-input";
@@ -30,53 +25,6 @@ function listDepth(state: EditorState): number {
   return 0;
 }
 
-function listCommand(name: "bullet_list" | "ordered_list"): Command {
-  return (state, dispatch) => {
-    const depth = listDepth(state);
-    if (depth === 0) return wrapInList(nodes[name]!)(state, dispatch);
-    const { $from } = state.selection;
-    const list = $from.node(depth - 1);
-    if (list.type === nodes[name]) return liftListItem(itemType)(state, dispatch);
-    dispatch?.(
-      state.tr.setNodeMarkup($from.before(depth - 1), nodes[name], { order: 1 }).scrollIntoView(),
-    );
-    return true;
-  };
-}
-
-const taskList: Command = (state, dispatch) => {
-  // 面板只查询可用性时复用结构验证，避免为长选区创建随后丢弃的文档与事务。
-  if (!dispatch) return listDepth(state) > 0 || wrapInList(nodes["bullet_list"]!)(state);
-  let current = state;
-  let tr = state.tr;
-  if (listDepth(state) === 0) {
-    if (
-      !wrapInList(nodes["bullet_list"]!)(state, (wrapped) => {
-        tr = wrapped;
-      })
-    )
-      return false;
-    current = state.apply(tr);
-  }
-  const depth = listDepth(current);
-  if (depth === 0) return false;
-  const checked = current.selection.$from.node(depth).attrs["checked"];
-  const positions = new Set<number>([current.selection.$from.before(depth)]);
-  current.doc.nodesBetween(current.selection.from, current.selection.to, (node, pos) => {
-    if (node.type === itemType) positions.add(pos);
-  });
-  for (const pos of positions) {
-    const node = tr.doc.nodeAt(pos);
-    if (node?.type === itemType)
-      tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        checked: typeof checked === "boolean" ? null : false,
-      });
-  }
-  dispatch(tr.scrollIntoView());
-  return true;
-};
-
 const splitItem: Command = (state, dispatch, view) => {
   const depth = listDepth(state);
   const checked = depth > 0 ? state.selection.$from.node(depth).attrs["checked"] : null;
@@ -85,19 +33,6 @@ const splitItem: Command = (state, dispatch, view) => {
     dispatch,
     view,
   );
-};
-
-const quote: Command = (state, dispatch) => {
-  const { $from, $to } = state.selection;
-  const range = $from.blockRange($to, (node) => node.type === nodes["blockquote"]);
-  if (range) {
-    // 引用中的列表属于同一个内容块，解除引用不能顺带提升它的列表项。
-    const target = liftTarget(range);
-    if (target === null) return false;
-    dispatch?.(state.tr.lift(range, target).scrollIntoView());
-    return true;
-  }
-  return wrapIn(nodes["blockquote"]!)(state, dispatch);
 };
 
 // 代码只能保存文本；把公式、链接节点或附件套入代码会在序列化时丢掉节点语义。
@@ -168,12 +103,17 @@ export const writingCommands = {
   strike: editingCommand(
     toggleMark(documentSchema.marks["strike"]!, null, { removeWhenPresent: false }),
   ),
-  highlight: toggleMark(documentSchema.marks["highlight"]!, null, { removeWhenPresent: false }),
+  underline: editingCommand(
+    toggleMark(documentSchema.marks["underline"]!, null, { removeWhenPresent: false }),
+  ),
+  highlight: editingCommand(
+    toggleMark(documentSchema.marks["highlight"]!, null, { removeWhenPresent: false }),
+  ),
   code: editingCommand(inlineCode),
-  bulletList: editingCommand(listCommand("bullet_list")),
-  orderedList: editingCommand(listCommand("ordered_list")),
-  taskList: editingCommand(taskList),
-  quote: editingCommand(quote),
+  bulletList: listFormattingCommand("bullet"),
+  orderedList: listFormattingCommand("ordered"),
+  taskList: listFormattingCommand("task"),
+  quote: quoteFormattingCommand,
   codeBlock: editingCommand(codeBlock),
 } satisfies Record<string, Command>;
 
@@ -207,7 +147,7 @@ export function writingPlugins(actions: { link: () => void; search: () => void }
         wrappingInputRule(/^\s*> $/, nodes["blockquote"]!),
         wrappingInputRule(/^\s*[-+*] $/, nodes["bullet_list"]!),
         wrappingInputRule(
-          /^(\d+)\. $/,
+          /^(\d{1,9})\. $/,
           nodes["ordered_list"]!,
           (match) => ({ order: Number(match[1]) }),
           (match, node) => node.childCount + Number(node.attrs["order"]) === Number(match[1]),
@@ -218,6 +158,7 @@ export function writingPlugins(actions: { link: () => void; search: () => void }
     keymap({
       "Mod-b": writingCommands["bold"]!,
       "Mod-i": writingCommands["italic"]!,
+      "Mod-u": writingCommands.underline,
       "Mod-Shift-x": writingCommands["strike"]!,
       "Mod-Shift-h": writingCommands.highlight,
       "Mod-`": writingCommands["code"]!,

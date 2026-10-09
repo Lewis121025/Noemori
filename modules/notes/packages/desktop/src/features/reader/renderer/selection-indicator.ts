@@ -1,11 +1,11 @@
 import type { Action } from "svelte/action";
-import { advanceSelection, type SelectionCoordinate } from "./selection-motion";
+import { advanceMotion, type MotionCoordinate } from "./spatial-motion";
 
 const axes = ["x", "y", "width", "height"] as const;
 /** 底色使用容器内容坐标，滚动由原生布局承担，不进入动画状态机。 */
 type Bounds = Record<(typeof axes)[number], number>;
 /** 一次浏览器动画的起始状态；中途改向按真实播放时间求解，保持速度连续。 */
-type Motion = Record<(typeof axes)[number], SelectionCoordinate>;
+type Motion = Record<(typeof axes)[number], MotionCoordinate>;
 
 function atRest(bounds: Bounds): Motion {
   return {
@@ -18,10 +18,10 @@ function atRest(bounds: Bounds): Motion {
 
 function advance(current: Motion, target: Bounds, seconds: number): Motion {
   return {
-    x: advanceSelection(current.x, target.x, seconds),
-    y: advanceSelection(current.y, target.y, seconds),
-    width: advanceSelection(current.width, target.width, seconds),
-    height: advanceSelection(current.height, target.height, seconds),
+    x: advanceMotion(current.x, target.x, seconds),
+    y: advanceMotion(current.y, target.y, seconds),
+    width: advanceMotion(current.width, target.width, seconds),
+    height: advanceMotion(current.height, target.height, seconds),
   };
 }
 

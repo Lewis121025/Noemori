@@ -42,6 +42,7 @@ export class ArticleLibrary {
   /** 核对当前文章位置；不存在返回失效状态，权限和读取错误抛出。 */
   async location(item: ConversationRecord): Promise<ArticleLocation | null> {
     if (!item.article) return null;
+    if (item.article.removed) return locateArticle(item.article, null);
     const source = await this.read(item.snapshot.workspace, item.article.path);
     const key = JSON.stringify([item.snapshot.workspace, item.article]);
     // 流式回复频繁请求快照；正文未变时复用定位结果，仍读取磁盘以核对实际内容。

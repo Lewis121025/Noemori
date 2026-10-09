@@ -73,8 +73,10 @@ export class BrowserDialogs {
    * @throws 弹窗已不存在、监视器不可用或协议发送失败。
    */
   async reply(accept: boolean, text?: string): Promise<void> {
+    const expected = this.current;
     await this.ready();
     if (!this.session || !this.current) throw new Error("页面没有待处理的对话框");
+    if (this.current !== expected) throw new Error("网页对话框已经改变，请重新确认");
     await this.session.send("Page.handleJavaScriptDialog", {
       accept,
       ...(text === undefined ? {} : { promptText: text }),

@@ -1,3 +1,4 @@
+import { describeElement, layoutSignature } from "./dom.js";
 import { randomUUID } from "node:crypto";
 import type { ElementHandle, FileChooser, Frame, Locator, Page } from "playwright-core";
 import type { BrowserSettings, Observation } from "./contract.js";
@@ -5,6 +6,14 @@ import { BrowserDialogs } from "./dialogs.js";
 
 /** 元素句柄保持节点身份；语义指纹拒绝虚拟列表复用同一节点后改变操作对象。 */
 type Reference = { handle: ElementHandle; fingerprint: string };
+
+/** 人工输入绑定一份页面与待处理交互；控件、对话框或接管代次改变后不能复用。 */
+type HumanObservation = {
+  token: string;
+  generation: number;
+  dialog: BrowserPage["dialog"];
+  chooser: FileChooser | null;
+};
 
 /** 框架采集共享同一引用序列；局部失败保留已取得的证据并明确记入 warnings。 */
 type PageContent = {
@@ -20,6 +29,8 @@ class NavigatedDuringObservation extends Error {}
 /** 页面状态由浏览器运行时独占；导航、崩溃与人工接管使旧观察失效。 */
 export class BrowserPage {
   readonly id = randomUUID();
+  /** 页面标题属于标签元数据，撤销控件观察不能同时清掉窗口标题。 */
+  title = "";
   generation = 0;
   crashed = false;
   readonly dialogs: BrowserDialogs;
@@ -27,6 +38,7 @@ export class BrowserPage {
   observation: Observation | null = null;
   private imageLayout: string | null = null;
   private references = new Map<string, Reference>();
+  private humanObservation: HumanObservation | null = null;
 
   /**
    * 绑定页面事件；网页地址和控件始终使用同一 Page 对象。
@@ -39,10 +51,12 @@ export class BrowserPage {
     changed: () => void,
   ) {
     this.dialogs = new BrowserDialogs(page, changed);
-    page.on("framenavigated", () => {
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) this.title = "";
       this.generation++;
       this.observation = null;
       this.imageLayout = null;
+      this.fileChooser = null;
     });
     page.on("crash", () => {
       this.crashed = true;
@@ -56,6 +70,39 @@ export class BrowserPage {
   /** 当前弹窗由协议事件维护，包含用户手动关闭后的状态。 */
   get dialog() {
     return this.dialogs.current;
+  }
+
+  /** 撤销当前人工输入凭据；接管和交还都须调用，不能恢复旧输入队列。 */
+  revokeHumanInput(): void {
+    this.humanObservation = null;
+  }
+
+  private humanObservationIsCurrent(): boolean {
+    const saved = this.humanObservation;
+    return saved !== null && !this.crashed && !this.page.isClosed() &&
+      saved.generation === this.generation && saved.dialog === this.dialog &&
+      saved.chooser === this.fileChooser;
+  }
+
+  /** 核验人工输入所见页面与交互；失效时抛出错误，不派发到后续页面或选择器。 */
+  requireHumanInput(token: string): void {
+    if (!this.humanObservationIsCurrent() || this.humanObservation?.token !== token)
+      throw new Error("画面或控制权已改变，请等待新画面后重新操作");
+  }
+
+  /** 读取独立画面和人工输入凭据；弹窗打开时仅更新凭据，模型观察始终保留。 */
+  async preview(human: boolean): Promise<{ image?: { format: "jpeg"; data: string }; input_token?: string }> {
+    await this.dialogs.ready();
+    const generation = this.generation, dialog = this.dialog, chooser = this.fileChooser;
+    const bytes = dialog ? undefined : await this.screenshot();
+    if (generation !== this.generation || dialog !== this.dialog || chooser !== this.fileChooser)
+      throw new Error("获取预览期间页面发生变化，请刷新画面");
+    if (human && !this.humanObservationIsCurrent())
+      this.humanObservation = { token: randomUUID(), generation, dialog, chooser };
+    return {
+      ...(bytes ? { image: { format: "jpeg" as const, data: bytes.toString("base64") } } : {}),
+      ...(human && this.humanObservation ? { input_token: this.humanObservation.token } : {}),
+    };
   }
 
   /**
@@ -240,11 +287,12 @@ export class BrowserPage {
       (await this.guard(() =>
         this.page.evaluate(() => ({ width: innerWidth, height: innerHeight })),
       ));
+    this.title = await this.guard(() => this.page.title());
     const observation: Observation = {
       id: randomUUID(),
       page: this.id,
       url: this.page.url(),
-      title: await this.guard(() => this.page.title()),
+      title: this.title,
       text,
       elements: content.elements,
       truncated: content.truncated || text.length < fullText.length,
@@ -358,47 +406,6 @@ export class BrowserPage {
   }
 }
 
-// 在各框架中采集可见布局；开放 Shadow DOM 一并检查，像素动画不进入控件定位契约。
-function layoutSignature(): unknown[] {
-  const geometry: unknown[] = [innerWidth, innerHeight, scrollX, scrollY];
-  const roots: (Document | ShadowRoot)[] = [document];
-  for (const root of roots) {
-    for (const element of root.querySelectorAll("*")) {
-      if (element.shadowRoot) roots.push(element.shadowRoot);
-      const box = element.getBoundingClientRect();
-      if (
-        box.width === 0 ||
-        box.height === 0 ||
-        box.bottom <= 0 ||
-        box.right <= 0 ||
-        box.top >= innerHeight ||
-        box.left >= innerWidth
-      )
-        continue;
-      const interactive = element.matches(
-        'a,button,input,select,textarea,[role],[onclick],[contenteditable="true"]',
-      );
-      const style = getComputedStyle(element);
-      geometry.push([
-        element.tagName,
-        ...[box.x, box.y, box.width, box.height].map((value) => Math.round(value * 10)),
-        style.visibility,
-        style.opacity,
-        style.pointerEvents,
-        style.zIndex,
-        style.clipPath,
-        element.getAttribute("aria-label"),
-        element.getAttribute("role"),
-        element.getAttribute("href"),
-        element.getAttribute("disabled"),
-        element.getAttribute("aria-checked"),
-        interactive ? (element.textContent || "").slice(0, 500) : "",
-      ]);
-    }
-  }
-  return geometry;
-}
-
 /**
  * 统一异常文本，保留有限诊断信息，避免工具堆栈挤占模型上下文。
  * @param error 捕获的原始异常。
@@ -406,63 +413,4 @@ function layoutSignature(): unknown[] {
  */
 export function reason(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 2000);
-}
-
-// 该函数在页面上下文内执行，必须自包含；密码字段只暴露类型，不读取其值。
-function describeElement(element: Element): {
-  connected: boolean;
-  inViewport: boolean;
-  fingerprint: string;
-  description: string;
-} {
-  const tag = element.tagName.toLowerCase();
-  const type = element.getAttribute("type") || "";
-  const role = element.getAttribute("role") || tag;
-  const labels =
-    "labels" in element && element.labels instanceof NodeList
-      ? [...element.labels].map((label) => label.textContent || "").join(" ")
-      : "";
-  const labelled = (element.getAttribute("aria-labelledby") || "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((id) => element.ownerDocument.getElementById(id)?.textContent || "")
-    .join(" ");
-  const name =
-    element.getAttribute("aria-label") ||
-    labelled ||
-    labels ||
-    element.getAttribute("placeholder") ||
-    element.textContent ||
-    element.getAttribute("title") ||
-    "";
-  const normalize = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 400);
-  const context = element.closest('tr,[role="row"],li')?.textContent || "";
-  const href = element.getAttribute("href") || "";
-  const fingerprint = JSON.stringify([tag, type, role, normalize(name), href, normalize(context)]);
-  const state = ["disabled", "checked", "selected", "aria-expanded", "aria-checked"].flatMap(
-    (key) => (element.hasAttribute(key) ? [`${key}=${element.getAttribute(key)}`] : []),
-  );
-  const value =
-    type !== "password" && tag !== "input" && tag !== "textarea"
-      ? ""
-      : type === "password"
-        ? " [password]"
-        : "value" in element && typeof element.value === "string"
-          ? ` value=${JSON.stringify(element.value.slice(0, 300))}`
-          : "";
-  const box = element.getBoundingClientRect();
-  const view = element.ownerDocument.defaultView;
-  const inViewport = Boolean(
-    view &&
-    box.bottom > 0 &&
-    box.right > 0 &&
-    box.top < view.innerHeight &&
-    box.left < view.innerWidth,
-  );
-  return {
-    connected: element.isConnected,
-    inViewport,
-    fingerprint,
-    description: `${role}${type ? `(${type})` : ""} ${JSON.stringify(normalize(name))}${value}${href ? ` href=${href.slice(0, 500)}` : ""}${state.length ? ` [${state.join(", ")}]` : ""}${context ? ` context=${JSON.stringify(normalize(context))}` : ""}`,
-  };
 }

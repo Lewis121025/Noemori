@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import QuickNavigation from "@reader/renderer/navigation/QuickNavigation.svelte";
 import LibraryBrowser from "@reader/renderer/library/LibraryBrowser.svelte";
 import { ReaderWorkspaceController } from "@reader/renderer/workspace/state.svelte";
 import type { ReaderApi, SearchHit, SearchPage, VaultEvent } from "@reader/shared/api";
@@ -28,7 +27,6 @@ function createApi(overrides: Partial<ReaderApi> = {}): ReaderApi {
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount>;
 let libraryComponent: LibraryBrowser | undefined;
-let isLibrary = false;
 let workspace: ReaderWorkspaceController;
 let onOpen: ReturnType<typeof vi.fn>;
 let onEdit: ReturnType<typeof vi.fn>;
@@ -55,60 +53,22 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function startList(api: ReaderApi, libraryMode = false): Promise<void> {
-  isLibrary = libraryMode;
+async function startList(api: ReaderApi, _libraryMode = false): Promise<void> {
   workspace = new ReaderWorkspaceController(api);
-  target = document.createElement("div");
-  document.body.append(target);
-  onOpen = vi.fn();
-  onEdit = vi.fn();
+  target = document.createElement("div"); document.body.append(target);
+  onOpen = vi.fn(); onEdit = vi.fn();
   await workspace.restore();
-  if (libraryMode) {
-    libraryComponent = mount(LibraryBrowser, {
-      target,
-      props: {
-        workspace,
-        readFile: api.fileRead,
-        onEdit,
-        onOpen,
-        onSearch: (query) => workspace.setSearchInput(query),
-      },
-    });
-    component = libraryComponent;
-    flushSync();
-    const menu = target.querySelector<HTMLDivElement>(".file-menu")!;
-    menu.showPopover = () => {};
-    menu.hidePopover = () => {};
-  } else {
-    workspace.sidebarView = "search";
-    component = mount(QuickNavigation, {
-      target,
-      props: {
-        workspace,
-        hidden: false,
-        width: 232,
-        onCommand: vi.fn(),
-        canRun: () => true,
-        onWidth: () => {},
-        onOpen: () => {},
-        onSearchHit: (hit, match) => {
-          void workspace.navigation
-            .openSearchMatch(hit, match ?? hit.matches[0], workspace.openFile, (message) =>
-              workspace.report(message),
-            )
-            .then(() => {
-              if (workspace.document.path === hit.path) onOpen();
-            });
-        },
-      },
-    });
-    flushSync();
-  }
+  libraryComponent = mount(LibraryBrowser, { target, props: {
+    workspace, onEdit, onOpen,
+  } });
+  component = libraryComponent; flushSync();
+  const menu = target.querySelector<HTMLDivElement>(".file-menu")!;
+  menu.showPopover = () => {}; menu.hidePopover = () => {};
 }
 
 function searchBox(): HTMLInputElement {
   const input = target.querySelector<HTMLInputElement>(
-    isLibrary ? '[aria-label="搜索笔记库"]' : '[aria-label="搜索文件和全文"]',
+    '[aria-label="搜索笔记库"]',
   );
   if (input === null) throw new Error("搜索框不存在");
   return input;
@@ -153,12 +113,13 @@ describe("侧栏全文搜索", () => {
     await typeAndSubmit("如何防止重复处理");
     expect(target.querySelector(".status")?.textContent).toContain("1 篇相关笔记");
     expect(target.querySelector(".semantic-status")?.textContent).toContain("1 / 2");
+    target.querySelector<HTMLButtonElement>('[aria-label="查看 幂等性 的命中详情"]')!.click(); flushSync();
     expect(target.querySelector(".semantic-evidence")?.textContent).toContain("相关段落");
     expect(target.querySelector(".expand")).toBeNull();
     const evidence = target.querySelector<HTMLButtonElement>(".semantic-evidence")!;
     evidence.focus();
     evidence.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    expect(document.activeElement).toBe(target.querySelector(".hit"));
+    expect(document.activeElement).toBe(target.querySelector(".search-details .hit"));
   });
 
   it("模型下载仅由明确点击发起", async () => {
@@ -210,7 +171,7 @@ describe("侧栏全文搜索", () => {
       try {
         await typeAndSubmit("needle");
         if (hasHit)
-          target.querySelector<HTMLButtonElement>('[aria-label="展开 Alpha 的 1 处命中"]')!.click();
+          target.querySelector<HTMLButtonElement>('[aria-label="查看 Alpha 的命中详情"]')!.click();
         flushSync();
         const occurrence = target.querySelector<HTMLButtonElement>(".occurrence");
         const focused = occurrence ?? searchBox();
@@ -219,7 +180,7 @@ describe("侧栏全文搜索", () => {
         workspace.setComposing(true);
         changed?.({ status: "changed", paths: ["notes/beta.md"], healthy: true });
         flushSync();
-        expect(target.querySelector('.results [role="status"]')?.textContent).toContain(
+        expect(target.querySelector('.status')?.textContent).toContain(
           "笔记库已变化",
         );
         expect(searchQuery).toHaveBeenCalledOnce();
@@ -231,7 +192,7 @@ describe("侧栏全文搜索", () => {
         flushSync();
         await vi.waitFor(() => {
           flushSync();
-          expect(target.querySelector('.results [role="status"]')?.textContent).toContain(
+          expect(target.querySelector('.status')?.textContent).toContain(
             "共 1 篇",
           );
           expect(searchQuery).toHaveBeenCalledTimes(2);
@@ -250,15 +211,15 @@ describe("侧栏全文搜索", () => {
     await startList(createApi({ searchQuery }));
     searchBox().focus();
     await typeAndSubmit(`${"-".repeat(SEARCH_DEPTH_LIMIT + 1)}alpha`);
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("检索条件嵌套过深");
+    expect(target.querySelector('.status')?.textContent).toContain("检索条件嵌套过深");
     expect(target.querySelector(".filename-matches")).toBeNull();
     expect(document.activeElement).toBe(searchBox());
     expect(searchQuery).not.toHaveBeenCalled();
 
     await typeAndSubmit("alpha");
     expect(searchQuery).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("共 0 篇");
-    expect(target.querySelector(".empty")?.textContent).toContain("没有匹配的笔记");
+    expect(target.querySelector('.status')?.textContent).toContain("共 1 篇");
+    expect(target.querySelector('.file[data-path="alpha.md"]')).not.toBeNull();
   });
 
   it("单篇按需加载保留精确总数、已有节点和键盘位置，直到真实末页", async () => {
@@ -284,7 +245,7 @@ describe("侧栏全文搜索", () => {
     );
     const open = vi.spyOn(workspace.navigation, "openSearchMatch").mockResolvedValue();
     await typeAndSubmit("needle");
-    target.querySelector<HTMLButtonElement>('[aria-label="展开 Alpha 的 26 处命中"]')!.click();
+    target.querySelector<HTMLButtonElement>('[aria-label="查看 Alpha 的命中详情"]')!.click();
     flushSync();
     expect(target.querySelectorAll(".occurrence")).toHaveLength(5);
     expect(searchMatches).not.toHaveBeenCalled();
@@ -301,7 +262,7 @@ describe("侧栏全文搜索", () => {
     expect(target.querySelectorAll(".occurrence")).toHaveLength(25);
     expect(target.querySelector(".occurrence")).toBe(first);
     expect(document.activeElement).toBe(target.querySelectorAll(".occurrence")[5]);
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("共 1 篇 · 26 处命中");
+    expect(target.querySelector('.status')?.textContent).toContain("共 1 篇 · 26 处命中");
     const last = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
       button.textContent?.includes("还有 1 处"),
     )!;
@@ -347,7 +308,7 @@ describe("侧栏全文搜索", () => {
       }),
     );
     await typeAndSubmit("needle");
-    target.querySelector<HTMLButtonElement>('[aria-label="展开 Alpha 的 26 处命中"]')!.click();
+    target.querySelector<HTMLButtonElement>('[aria-label="查看 Alpha 的命中详情"]')!.click();
     flushSync();
     [...target.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.includes("显示更多"))!
@@ -376,19 +337,19 @@ describe("侧栏全文搜索", () => {
       .mockResolvedValueOnce({ hits: [hit("notes/beta.md")], nextCursor: null });
     await startList(createApi({ searchQuery }));
     await typeAndSubmit("alpha");
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("已显示 1 篇");
-    const first = target.querySelector(".hit");
+    expect(target.querySelector('.status')?.textContent).toContain("已显示 1 篇");
+    const first = target.querySelector('.file[data-path="alpha.md"]');
     const more = [...target.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "加载更多结果",
+      (button) => button.textContent === "更多结果",
     )!;
     more.focus();
     more.click();
     await settle();
     flushSync();
-    expect(target.querySelectorAll(".hit")).toHaveLength(2);
-    expect(target.querySelector(".hit")).toBe(first);
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("共 2 篇");
-    expect(document.activeElement).toBe(target.querySelectorAll(".hit")[1]);
+    expect(target.querySelectorAll('.file[aria-label$=".md"]')).toHaveLength(2);
+    expect(target.querySelector('.file[data-path="alpha.md"]')).toBe(first);
+    expect(target.querySelector('.status')?.textContent).toContain("共 2 篇");
+    expect(document.activeElement).toBe(target.querySelector('.file[data-path="notes/beta.md"]'));
   });
 
   it("按文件展开真实命中，选择第二处时传递其范围并保留结果", async () => {
@@ -408,8 +369,8 @@ describe("侧栏全文搜索", () => {
     await startList(createApi({ searchQuery: async () => ({ hits: [hit], nextCursor: null }) }));
     const open = vi.spyOn(workspace.navigation, "openSearchMatch").mockResolvedValue();
     await typeAndSubmit("预算");
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("1 篇 · 2 处");
-    target.querySelector<HTMLButtonElement>('[aria-label="展开 Alpha 的 2 处命中"]')!.click();
+    expect(target.querySelector('.status')?.textContent).toContain("1 篇 · 2 处");
+    target.querySelector<HTMLButtonElement>('[aria-label="查看 Alpha 的命中详情"]')!.click();
     flushSync();
     const occurrences = target.querySelectorAll<HTMLButtonElement>(".occurrence");
     expect(occurrences.length).toBe(2);
@@ -419,65 +380,29 @@ describe("侧栏全文搜索", () => {
     expect(open).toHaveBeenCalledWith(hit, matches[1], workspace.openFile, expect.any(Function));
     expect(target.querySelectorAll(".occurrence").length).toBe(2);
   });
-  it.each(["标签", "书签", "过滤"])(
-    "从%s返回时保留层级目录的滚动位置",
-    async (mode) => {
-      await startList(createApi(), true);
-      target.querySelector<HTMLButtonElement>('[data-path="notes"]')!.click();
-      flushSync();
-      const tree = target.querySelector<HTMLDivElement>('[role="treegrid"]')!;
-      // 锚点必须落在真实行内；jsdom 不会像浏览器一样夹住越界的 scrollTop。
-      tree.scrollTop = 72;
-      tree.dispatchEvent(new Event("scroll"));
-      flushSync();
-      if (mode === "标签" || mode === "书签") {
-        const button = target.querySelector<HTMLButtonElement>(
-          `[aria-label="${mode === "标签" ? "浏览标签" : "书签"}"]`,
-        )!;
-        button.click();
-        flushSync();
-        button.click();
-      } else {
-        searchBox().value = "alpha";
-        searchBox().dispatchEvent(new Event("input", { bubbles: true }));
-        flushSync();
-        expect(tree.scrollTop).toBe(0);
-        target.querySelector<HTMLButtonElement>('[aria-label="清除搜索"]')!.click();
-      }
-      flushSync();
-      expect(target.querySelector<HTMLDivElement>('[role="treegrid"]')!.scrollTop).toBe(72);
-      expect(target.querySelector('[data-path="notes"]')).not.toBeNull();
-    },
-  );
-
-  it.each(["标签", "书签", "搜索"])("从%s定位当前文件时切回完整目录并交还焦点", async (mode) => {
+  it("退出搜索时保留层级目录的滚动位置", async () => {
     await startList(createApi(), true);
-    await workspace.openFile("notes/beta.md");
+    target.querySelector<HTMLButtonElement>('[data-path="notes"]')!.click();
     flushSync();
-    if (mode === "搜索") await typeAndSubmit("正文");
-    else {
-      target
-        .querySelector<HTMLButtonElement>(
-          `[aria-label="${mode === "标签" ? "浏览标签" : "书签"}"]`,
-        )!
-        .click();
-      flushSync();
-    }
-    target.querySelector<HTMLButtonElement>('[aria-label="定位当前文件"]')!.click();
-    await settle();
+    const tree = target.querySelector<HTMLDivElement>('[role="treegrid"]')!;
+    tree.scrollTop = 72;
+    tree.dispatchEvent(new Event("scroll"));
     flushSync();
-    expect(searchBox().value).toBe("");
-    expect(workspace.search.active).toBe(false);
-    const row = target.querySelector('[data-path="notes/beta.md"]');
-    expect(row).not.toBeNull();
-    expect(document.activeElement).toBe(row);
+    searchBox().value = "alpha";
+    searchBox().dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    expect(tree.scrollTop).toBe(0);
+    target.querySelector<HTMLButtonElement>('[aria-label="清除搜索"]')!.click();
+    flushSync();
+    expect(target.querySelector<HTMLDivElement>('[role="treegrid"]')!.scrollTop).toBe(72);
+    expect(target.querySelector('[data-path="notes"]')).not.toBeNull();
   });
 
-  it("分类切换与层级检索独立于高级搜索的状态", async () => {
+  it("清除查询后继续搜索，目录共用唯一搜索状态", async () => {
     const api = createApi();
     await startList(api, true);
     await typeAndSubmit("正文");
-    target.querySelector<HTMLButtonElement>('[aria-label="浏览标签"]')!.click();
+    target.querySelector<HTMLButtonElement>('[aria-label="清除搜索"]')!.click();
     flushSync();
     expect(workspace.search.active).toBe(false);
     expect(searchBox().value).toBe("");
@@ -494,19 +419,19 @@ describe("侧栏全文搜索", () => {
     expect(workspace.search.active).toBe(false);
     expect(target.querySelector('[data-path="alpha.md"]')).not.toBeNull();
     await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
-    expect(workspace.search.active).toBe(false);
+    await vi.waitFor(() => expect(workspace.search.active).toBe(true));
   });
 
-  it("文件操作完成后从书签面板回到条目所在目录", async () => {
+  it("文件操作完成后清除搜索并回到条目所在目录", async () => {
     await startList(createApi(), true);
-    await libraryComponent!.showBookmarks();
+    await typeAndSubmit("alpha");
     await libraryComponent!.reflectChange(
       { action: "create", entry: { path: "notes", kind: "directory" } },
       true,
     );
     flushSync();
     expect(document.activeElement).toBe(target.querySelector('[data-path="notes"]'));
-    expect(target.querySelector('[aria-label="书签"]')?.getAttribute("aria-pressed")).toBe("false");
+    expect(searchBox().value).toBe("");
   });
 
   it("文件树的输入法按键不触发重命名，删除快捷键进入确认流程", async () => {
@@ -554,7 +479,7 @@ describe("侧栏全文搜索", () => {
       nextCursor: null,
     }));
     await startList(createApi({ searchQuery }));
-    expect(target.querySelector(".empty")?.textContent).toContain("输入关键词");
+    expect(target.querySelector(".file-tree")).not.toBeNull();
 
     await typeAndSubmit("hit word");
 
@@ -569,15 +494,15 @@ describe("侧栏全文搜索", () => {
       null,
     );
     expect(target.querySelector(".filename-matches")).toBeNull();
-    const hit = target.querySelector<HTMLButtonElement>(".hit");
+    const hit = target.querySelector<HTMLButtonElement>('.file[data-path="notes/beta.md"]');
     expect(hit).not.toBeNull();
-    expect(hit?.querySelector(".title")?.textContent).toBe("Beta");
-    expect(hit?.querySelector(".path")?.textContent).toBe("notes/beta.md");
+    expect(hit?.querySelector(".name")?.textContent).toBe("beta");
+    expect(hit?.getAttribute("title")).toBe("notes/beta.md");
     expect(hit?.querySelector("mark")?.textContent).toBe("hit word");
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("共 1 篇");
+    expect(target.querySelector('.status')?.textContent).toContain("共 1 篇");
   });
 
-  it("点击命中打开文件并通知外壳完成导航", async () => {
+  it("单击命中打开共享文档且不夺取目录焦点", async () => {
     const searchQuery = vi.fn(async (): Promise<SearchPage> => ({
       hits: [
         {
@@ -595,14 +520,14 @@ describe("侧栏全文搜索", () => {
     await startList(createApi({ searchQuery }));
     await typeAndSubmit("hit");
 
-    target.querySelector<HTMLButtonElement>(".hit")!.click();
+    target.querySelector<HTMLButtonElement>('.file[data-path="notes/beta.md"]')!.click();
     await settle();
     flushSync();
 
     expect(workspace.document.path).toBe("notes/beta.md");
-    expect(onOpen).toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledWith(false);
     // 结果保持展示，命中标记跟随当前文档。
-    expect(target.querySelector(".hit.active")).not.toBeNull();
+    expect(target.querySelector('.file[aria-current="page"]')).not.toBeNull();
   });
 
   it("检索失败展示原因，不回到文件树", async () => {
@@ -611,142 +536,40 @@ describe("侧栏全文搜索", () => {
     });
     await startList(createApi({ searchQuery }));
     await typeAndSubmit("alpha");
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("搜索失败");
-    expect(target.querySelector('[role="status"]')?.textContent).toContain("索引损坏");
+    expect(target.querySelector('.status')?.textContent).toContain("搜索失败");
+    expect(target.querySelector('.status')?.textContent).toContain("索引损坏");
     expect(target.querySelector(".hit")).toBeNull();
   });
 
   it("空结果展示引导文案", async () => {
     await startList(createApi());
     await typeAndSubmit("absent");
-    expect(target.querySelector(".empty")?.textContent).toContain("没有匹配的笔记");
+    expect(target.querySelector(".empty")?.textContent).toContain("无匹配结果");
   });
 
-  it("Escape 保留查询与结果，清除按钮才清空查询", async () => {
-    const searchQuery = vi.fn(async (): Promise<SearchPage> => ({
-      hits: [
-        {
-          path: "alpha.md",
-          title: "Alpha",
-          contentHash: "a".repeat(64),
-          matches: [],
-          snippet: "",
-          matchCount: 0,
-          matchesCursor: null,
-        },
-      ],
-      nextCursor: null,
-    }));
-    await startList(createApi({ searchQuery }));
+  it("Escape 清除统一查询并恢复目录，焦点留在搜索框", async () => {
+    await startList(createApi());
     await typeAndSubmit("alpha");
-    expect(target.querySelector(".hit")).not.toBeNull();
-
+    expect(target.querySelector('[data-path="alpha.md"]')).not.toBeNull();
     searchBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    flushSync();
-    expect(target.querySelector(".hit")).not.toBeNull();
+    flushSync(); expect(searchBox().value).toBe("");
     expect(document.activeElement).toBe(searchBox());
-    expect(searchBox().value).toBe("alpha");
-
-    await typeAndSubmit("alpha");
-    target.querySelector<HTMLButtonElement>(".clear-full-search")!.click();
-    flushSync();
-    expect(target.querySelector(".hit")).toBeNull();
-    expect(searchBox().value).toBe("");
+    expect(target.querySelector('[data-path="notes"]')).not.toBeNull();
   });
 
-  it("ArrowDown 从搜索框进入结果列表，Escape 在列表内也能退出", async () => {
-    const searchQuery = vi.fn(async (): Promise<SearchPage> => ({
-      hits: [
-        {
-          path: "alpha.md",
-          title: "Alpha",
-          contentHash: "a".repeat(64),
-          matches: [],
-          snippet: "",
-          matchCount: 0,
-          matchesCursor: null,
-        },
-        {
-          path: "notes/beta.md",
-          title: "Beta",
-          contentHash: "a".repeat(64),
-          matches: [],
-          snippet: "",
-          matchCount: 0,
-          matchesCursor: null,
-        },
-      ],
-      nextCursor: null,
-    }));
-    await startList(createApi({ searchQuery }));
-    await typeAndSubmit("a");
-
+  it("ArrowDown 从搜索框进入层级结果，方向键沿可见树移动，Escape 恢复查询前现场", async () => {
+    const hit = (path: string): SearchHit => ({ path, title: path, contentHash: "a".repeat(64), matches: [], snippet: "", matchCount: 0, matchesCursor: null });
+    await startList(createApi({ searchQuery: async () => ({ hits: [hit("alpha.md"), hit("notes/beta.md")], nextCursor: null }) }));
+    await typeAndSubmit("needle");
     searchBox().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    flushSync();
-    const first = target.querySelector<HTMLButtonElement>('.hit[data-index="0"]');
+    await settle(); flushSync();
+    const first = target.querySelector<HTMLButtonElement>('.file[data-path="notes/beta.md"]')!;
     expect(document.activeElement).toBe(first);
-
-    first!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    flushSync();
-    expect(document.activeElement).toBe(target.querySelector('.hit[data-index="1"]'));
-
-    target
-      .querySelector<HTMLButtonElement>('.hit[data-index="1"]')!
-      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    flushSync();
-    expect(target.querySelector(".hit")).not.toBeNull();
-    expect(document.activeElement).toBe(searchBox());
-  });
-
-  it("标签面板组树展示，点击标签进入 tag: 检索", async () => {
-    const searchQuery = vi.fn(async (): Promise<SearchPage> => ({
-      hits: [
-        {
-          path: "notes/beta.md",
-          title: "Beta",
-          contentHash: "a".repeat(64),
-          matches: [],
-          snippet: "",
-          matchCount: 0,
-          matchesCursor: null,
-        },
-      ],
-      nextCursor: null,
-    }));
-    const indexTags = vi.fn(async () => [
-      { tag: "project", count: 2 },
-      { tag: "project/noemori", count: 1 },
-    ]);
-    await startList(createApi({ searchQuery, indexTags }), true);
-
-    target.querySelector<HTMLButtonElement>('[aria-label="浏览标签"]')!.click();
-    flushSync();
-    await settle();
-    flushSync();
-
-    const names = [...target.querySelectorAll(".tag .name")].map((node) => node.textContent);
-    expect(names).toEqual(["#project", "#noemori"]);
-    // 分类切换应真正卸载文件网格，保留标签自己的树形结构。
-    expect(target.querySelector('[role="treegrid"]')).toBeNull();
-
-    // 点击子标签：转成 tag: 谓词检索并展示结果。
-    const child = [...target.querySelectorAll<HTMLButtonElement>(".tag")].find((button) =>
-      button.textContent?.includes("noemori"),
-    );
-    child!.click();
-    await settle();
-    flushSync();
-    await vi.waitFor(() => expect(searchQuery).toHaveBeenCalled());
-    expect(searchQuery).toHaveBeenCalledWith(
-      {
-        expr: { kind: "tag", value: "project/noemori" },
-        limit: 100,
-      },
-      expect.any(String),
-      null,
-    );
-    expect(workspace.search.input).toBe("tag:project/noemori");
-    expect(workspace.search.active).toBe(true);
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await settle(); flushSync();
+    expect(document.activeElement).toBe(target.querySelector('.file[data-path="alpha.md"]'));
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    flushSync(); expect(document.activeElement).toBe(searchBox()); expect(searchBox().value).toBe("");
   });
 
   it("谓词查询进入结构化条件，纯空白回车不发起检索", async () => {
@@ -778,6 +601,6 @@ describe("侧栏全文搜索", () => {
 
     await typeAndSubmit("   ");
     expect(searchQuery).toHaveBeenCalledTimes(1);
-    expect(target.querySelector(".empty")?.textContent).toContain("输入关键词");
+    expect(target.querySelector(".file-tree")).not.toBeNull();
   });
 });

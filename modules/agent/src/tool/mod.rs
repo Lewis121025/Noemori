@@ -5,6 +5,7 @@ mod contract;
 mod definition;
 mod registry;
 pub mod terminal;
+pub mod ui;
 pub mod web;
 
 pub use contract::{Tool, ToolConcurrency, ToolContext, ToolError};

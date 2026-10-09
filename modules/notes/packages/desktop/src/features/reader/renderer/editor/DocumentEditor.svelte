@@ -57,8 +57,8 @@
   import EditorWebPage from "./webpage/EditorWebPage.svelte";
   import { canInsertWebPage } from "./webpage/insert";
   import LinkSuggestPopup from "./links/LinkSuggestPopup.svelte";
-  import PropertiesPanel from "./properties/PropertiesPanel.svelte";
-  import { bodySelection, frontmatterPresentation } from "./properties/frontmatter-presentation";
+  import { bodySelection, frontmatterPresentation } from "./frontmatter";
+  import { headingFolding } from "./heading-fold";
   import { createAttachmentEditing, type AttachmentProgress } from "./attachments/attachments";
   import type { AttachmentImporter } from "../../shared/attachments";
   import { emptyWhiteboard, serializeWhiteboard } from "../../shared/whiteboard/model";
@@ -473,6 +473,7 @@
           plugins: [
             documentAccess(locked),
             frontmatterPresentation(),
+            headingFolding(),
             // 补全弹层激活时优先接管导航键；未激活时完全透明。
             linkSuggestPlugin(suggestKeys),
             history(),
@@ -590,10 +591,6 @@
           return true;
         },
         visibleHeading: () => outlinePosition.visibleHeading(created),
-        currentHeading: () => {
-          const from = created.state.selection.from;
-          return outlinePosition.items.findLast((item) => item.pos < from)?.text ?? null;
-        },
       };
       return () => {
         stopRestoring?.();
@@ -701,14 +698,6 @@
           view={editor}
           onClose={() => (showWebPage = false)}
         />{/if}{/key}
-    <div
-      id="properties-{formattingId}"
-      popover="auto"
-      class="reader-popover properties-popover"
-      aria-label="笔记属性"
-    >
-      <PropertiesPanel view={editor} state={editorState} {readOnly} />
-    </div>
   {/if}
 {/snippet}
 {#if registerToolbar === undefined}{@render editorToolbar()}{/if}
@@ -743,12 +732,6 @@
   }
   .surface :global(a[href^="noemori://conversation/"]::before) {
     content: "◌ ";
-  }
-  .properties-popover {
-    width: min(32rem, calc(100vw - 2rem));
-    max-height: 70vh;
-    overflow: auto;
-    padding: 0.75rem;
   }
   .surface,
   .surface :global(> .markdown-content) {

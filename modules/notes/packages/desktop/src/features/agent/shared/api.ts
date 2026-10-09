@@ -1,5 +1,12 @@
 import type { ArticleConversationRequest, ArticleLocation } from "./article";
-import type { ModelSelection, ProviderCatalog, ProviderUpdate } from "./providers";
+import type {
+  DiscoveredModel,
+  ModelSelection,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderUpdate,
+} from "./providers";
+import type { ReasoningEffort } from "./reasoning";
 /** Agent 的窗口协议只交付可见状态，认证材料由主进程单独持有。 */
 export type Protocol =
   | "openai-chat"
@@ -21,7 +28,7 @@ export type Authentication =
       secret_key: string;
       session_token: string | null;
     };
-/** 原生模型配置；能力由用户明确声明，不按模型名称推断。 */
+/** 原生模型配置；能力来自接口或用户声明，不按模型名称推断。 */
 export type ModelSettings = {
   protocol: Protocol;
   model: string;
@@ -32,6 +39,7 @@ export type ModelSettings = {
   vision: boolean;
   audio: boolean;
   video: boolean;
+  reasoningEffort?: ReasoningEffort;
 };
 /** 设置读取不会返还密钥原文，空认证输入可以明确选择保留已有材料。 */
 export type PublicModelSettings = Omit<ModelSettings, "authentication"> & {
@@ -109,6 +117,16 @@ export type AgentApproval = {
   request:
     | TerminalApproval
     | NetworkApproval
+    | {
+        type: "ui";
+        request: {
+          app: string;
+          window: string;
+          reason: string;
+          app_name: string;
+          window_title: string;
+        };
+      }
     | { type: "browser"; request: { origin: string; reason: string } };
 };
 /** 浏览器状态来自 Rust 资源所有者；迟到回执不会随模型取消而丢失。 */
@@ -159,6 +177,7 @@ export type ConversationOrigin = { conversationId: string; title: string; turnId
 export type ConversationForkRequest = { title: string; afterTurnId: string | null };
 /** 对话快照可在窗口重载后重新读取。 */
 export type AgentSnapshot = {
+  ui: AgentUi;
   browser: AgentBrowser;
   id: string;
   workspace: string;
@@ -171,12 +190,72 @@ export type AgentSnapshot = {
   approvals: AgentApproval[];
 };
 
+/** 界面执行与真实连接状态，重启和分叉不恢复这些资源。 */
+export type AgentUi = {
+  status: "idle" | "ready" | "busy" | "failed" | "closed";
+  generation: number;
+  call: string | null;
+  error: string | null;
+  connections: {
+    id: string;
+    backend: "chrome" | "edge" | "computer";
+    name: string;
+    connected: boolean;
+    human: boolean;
+    tabs: { id: string; title: string; url: string }[];
+  }[];
+  receipts: {
+    id: string;
+    backend: string;
+    action: string;
+    outcome: "observed" | "executed" | "not_executed" | "unknown";
+    pending: boolean;
+    error: string | null;
+  }[];
+  control: {
+    app: string;
+    window: string;
+    reason: string;
+    app_name: string;
+    window_title: string;
+  } | null;
+};
+/** 加载扩展和识别原生 helper 所需安装信息，不包含连接密钥。 */
+export type UiInstallation = {
+  extensionDirectory: string;
+  computerHelper: string | null;
+  installed: boolean;
+};
+/** 系统权限只能由用户授予，检查返回当前实际状态。 */
+export type UiPermissions = {
+  accessibility: boolean;
+  screen_recording: boolean;
+  input_monitoring: boolean;
+};
+
+/** 浮窗只能查看当前会话已经打开的页面或已批准的应用窗口。 */
+export type UiPreviewTarget =
+  | { backend: "managed" | "chrome" | "edge"; page: string }
+  | { backend: "computer"; app: string; window: string };
+/** 一次独立预览；图像与接管凭据一起交付，弹窗阻止截图时图像为空。 */
+export type UiPreviewFrame = { image: string | null; inputToken: string | null };
+/** 人工接管后的浏览器输入；坐标使用原始画面像素，缩放不会改变页面视口。 */
+export type BrowserHumanInput =
+  | { type: "dialog"; accept: boolean; text?: string }
+  | { type: "files"; paths: string[] }
+  | { type: "pointer"; x: number; y: number }
+  | { type: "scroll"; x: number; y: number }
+  | { type: "key"; key: string }
+  | { type: "text"; text: string };
+
 /** 会话列表只传摘要，完整消息按选中的会话读取。时间采用 Unix 毫秒。 */
 export type AgentConversationInfo = {
   id: string;
   title: string;
-  workspace: string;
+  /** 用户选择的目录关联；null 表示独立对话，不暴露内部运行目录。 */
+  workspace: string | null;
   model: string;
+  modelSelection: ModelSelection | null;
   createdAt: number;
   updatedAt: number;
   archived: boolean;
@@ -185,7 +264,7 @@ export type AgentConversationInfo = {
   status: NonNullable<AgentSnapshot["run"]>["status"] | null;
 };
 /** 持久化对话与当前资源状态；草稿属于单条会话，保存失败必须明确展示。 */
-export type AgentConversation = AgentSnapshot &
+export type AgentConversation = Omit<AgentSnapshot, "workspace"> &
   Omit<AgentConversationInfo, "status"> & {
     draft: string;
     storageError: string | null;
@@ -208,7 +287,7 @@ export type TerminalPage = {
 };
 /** 窗口明确提交已有申请的决定；前缀决定由界面确认完整参数向量。 */
 export type ApprovalReply = {
-  type: "terminal" | "network" | "browser";
+  type: "terminal" | "network" | "browser" | "ui";
   decision:
     | { decision: "allow_once" | "allow_for_session" }
     | { decision: "deny"; details: string }
@@ -216,14 +295,33 @@ export type ApprovalReply = {
 };
 /** preload 暴露的固定动作，不提供任意主进程调用或原生句柄。 */
 export type AgentApi = {
+  /** 独立预览不改变模型观察，目标关闭或失效时拒绝。 */
+  uiPreview(id: string, target: UiPreviewTarget): Promise<UiPreviewFrame>;
+  /** 未接管时拒绝人工输入，不触发模型运行。 */
+  browserInput(id: string, page: string, token: string, input: BrowserHumanInput): Promise<void>;
+  /** 用户选择工作区文件后交给待处理上传控件；取消时清空选择。 */
+  browserChooseFiles(id: string, page: string, token: string): Promise<void>;
+  uiControl(
+    id: string,
+    backend: "managed" | "chrome" | "edge" | "computer",
+    resume: boolean,
+  ): Promise<void>;
+  uiSetup(): Promise<UiInstallation>;
+  uiPermissions(id: string): Promise<UiPermissions>;
   browserControl(id: string, resume: boolean): Promise<void>;
-  settingsGet(): Promise<PublicModelSettings | null>;
+  settingsGet(id: string): Promise<PublicModelSettings | null>;
   providersGet(): Promise<ProviderCatalog>;
+  /** 发现模型及接口报告的能力；认证原文只发给主进程，不随结果返回。 */
+  providersDiscover(connection: ProviderConnection): Promise<DiscoveredModel[]>;
+  /** 读取已保存连接的模型目录；请求期间连接改变则拒绝迟到结果。 */
+  providersRefresh(id: string): Promise<ProviderCatalog>;
   providersSave(settings: ProviderUpdate): Promise<ProviderCatalog>;
   providersRemove(id: string): Promise<ProviderCatalog>;
-  modelSelect(selection: ModelSelection): Promise<ProviderCatalog>;
+  /** 只修改指定对话下一轮的模型，不改变运行中的配置或其他对话。 */
+  modelSelect(id: string, selection: ModelSelection): Promise<ModelSelection>;
   pickWorkspace(): Promise<string | null>;
-  create(workspace: string, title: string): Promise<AgentConversation>;
+  /** 目录关联可选；null 创建独立对话，运行目录由主进程管理。 */
+  create(workspace: string | null, title: string): Promise<AgentConversation>;
   /** 加载已打开笔记库中的文章对话；无记录时不创建目录。 */
   attachVault(root: string): Promise<void>;
   createArticle(request: ArticleConversationRequest): Promise<AgentConversation>;

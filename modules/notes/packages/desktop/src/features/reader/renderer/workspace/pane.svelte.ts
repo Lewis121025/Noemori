@@ -117,6 +117,8 @@ export class ReaderPane {
   private transitioning = $state(false);
   private duplicating = $state(false);
   private idleWaiters: Array<() => void> = [];
+  private requestedFile: string | null = null;
+  private openingFile: Promise<void> | null = null;
   private readonly autosave;
 
   /**
@@ -161,6 +163,7 @@ export class ReaderPane {
 
   /** 释放本栏计时器；卸载或关栏时调用。 */
   dispose(): void {
+    this.requestedFile = null;
     this.autosave.dispose();
   }
 
@@ -174,22 +177,42 @@ export class ReaderPane {
     this.autosave.resume();
   }
 
-  /** @param path 待打开的库内路径；保存门禁拒绝时保持当前文档。 */
-  openFile = async (path: string): Promise<void> => {
-    if (path === this.document.path) return;
-    try {
-      await this.withSavedDocument(async () => {
-        // 门禁已通过、加载成功才入栈：失败不留下幽灵历史。
-        const previous = this.captureCurrentStep();
-        await this.loadFile(path, true);
-        if (previous !== null) this.history.pushStep(previous);
-        this.currentStep = { path, anchor: null };
-        await this.host.rememberDocuments();
-      });
-    } catch (error) {
-      this.host.report(`打开文件失败：${errorText(error)}`);
-    }
+  /**
+   * 连续点选合并尚未执行的目标，当前读取结算后打开最后一次选择。
+   * @param path 待打开的库内路径；保存门禁拒绝时保留当前文档并终止这批导航。
+   * @returns 本批打开完成后兑现；错误经工作区反馈，不让旧请求覆盖新选择。
+   */
+  openFile = (path: string): Promise<void> => {
+    if (this.openingFile === null && path === this.document.path) return Promise.resolve();
+    this.requestedFile = path;
+    this.openingFile ??= this.drainFileRequests().finally(() => {
+      this.openingFile = null;
+    });
+    return this.openingFile;
   };
+
+  private async drainFileRequests(): Promise<void> {
+    while (this.requestedFile !== null) {
+      const path = this.requestedFile;
+      this.requestedFile = null;
+      if (path === this.document.path) continue;
+      try {
+        const opened = await this.withSavedDocument(async () => {
+          const previous = this.captureCurrentStep();
+          await this.loadFile(path, true);
+          if (previous !== null) this.history.pushStep(previous);
+          this.currentStep = { path, anchor: null };
+          await this.host.rememberDocuments();
+          return true;
+        });
+        if (opened) continue;
+      } catch (error) {
+        this.host.report(`打开文件失败：${errorText(error)}`);
+      }
+      this.requestedFile = null;
+      return;
+    }
+  }
 
   /** 后退到上一个阅读位置；门禁拒绝或栈空时不动。 */
   navigateBack = async (): Promise<void> => {

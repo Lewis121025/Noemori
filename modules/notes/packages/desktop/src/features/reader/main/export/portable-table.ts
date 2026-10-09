@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Node as PmNode } from "prosemirror-model";
+import { isTextColor, isHighlightColor, textStyleTags } from "../../shared/markdown/text-style";
 
 /** 只有单一表头、矩形数据及逐列一致的对齐才能无损表示为 GFM 表格。 */
 export function isMarkdownTable(table: PmNode): boolean {
@@ -65,12 +66,23 @@ function inline(node: PmNode): string {
     em: "em",
     strike: "del",
     code: "code",
-    highlight: "mark",
+    underline: "u",
   };
   for (const mark of [...node.marks].reverse()) {
     if (mark.type.name === "link")
       content = `<a href="${escape(String(mark.attrs["href"]))}" title="${escape(String(mark.attrs["title"] ?? ""))}">${content}</a>`;
-    else {
+    else if (mark.type.name === "highlight" || mark.type.name === "text_color") {
+      const color: unknown = mark.attrs["color"];
+      const style =
+        mark.type.name === "highlight" && isHighlightColor(color)
+          ? ({ kind: "highlight", color } as const)
+          : mark.type.name === "text_color" && isTextColor(color)
+            ? ({ kind: "text_color", color } as const)
+            : null;
+      if (!style) throw new Error("HTML 表格包含未知配色");
+      const [open, close] = textStyleTags(style);
+      content = open + content + close;
+    } else {
       const tag = tags[mark.type.name];
       if (!tag) throw new Error(`HTML 表格不能可靠保留此文字格式：${mark.type.name}`);
       content = `<${tag}>${content}</${tag}>`;

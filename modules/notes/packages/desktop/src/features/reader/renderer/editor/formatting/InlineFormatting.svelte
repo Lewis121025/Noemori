@@ -1,38 +1,85 @@
 <script lang="ts">
-  /** 两个格式入口共用命令、可用性与选中状态，避免按钮行为分叉。 */
+  /** 常用文字样式平铺，颜色选项归属各自菜单，选区状态由文档读取。 */
   import type { Command, EditorState } from "prosemirror-state";
   import { writingCommands } from "../writing";
-  import { readInlineMarkStates } from "./inline-formatting";
+  import { readInlineMarkStates, readInlineColors } from "./inline-formatting";
+  import FormattingMenu, { type FormattingMenuItem } from "./FormattingMenu.svelte";
+  import { textPalette, isTextColor, isHighlightColor } from "../../../shared/markdown/text-style";
+  import { setTextColor, setHighlightColor, clearTextStyles } from "../text-style-commands";
 
   let {
     state,
     onFormat,
-    variant = "all",
+    id,
   }: {
     state: EditorState;
     onFormat: (command: Command) => void;
-    variant?: "all" | "primary" | "secondary";
+    id: string;
   } = $props();
   const formats = [
     { name: "bold", label: "加粗", text: "B", mark: "strong", shortcut: "B" },
     { name: "italic", label: "斜体", text: "I", mark: "em", shortcut: "I" },
+    { name: "underline", label: "下划线", text: "U", mark: "underline", shortcut: "U" },
     { name: "strike", label: "删除线", text: "S", mark: "strike", shortcut: "Shift + X" },
-    { name: "highlight", label: "高亮", text: "H", mark: "highlight", shortcut: "Shift + H" },
     { name: "code", label: "行内代码", text: "〈〉", mark: "code", shortcut: "`" },
   ] as const;
 
-  const visibleFormats = $derived(
-    formats.filter(
-      (format) =>
-        variant === "all" ||
-        (variant === "primary") === ["bold", "italic", "highlight"].includes(format.name),
-    ),
-  );
   const marks = $derived(readInlineMarkStates(state));
+  const colors = $derived(readInlineColors(state));
+  const colorItems = $derived<FormattingMenuItem[]>([
+    {
+      kind: "command",
+      id: "default",
+      label: "默认文字颜色",
+      command: setTextColor(null),
+      checked: colors.text === null,
+      disabled: !setTextColor(null)(state),
+    },
+    ...Object.entries(textPalette.text).flatMap(([color, entry]): FormattingMenuItem[] =>
+      isTextColor(color)
+        ? [
+            {
+              kind: "command",
+              id: color,
+              label: entry.label,
+              command: setTextColor(color),
+              checked: colors.text === color,
+              disabled: !setTextColor(color)(state),
+              swatch: entry,
+            },
+          ]
+        : [],
+    ),
+  ]);
+  const highlightItems = $derived<FormattingMenuItem[]>([
+    {
+      kind: "command",
+      id: "none",
+      label: "无高亮",
+      command: setHighlightColor(null),
+      checked: colors.highlight === null,
+      disabled: !setHighlightColor(null)(state),
+    },
+    ...Object.entries(textPalette.highlight).flatMap(([color, entry]): FormattingMenuItem[] =>
+      isHighlightColor(color)
+        ? [
+            {
+              kind: "command",
+              id: color,
+              label: entry.label,
+              command: setHighlightColor(color),
+              checked: colors.highlight === color,
+              disabled: !setHighlightColor(color)(state),
+              swatch: entry,
+            },
+          ]
+        : [],
+    ),
+  ]);
 </script>
 
 <div class="marks" role="group" aria-label="文字样式">
-  {#each visibleFormats as format (format.name)}
+  {#each formats as format (format.name)}
     <button
       class="reader-button"
       type="button"
@@ -43,20 +90,51 @@
       onclick={() => onFormat(writingCommands[format.name])}>{format.text}</button
     >
   {/each}
+  <FormattingMenu
+    id="{id}-text-color"
+    label="文字颜色"
+    indicator={isTextColor(colors.text) ? textPalette.text[colors.text] : null}
+    icon="m6 17 6-13 6 13M8 13h8M5 21h14"
+    items={colorItems}
+    onCommand={onFormat}
+  />
+  <FormattingMenu
+    id="{id}-highlight"
+    label="高亮"
+    indicator={isHighlightColor(colors.highlight)
+      ? textPalette.highlight[colors.highlight]
+      : null}
+    icon="m9 11 7-7 4 4-7 7M9 11l4 4-3 3-4-4 3-3M4 20h7"
+    items={highlightItems}
+    onCommand={onFormat}
+  />
+  <button
+    class="reader-button"
+    type="button"
+    aria-label="清除文字样式"
+    title="清除文字样式"
+    disabled={!clearTextStyles(state)}
+    onclick={() => onFormat(clearTextStyles)}
+  >
+    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+      ><path d="m10 4 10 8-7 8H8l-6-5 8-11M6 10l10 8M13 20h8" /></svg
+    >
+  </button>
 </div>
 
 <style>
   .marks {
     display: flex;
-    gap: 0.2rem;
+    gap: 2px;
   }
   button {
     position: relative;
-    flex: 1;
-    min-width: 2rem;
-    height: 2rem;
+    flex: 0 0 30px;
+    min-width: 30px;
+    min-height: 30px;
+    height: 30px;
     padding: 0 0.3rem;
-    font-size: 1rem;
+    font-size: 15px;
     border-color: transparent;
     background: transparent;
   }
@@ -80,7 +158,8 @@
   button[aria-label="删除线"] {
     text-decoration: line-through;
   }
-  button[aria-label="高亮"][aria-pressed="true"] {
-    background: light-dark(#fff3a3, #5c4a12);
+  button[aria-label="下划线"] {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 </style>

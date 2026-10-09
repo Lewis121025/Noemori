@@ -1,5 +1,6 @@
 <script lang="ts">
   /** 侧栏全文检索结果：命中列表、状态与键盘导航；查询执行由 ReaderSearch 负责。 */
+  import SearchStatus from "./SearchStatus.svelte";
   import type { SearchHit, SearchMatch } from "../../shared/api";
   import { tick, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
@@ -8,6 +9,7 @@
 
   let {
     search,
+    onlyPath,
     activePath,
     onActivate,
     onExit,
@@ -15,6 +17,8 @@
   }: {
     /** 工作区持有的检索状态；结果只在最近一次成功检索后更新。 */
     search: ReaderSearch;
+    /** 统一目录选中某篇的命中详情，只投影该文件而不另建检索。 */
+    onlyPath?: string;
     /** 当前打开的文件路径，用于命中标记。 */
     activePath: string | null;
     /** 打开用户选择的具体命中；省略时进入文件第一处命中。 */
@@ -28,23 +32,14 @@
   let listElement: HTMLElement | undefined = $state();
   let focusedPath = $state<string | null>(null);
   let expanded = $state<Record<string, boolean>>({});
-  const hits = $derived(search.hits);
+  const hits = $derived(
+    onlyPath === undefined ? search.hits : search.hits.filter((hit) => hit.path === onlyPath),
+  );
+  $effect(() => {
+    if (onlyPath !== undefined) expanded = { [onlyPath]: true };
+  });
   const tabPath = $derived(
     hits.some((hit) => hit.path === focusedPath) ? focusedPath : (hits[0]?.path ?? null),
-  );
-  const matchCount = $derived(hits.reduce((total, hit) => total + hit.matchCount, 0));
-  const status = $derived(
-    search.error !== null
-      ? `${search.error}${search.stale ? "；当前显示的是上次结果。" : ""}`
-      : search.stale
-        ? "笔记库已变化，正在更新搜索结果…"
-        : search.busy
-          ? "正在搜索…"
-          : search.semantic !== null
-            ? `${search.hasMore ? "已显示 " : ""}${hits.length} 篇相关笔记${search.limited ? " · 可缩小范围继续查找" : ""}${search.loadingMore ? " · 正在加载…" : ""}`
-            : search.hasMore
-              ? `已显示 ${hits.length} 篇 · ${matchCount} 处命中${search.loadingMore ? " · 正在加载…" : ""}`
-              : `共 ${hits.length} 篇 · ${matchCount} 处命中`,
   );
 
   $effect.pre(() => {
@@ -160,28 +155,7 @@
       focusedPath = event.target.dataset.path;
   }}
 >
-  <div class="status" role="status">{status}</div>
-  {#if search.semantic !== null && search.semantic.state !== "ready"}
-    <div class="semantic-status" role="status">
-      {#if search.modelInstalling}
-        <span>正在下载或导入本地语义模型…</span>
-        <button onclick={() => search.cancelModel()}>取消</button>
-      {:else if search.semantic.state === "missing"}
-        <span>已启用关键词和拼写容错。安装本地模型后可按意思查找。</span>
-        <button onclick={() => search.installModel("download")}>下载语义模型（约 1.1 GB）</button>
-        <button onclick={() => search.installModel("import")}>导入模型</button>
-      {:else if search.semantic.state === "error"}
-        <span>语义搜索暂不可用：{search.semantic.message}</span>
-        <button onclick={() => search.installModel("download")}>重试</button>
-        <button onclick={() => search.installModel("import")}>导入模型</button>
-      {:else}
-        <span
-          >语义索引准备中：{search.semantic.indexed} / {search.semantic.total} 篇。当前结果可能不完整。</span
-        >
-        <button onclick={() => search.refresh()}>刷新</button>
-      {/if}
-    </div>
-  {/if}
+  {#if onlyPath === undefined}<SearchStatus {search} />{/if}
   {#if search.busy && hits.length === 0}
     <!-- 新查询不显示旧内容；同一查询的后台刷新保留已显示的节点和焦点。 -->
   {:else if !search.stale && search.error === null && hits.length === 0}
@@ -304,7 +278,7 @@
       {/each}
     </ul>
   {/if}
-  {#if search.error !== null || search.hasMore}
+  {#if onlyPath === undefined && (search.error !== null || search.hasMore)}
     <button
       class="expand"
       data-search-focus="more"
@@ -325,12 +299,6 @@
 </section>
 
 <style>
-  .semantic-status {
-    display: grid;
-    gap: 6px;
-    padding: 8px 12px;
-    font-size: 12px;
-  }
   .semantic-evidence {
     display: block;
     width: 100%;
@@ -349,11 +317,6 @@
     min-height: 0;
     overflow: auto;
     padding: 0 0.55rem 0.65rem;
-  }
-  .status {
-    color: var(--muted);
-    font-size: 0.75rem;
-    padding: 0 0.25rem 0.45rem;
   }
   .match-error {
     color: var(--muted);

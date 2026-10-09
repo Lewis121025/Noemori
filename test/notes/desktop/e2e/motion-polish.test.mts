@@ -200,6 +200,7 @@ test("键盘候选筛选后第一项可见，中途减少动态效果会完成�
       .poll(() => page.locator(".picker .results").evaluate((element) => element.scrollTop))
       .toBe(0);
     await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
     const kids = page.locator(".outline-sidebar nav > .kids");
     expect(
       await page

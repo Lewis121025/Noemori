@@ -1,9 +1,12 @@
 <script lang="ts">
   import type { AgentApi, AgentBrowser } from "../shared/api";
+  import AgentPreview from "./AgentPreview.svelte";
   let { api, session, browser }: { api: AgentApi; session: string; browser: AgentBrowser } =
     $props();
   let changing = $state(false);
   let error = $state("");
+  let preview = $state<string | null>(null);
+  const previewTab = $derived(browser.tabs.find((tab) => tab.id === preview));
   const latest = $derived(browser.receipts.at(-1));
   const latestBatch = $derived(browser.receipts.findLast((receipt) => receipt.action === "batch"));
   const outcomes = {
@@ -32,6 +35,7 @@
     error = "";
     try {
       await api.browserControl(session, resume);
+      if (!resume) preview = preview ?? browser.tabs[0]?.id ?? null;
     } catch (reason) {
       error = reason instanceof Error ? reason.message : String(reason);
     } finally {
@@ -51,11 +55,12 @@
       {/if}
     </header>
     {#if browser.status === "human"}<p>
-        请在专用浏览器窗口中操作。完成后交还助手，再发送继续执行的要求。
+        在画面浮窗中操作。完成后交还助手，再发送继续执行的要求。
       </p>{/if}
     <ul>
       {#each browser.tabs as tab (tab.id)}<li>
           <span title={tab.url}>{tab.title || tab.url}</span>
+          <button onclick={() => { preview = tab.id; }}>查看画面</button>
           {#if tab.crashed}<em>页面已退出</em>{/if}
           {#if tab.file_chooser}<p>页面正在等待选择文件。</p>{/if}
           {#if tab.dialog}<p>{tab.dialog.message}</p>{/if}
@@ -78,6 +83,10 @@
     {/if}
     {#if browser.error || error}<p class="error" role="alert">{error || browser.error}</p>{/if}
   </section>
+{/if}
+
+{#if previewTab}
+  <AgentPreview {api} {session} target={{ backend: "managed", page: previewTab.id }} title={previewTab.title || "浏览器"} human={browser.status === "human"} dialog={previewTab.dialog} fileChooser={previewTab.file_chooser} close={() => { preview = null; }} />
 {/if}
 
 <style>

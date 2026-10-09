@@ -1,6 +1,78 @@
 use super::*;
 
 #[tokio::test]
+async fn anthropic_effort_is_sent_only_when_explicitly_selected() {
+    use noemori_agent::llm::ReasoningEffort;
+    for protocol in [Protocol::Anthropic, Protocol::VertexAnthropic] {
+        for effort in [
+            None,
+            Some("none"),
+            Some("minimal"),
+            Some("low"),
+            Some("medium"),
+            Some("high"),
+            Some("xhigh"),
+            Some("max"),
+            Some("ULTRA"),
+        ] {
+            let mut server = Server::start(vec![Fixture::json(
+                json!({"id":"m1","role":"assistant","content":[{"type":"text","text":"你好"}],"stop_reason":"end_turn","usage":{}}),
+            )]).await;
+            let mut selected = config(protocol, &server.url, false);
+            selected.reasoning_effort = effort
+                .map(|value| serde_json::from_value::<ReasoningEffort>(json!(value)).unwrap());
+            generate(&HttpModel::new(selected).unwrap(), request(), context())
+                .await
+                .unwrap();
+            server.finish().await;
+            let requests = server.requests.lock().unwrap();
+            let expected = effort
+                .filter(|value| *value != "none")
+                .map(|value| json!(value));
+            assert_eq!(
+                requests[0].body.pointer("/output_config/effort"),
+                expected.as_ref()
+            );
+            assert_eq!(
+                requests[0].body.get("thinking"),
+                effort
+                    .filter(|value| *value == "none")
+                    .map(|_| json!({"type":"disabled"}))
+                    .as_ref()
+            );
+            if effort.is_none() {
+                assert!(requests[0].body.get("output_config").is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn anthropic_unsupported_effort_reports_the_gateway_error_without_downgrade() {
+    use noemori_agent::llm::ReasoningEffort;
+    for protocol in [Protocol::Anthropic, Protocol::VertexAnthropic] {
+        let mut server = Server::start(vec![Fixture {
+            status: 400,
+            content_type: "application/json",
+            body: br#"{"error":{"message":"unsupported reasoning effort: minimal"}}"#.to_vec(),
+        }])
+        .await;
+        let mut selected = config(protocol, &server.url, false);
+        selected.reasoning_effort = Some(ReasoningEffort::Minimal);
+        let error = generate(&HttpModel::new(selected).unwrap(), request(), context())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Http { status: 400, ref message, .. } if message.contains("unsupported reasoning effort: minimal"))
+        );
+        server.finish().await;
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].body["output_config"]["effort"], "minimal");
+    }
+}
+
+#[tokio::test]
 async fn anthropic_stream_requires_closed_blocks_and_retains_thinking_signature() {
     let events = vec![
         json!({"type":"message_start","message":{"id":"m1","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":5,"output_tokens":0}}}),

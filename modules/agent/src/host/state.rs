@@ -15,6 +15,7 @@ pub(super) struct Active {
     pub(super) cancellation: CancellationToken,
     pub(super) done: watch::Receiver<bool>,
     pub(super) draft: Option<usize>,
+    pub(super) control: crate::runtime::RunControl,
 }
 pub(super) struct TerminalEntry {
     pub(super) view: HostTerminal,
@@ -100,6 +101,7 @@ impl State {
     pub(super) fn snapshot(&self) -> HostSnapshot {
         let data = self.data.lock().expect("桌面会话锁被污染");
         HostSnapshot {
+            ui: Default::default(),
             browser: Default::default(),
             id: self.id.clone(),
             workspace: self.workspace.to_string_lossy().into_owned(),
@@ -199,7 +201,7 @@ impl State {
                 ) | (
                     HostApprovalRequest::Browser(_),
                     HostApprovalReply::Browser(_)
-                )
+                ) | (HostApprovalRequest::Ui(_), HostApprovalReply::Ui(_))
             ) {
                 return Err(Error::Config("审批决定与申请类型不符".into()));
             }
@@ -310,18 +312,24 @@ impl State {
     }
 }
 
-
 /// 模型私有历史保留图片数据，界面投影不在每次状态变化时复制工具截图。
 pub(super) fn visible_messages(messages: &[HostMessage]) -> Vec<HostMessage> {
-    messages.iter().map(|message| {
-        let mut visible = message.clone();
-        for part in &mut visible.content {
-            if let ContentPart::ToolResult(result) = part
-                && result.name == "browser"
-            {
-                result.media.clear();
+    messages
+        .iter()
+        .map(|message| {
+            let mut visible = message.clone();
+            for part in &mut visible.content {
+                if let ContentPart::ToolResult(result) = part
+                    && matches!(result.name.as_str(), "browser" | "ui_repl")
+                {
+                    result.media.clear();
+                }
             }
-        }
-        visible
-    }).collect()
+            visible
+        })
+        .collect()
 }
+
+#[cfg(test)]
+#[path = "../../../../test/agent/host/unit/visible.rs"]
+mod visible_tests;

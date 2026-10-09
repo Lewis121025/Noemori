@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { expect, test } from "vitest";
 import { _electron as electron } from "playwright-core";
+import { openSettings } from "../support/workspace-actions";
 import { visualViewports } from "../fixtures/quality-scenes";
 
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
@@ -49,19 +50,28 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
     const editor = page.locator(".ProseMirror");
 
     const panel = page
-      .locator(".pane-column.active")
+      .locator(".topbar-document:not([hidden])")
       .getByRole("toolbar", { name: "编辑工具栏", exact: true });
     const run = async (name: string) => {
       await page
-        .locator(".pane-column.active")
+        .locator(".topbar-document:not([hidden])")
         .getByRole("toolbar", { name: "编辑工具栏", exact: true })
         .waitFor();
-      const pane = page.locator(".pane-column.active");
-      if (!(await panel.getByRole("button", { name, exact: true }).isVisible()))
-        await panel
-          .getByRole("button", { name: name === "插入表格" ? "插入" : "更多编辑操作", exact: true })
-          .click();
-      await pane.getByRole("button", { name, exact: true }).click();
+      if (name === "撤销" || name === "重做") {
+        await panel.getByRole("button", { name, exact: true }).click();
+      } else if (name === "插入表格") {
+        await panel.getByRole("button", { name: "插入", exact: true }).click();
+        await panel.getByRole("menuitem", { name: "表格…", exact: true }).click();
+        const picker = panel.getByRole("dialog", { name: "插入表格", exact: true });
+        await picker.locator('[data-table-rows="2"][data-table-columns="2"]').click();
+        await picker.getByRole("button", { name: "左对齐", exact: true }).click();
+        await picker.getByRole("button", { name: "插入表格", exact: true }).click();
+      } else {
+        await panel.getByRole("button", { name: "表格操作", exact: true }).click();
+        const category = name.includes("对齐") ? "列对齐" : name.includes("行") ? "行" : name.includes("列") ? "列" : null;
+        if (category) await panel.getByRole("menuitem", { name: category, exact: true }).click();
+        await panel.getByRole(name.includes("对齐") ? "menuitemradio" : "menuitem", { name, exact: true }).click();
+      }
       expect(await panel.isVisible()).toBe(true);
       expect(await editor.evaluate((element) => element === document.activeElement)).toBe(true);
     };
@@ -71,6 +81,23 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
       return readFile(file, "utf8");
     };
     await editor.locator("p").first().click();
+    await panel.getByRole("button", { name: "插入", exact: true }).click();
+    await panel.getByRole("menuitem", { name: "表格…", exact: true }).click();
+    const picker = panel.getByRole("dialog", { name: "插入表格", exact: true });
+    await picker.locator('[data-table-rows="4"][data-table-columns="5"]').hover();
+    await expect.poll(() => picker.locator("output").textContent()).toBe("5 列 × 4 行");
+    expect(await editor.locator("table").count()).toBe(0);
+    await picker.locator('[data-table-rows="4"][data-table-columns="5"]').click();
+    await picker.getByRole("button", { name: "居中", exact: true }).click();
+    await expect.poll(() => picker.locator("output").textContent()).toBe("5 列 × 4 行");
+    const pickerArtifacts = process.env.NOEMORI_TABLE_ARTIFACTS;
+    if (pickerArtifacts) {
+      await mkdir(pickerArtifacts, { recursive: true });
+      await page.screenshot({ path: join(pickerArtifacts, "table-picker.png") });
+    }
+    await picker.getByRole("button", { name: "取消插入表格", exact: true }).click();
+    expect(await editor.locator("table").count()).toBe(0);
+    expect(await readFile(file, "utf8")).toBe("\uFEFF前文 _原样_\r\n\r\n后文");
     await run("插入表格");
     expect(await editor.locator("th").count()).toBe(2);
     await page.keyboard.insertText("项目");
@@ -108,12 +135,15 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
     const artifacts = process.env.NOEMORI_TABLE_ARTIFACTS;
     if (artifacts) await mkdir(artifacts, { recursive: true });
     for (const appearance of ["浅色", "深色"]) {
-      await page.getByRole("button", { name: "切换笔记库", exact: true }).click();
+      await openSettings(page);
       await page.getByRole("button", { name: appearance, exact: true }).click();
       await expect
         .poll(() => page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches))
         .toBe(appearance === "深色");
-      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "关闭设置", exact: true }).click();
+      await page.getByRole("dialog", { name: "设置", exact: true }).waitFor({ state: "hidden" });
+      const sidebarToggle = page.getByRole("button", { name: "显示或隐藏文件栏", exact: true });
+      if (await sidebarToggle.getAttribute("aria-expanded") === "true") await sidebarToggle.click();
       for (const viewport of visualViewports) {
         await app.evaluate(({ BrowserWindow }, { width, height }) => {
           const window = BrowserWindow.getAllWindows()[0];
@@ -123,18 +153,34 @@ test("表格插入、连续写作、结构编辑、撤销和重启保留内容�
         await expect.poll(() => page.evaluate(() => innerWidth)).toBe(viewport.width);
         await editor.locator("td").last().click();
         await page
-          .locator(".pane-column.active")
+          .locator(".topbar-document:not([hidden])")
           .getByRole("toolbar", { name: "编辑工具栏", exact: true })
           .waitFor();
         expect(
-          await panel.getByRole("button", { name: "更多编辑操作", exact: true }).isVisible(),
+          await panel.getByRole("button", { name: "插入", exact: true }).isVisible(),
         ).toBe(true);
-        const bounds = await panel.boundingBox();
+        const insertButton = panel.getByRole("button", { name: "插入", exact: true });
+        await insertButton.focus();
+        const bounds = await insertButton.boundingBox();
         if (bounds === null) throw new Error("表格面板不可见");
         expect(bounds.x).toBeGreaterThanOrEqual(0);
         expect(bounds.y).toBeGreaterThanOrEqual(0);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+        await panel.getByRole("button", { name: "表格操作", exact: true }).click();
+        await panel.getByRole("menuitem", { name: "列对齐", exact: true }).hover();
+        const alignmentMenu = panel.getByRole("menu", { name: "列对齐", exact: true });
+        await alignmentMenu.waitFor();
+        const alignmentBounds = (await alignmentMenu.boundingBox())!;
+        expect(alignmentBounds.x).toBeGreaterThanOrEqual(0);
+        expect(alignmentBounds.x + alignmentBounds.width).toBeLessThanOrEqual(viewport.width);
+        await alignmentMenu.getByRole("menuitemradio", { name: "列左对齐", exact: true }).focus();
+        await page.keyboard.press("Escape");
+        await alignmentMenu.waitFor({ state: "hidden" });
+        await page.keyboard.press("Escape");
+        await panel.getByRole("menu", { name: "表格操作", exact: true }).waitFor({ state: "hidden" });
+        await page.keyboard.press("Escape");
+        await panel.getByRole("menu", { name: "插入", exact: true }).waitFor({ state: "hidden" });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );

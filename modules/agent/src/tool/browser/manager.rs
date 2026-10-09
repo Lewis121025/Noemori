@@ -62,6 +62,12 @@ impl Manager {
                 return Err(ToolError::Execution("浏览器会话已关闭".into()));
             }
             if state.handle.is_none() {
+                if matches!(
+                    action,
+                    BrowserInput::Preview { .. } | BrowserInput::HumanInput { .. }
+                ) {
+                    return Err(ToolError::Execution("浏览器尚未启动".into()));
+                }
                 let (sender, receiver) = mpsc::channel(32);
                 let (finished, done) = watch::channel(None);
                 self.snapshot.lock().expect("浏览器状态锁被污染").status = BrowserStatus::Starting;
@@ -87,7 +93,9 @@ impl Manager {
             }
             handle.sender.clone()
         };
-        changed();
+        if !matches!(action, BrowserInput::Preview { .. }) {
+            changed();
+        }
         let (reply, received) = oneshot::channel();
         context
             .wait(sender.send(Request {

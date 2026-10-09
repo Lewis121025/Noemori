@@ -86,3 +86,29 @@ it("双栏的创建表单和插入点各自独立，取消不会创建记录或�
   expect(second.view.state.doc.textContent).toContain("讨论：第二栏讨论");
   expect(second.actions.create).toHaveBeenCalledExactlyOnceWith("第二栏讨论");
 });
+
+it("焦点离开文章会取消待弹出的对话预览，进入预览按钮仍可继续操作", async (test) => {
+  const { default: ConversationPreview } = await import("../../../../modules/notes/packages/desktop/src/features/reader/renderer/editor/agent/ConversationPreview.svelte");
+  vi.useFakeTimers();
+  const target = document.createElement("div"), editor = document.createElement("div"), outside = document.createElement("input");
+  target.append(editor, outside); document.body.append(target);
+  const id = "33333333-3333-4333-8333-333333333333";
+  const view = new EditorView(editor, { state: EditorState.create({ doc: parseMarkdown(`段落 [讨论](noemori://conversation/${id})`) }) });
+  const preview = vi.fn(async (): Promise<ArticleConversationPreview> => ({ id, title: "讨论", workspace: "/库", archived: false, article: { path: "文章.md", title: "文章" }, excerpt: "内容", messages: [] }));
+  const component = mount(ConversationPreview, { target, props: { view, state: view.state, actions: { preview, open: vi.fn(), report: vi.fn() } } });
+  test.onTestFinished(async () => { await unmount(component); view.destroy(); target.remove(); vi.useRealTimers(); });
+  flushSync();
+  const marker = editor.querySelector("a")!;
+  marker.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  await vi.advanceTimersByTimeAsync(399);
+  outside.focus();
+  await vi.advanceTimersByTimeAsync(2); flushSync();
+  expect(preview).not.toHaveBeenCalled();
+  marker.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  await vi.advanceTimersByTimeAsync(400); flushSync();
+  const button = target.querySelector<HTMLButtonElement>(".conversation-preview button")!;
+  button.focus(); flushSync();
+  expect(target.querySelector(".conversation-preview")).not.toBeNull();
+  outside.focus(); flushSync();
+  expect(target.querySelector(".conversation-preview")).toBeNull();
+});

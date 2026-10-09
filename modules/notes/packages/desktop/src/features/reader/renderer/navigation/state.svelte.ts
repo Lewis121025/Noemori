@@ -244,11 +244,6 @@ export class ReaderNavigation {
     return true;
   }
 
-  /** 排版或阅读视图里选区所在章节的标题；源码视图与非 Markdown 文档没有章节概念，返回 `null`。 */
-  currentHeading(): string | null {
-    return this.markdown?.currentHeading() ?? null;
-  }
-
   /**
    * 打开当前文档的查找入口；编辑器尚未挂载时不执行操作。
    *

@@ -1,6 +1,179 @@
 use super::*;
 
 #[tokio::test]
+async fn streaming_requests_accept_complete_json_responses_declared_by_the_server() {
+    let cases = [
+        (Protocol::OpenAiChat, chat("完成")),
+        (
+            Protocol::OpenAiResponses,
+            json!({"id":"r1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"完成"}]}],"usage":{"input_tokens":3,"output_tokens":2}}),
+        ),
+    ];
+    for (protocol, body) in cases {
+        for content_type in [
+            "application/json; charset=utf-8",
+            "Application/JSON",
+            "application/vnd.gateway+json",
+        ] {
+            let mut fixture = Fixture::json(body.clone());
+            fixture.content_type = content_type;
+            let mut server = Server::start(vec![fixture]).await;
+            let model = HttpModel::new(config(protocol, &server.url, true)).unwrap();
+            let response = generate(&model, request(), context()).await.unwrap();
+            assert_eq!(response.message.text_content(), "完成");
+            assert_eq!(response.finish_reason, FinishReason::Stop);
+            assert_eq!(response.usage.input_tokens, Some(3));
+            assert_eq!(response.usage.output_tokens, Some(2));
+            server.finish().await;
+            assert_eq!(server.requests.lock().unwrap()[0].body["stream"], true);
+        }
+    }
+}
+
+#[tokio::test]
+async fn streaming_json_responses_preserve_truncation_and_reject_invalid_payloads() {
+    let cases = [
+        (
+            Protocol::OpenAiChat,
+            json!({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"a","type":"function","function":{"name":"double","arguments":"{"}}]},"finish_reason":"length"}]}),
+        ),
+        (
+            Protocol::OpenAiResponses,
+            json!({"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"function_call","call_id":"a","name":"double","arguments":"{"}]}),
+        ),
+    ];
+    for (protocol, body) in cases {
+        let mut incomplete_json = Fixture::json(body.clone());
+        incomplete_json.body.pop();
+        let mut server = Server::start(vec![
+            Fixture::json(body),
+            incomplete_json,
+            Fixture::json(json!({"error":{"message":"gateway failure"}})),
+        ])
+        .await;
+        let model = HttpModel::new(config(protocol, &server.url, true)).unwrap();
+        let response = generate(&model, request(), context()).await.unwrap();
+        assert_eq!(response.finish_reason, FinishReason::Length);
+        assert_eq!(response.message.tool_calls().count(), 0);
+        for _ in 0..2 {
+            assert!(matches!(
+                generate(&model, request(), context()).await,
+                Err(Error::Protocol(_))
+            ));
+        }
+        server.finish().await;
+    }
+}
+
+#[test]
+fn reasoning_effort_configuration_does_not_prejudge_gateway_support() {
+    use noemori_agent::llm::ReasoningEffort;
+    for protocol in [
+        Protocol::Gemini,
+        Protocol::Ollama,
+        Protocol::Bedrock,
+        Protocol::VertexAnthropic,
+    ] {
+        let mut settings = config(protocol, "https://example.com/model", false);
+        settings.reasoning_effort = Some(ReasoningEffort::High);
+        assert!(HttpModel::new(settings).is_ok());
+    }
+}
+
+#[tokio::test]
+async fn openai_effort_reaches_the_matching_request_field_in_json_and_streaming_calls() {
+    use noemori_agent::llm::ReasoningEffort;
+    for protocol in [Protocol::OpenAiChat, Protocol::OpenAiResponses] {
+        for streaming in [false, true] {
+            for effort in [
+                None,
+                Some("high"),
+                Some("none"),
+                Some("minimal"),
+                Some("low"),
+                Some("medium"),
+                Some("xhigh"),
+                Some("max"),
+                Some("ULTRA"),
+            ] {
+                let response = match protocol {
+                    Protocol::OpenAiChat => chat("完成"),
+                    _ => {
+                        json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"完成"}]}]})
+                    }
+                };
+                let fixture = if !streaming {
+                    Fixture::json(response)
+                } else if protocol == Protocol::OpenAiChat {
+                    Fixture::sse(
+                        vec![chat_chunk(json!({"content":"完成"}), json!("stop"))],
+                        true,
+                    )
+                } else {
+                    Fixture::sse(
+                        vec![json!({"type":"response.completed","response":response})],
+                        false,
+                    )
+                };
+                let mut server = Server::start(vec![fixture]).await;
+                let mut settings = config(protocol, &server.url, streaming);
+                settings.reasoning_effort = effort
+                    .map(|value| serde_json::from_value::<ReasoningEffort>(json!(value)).unwrap());
+                let model = HttpModel::new(settings).unwrap();
+                assert_eq!(
+                    generate(&model, request(), context())
+                        .await
+                        .unwrap()
+                        .message
+                        .text_content(),
+                    "完成"
+                );
+                server.finish().await;
+                let requests = server.requests.lock().unwrap();
+                let body = &requests[0].body;
+                let (pointer, absent) = if protocol == Protocol::OpenAiChat {
+                    ("/reasoning_effort", "reasoning")
+                } else {
+                    ("/reasoning/effort", "reasoning_effort")
+                };
+                assert_eq!(
+                    body.pointer(pointer),
+                    effort.map(|value| json!(value)).as_ref(),
+                    "{protocol:?} streaming={streaming}"
+                );
+                assert!(body.get(absent).is_none());
+                if effort.is_none() {
+                    assert!(body.get("reasoning").is_none());
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn openai_unsupported_effort_reports_the_service_error_without_retry_or_downgrade() {
+    use noemori_agent::llm::ReasoningEffort;
+    for protocol in [Protocol::OpenAiChat, Protocol::OpenAiResponses] {
+        let mut server = Server::start(vec![Fixture {
+            status: 400,
+            content_type: "application/json",
+            body: br#"{"error":{"message":"unsupported reasoning effort: high"}}"#.to_vec(),
+        }])
+        .await;
+        let mut settings = config(protocol, &server.url, false);
+        settings.reasoning_effort = Some(ReasoningEffort::High);
+        let error = generate(&HttpModel::new(settings).unwrap(), request(), context())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Http { status: 400, ref message, .. } if message.contains("unsupported reasoning effort: high"))
+        );
+        server.finish().await;
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn nullable_tool_delta_fields_preserve_the_existing_call() {
     let events = vec![
         chat_chunk(

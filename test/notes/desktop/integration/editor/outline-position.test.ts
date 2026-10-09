@@ -3,6 +3,7 @@ import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { afterEach, expect, it, vi } from "vitest";
 import { createOutlinePosition } from "@reader/renderer/editor/outline-position";
+import { headingFolding, toggleHeadingFold } from "@reader/renderer/editor/heading-fold";
 import { parseMarkdown } from "@reader/shared/markdown/parse";
 
 afterEach(() => vi.restoreAllMocks());
@@ -12,7 +13,7 @@ function fixture(source: string) {
   const scroller = document.createElement("div");
   scroller.className = "main";
   document.body.append(scroller);
-  const view = new EditorView(scroller, { state: EditorState.create({ doc }) });
+  const view = new EditorView(scroller, { state: EditorState.create({ doc, plugins: [headingFolding()] }) });
   vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 800, 600));
   return {
     view,
@@ -78,9 +79,25 @@ it("空目录返回 null，编辑后的索引使用新标题位置", () => {
   try {
     expect(test.index.visibleHeading(test.view)).toBeNull();
     const doc = parseMarkdown("# 新标题\n\n正文\n");
-    test.view.updateState(EditorState.create({ doc }));
+    test.view.updateState(EditorState.create({ doc, plugins: [headingFolding()] }));
     expect(createOutlinePosition(doc).visibleHeading(test.view)).toBe(0);
   } finally {
     test.close();
   }
+});
+
+it("折叠后的隐藏标题不参与目录高亮，展开后恢复原来的可见索引", () => {
+  const test = fixture("# 第一章\n\n正文\n\n## 隐藏小节\n\n细节\n\n# 第二章\n\n结尾\n");
+  try {
+    for (const [index, item] of test.index.items.entries()) {
+      const node = test.view.nodeDOM(item.pos);
+      if (!(node instanceof HTMLElement)) throw new Error("缺少标题节点");
+      vi.spyOn(node, "getBoundingClientRect").mockReturnValue(new DOMRect(0, index === 2 ? 500 : 0, 400, 30));
+    }
+    expect(test.index.visibleHeading(test.view)).toBe(test.index.items[1]!.pos);
+    toggleHeadingFold(0)(test.view.state, test.view.dispatch, test.view);
+    expect(test.index.visibleHeading(test.view)).toBe(0);
+    toggleHeadingFold(0)(test.view.state, test.view.dispatch, test.view);
+    expect(test.index.visibleHeading(test.view)).toBe(test.index.items[1]!.pos);
+  } finally { test.close(); }
 });

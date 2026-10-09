@@ -56,14 +56,14 @@ beforeEach(async () => {
   document.body.append(target);
   view = mount(LibraryBrowser, {
     target,
-    props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
+    props: { workspace, onEdit: vi.fn(), onOpen: vi.fn() },
   });
   flushSync();
 });
 afterEach(async () => {
   await unmount(view);
   workspace.fileTree.reset();
-  workspace.librarySearch.reset();
+  workspace.search.reset();
   target.remove();
   vi.restoreAllMocks();
 });
@@ -86,24 +86,14 @@ it("左右键展开、进入和返回父目录，折叠不把隐藏条目纳入�
   expect(workspace.fileTree.state.selected).toEqual(["docs", "empty"]);
 });
 
-it("正文结果保留祖先与摘录，完整预览可逐处跳转且不打开编辑文档", async () => {
+it("正文结果保留祖先与摘录，单击进入共享文档", async () => {
   query("光的传播");
-  await vi.waitFor(() => {
-    flushSync();
-    expect(row("docs/sub/wave.md")).not.toBeNull();
-  });
+  await vi.waitFor(() => { flushSync(); expect(row("docs/sub/wave.md")).not.toBeNull(); });
   expect(row("docs/sub/wave.md").querySelector(".excerpt mark")?.textContent).toBe("光的传播");
   expect(row("docs")).not.toBeNull();
   row("docs/sub/wave.md").click();
-  await settle();
-  expect(target.querySelector(".library-document")?.textContent).toContain("光的传播速度");
-  expect(target.querySelector(".matches")?.textContent).toContain("2 处");
-  target.querySelector<HTMLButtonElement>('[aria-label="下一处匹配"]')!.click();
-  await settle();
-  expect(target.querySelector(".matches")?.textContent).toContain("1/2");
-  expect(target.querySelector(".ProseMirror-active-search-match")).not.toBeNull();
-  expect(api.fileSnapshot).not.toHaveBeenCalled();
-  expect(target.querySelector(".library-actions")).toBeNull();
+  await vi.waitFor(() => expect(api.fileSnapshot).toHaveBeenCalledWith("docs/sub/wave.md"));
+  expect(target.querySelector(".library-document")).toBeNull();
 });
 
 it("拼音组词期间不检索，迟到的旧结果不能覆盖新关键词", async () => {
@@ -153,5 +143,27 @@ it("跨目录连续选择文件时排除分组文件夹，避免文件操作扩�
   row("outside.md").click();
   row("docs/sub/wave.md").dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
   flushSync();
-  expect(workspace.fileTree.state.selected).toEqual(["outside.md", "docs/sub/wave.md"]);
+  expect(workspace.fileTree.state.selected).toEqual(["docs/sub/wave.md", "outside.md"]);
+});
+
+it("未打开笔记库时，独立对话仍能搜索并从搜索框用键盘进入，文件搜索不会报无库错误", async () => {
+  await unmount(view);
+  vi.mocked(api.vaultRestore).mockResolvedValue(null);
+  workspace = new ReaderWorkspaceController(api);
+  await workspace.restore();
+  view = mount(LibraryBrowser, { target, props: {
+    workspace, onEdit: vi.fn(), onOpen: vi.fn(),
+    conversations: { selected: null, open: vi.fn(), create: vi.fn(), manage: vi.fn(), items: [
+      { id: "independent", title: "独立研究", workspace: "/projects/research", archived: false, updatedAt: 1, origin: null, article: null, status: null },
+    ] },
+  } });
+  flushSync();
+  const input = query("独立研究");
+  await new Promise(resolve => setTimeout(resolve, 280)); flushSync();
+  const chat = [...target.querySelectorAll<HTMLButtonElement>("button")].find(button => button.getAttribute("aria-label") === "独立研究");
+  expect(chat).toBeDefined();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  await settle();
+  expect(document.activeElement?.getAttribute("data-path")).toBe("\0workspace:/projects/research");
+  expect(api.searchQuery).not.toHaveBeenCalled();
 });

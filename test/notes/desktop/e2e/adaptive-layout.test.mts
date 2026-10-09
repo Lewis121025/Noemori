@@ -116,9 +116,7 @@ test("自适应书页：图文共用左右边界，左侧目录跨尺寸保持�
     await resize(1440);
     await sidebarComponent(page, "目录");
     await sidebar.waitFor();
-    const outlineToggle = page
-      .getByRole("toolbar", { name: "组件栏", exact: true })
-      .getByRole("button", { name: "目录", exact: true });
+    const outlineToggle = page.getByRole("button", { name: "文章大纲", exact: true });
     await sidebarComponent(page, "文件");
     await expect.poll(() => sidebar.isVisible()).toBe(false);
     expect(await outlineToggle.getAttribute("aria-pressed")).toBe("false");
@@ -218,7 +216,9 @@ test("自适应书页：图文共用左右边界，左侧目录跨尺寸保持�
 
     expect(await pane.locator(".outline-sidebar").count()).toBe(0);
     await sidebar.getByRole("button", { name: "折叠", exact: true }).first().click();
-    expect(await sidebar.getByRole("button", { name: "甲第二节", exact: true }).count()).toBe(0);
+    await expect
+      .poll(() => sidebar.getByRole("button", { name: "甲第二节", exact: true }).count())
+      .toBe(0);
     await sidebar.getByRole("button", { name: "展开", exact: true }).first().click();
     const sidebarTop = (await sidebar.boundingBox())!.y;
     await sidebar.getByRole("button", { name: "甲第二节", exact: true }).click();
@@ -266,9 +266,9 @@ test("自适应书页：图文共用左右边界，左侧目录跨尺寸保持�
     expect(await rightOutline.isVisible()).toBe(false);
     await open("无标题.md");
     expect(await sidebar.count()).toBe(0);
-    expect(await page.getByText("当前文档没有可导航的标题。", { exact: true }).isVisible()).toBe(
-      true,
-    );
+    expect(
+      await page.getByRole("navigation", { name: "最近文件列表", exact: true }).isVisible(),
+    ).toBe(true);
     await open("短笔记.md");
     expect(await pane.locator(".outline-sidebar").count()).toBe(0);
     expect(await outlineToggle.isEnabled()).toBe(true);

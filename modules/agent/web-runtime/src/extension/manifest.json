@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Noemori 浏览器连接",
+  "version": "0.1.0",
+  "minimum_chrome_version": "125",
+  "description": "将用户明确共享的 Chrome 或 Edge 页面连接到 Noemori。",
+  "permissions": ["debugger", "nativeMessaging", "tabs"],
+  "background": { "service_worker": "extension/background.js", "type": "module" },
+  "action": { "default_popup": "extension/popup.html" },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxb+XpT7M4LYulZin/Bry/FOLpv8b5PvaiHBv2o7E4zXDK9orMsOxjVthEFPHmf/NuycujxfEzV7Kn9CmlUAmCPvzSpRlLqOxzT2OAWhPYFmFktnVdqa4F/H3+NqJrul7a1PkA2CsP2572+CqEgBmKxQBZkfB6m5RvVnhtc00LN+QC2h6ANA98iKWRdhQb1k06E6YLgG1AEoP/JtBmQP7obFuY822smk042H7gcq/5vF2rZLnRjXqwE3yRDV8MnPPiPkk+c2m7XSwqOUxl0MCtluJMG6eIV+MhIJ+mIi+sB4fNLGElFGcYlOQmOlZqhqYYies6Cbp0Gp3BmL8dMHexwIDAQAB"
+}

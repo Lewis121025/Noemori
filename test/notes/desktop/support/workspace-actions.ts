@@ -1,32 +1,26 @@
 import type { Page } from "playwright-core";
 
 /**
- * 从固定组件栏选择入口，隐藏时先恢复侧栏。
+ * 从侧栏顶部选择文件或大纲入口，隐藏时先恢复侧栏。
  * @param page 当前 Electron 窗口。
  * @param name 组件入口的可访问名称。
  * @returns 入口被选中且文档面板完成返回后兑现，异步内容由调用方按目标内容等待。
  * @throws 侧栏或组件不可用时保留 Playwright 定位错误。
  */
 export async function sidebarComponent(page: Page, name: string): Promise<void> {
-  await page.locator(".file-sidebar").waitFor({ state: "attached" });
+  const sidebar = page.locator(".file-sidebar:not(.right)");
+  await sidebar.waitFor({ state: "attached" });
   await page.getByRole("region", { name: "打开资料库", exact: true }).waitFor({ state: "hidden" });
-  // 退出动画期间仍有画面，但 hidden/inert 已关闭交互；按语义状态恢复侧栏。
-  if ((await page.locator(".file-sidebar").getAttribute("hidden")) !== null)
+  if (await sidebar.getAttribute("hidden") !== null)
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-  const entry = page
-    .getByRole("toolbar", { name: "组件栏", exact: true })
-    .getByRole("button", { name, exact: true });
-  const component = await entry.getAttribute("data-component");
-  await entry.click();
-  await page.waitForFunction(
-    (name) =>
-      document
-        .querySelector(`.component-button[aria-label="${name}"]`)
-        ?.getAttribute("aria-pressed") === "true",
-    name,
-  );
-  if (component === "outline")
-    await page.locator(".reading-space").waitFor();
+  const label = name === "目录" ? "目录" : "笔记库";
+  const panel = sidebar.getByRole("region", { name: label, exact: true });
+  if (!(await panel.isVisible()))
+    await sidebar.getByRole("button", {
+      name: label === "目录" ? "文章大纲" : "文件目录", exact: true,
+    }).click();
+  await panel.waitFor();
+  if (name === "搜索") await sidebar.getByRole("searchbox").focus();
 }
 
 /** 顶栏工具始终属于当前文档；从文件系统返回时通过文件入口恢复原文档。 */
@@ -38,8 +32,8 @@ export async function documentTools(page: Page): Promise<void> {
 
 /** 打开独立设置窗口；窗口出现后交由调用方选择设置分类。 */
 export async function openSettings(page: Page): Promise<void> {
-  await page.locator(".file-sidebar").waitFor({ state: "attached" });
-  if ((await page.locator(".file-sidebar").getAttribute("hidden")) !== null)
+  await page.locator(".file-sidebar:not(.right)").waitFor({ state: "attached" });
+  if ((await page.locator(".file-sidebar:not(.right)").getAttribute("hidden")) !== null)
     await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
@@ -67,20 +61,9 @@ export async function noteAction(page: Page, name: string): Promise<void> {
 
 /** 从任一恢复现场进入资料管理，等待保存门禁与空间切换完成。 */
 export async function openLibrary(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () =>
-      document.querySelector(".pane-column") !== null &&
-      document.querySelector('.window-toolbar [aria-label="显示或隐藏文件栏"]') !== null,
-  );
-  // 抽屉会让中央页面 inert；应先关闭抽屉，不能把正常的遮罩状态误判为保存未完成。
-  if ((await page.locator(".library").getAttribute("hidden")) === null) {
-    const scrim = page.getByRole("button", { name: "收起文件栏", exact: true });
-    if (await scrim.isVisible())
-      await page.getByRole("button", { name: "显示或隐藏文件栏", exact: true }).click();
-    return;
-  }
-  await sidebarComponent(page, "文件系统");
-  await page.getByRole("region", { name: "文件系统", exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector(".pane-column") !== null);
+  await sidebarComponent(page, "笔记库");
+  await page.getByRole("navigation", { name: "文件列表", exact: true }).waitFor();
 }
 
 /** 确认新建表单中的名称与目录；可选名称覆盖建议值，确认成功后等待表单关闭。 */
@@ -94,6 +77,13 @@ export async function confirmNewEntry(page: Page, name?: string): Promise<void> 
 
 /** 文件管理的新建菜单是唯一可见的创建入口，类型选择后仍需确认名称和位置。 */
 export async function newEntry(page: Page, kind: "笔记" | "白板" | "文件夹"): Promise<void> {
-  await page.locator(".library-heading").getByRole("button", { name: "新建", exact: true }).click();
+  await page.locator(".navigation-heading").getByRole("button", { name: "新建", exact: true }).click();
   await page.locator(".create-menu").getByRole("button", { name: `新建${kind}`, exact: true }).click();
+}
+
+/** 从统一目录顶部发起独立 Agent 对话，名称与实际工作目录仍由表单确认。 */
+export async function newConversation(page: Page): Promise<void> {
+  await openLibrary(page);
+  await page.locator(".navigation-heading").getByRole("button", { name: "新建", exact: true }).click();
+  await page.locator(".create-menu").getByRole("button", { name: "Agent 对话", exact: true }).click();
 }

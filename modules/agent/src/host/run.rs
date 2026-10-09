@@ -47,7 +47,9 @@ impl Drop for Guard {
                     &data.messages[from..],
                     &data.calls.keys().cloned().collect::<Vec<_>>(),
                 ));
-                data.active.take();
+                if let Some(active) = data.active.take() {
+                    data.history.extend(active.control.finish());
+                }
                 data.calls.clear();
                 data.approvals.clear();
                 if let Some(run) = &mut data.run {

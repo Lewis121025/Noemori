@@ -1,36 +1,57 @@
 import type { Authentication, ModelSettings, Protocol, PublicModelSettings } from "./api";
 import { boolean, parseAuthentication, parseProtocol, record, text } from "./parse";
+import {
+  parseReasoningCapability,
+  parseReasoningEffort,
+  type ReasoningCapability,
+  type ReasoningEffort,
+} from "./reasoning";
 
-/** 模型标识在所属供应商内唯一；能力由用户声明，不根据名称猜测。 */
-export type ProviderModel = { id: string } & Pick<
-  ModelSettings,
-  "tools" | "streaming" | "vision" | "audio" | "video"
->;
+/** 模型标识在所属供应商内唯一；能力来自接口或用户声明，不根据名称猜测。 */
+export type ProviderModel = {
+  id: string;
+  reasoning?: ReasoningCapability;
+  /** 只用于迁移旧配置；新的推理强度选择由对话持有。 */
+  reasoningEffort?: ReasoningEffort;
+} & Pick<ModelSettings, "tools" | "streaming" | "vision" | "audio" | "video">;
 /** Base URL 包含 API 版本路径；完整地址可用 {model} 表达部署路径中的模型。 */
 export type ProviderAddress = { type: "base_url" | "endpoint"; url: string };
-/** 一套已保存连接拥有独立认证及至少一个模型，品牌预设只负责初始化填写。 */
+/** 连接与可用模型目录独立；尚未获取列表时仍可保存认证与地址。 */
 export type ProviderSettings = {
   id: string;
   name: string;
   protocol: Protocol;
   address: ProviderAddress;
   authentication: Authentication;
-  models: [ProviderModel, ...ProviderModel[]];
+  models: ProviderModel[];
 };
-/** 可编辑输入允许临时空模型列表，提交时验证；null 认证仅保留指定连接的凭据。 */
+/** 空列表表示尚未获取模型；null 认证仅保留指定连接的凭据。 */
 export type ProviderUpdate = Omit<ProviderSettings, "id" | "authentication" | "models"> & {
   id: string | null;
   authentication: Authentication | null;
   models: ProviderModel[];
 };
+/** 模型发现只需要连接，不要求先输入名称或模型；null 认证仅引用已保存连接。 */
+export type ProviderConnection = Pick<
+  ProviderUpdate,
+  "id" | "protocol" | "address" | "authentication"
+>;
+/** 发现结果中的名称仅供显示，模型 ID 原样用于请求。 */
+export type DiscoveredModel = ProviderModel & { name: string; reasoning: ReasoningCapability };
 /** 供应商列表只返回认证描述，不返还认证原文或密文。 */
 export type PublicProvider = Omit<ProviderSettings, "authentication"> & {
   authentication: PublicModelSettings["authentication"];
 };
-/** 默认模型同时绑定供应商身份，防止同名模型混用不同账号。 */
-export type ModelSelection = { providerId: string; modelId: string };
-/** 空目录或删除默认模型后 active 为 null，需要用户明确选择。 */
-export type ProviderCatalog = { providers: PublicProvider[]; active: ModelSelection | null };
+/** 对话选择绑定连接身份；省略推理强度表示使用服务商默认。 */
+export type ModelSelection = {
+  providerId: string;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+};
+/** 连接目录不持有模型选择，选择由每条对话独立保存。 */
+export type ProviderCatalog = { providers: PublicProvider[] };
+/** 自动发现需保存完整目录，数量上限与远端读取边界一致。 */
+export const providerModelLimit = 4096;
 
 /**
  * 创建待用户确认能力的独立草稿，不根据模型名称推断服务商支持情况。
@@ -93,28 +114,16 @@ export function providerEndpoint(
  * @returns 已校验并去除名称、地址和模型标识首尾空白的配置。
  * @throws 名称、模型、地址、认证或数量超出约束时拒绝，不修补错误输入。
  */
-export function parseProviderUpdate(
-  value: unknown,
-): ProviderUpdate & Pick<ProviderSettings, "models"> {
+export function parseProviderUpdate(value: unknown): ProviderUpdate {
   const input = record(value);
-  const id = input["id"] === null ? null : text(input, "id");
+  const { id, protocol, address, authentication } = parseProviderConnection(input);
   const name = text(input, "name").trim();
-  if ((id !== null && (!id || id.length > 128)) || !name || name.length > 128)
-    throw new Error("供应商名称或标识无效");
-  const rawAddress = record(input["address"]);
-  const type = text(rawAddress, "type");
-  if (type !== "base_url" && type !== "endpoint") throw new Error("接口地址模式无效");
-  const address: ProviderAddress = { type, url: text(rawAddress, "url").trim() };
-  if (address.url.length > 8192) throw new Error("接口地址过长");
-  const protocol = parseProtocol(text(input, "protocol"));
+  if (!name || name.length > 128) throw new Error("供应商名称或标识无效");
   const rawModels = input["models"];
-  if (!Array.isArray(rawModels) || rawModels.length < 1 || rawModels.length > 256)
-    throw new Error("每个供应商需要 1 到 256 个模型");
+  if (!Array.isArray(rawModels) || rawModels.length > providerModelLimit)
+    throw new Error(`供应商模型列表不能超过 ${providerModelLimit} 个模型`);
   const ids = new Set<string>();
-  const models: [ProviderModel, ...ProviderModel[]] = [
-    parseProviderModel(rawModels[0]),
-    ...rawModels.slice(1).map(parseProviderModel),
-  ];
+  const models = rawModels.map(parseProviderModel);
   for (const model of models) {
     if (ids.has(model.id)) throw new Error("模型标识不能重复");
     ids.add(model.id);
@@ -127,18 +136,46 @@ export function parseProviderUpdate(
     !/%7bmodel%7d|\{model\}/iu.test(new URL(address.url).pathname)
   )
     throw new Error("此协议的多个模型需要在完整地址路径中使用 {model} 占位");
+  return { id, name, protocol, address, authentication, models };
+}
+
+/**
+ * 发现与保存共用连接校验，避免尚未选择模型时绕过认证和 URL 约束。
+ * @param value 未信任的连接输入。
+ * @returns 已复制并校验的连接。
+ * @throws 身份、协议、地址或认证无效时拒绝。
+ */
+export function parseProviderConnection(value: unknown): ProviderConnection {
+  const input = record(value);
+  const id = input["id"] === null ? null : text(input, "id");
+  if (id !== null && (!id || id.length > 128)) throw new Error("供应商标识无效");
+  const rawAddress = record(input["address"]);
+  const type = text(rawAddress, "type");
+  if (type !== "base_url" && type !== "endpoint") throw new Error("接口地址模式无效");
+  const address: ProviderAddress = { type, url: text(rawAddress, "url").trim() };
+  if (address.url.length > 8192) throw new Error("接口地址过长");
+  const protocol = parseProtocol(text(input, "protocol"));
+  providerEndpoint(protocol, address, "model");
   const authentication =
     input["authentication"] === null ? null : parseAuthentication(input["authentication"]);
   if (authentication === null && id === null) throw new Error("新增供应商必须明确配置认证");
-  return { id, name, protocol, address, authentication, models };
+  return { id, protocol, address, authentication };
 }
 
 function parseProviderModel(value: unknown): ProviderModel {
   const item = record(value),
     id = text(item, "id").trim();
   if (!id || id.length > 8192 || /[\r\n\0\ud800-\udfff]/u.test(id)) throw new Error("模型标识无效");
+  const reasoning =
+    item["reasoning"] === undefined ? undefined : parseReasoningCapability(item["reasoning"]);
+  const reasoningEffort =
+    item["reasoningEffort"] === undefined
+      ? undefined
+      : parseReasoningEffort(item["reasoningEffort"]);
   return {
     id,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     tools: boolean(item, "tools"),
     streaming: boolean(item, "streaming"),
     vision: boolean(item, "vision"),
@@ -157,6 +194,10 @@ export function parseModelSelection(value: unknown): ModelSelection {
   const providerId = text(input, "providerId"),
     modelId = text(input, "modelId");
   if (!providerId || providerId.length > 128 || !modelId || modelId.length > 8192)
-    throw new Error("默认模型标识无效");
-  return { providerId, modelId };
+    throw new Error("对话模型标识无效");
+  const reasoningEffort =
+    input["reasoningEffort"] === undefined
+      ? undefined
+      : parseReasoningEffort(input["reasoningEffort"]);
+  return { providerId, modelId, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) };
 }

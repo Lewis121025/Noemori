@@ -11,10 +11,14 @@ import { authenticationDescription, decryptAuthentication, parseProtectedModel }
 
 /** 公开连接与系统密文成对保存；模型归属根据实际连接计算，不依赖人为修订号。 */
 export type StoredProvider = { provider: PublicProvider; encrypted: string | null };
-/** 目录引用必须指向已保存模型，空选择表示不能启动下一轮。 */
+/** active 仅作为旧版对话迁移来源，新版选择保存在对话中。 */
 export type StoredCatalog = { providers: StoredProvider[]; active: ModelSelection | null };
 /** 单次目录快照中解析出的确定连接与模型，避免重复查找和非空断言。 */
-export type SelectedProvider = { record: StoredProvider; model: ProviderModel };
+export type SelectedProvider = {
+  record: StoredProvider;
+  model: ProviderModel;
+  selection: ModelSelection;
+};
 
 /**
  * 解码供应商磁盘契约，版本二不解密；旧版认证类型只能从系统密文恢复。
@@ -53,7 +57,7 @@ function parseStoredProvider(value: unknown): StoredProvider {
  * @param catalog 已解码的目录。
  * @param selection 用户确认的供应商与模型身份。
  * @returns 对应的连接记录及模型。
- * @throws 供应商或模型不存在时拒绝。
+ * @throws 供应商或模型不存在时拒绝；推理档位是否支持交由网关判断。
  */
 export function requireModelSelection(
   catalog: StoredCatalog,
@@ -61,34 +65,41 @@ export function requireModelSelection(
 ): SelectedProvider {
   const stored = catalog.providers.find((entry) => entry.provider.id === selection.providerId);
   const model = stored?.provider.models.find((model) => model.id === selection.modelId);
-  if (!stored || !model) throw new Error("默认供应商或模型不存在");
-  return { record: stored, model };
+  if (!stored || !model) throw new Error("所选供应商或模型已不可用，请重新选择模型");
+  return { record: stored, model, selection };
 }
 
 /**
- * 私有模型构造与公开默认配置共用同一映射，保持模型、路径和能力一致。
+ * 私有模型构造与公开配置共用同一映射，保持模型、路径和能力一致。
  * @param selected 已解析的选择。
  * @returns 不含认证的原生模型参数。
  * @throws 地址不能解析为协议请求路径时拒绝。
  */
 export function modelParameters(selected: SelectedProvider): Omit<ModelSettings, "authentication"> {
   const { provider } = selected.record,
-    { id, ...capabilities } = selected.model;
+    model = selected.model;
   return {
     protocol: provider.protocol,
-    model: id,
-    endpoint: providerEndpoint(provider.protocol, provider.address, id),
-    ...capabilities,
+    model: model.id,
+    endpoint: providerEndpoint(provider.protocol, provider.address, model.id),
+    tools: model.tools,
+    streaming: model.streaming,
+    vision: model.vision,
+    audio: model.audio,
+    video: model.video,
+    ...(selected.selection.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: selected.selection.reasoningEffort }),
   };
 }
 
 /**
  * 将目录投影给界面，不暴露系统密文，也不解密。
  * @param catalog 本次读取或提交的完整目录。
- * @returns 公开连接及默认选择。
+ * @returns 无密钥的连接目录，不包含对话选择。
  */
 export function projectCatalog(catalog: StoredCatalog): ProviderCatalog {
-  return { providers: catalog.providers.map((entry) => entry.provider), active: catalog.active };
+  return { providers: catalog.providers.map((entry) => entry.provider) };
 }
 
 function migrateLegacy(value: Record<string, unknown>): StoredCatalog {

@@ -1,12 +1,23 @@
 <script lang="ts">
-  /** 编辑模式常驻工具栏；所有命令直接使用所属编辑器选区，不复制文档状态。 */
-  import { onMount, tick } from "svelte";
+  /** 顶栏常用命令平铺，分类菜单只承载同一类子操作；状态与执行均来自所属编辑器。 */
+  import { tick } from "svelte";
   import type { Command, EditorState } from "prosemirror-state";
   import type { EditorView } from "prosemirror-view";
   import { undo, redo } from "prosemirror-history";
   import { writingCommands } from "../writing";
-  import { inTable, leaveTable, tableCommands } from "../table/table";
+  import { readBlockFormatting } from "../block-formatting";
+  import {
+    canInsertTable,
+    insertTable,
+    inTable,
+    leaveTable,
+    tableCommands,
+    type TableInsertOptions,
+  } from "../table/table";
+  import TableInsertPicker from "../table/TableInsertPicker.svelte";
+  import { linkSelectionKey } from "../links/link-editing";
   import InlineFormatting from "./InlineFormatting.svelte";
+  import FormattingMenu, { type FormattingMenuItem } from "./FormattingMenu.svelte";
   import { canInsertAttachment } from "../attachments/attachments";
   import { canInsertWebPage } from "../webpage/insert";
 
@@ -18,7 +29,6 @@
     onAttachment,
     onWebPage,
     onConversation,
-    sidebar = false,
     onShowTools,
   }: {
     /** 工具栏 DOM id；各分栏身份独立，操作始终作用于所属编辑器。 */
@@ -31,47 +41,20 @@
     onWebPage?: () => void;
     /** 在当前文章位置创建对话；能力由应用装配，独立编辑器可不提供。 */
     onConversation?: () => void;
-    /** 侧栏固定使用换行布局，基础格式不随栏宽藏入菜单。 */
-    sidebar?: boolean;
-    /** 快捷键进入工具时先展开所属侧栏，不新建另一组选区按钮。 */
+    /** 快捷键进入工具前，让工作区完成必要的焦点与侧栏交接。 */
     onShowTools?: () => void;
   } = $props();
-  const blocks = [
-    { name: "paragraph", label: "正文" },
-    { name: "heading1", label: "标题 1" },
-    { name: "heading2", label: "标题 2" },
-    { name: "heading3", label: "标题 3" },
-    { name: "heading4", label: "标题 4" },
-    { name: "heading5", label: "标题 5" },
-    { name: "heading6", label: "标题 6" },
-    { name: "codeBlock", label: "代码块" },
-  ] as const;
-  const structures = [
-    {
-      name: "bulletList",
-      label: "项目列表",
-      icon: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
-    },
-    {
-      name: "orderedList",
-      label: "编号列表",
-      icon: "M10 6h10M10 12h10M10 18h10M3 4h1v5M3 9h3M3 14c3-2 4 1 1 3l-1 2h3",
-    },
-    { name: "taskList", label: "任务列表", icon: "m3 6 2 2 3-4M11 6h9M11 16h9M3 13h5v5H3z" },
-    { name: "quote", label: "引用", icon: "M5 5v14M10 7h10M10 12h10M10 17h6" },
-  ] as const;
-  const tableStructure = [
-    { name: "addRow", label: "下方插入行" },
-    { name: "deleteRow", label: "删除当前行" },
-    { name: "addColumn", label: "右侧插入列" },
-    { name: "deleteColumn", label: "删除当前列" },
-  ] as const;
-  const alignments = [
-    { name: "alignLeft", value: "left", label: "列左对齐", icon: "M4 6h16M4 12h10M4 18h16" },
-    { name: "alignCenter", value: "center", label: "列居中对齐", icon: "M4 6h16M7 12h10M4 18h16" },
-    { name: "alignRight", value: "right", label: "列右对齐", icon: "M4 6h16M10 12h10M4 18h16" },
+
+  const headings = [
+    "heading1",
+    "heading2",
+    "heading3",
+    "heading4",
+    "heading5",
+    "heading6",
   ] as const;
   const table = $derived(inTable(editorState));
+  const structures = $derived(readBlockFormatting(editorState));
   const block = $derived(
     editorState.selection.$from.parent.type.name === "heading"
       ? `heading${String(editorState.selection.$from.parent.attrs["level"])}`
@@ -79,39 +62,180 @@
         ? "codeBlock"
         : "paragraph",
   );
+  const blockLabel = $derived(
+    block === "codeBlock" ? "代码块" : block === "paragraph" ? "正文" : `标题 ${block.slice(-1)}`,
+  );
+
+  function item(
+    id: string,
+    label: string,
+    command: Command,
+    checked?: boolean,
+  ): FormattingMenuItem {
+    return {
+      kind: "command",
+      id,
+      label,
+      command,
+      disabled: !command(editorState),
+      ...(checked === undefined ? {} : { checked }),
+    };
+  }
+  const blockItems = $derived<FormattingMenuItem[]>([
+    item("paragraph", "正文", writingCommands.paragraph, block === "paragraph"),
+    {
+      kind: "submenu",
+      id: "headings",
+      label: "标题",
+      items: headings.map((name, index) =>
+        item(name, `标题 ${index + 1}`, writingCommands[name], block === name),
+      ),
+    },
+    item("code", "代码块", writingCommands.codeBlock, block === "codeBlock"),
+  ]);
+  const listItems = $derived<FormattingMenuItem[]>([
+    item("bullet", "项目列表", writingCommands.bulletList, structures.list === "bullet"),
+    item("ordered", "编号列表", writingCommands.orderedList, structures.list === "ordered"),
+    item("task", "任务列表", writingCommands.taskList, structures.list === "task"),
+  ]);
+  const tableItems = $derived<FormattingMenuItem[]>([
+    {
+      kind: "submenu",
+      id: "rows",
+      label: "行",
+      disabled: !table,
+      items: [
+        item("add", "下方插入行", tableCommands.addRow),
+        item("up", "上移当前行", tableCommands.moveRowUp),
+        item("down", "下移当前行", tableCommands.moveRowDown),
+        item("delete", "删除当前行", tableCommands.deleteRow),
+      ],
+    },
+    {
+      kind: "submenu",
+      id: "columns",
+      label: "列",
+      disabled: !table,
+      items: [
+        item("add", "右侧插入列", tableCommands.addColumn),
+        item("left", "左移当前列", tableCommands.moveColumnLeft),
+        item("right", "右移当前列", tableCommands.moveColumnRight),
+        item("delete", "删除当前列", tableCommands.deleteColumn),
+      ],
+    },
+    {
+      kind: "submenu",
+      id: "alignment",
+      label: "列对齐",
+      disabled: !table,
+      items: [
+        item(
+          "left",
+          "列左对齐",
+          tableCommands.alignLeft,
+          editorState.selection.$from.parent.attrs["align"] === "left",
+        ),
+        item(
+          "center",
+          "列居中对齐",
+          tableCommands.alignCenter,
+          editorState.selection.$from.parent.attrs["align"] === "center",
+        ),
+        item(
+          "right",
+          "列右对齐",
+          tableCommands.alignRight,
+          editorState.selection.$from.parent.attrs["align"] === "right",
+        ),
+      ],
+    },
+    item("leave", "返回正文", leaveTable),
+    item("remove", "删除表格", tableCommands.remove),
+  ]);
+
+  const insertItems = $derived.by((): FormattingMenuItem[] => {
+    const entries: FormattingMenuItem[] = [
+      {
+        kind: "action",
+        id: "link",
+        label: "链接…",
+        action: onLink,
+        disabled: !!editorState.selection.$from.parent.type.spec.code,
+      },
+      {
+        kind: "action",
+        id: "attachment",
+        label: "插入附件…",
+        action: onAttachment,
+        disabled: !canInsertAttachment(editorState),
+      },
+    ];
+    if (onWebPage)
+      entries.push({
+        kind: "action",
+        id: "webpage",
+        label: "插入网页…",
+        action: onWebPage,
+        disabled: !canInsertWebPage(editorState),
+      });
+    entries.push({
+      kind: "action",
+      id: "table",
+      label: "表格…",
+      action: openTable,
+      disabled: !canInsertTable(editorState),
+    });
+    if (onConversation)
+      entries.push({
+        kind: "action",
+        id: "conversation",
+        label: "插入 Agent 对话…",
+        action: onConversation,
+        disabled: !canInsertAttachment(editorState),
+      });
+    return entries;
+  });
 
   function run(command: Command): void {
+    if (view.isDestroyed || view.composing) return;
     command(view.state, view.dispatch, view);
     view.focus();
   }
-  function setBlock(value: string): void {
-    const option = blocks.find((item) => item.name === value);
-    if (option) run(writingCommands[option.name]);
-  }
-  let width = $state(0);
   let panel: HTMLDivElement;
-  onMount(() => {
-    const observer = new ResizeObserver(() => {
-      width = panel.clientWidth;
-    });
-    observer.observe(panel);
-    width = panel.clientWidth;
-    return () => observer.disconnect();
+  let tablePicker: TableInsertPicker | undefined = $state();
+  let tableOwner: EditorView | null = null;
+  function openTable(): void {
+    const source = panel.querySelector<HTMLButtonElement>('button[aria-label="插入"]');
+    if (!source || !tablePicker || view.isDestroyed || view.composing || !canInsertTable(view.state))
+      return;
+    tableOwner = view;
+    view.dispatch(view.state.tr.setMeta(linkSelectionKey, true).setMeta("addToHistory", false));
+    tablePicker.open(source);
+  }
+  function closeTable(restoreFocus: boolean): void {
+    const owner = tableOwner;
+    tableOwner = null;
+    if (!owner || owner.isDestroyed) return;
+    owner.dispatch(owner.state.tr.setMeta(linkSelectionKey, false).setMeta("addToHistory", false));
+    if (restoreFocus && owner === view) owner.focus();
+  }
+  function insertChosenTable(options: TableInsertOptions): void {
+    const owner = tableOwner;
+    if (!owner || owner !== view || owner.isDestroyed)
+      throw new Error("原文档已更新，请关闭后重新选择插入位置");
+    if (owner.composing) throw new Error("请完成正文输入后再插入表格");
+    const bookmark = linkSelectionKey.getState(owner.state);
+    if (!bookmark) throw new Error("原插入位置已失效，请重新选择正文位置");
+    owner.dispatch(owner.state.tr.setSelection(bookmark.resolve(owner.state.doc)));
+    if (!insertTable(options)(owner.state, owner.dispatch, owner))
+      throw new Error("请在可编辑的同一段正文中选择插入位置");
+  }
+  $effect(() => {
+    const owner = view;
+    return () => {
+      if (tableOwner === owner) tablePicker?.close(false);
+    };
   });
-  let insertMenu: HTMLDivElement;
-  let moreMenu: HTMLDivElement;
-  const compact = $derived(sidebar || width < 620);
-  const minimal = $derived(!sidebar && width < 360);
-  const condensed = $derived(!sidebar && width < 200);
-  function closeMenus(): void {
-    insertMenu.hidePopover();
-    moreMenu.hidePopover();
-  }
-  function action(command: Command): void {
-    closeMenus();
-    run(command);
-  }
-
   function focusTools(event: KeyboardEvent): void {
     if (event.isComposing || view.isDestroyed || view.composing) return;
     if (event.key === "Escape" && panel.contains(document.activeElement)) {
@@ -125,8 +249,8 @@
       event.preventDefault();
       onShowTools?.();
       void tick().then(() => {
-        if (!panel.isConnected) return;
-        panel.querySelector<HTMLElement>("select:not(:disabled), button:not(:disabled)")?.focus();
+        if (panel.isConnected)
+          panel.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
       });
     }
   }
@@ -134,205 +258,135 @@
 
 <svelte:window onkeydown={focusTools} />
 
-{#snippet blockPicker()}
-  <select
-    class="reader-input"
-    aria-label="段落格式"
-    value={block}
-    onchange={(event) => setBlock(event.currentTarget.value)}
-  >
-    {#each blocks as option (option.name)}<option
-        value={option.name}
-        disabled={option.name !== block && !writingCommands[option.name](editorState)}
-        >{option.label}</option
-      >{/each}
-  </select>
-{/snippet}
-{#snippet listButtons()}
-  {#each structures as format (format.name)}
-    <button
-      class="reader-button"
-      type="button"
-      aria-label={format.label}
-      title={format.label}
-      disabled={!writingCommands[format.name](editorState)}
-      onclick={() => action(writingCommands[format.name])}
-    >
-      <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={format.icon} /></svg
-      ><span>{format.label}</span>
-    </button>
-  {/each}
-{/snippet}
-{#snippet historyButtons()}
-  <button
-    class="reader-button"
-    type="button"
-    disabled={!undo(editorState)}
-    onclick={() => action(undo)}>撤销</button
-  >
-  <button
-    class="reader-button"
-    type="button"
-    disabled={!redo(editorState)}
-    onclick={() => action(redo)}>重做</button
-  >
-{/snippet}
 <div
   {id}
   class="formatting-panel"
-  class:docked={sidebar}
   role="toolbar"
   tabindex="-1"
   aria-label="编辑工具栏"
   aria-keyshortcuts="Alt+F10"
   bind:this={panel}
   onmousedown={(event) => {
-    if (event.target instanceof HTMLElement && event.target.closest("button"))
-      event.preventDefault();
+    // SVG 图标也属于按钮；阻止浏览器先清掉正文选区，再派发格式命令。
+    if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();
   }}
 >
-  {#if !condensed}{@render blockPicker()}{/if}
-  {#if !minimal}<InlineFormatting state={editorState} onFormat={run} variant="primary" />{/if}
-  {#if !compact}<div class="lists">{@render listButtons()}</div>{/if}
+  <FormattingMenu
+    id="{id}-blocks"
+    label="段落格式"
+    text={blockLabel}
+    items={blockItems}
+    onCommand={run}
+  />
+  <InlineFormatting {id} state={editorState} onFormat={run} />
+  <span class="divider" aria-hidden="true"></span>
+  <FormattingMenu
+    id="{id}-lists"
+    label="列表"
+    icon={structures.list === "ordered"
+      ? "M10 6h10M10 12h10M10 18h10M3 4h1v5M3 9h3M3 14c3-2 4 1 1 3l-1 2h3"
+      : structures.list === "task"
+        ? "m3 6 2 2 3-4M11 6h9M11 16h9M3 13h5v5H3z"
+        : "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"}
+    pressed={structures.list === "mixed" ? "mixed" : structures.list !== null}
+    items={listItems}
+    onCommand={run}
+  />
   <button
-    class="reader-button"
+    class="reader-button tool"
     type="button"
-    popovertarget="{id}-insert"
-    aria-label="插入"
-    title="插入链接、附件或表格">插入</button
+    aria-label="引用"
+    aria-pressed={structures.quote}
+    title="引用"
+    disabled={!writingCommands.quote(editorState)}
+    onclick={() => run(writingCommands.quote)}
   >
-  {#if !compact}<div class="history">{@render historyButtons()}</div>{/if}
-  <button
-    class="reader-button"
-    type="button"
-    popovertarget="{id}-more"
-    aria-label="更多编辑操作"
-    title={table ? "表格与更多编辑操作" : "更多编辑操作"}>{table ? "表格" : "更多"}</button
-  >
-</div>
-<div id="{id}-insert" bind:this={insertMenu} popover="auto" class="reader-popover formatting-menu">
-  {#if onConversation}<button
-      class="reader-button"
-      type="button"
-      disabled={!canInsertAttachment(editorState)}
-      onclick={() => {
-        closeMenus();
-        onConversation?.();
-      }}>插入 Agent 对话…</button
-    >{/if}
-  <button
-    class="reader-button"
-    type="button"
-    disabled={!!editorState.selection.$from.parent.type.spec.code}
-    onclick={() => {
-      closeMenus();
-      onLink();
-    }}>链接…</button
-  >
-  <button
-    class="reader-button"
-    type="button"
-    disabled={!canInsertAttachment(editorState)}
-    aria-label="插入附件…"
-    onclick={() => {
-      closeMenus();
-      onAttachment();
-    }}>插入附件…</button
-  >
-  {#if onWebPage}<button
-      class="reader-button"
-      type="button"
-      disabled={!canInsertWebPage(editorState)}
-      aria-label="插入网页…"
-      onclick={() => {
-        closeMenus();
-        onWebPage?.();
-      }}>插入网页…</button
-    >{/if}
-  <button
-    class="reader-button"
-    type="button"
-    disabled={!tableCommands.insert(editorState)}
-    aria-label="插入表格"
-    onclick={() => action(tableCommands.insert)}>插入表格</button
-  >
-</div>
-<div id="{id}-more" bind:this={moreMenu} popover="auto" class="reader-popover formatting-menu">
-  {#if condensed}{@render blockPicker()}{/if}
-  <InlineFormatting state={editorState} onFormat={action} variant={minimal ? "all" : "secondary"} />
-  {#if compact}{@render listButtons()}{@render historyButtons()}{/if}
-  {#if table}
-    <hr />
-    {#each tableStructure as item (item.name)}<button
-        class="reader-button"
-        type="button"
-        disabled={!tableCommands[item.name](editorState)}
-        onclick={() => action(tableCommands[item.name])}>{item.label}</button
-      >{/each}
-    {#each alignments as item (item.name)}<button
-        class="reader-button"
-        type="button"
-        aria-pressed={editorState.selection.$from.parent.attrs["align"] === item.value}
-        onclick={() => action(tableCommands[item.name])}>{item.label}</button
-      >{/each}
-    <button class="reader-button" type="button" onclick={() => action(leaveTable)}>返回正文</button>
-    <button class="reader-button" type="button" onclick={() => action(tableCommands.remove)}
-      >删除表格</button
+    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+      ><path d="M3 21c3 0 7-1 7-8V5H2v8h8M14 21c3 0 7-1 7-8V5h-8v8h8" /></svg
     >
-  {/if}
+  </button>
+  <span class="divider" aria-hidden="true"></span>
+  {#if table}<FormattingMenu
+      id="{id}-table"
+      label="表格操作"
+      text="表格"
+      items={tableItems}
+      onCommand={run}
+    />{/if}
+  <FormattingMenu id="{id}-insert" label="插入" text="插入" items={insertItems} onCommand={run} />
+  <TableInsertPicker
+    id="{id}-table-insert"
+    bind:this={tablePicker}
+    onInsert={insertChosenTable}
+    onClose={closeTable}
+  />
+  <span class="divider" aria-hidden="true"></span>
+  <button
+    class="reader-button tool"
+    type="button"
+    aria-label="撤销"
+    title="撤销（⌘/Ctrl+Z）"
+    disabled={!undo(editorState)}
+    onclick={() => run(undo)}
+  >
+    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+      ><path d="m7 4-4 4 4 4M3 8h10a6 6 0 0 1 0 12h-3" /></svg
+    >
+  </button>
+  <button
+    class="reader-button tool"
+    type="button"
+    aria-label="重做"
+    title="重做（⌘/Ctrl+Shift+Z）"
+    disabled={!redo(editorState)}
+    onclick={() => run(redo)}
+  >
+    <svg class="reader-icon" viewBox="0 0 24 24" aria-hidden="true"
+      ><path d="m17 4 4 4-4 4M21 8H11a6 6 0 0 0 0 12h3" /></svg
+    >
+  </button>
 </div>
 
 <style>
   .formatting-panel {
     display: flex;
     align-items: center;
-    gap: 0.2rem;
-    min-width: 0;
-    padding: 0.35rem 0.5rem;
+    gap: 2px;
+    width: max-content;
+    min-width: max-content;
+    padding: 4px 6px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
   }
-  .formatting-panel.docked {
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    padding: 0.5rem 0.75rem;
-    background: transparent;
-  }
-  select {
-    width: 5.5rem;
-    flex-shrink: 0;
-  }
-  .formatting-panel > button {
-    flex-shrink: 0;
-    font-size: 0.75rem;
-    padding-inline: 0.4rem;
-  }
-  .lists,
-  .history {
-    display: flex;
-  }
-  .lists button {
-    width: 2rem;
-    padding: 0.25rem;
-  }
-  .lists span {
-    display: none;
-  }
-  .history {
-    margin-left: auto;
-  }
-  .history button {
-    font-size: 0.75rem;
-    padding: 0.3rem;
-  }
-  .formatting-menu {
-    min-width: 12rem;
-  }
-  .formatting-menu > button {
-    display: flex;
+  .tool {
+    position: relative;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    text-align: left;
+    justify-content: center;
+    flex: 0 0 30px;
+    min-width: 30px;
+    min-height: 30px;
+    height: 30px;
+    padding: 0;
+  }
+  .tool .reader-icon {
+    width: 17px;
+    height: 17px;
+  }
+  .tool[aria-pressed="mixed"]::after {
+    content: "";
+    position: absolute;
+    bottom: 2px;
+    left: calc(50% - 3px);
+    width: 6px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+  }
+  .divider {
+    flex: 0 0 1px;
+    height: 16px;
+    margin: 0 4px;
+    background: var(--border);
   }
 </style>

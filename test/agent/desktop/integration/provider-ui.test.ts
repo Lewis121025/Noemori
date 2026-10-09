@@ -5,12 +5,13 @@ import ModelSettings from "../../../../modules/notes/packages/desktop/src/featur
 import {
   parseProviderUpdate,
   newProviderModel,
+  type DiscoveredModel,
   type ProviderCatalog,
   type PublicProvider,
 } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
 import { createAgentApiMock } from "../../../notes/desktop/fixtures/agent-api-mock";
 
-let component: ModelSettings | undefined;
+let component: ReturnType<typeof mount> | undefined;
 let target: HTMLDivElement;
 afterEach(async () => {
   if (component) await unmount(component);
@@ -26,13 +27,22 @@ function provider(id: string, name: string): PublicProvider {
     models: [newProviderModel("fixture")],
   };
 }
-async function setup(initial: ProviderCatalog = { providers: [], active: null }) {
+async function setup(initial: ProviderCatalog = { providers: [] }) {
   target = document.createElement("div");
   document.body.append(target);
   let catalog = initial;
   const api = createAgentApiMock();
   api.providersGet = vi.fn(async () => catalog);
+  api.providersDiscover = vi.fn<typeof api.providersDiscover>(async () =>
+    ["fixture", "gemini-fixture", "second-model"].map((id): DiscoveredModel => ({
+      ...newProviderModel(id),
+      name: id,
+      reasoning: { supported: null, efforts: null },
+    })),
+  );
   api.providersSave = vi.fn(async (value) => {
+    // Electron IPC 使用结构化复制，测试也必须拒绝残留的响应式代理。
+    structuredClone(value);
     const input = parseProviderUpdate(value);
     const id = input.id ?? `provider-${catalog.providers.length}`;
     const prior = catalog.providers.find((item) => item.id === id);
@@ -52,26 +62,26 @@ async function setup(initial: ProviderCatalog = { providers: [], active: null })
     };
     catalog = {
       providers: [...catalog.providers.filter((item) => item.id !== id), item],
-      active:
-        catalog.providers.length === 0
-          ? { providerId: id, modelId: item.models[0]!.id }
-          : catalog.active,
     };
     return catalog;
   });
-  api.modelSelect = vi.fn(async (active) => {
-    catalog = { ...catalog, active };
+  api.modelSelect = vi.fn();
+  api.providersRefresh = vi.fn(async (id) => {
+    const prior = catalog.providers.find((item) => item.id === id)!;
+    const models = await api.providersDiscover({ ...prior, authentication: null });
+    catalog = {
+      providers: catalog.providers.map((item) => (item.id === id ? { ...item, models } : item)),
+    };
     return catalog;
   });
   api.providersRemove = vi.fn(async (id) => {
     catalog = {
       providers: catalog.providers.filter((item) => item.id !== id),
-      active: catalog.active?.providerId === id ? null : catalog.active,
     };
     return catalog;
   });
   const saved = vi.fn();
-  component = mount(ModelSettings, { target, props: { api, saved, close: vi.fn() } });
+  component = mount(ModelSettings, { target, props: { api, saved } });
   await vi.waitFor(() => {
     flushSync();
     expect(target.textContent).not.toContain("正在加载供应商");
@@ -105,50 +115,80 @@ function submit(): void {
     .querySelector("form")!
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
+function select(label: string, value: string): void {
+  const item = target.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+  if (!item) throw new Error(`缺少选择：${label}`);
+  item.value = value;
+  item.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+async function discover(): Promise<void> {
+  button("获取模型").click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.textContent).not.toContain("正在获取模型");
+  });
+}
 
-it("预设填充连接而不猜测模型，可保存多个模型并显示默认选择，密钥保存后清空", async () => {
+it("首次配置直接展示必要表单，不展示空的管理列表和默认模型卡片", async () => {
+  await setup();
+  expect(target.querySelector('select[aria-label="供应商预设"]')).not.toBeNull();
+  expect(input("API Key")).toBeDefined();
+  expect(target.querySelector('input[aria-label="搜索供应商"]')).toBeNull();
+  expect(target.querySelector(".default-model")).toBeNull();
+  expect(target.querySelector("aside")).toBeNull();
+  expect(target.querySelectorAll("form")).toHaveLength(1);
+  expect(target.textContent).not.toContain("供应商与模型");
+  expect(target.querySelector('select[aria-label="模型 1"]')).toBeNull();
+  expect(button("保存供应商").disabled).toBe(true);
+  expect(target.textContent).not.toContain("获取模型");
+});
+
+it("只填密钥即可保存连接并自动获取全部模型，无需在配置选择模型，密钥随后清空", async () => {
   const { api, saved } = await setup();
-  button("＋ 添加供应商").click();
-  flushSync();
-  const preset = target.querySelector<HTMLSelectElement>('select[aria-label="供应商预设"]')!;
-  preset.value = "gemini";
-  preset.dispatchEvent(new Event("change", { bubbles: true }));
-  flushSync();
-  expect(input("接口地址").value).toBe("https://generativelanguage.googleapis.com/v1beta");
-  expect(input("模型标识 1").value).toBe("");
+  select("供应商预设", "gemini");
   fill("API Key", "private-key");
-  fill("模型标识 1", "gemini-fixture");
-  button("添加模型").click();
-  flushSync();
-  fill("模型标识 2", "second-model");
   submit();
   await vi.waitFor(() => {
     flushSync();
-    expect(saved).toHaveBeenCalledOnce();
+    expect(target.textContent).toContain("模型可在对话中选择");
   });
+  expect(saved).toHaveBeenCalledOnce();
   expect(api.providersSave).toHaveBeenCalledWith(
     expect.objectContaining({
       protocol: "gemini",
       authentication: { type: "header", name: "x-goog-api-key", value: "private-key" },
-      models: expect.arrayContaining([expect.objectContaining({ id: "second-model" })]),
+      models: [],
     }),
   );
-  expect(target.textContent).toContain("Google Gemini / gemini-fixture");
+  expect(api.providersRefresh).toHaveBeenCalledWith("provider-0");
+  expect(target.querySelector('select[aria-label="模型 1"]')).toBeNull();
+  expect(api.modelSelect).not.toHaveBeenCalled();
   expect(input("API Key").value).toBe("");
+  button("高级设置").click();
+  flushSync();
+  expect(
+    target.querySelectorAll(
+      'section[aria-label="模型目录"] input[placeholder="服务商提供的模型 ID"]',
+    ),
+  ).toHaveLength(3);
 });
 
-it("编辑留空认证只保留当前供应商，未保存切换需要明确放弃，切换默认与删除都有目标", async () => {
+it("编辑留空认证只保留当前供应商，未保存切换需要明确放弃，删除有明确目标", async () => {
   const { api } = await setup({
     providers: [provider("first", "账号一"), provider("second", "账号二")],
-    active: { providerId: "first", modelId: "fixture" },
   });
-  fill("名称", "账号一改名");
-  target.querySelectorAll<HTMLButtonElement>(".provider-card")[1]!.click();
+  button("高级设置").click();
   flushSync();
+  fill("名称", "账号一改名");
+  select("已保存供应商", "second");
   expect(target.textContent).toContain("当前修改尚未保存");
   button("继续编辑").click();
   flushSync();
   expect(input("名称").value).toBe("账号一改名");
+  expect(target.querySelector<HTMLSelectElement>('select[aria-label="已保存供应商"]')!.value).toBe(
+    "first",
+  );
   submit();
   await vi.waitFor(() => {
     flushSync();
@@ -157,15 +197,11 @@ it("编辑留空认证只保留当前供应商，未保存切换需要明确放�
   expect(api.providersSave).toHaveBeenCalledWith(
     expect.objectContaining({ id: "first", authentication: null }),
   );
-  target.querySelectorAll<HTMLButtonElement>(".provider-card")[0]!.click();
+  select("已保存供应商", "second");
+  button("高级设置").click();
   flushSync();
   expect(input("名称").value).toBe("账号二");
-  button("设为默认模型 fixture").click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.textContent).toContain("默认模型已切换");
-  });
-  expect(api.modelSelect).toHaveBeenCalledWith({ providerId: "second", modelId: "fixture" });
+  expect(api.modelSelect).not.toHaveBeenCalled();
   button("删除供应商").click();
   flushSync();
   expect(api.providersRemove).not.toHaveBeenCalled();
@@ -178,7 +214,7 @@ it("编辑留空认证只保留当前供应商，未保存切换需要明确放�
   await vi.waitFor(() => {
     flushSync();
     expect(api.providersRemove).toHaveBeenCalledWith("second");
-    expect(target.textContent).toContain("尚未选择模型");
+    expect(target.textContent).toContain("供应商已删除");
   });
 });
 
@@ -187,10 +223,7 @@ it("保存失败保留用户填写，不显示成功状态或丢失密钥", asyn
   api.providersSave = vi.fn(async () => {
     throw new Error("写盘失败");
   });
-  button("＋ 添加供应商").click();
-  flushSync();
   fill("API Key", "retry-key");
-  fill("模型标识 1", "fixture");
   submit();
   await vi.waitFor(() => {
     flushSync();
@@ -198,4 +231,114 @@ it("保存失败保留用户填写，不显示成功状态或丢失密钥", asyn
   });
   expect(input("API Key").value).toBe("retry-key");
   expect(saved).not.toHaveBeenCalled();
+});
+
+it("本地服务不需要密钥，自定义连接只需地址和密钥；高级输入仍可手动配置", async () => {
+  const { api } = await setup();
+  select("供应商预设", "ollama");
+  expect(target.querySelector('input[type="password"]')).toBeNull();
+  button("高级设置").click();
+  flushSync();
+  await discover();
+  expect(api.providersDiscover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ authentication: { type: "none" } }),
+  );
+  select("供应商预设", "custom");
+  fill("接口地址", "https://gateway.example/v1");
+  fill("API Key", "gateway-key");
+  button("手动添加模型").click();
+  flushSync();
+  fill("模型标识 1", "manual-model");
+  submit();
+  await vi.waitFor(() =>
+    expect(api.providersSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: { type: "base_url", url: "https://gateway.example/v1" },
+        models: [newProviderModel("manual-model")],
+      }),
+    ),
+  );
+});
+
+it("连接变化使迟到发现结果失效，新连接的结果不会被旧请求覆盖", async () => {
+  const { api } = await setup();
+  let complete: (models: DiscoveredModel[]) => void = () => {};
+  api.providersDiscover = vi
+    .fn<typeof api.providersDiscover>()
+    .mockImplementationOnce(
+      () =>
+        new Promise<DiscoveredModel[]>((resolve) => {
+          complete = resolve;
+        }),
+    )
+    .mockResolvedValueOnce([
+      { ...newProviderModel("new"), name: "new", reasoning: { supported: null, efforts: null } },
+    ]);
+  fill("API Key", "first");
+  button("高级设置").click();
+  flushSync();
+  button("获取模型").click();
+  flushSync();
+  expect(button("正在获取模型…").disabled).toBe(true);
+  fill("API Key", "second");
+  await discover();
+  complete([
+    { ...newProviderModel("old"), name: "old", reasoning: { supported: null, efforts: null } },
+  ]);
+  await Promise.resolve();
+  flushSync();
+  expect(input("模型标识 1").value).toBe("new");
+  expect(target.querySelector('input[value="old"]')).toBeNull();
+});
+
+it("配置只保存接口能力，推理强度由对话选择", async () => {
+  const { api } = await setup();
+  api.providersDiscover = vi.fn<typeof api.providersDiscover>(async () => [
+    {
+      ...newProviderModel("reasoner"),
+      name: "reasoner",
+      reasoning: { supported: true, efforts: ["low", "max"] },
+    },
+  ]);
+  select("供应商预设", "anthropic");
+  fill("API Key", "key");
+  submit();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.textContent).toContain("模型可在对话中选择");
+  });
+  expect(target.querySelector('select[aria-label="推理强度 1"]')).toBeNull();
+  button("高级设置").click();
+  flushSync();
+  submit();
+  await vi.waitFor(() => expect(api.providersSave).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(api.providersSave).mock.calls[1]![0].models[0]).toMatchObject({
+    id: "reasoner",
+    reasoning: { efforts: ["low", "max"] },
+  });
+  expect(vi.mocked(api.providersSave).mock.calls[1]![0].models[0]).not.toHaveProperty(
+    "reasoningEffort",
+  );
+});
+
+it("模型获取失败不伪报连接保存失败，保留连接并允许重试", async () => {
+  const { api, saved } = await setup();
+  api.providersDiscover = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("获取模型超时"))
+    .mockResolvedValueOnce([]);
+  fill("API Key", "retry");
+  submit();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.textContent).toContain("模型获取失败");
+  });
+  expect(target.textContent).toContain("连接已保存");
+  expect(saved).toHaveBeenCalledOnce();
+  expect(input("API Key").value).toBe("");
+  button("高级设置").click();
+  flushSync();
+  await discover();
+  expect(target.textContent).toContain("模型目录 · 0");
+  expect(api.providersSave).toHaveBeenCalledOnce();
 });

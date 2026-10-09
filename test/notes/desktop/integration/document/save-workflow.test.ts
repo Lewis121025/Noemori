@@ -219,14 +219,14 @@ async function manageFiles(): Promise<void> {
   onCommand("open-library");
   await vi.waitFor(() => {
     flushSync();
-    expect(target.querySelector<HTMLElement>(".library")!.hidden).toBe(false);
+    expect(target.querySelector<HTMLElement>(".list[aria-label=文件列表]")!.hidden).toBe(false);
   });
 }
 
 async function beginTrash(path: string): Promise<void> {
   await manageFiles();
   target
-    .querySelector(`.library [data-path="${path}"]`)!
+    .querySelector(`.list[aria-label=文件列表] [data-path="${path}"]`)!
     .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
   flushSync();
   click("移到废纸篓…");
@@ -245,7 +245,7 @@ function openDocument(path: string): void {
 
 async function requestKeyboardTrash(path: string): Promise<void> {
   await manageFiles();
-  const card = target.querySelector<HTMLButtonElement>(`.library button[data-path="${path}"]`)!;
+  const card = target.querySelector<HTMLButtonElement>(`.list[aria-label=文件列表] button[data-path="${path}"]`)!;
   card.click();
   flushSync();
   card.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }));
@@ -468,9 +468,9 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     );
     click("移到废纸篓");
     await vi.waitFor(() => {
-      expect(target.querySelector('.library [data-path="项目"]')).toBeNull();
+      expect(target.querySelector('.list[aria-label=文件列表] [data-path="项目"]')).toBeNull();
       expect(target.querySelector(".ProseMirror")).toBeNull();
-      expect(document.activeElement?.closest('.library [role="gridcell"][aria-selected="true"]')).not.toBeNull();
+      expect(document.activeElement?.closest('.list[aria-label=文件列表] [role="gridcell"][aria-selected="true"]')).not.toBeNull();
     });
     expect(api.entryTrash).toHaveBeenCalledExactlyOnceWith("项目");
     expect(disk.has("note.md")).toBe(true);
@@ -502,7 +502,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(disk.has("other.md")).toBe(true);
   });
 
-  it("当前编辑有保存冲突时无法进入文件管理删除，新建也保留原编辑", async () => {
+  it("当前编辑有保存冲突时文件栏仍可浏览，新建与删除仍经过保存门禁", async () => {
     await start();
     vi.mocked(api.fileWrite).mockResolvedValue({
       status: "conflict",
@@ -510,11 +510,12 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     });
     await edit("my unsaved work");
     onCommand("open-library");
+    onCommand("save");
     await vi.waitFor(() => {
       flushSync();
       expect(status()).toBe("存在保存冲突");
     });
-    expect(target.querySelector<HTMLElement>(".library")!.hidden).toBe(true);
+    expect(target.querySelector<HTMLElement>(".list[aria-label=文件列表]")!.hidden).toBe(false);
     expect(api.entryTrash).not.toHaveBeenCalled();
     expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
     onCommand("new-note");
@@ -566,7 +567,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     vi.mocked(api.entryCreate).mockRejectedValue(new Error("父文件夹不存在"));
     await start();
     await manageFiles();
-    target.querySelector<HTMLButtonElement>('.library [data-path="失踪"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    target.querySelector<HTMLButtonElement>('.list[aria-label=文件列表] [data-path="失踪"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     flushSync();
     onCommand("new-note");
     flushSync();
@@ -611,10 +612,10 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     await start();
     expect(target.querySelector('[aria-label="待恢复的笔记"]')).not.toBeNull();
     expect(
-      target.querySelector('.library [data-path="归档"]')?.getAttribute("aria-expanded"),
+      target.querySelector('.list[aria-label=文件列表] [data-path="归档"]')?.getAttribute("aria-expanded"),
     ).toBeNull();
     expect(
-      target.querySelector('.library [data-path="替换.md"]')?.getAttribute("aria-expanded"),
+      target.querySelector('.list[aria-label=文件列表] [data-path="替换.md"]')?.getAttribute("aria-expanded"),
     ).toBeNull();
     for (const path of [...recoveries]) {
       target.querySelector<HTMLButtonElement>(`.recovery-entry[data-path="${path}"]`)!.click();
@@ -624,8 +625,8 @@ describe("保存、冲突与恢复的完整界面流程", () => {
         expect(target.querySelector(".save-notice")?.textContent).toContain("原文件暂时无法读取");
       });
       expect(target.querySelector(".save-notice")?.textContent).toContain("原路径被其他条目占用");
-      expect(target.querySelector('.library [role="treegrid"]')).not.toBeNull();
-      expect(target.querySelectorAll('.library [role="treegrid"] [aria-current="page"]')).toHaveLength(0);
+      expect(target.querySelector('.list[aria-label=文件列表] [role="treegrid"]')).not.toBeNull();
+      expect(target.querySelectorAll('.list[aria-label=文件列表] [role="treegrid"] [aria-current="page"]')).toHaveLength(0);
       click("另存为副本");
       await vi.waitFor(() => expect(status()).toBe("已保存"));
       expect(target.querySelector(`.recovery-entry[data-path="${path}"]`)).toBeNull();
@@ -660,8 +661,8 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       expect(target.querySelector(".file-row.active .file")?.getAttribute("data-path")).toBe("note.md");
       expect(disk.has("note.md")).toBe(true);
       click("取消");
-      click("目录");
-      await vi.waitFor(() => expect(target.querySelector<HTMLElement>(".library")!.hidden).toBe(true));
+      click("文章大纲");
+      await vi.waitFor(() => expect(target.querySelector<HTMLElement>(".list[aria-label=文件列表]")!.hidden).toBe(true));
       await edit("still editable");
       click("保存");
       await vi.waitFor(() => expect(status()).toBe("已保存"));

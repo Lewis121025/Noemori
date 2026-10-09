@@ -17,6 +17,9 @@ function button(label: string): HTMLButtonElement {
 }
 
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
   target = document.createElement("div");
   document.body.append(target);
   close = vi.fn();
@@ -32,66 +35,20 @@ afterEach(async () => {
   target.remove();
 });
 
-it("返回会话只退出模型设置，关闭助手才退出整个面板", async () => {
-  button("模型接口").click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.querySelector(".model-settings")).not.toBeNull();
-  });
-  button("返回会话").click();
-  flushSync();
+it("助手不再包含独立模型配置页，关闭时仍经过保存门禁", async () => {
+  expect(target.querySelector('[aria-label="模型接口"]')).toBeNull();
   expect(target.querySelector(".model-settings")).toBeNull();
-  expect(close).not.toHaveBeenCalled();
-  button("＋ 新会话");
-  button("模型接口").click();
-  flushSync();
+  button("开始新对话");
   button("关闭助手").click();
   await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
 });
 
-async function editProvider(): Promise<HTMLInputElement> {
-  button("模型接口").click();
+it("缺少模型时仍可打开新建对话，不强制进入配置", async () => {
+  button("开始新对话").click();
   await vi.waitFor(() => {
     flushSync();
-    expect(target.textContent).not.toContain("正在加载供应商");
-    expect(target.querySelector(".model-settings")).not.toBeNull();
+    expect(target.querySelector(".new-conversation-dialog[open]")).not.toBeNull();
   });
-  button("＋ 添加供应商").click();
-  flushSync();
-  const field = [...target.querySelectorAll("input")].find(
-    (item) => item.closest("label")?.textContent?.trim() === "名称",
-  );
-  if (!field) throw new Error("没有名称输入");
-  field.value = "尚未保存的连接";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  return field;
-}
-
-it.each(["返回会话", "关闭助手"])("%s必须经过供应商草稿的离开确认", async (label) => {
-  const field = await editProvider();
-  button(label).click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.textContent).toContain("当前修改尚未保存");
-  });
-  button("继续编辑").click();
-  flushSync();
-  expect(field.value).toBe("尚未保存的连接");
-  expect(close).not.toHaveBeenCalled();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(button(label).disabled).toBe(false);
-  });
-  button(label).click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.textContent).toContain("当前修改尚未保存");
-  });
-  button("放弃修改").click();
-  await vi.waitFor(() => {
-    flushSync();
-    if (label === "返回会话") expect(target.querySelector(".model-settings")).toBeNull();
-    else expect(close).toHaveBeenCalledOnce();
-  });
+  expect(target.querySelector(".panel-error")).toBeNull();
+  expect(target.querySelector(".model-settings")).toBeNull();
 });

@@ -5,6 +5,7 @@
  */
 import { Schema, type DOMOutputSpec, type MarkSpec, type NodeSpec } from "prosemirror-model";
 import { webPageHeight, webPageUrl } from "../webpage";
+import { isTextColor, isHighlightColor, paletteColor, textPalette } from "./text-style";
 
 const mediaAttrs = {
   src: { default: "", validate: "string" },
@@ -597,7 +598,37 @@ const marks: Record<string, MarkSpec> = {
     parseDOM: [{ tag: "del" }, { tag: "s" }, { tag: "strike" }],
     toDOM: () => ["del", 0],
   },
-  highlight: { parseDOM: [{ tag: "mark" }], toDOM: () => ["mark", 0] },
+  underline: { parseDOM: [{ tag: "u" }], toDOM: () => ["u", 0] },
+  highlight: {
+    attrs: { color: { default: "yellow", validate: highlightColor } },
+    parseDOM: [
+      {
+        tag: "mark",
+        getAttrs: (dom) => {
+          const own = dom.getAttribute("data-highlight-color");
+          const color = isHighlightColor(own)
+            ? own
+            : dom.style.backgroundColor
+              ? paletteColor("highlight", dom.style.backgroundColor)
+              : "yellow";
+          return color ? { color } : false;
+        },
+      },
+    ],
+    toDOM: (mark) => {
+      const color: unknown = mark.attrs["color"];
+      if (!isHighlightColor(color)) throw new RangeError("未知高亮颜色");
+      const entry = textPalette.highlight[color];
+      return [
+        "mark",
+        {
+          "data-highlight-color": color,
+          style: `background-color: ${entry.light}; --noemori-highlight: light-dark(${entry.light}, ${entry.dark})`,
+        },
+        0,
+      ];
+    },
+  },
   code: { parseDOM: [{ tag: "code" }], toDOM: () => ["code", 0] },
   link: {
     attrs: {
@@ -626,17 +657,60 @@ const marks: Record<string, MarkSpec> = {
       0,
     ],
   },
+  // 颜色排在链接与代码之后，让颜色 DOM 位于内层，避免被链接和代码的主题色覆盖。
+  text_color: {
+    attrs: { color: { validate: textColor } },
+    parseDOM: [
+      {
+        tag: "span",
+        getAttrs: (dom) => {
+          const own = dom.getAttribute("data-text-color");
+          const color = isTextColor(own) ? own : paletteColor("text", dom.style.color);
+          return color ? { color } : false;
+        },
+      },
+    ],
+    toDOM: (mark) => {
+      const color: unknown = mark.attrs["color"];
+      if (!isTextColor(color)) throw new RangeError("未知文字颜色");
+      const entry = textPalette.text[color];
+      return [
+        "span",
+        {
+          "data-text-color": color,
+          style: `color: ${entry.light}; --noemori-text: light-dark(${entry.light}, ${entry.dark})`,
+        },
+        0,
+      ];
+    },
+  },
 };
 
 // 恢复和外部 JSON 进入文档时按同一 schema 验证，不能依靠渲染时的 String 转换掩盖坏数据。
+function textColor(value: unknown): void {
+  if (!isTextColor(value)) throw new RangeError("未知文字颜色");
+}
+
+function highlightColor(value: unknown): void {
+  if (!isHighlightColor(value)) throw new RangeError("未知高亮颜色");
+}
+
 function headingLevel(value: unknown): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 6)
     throw new RangeError("标题级别必须在 1 到 6 之间");
 }
 
+/**
+ * 核验 Markdown 编号范围，结构命令在拆分前与 schema 共用同一契约。
+ * @param value 待核验的起始编号。
+ * @returns 是否为最多九位的非负整数，不抛出异常。
+ */
+export function isListOrder(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 999999999;
+}
+
 function listOrder(value: unknown): void {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 999999999)
-    throw new RangeError("有序列表起始编号必须是最多九位的非负整数");
+  if (!isListOrder(value)) throw new RangeError("有序列表起始编号必须是最多九位的非负整数");
 }
 
 function linkKind(value: unknown): void {

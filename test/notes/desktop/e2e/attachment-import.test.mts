@@ -73,11 +73,11 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
     );
     const choose = async (files: { name: string; mimeType: string; buffer: Buffer }[]) => {
       await page
-        .locator(".pane-column.active")
+        .locator(".topbar-document:not([hidden])")
         .getByRole("toolbar", { name: "编辑工具栏", exact: true })
         .waitFor();
       const panel = page
-        .locator(".pane-column.active")
+        .locator(".topbar-document:not([hidden])")
         .getByRole("toolbar", { name: "编辑工具栏", exact: true });
       const bounds = await panel.boundingBox();
       const lastAction = await panel
@@ -88,9 +88,9 @@ test("选择、重试、粘贴和拖入附件，经保存与重启仍使用本�
       expect(await panel.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
         true,
       );
-      await panel.getByRole("button", { name: "插入", exact: true }).click();
       const chooser = page.waitForEvent("filechooser");
-      await page.getByRole("button", { name: "插入附件…", exact: true }).click();
+      await page.getByRole("button", { name: "插入", exact: true }).click();
+      await page.getByRole("menuitem", { name: "插入附件…", exact: true }).click();
       await (await chooser).setFiles(files);
     };
     await choose([{ name: "图片 #1.svg", mimeType: "image/svg+xml", buffer: svg }]);

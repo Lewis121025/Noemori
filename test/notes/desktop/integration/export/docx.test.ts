@@ -111,11 +111,42 @@ describe("随包 DOCX 转换与独立结构校验", () => {
     expect(xml).toContain("原始代码内容");
     expect(xml).toContain("编号起点");
     const styles = new TextDecoder().decode(parts["word/styles.xml"]);
-    expect(styles).toMatch(
-      /<w:style[^>]+w:styleId="NoemoriHighlight"[^>]*>[^]*?<w:highlight w:val="yellow"\s*\/>/,
-    );
+    const highlightStyle = styles.match(/<w:style[^>]+w:styleId="NoemoriHighlight"[^>]*>[^]*?<\/w:style>/)?.[0];
+    expect(highlightStyle).toContain('w:fill="f6e7a3"');
     expect(xml).toContain('w:rStyle w:val="NoemoriHighlight"');
   });
+  it("下划线、前景色与高亮组合保留 Word 字符样式和代码字体，链接与加粗继续有效", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "noemori-docx-colors-"));
+    t.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    const note = document('<u><span style="color: #b44343"><mark style="background-color: #cde1f5">**[组合](https://example.test)** `代码`</mark></span></u>');
+    const parts = unzipSync(await exportDocx(note, directory, new AbortController().signal, computeExport, binary));
+    const xml = new TextDecoder().decode(parts["word/document.xml"]);
+    const styles = new TextDecoder().decode(parts["word/styles.xml"]);
+    const combined = xml.match(/<w:r>[^]*?<w:t[^>]*>组合<\/w:t>[^]*?<\/w:r>/)?.[0];
+    expect(combined).toContain('<w:u w:val="single"');
+    expect(combined).toContain('<w:b');
+    expect(combined).toContain('w:rStyle w:val="NoemoriText_red_blue"');
+    expect(xml).toContain('<w:hyperlink');
+    expect(xml).toContain('w:rStyle w:val="NoemoriText_red_blue_code"');
+    for (const [id, base] of [["NoemoriText_red_blue", "DefaultParagraphFont"], ["NoemoriText_red_blue_code", "VerbatimChar"]]) {
+      const style = styles.match(new RegExp(`<w:style[^>]+w:styleId="${id}"[^>]*>[^]*?</w:style>`))?.[0];
+      expect(style).toContain(`w:basedOn w:val="${base}"`);
+      expect(style).toContain('w:color w:val="b44343"');
+      expect(style).toContain('w:fill="cde1f5"');
+    }
+  });
+
+  it("文字色与高亮叠加在行内代码上时保留连续空格和制表符", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "noemori-docx-code-space-"));
+    t.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    const note = document('<span style="color: #b44343"><mark style="background-color: #cde1f5">`a  b\tc`</mark></span>');
+    expect(note.doc.textContent).toBe("a  b\tc");
+    const parts = unzipSync(await exportDocx(note, directory, new AbortController().signal, computeExport, binary));
+    const xml = new TextDecoder().decode(parts["word/document.xml"]);
+    const text = Array.from(xml.matchAll(/<w:t(?:\s[^>]*)?>([^]*?)<\/w:t>|<w:tab\s*\/>/g), (match) => match[1] ?? "\t").join("");
+    expect(text).toBe("a  b\tc");
+  });
+
   it("保留可编辑文字、表格、脚注以及六类原生数学结构", async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "noemori-docx-"));
     t.onTestFinished(() => rm(directory, { recursive: true, force: true }));

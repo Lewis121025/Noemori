@@ -1,3 +1,4 @@
+import { sidebarComponent } from "../support/workspace-actions";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -94,10 +95,10 @@ $$
     page.on("pageerror", (error) => errors.push(error.message));
     await page.locator(".ProseMirror").waitFor();
     await page.locator(".references summary").waitFor();
-    expect(await page.locator(".file-sidebar").count()).toBe(1);
+    expect(await page.locator(".file-sidebar:not(.right)").count()).toBe(1);
     // PDF 预览的全局样式不能给文件栏添加浮层圆角、内边距或阴影。
     expect(
-      await page.locator(".file-sidebar").evaluate((aside) => {
+      await page.locator(".file-sidebar:not(.right)").evaluate((aside) => {
         const style = getComputedStyle(aside);
         return { radius: style.borderRadius, padding: style.paddingTop, shadow: style.boxShadow };
       }),
@@ -107,11 +108,11 @@ $$
     expect(await page.locator(".references details").getAttribute("open")).toBeNull();
     expect(await page.locator(".references summary").innerText()).toBe("被 1 篇笔记引用");
 
-    await page.getByRole("button", { name: "目录", exact: true }).click();
+    await sidebarComponent(page, "目录");
     await page.getByRole("navigation", { name: "文档目录" }).waitFor();
     await page.keyboard.press("Escape");
     expect(await page.locator("#outline-panel-0").isVisible()).toBe(false);
-    await page.getByRole("button", { name: "目录", exact: true }).click();
+    await sidebarComponent(page, "目录");
     await page.getByRole("button", { name: "少一点选择", exact: true }).click();
     expect(await page.locator("#outline-panel-0").isVisible()).toBe(false);
 
@@ -179,7 +180,7 @@ $$
     );
     await page.getByRole("button", { name: "显示或隐藏文件栏" }).click();
     expect(await page.getByRole("complementary", { name: "文件栏" }).isVisible()).toBe(false);
-    await page.getByRole("button", { name: "目录", exact: true }).click();
+    await sidebarComponent(page, "目录");
     await page.getByRole("navigation", { name: "文档目录" }).waitFor();
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 1100, height: 760 });

@@ -246,9 +246,15 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     (value.space !== undefined && !isReaderSpace(value.space)) ||
     (value.destination !== undefined && !isWorkspaceDestination(value.destination)) ||
     (value.sidebarView !== undefined &&
+      value.sidebarView !== "files" &&
       value.sidebarView !== "outline" &&
       value.sidebarView !== "search") ||
-    (value.searchQuery !== undefined && typeof value.searchQuery !== "string")
+    (value.searchQuery !== undefined && typeof value.searchQuery !== "string") ||
+    (value.rightWidth !== undefined &&
+      (typeof value.rightWidth !== "number" ||
+        !Number.isFinite(value.rightWidth) ||
+        value.rightWidth < 320 ||
+        value.rightWidth > 640))
   )
     throw new Error("文件栏布局参数无效");
   return {
@@ -257,6 +263,9 @@ export function parsePaneLayoutMessage(value: unknown): PaneLayout {
     ...(value.space === undefined ? {} : { space: value.space }),
     ...(value.destination === undefined ? {} : { destination: value.destination }),
     ...(value.sidebarView === undefined ? {} : { sidebarView: value.sidebarView }),
+    ...(typeof value.rightWidth === "number" && Number.isFinite(value.rightWidth)
+      ? { rightWidth: Math.max(320, Math.min(640, Math.round(value.rightWidth))) }
+      : {}),
     ...(value.searchQuery === undefined ? {} : { searchQuery: value.searchQuery }),
   };
 }

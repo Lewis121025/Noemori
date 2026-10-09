@@ -1,5 +1,6 @@
 use noemori_agent::llm::{
     Authentication, AwsCredentials, AwsSigV4, Capabilities, HttpModel, ModelConfig, Protocol,
+    ReasoningEffort,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -21,6 +22,8 @@ pub(crate) struct Settings {
     pub(crate) audio: bool,
     #[serde(default)]
     pub(crate) video: bool,
+    #[serde(default, rename = "reasoningEffort")]
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 fn yes() -> bool {
     true
@@ -64,6 +67,7 @@ impl Settings {
             audio: self.audio,
             video: self.video,
         };
+        config.reasoning_effort = self.reasoning_effort;
         config.authentication = match self.authentication {
             Auth::None => Authentication::None,
             Auth::Bearer { value } => Authentication::Bearer(value),

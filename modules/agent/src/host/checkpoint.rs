@@ -133,6 +133,7 @@ impl HostCheckpoint {
     pub fn snapshot(&self) -> Result<HostSnapshot, Error> {
         self.validate()?;
         Ok(HostSnapshot {
+            ui: Default::default(),
             id: String::new(),
             workspace: self.workspace.to_string_lossy().into_owned(),
             revision: 0,

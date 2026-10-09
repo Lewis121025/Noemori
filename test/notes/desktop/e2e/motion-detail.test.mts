@@ -80,7 +80,7 @@ test("选中底色连续移动，按压可撤销，目录折叠可反向且正�
       return values;
     });
     expect(samples.at(-1)).toBeGreaterThan(samples[0]!);
-    await bar.getByRole("button", { name: "目录", exact: true }).click();
+    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
     await expect.poll(indicatorX).toBeCloseTo(origin, 1);
     await page.keyboard.press("ArrowRight");
     expect(await indicatorX()).toBeCloseTo(origin, 1);
@@ -100,7 +100,7 @@ test("选中底色连续移动，按压可撤销，目录折叠可反向且正�
       )
       .toBeCloseTo(0, 1);
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await bar.getByRole("button", { name: "目录", exact: true }).click();
+    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
     await expect.poll(indicatorX).toBeCloseTo(origin, 1);
 
     const fold = page

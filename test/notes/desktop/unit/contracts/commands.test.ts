@@ -134,7 +134,13 @@ describe("可用性门禁", () => {
     expect(commandAvailable("go-back", { ...ready, canBack: false })).toBe(false);
     expect(commandAvailable("rename-file", { ...ready, hasDocument: false })).toBe(false);
     expect(commandAvailable("quick-switcher", ready)).toBe(true);
-    expect(commandAvailable("bookmark-heading", { ...ready, markdown: false })).toBe(false);
-    expect(commandAvailable("bookmark-file", { ...ready, hasDocument: false })).toBe(false);
   });
+});
+
+it("收藏功能移除后，原生命令与命令面板不再接受收藏入口", () => {
+  for (const id of ["bookmark-file", "bookmark-heading", "show-bookmarks"]) {
+    expect(parseReaderCommand(id)).toBeNull();
+    expect(parseAppCommand(id)).toBeNull();
+  }
+  expect(READER_COMMANDS.some(command => /收藏|书签/.test(command.label))).toBe(false);
 });

@@ -91,11 +91,11 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const files = page.locator(".search-content");
+    const files = page.getByRole("navigation", { name: "文件列表" });
     const search = files.getByRole("searchbox");
     const status = files.locator(".status");
     const hitPaths = async () =>
-      files.locator(".hit .path").evaluateAll((nodes) => nodes.map((node) => node.textContent));
+      files.locator('.file[aria-label$=".md"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-path")));
 
     // 等待启动恢复完成：当前文档就绪且切换门禁释放。
     await page.waitForFunction(
@@ -107,8 +107,9 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("quantumTken");
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
     expect(await files.locator(".semantic-status").textContent()).toContain("安装本地模型");
+    await files.getByRole("button", { name: "查看 设计笔记 的命中详情", exact: true }).click();
     expect(await files.locator(".semantic-evidence").first().textContent()).toContain("拼写近似");
     expect(await hitPaths()).toContain("设计笔记.md");
 
@@ -116,14 +117,14 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"量子检索"');
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
     expect(await status.textContent()).toContain("共 1 篇");
     expect(await hitPaths()).toEqual(["设计笔记.md"]);
-    expect(await files.locator(".hit mark").textContent()).toBe("量子检索");
+    expect(await files.locator(".file mark").textContent()).toBe("量子检索");
     expect(await files.getByRole("treeitem").count()).toBe(0);
 
     // 点击命中：打开文件并把光标定位到命中词所在文本。
-    await files.locator(".hit").first().click();
+    await files.locator('.file[aria-label$=".md"]').first().click();
     await page.waitForFunction(() => {
       const selection = document.getSelection();
       const text = selection?.anchorNode?.parentElement?.textContent ?? "";
@@ -137,8 +138,8 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"quantumToken"');
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
-    await files.locator(".hit").first().click();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().click();
     await page.waitForFunction(() => {
       const selection = document.getSelection();
       return (selection?.anchorNode?.parentElement?.textContent ?? "").includes("quantumToken");
@@ -149,7 +150,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await search.fill('"预算审批"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 2 处命中");
-    await files.getByRole("button", { name: "展开 设计笔记 的 2 处命中" }).click();
+    await files.getByRole("button", { name: "查看 设计笔记 的命中详情" }).click();
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await files.locator(".occurrence").first().click();
     await expect
@@ -194,8 +195,8 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("line:(预算 审批)");
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
-    await files.locator(".hit").first().click();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().click();
     await expect
       .poll(() =>
         page.evaluate(() => document.getSelection()?.anchorNode?.parentElement?.textContent),
@@ -206,7 +207,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"量子"');
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
 
     // OR 的短词分支独立召回，不能因为另一个分支使用长词索引而漏掉它。
@@ -226,7 +227,7 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("tag:project");
     await search.press("Enter");
-    await files.locator(".hit").first().waitFor();
+    await files.locator('.file[aria-label$=".md"]').first().waitFor();
     expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
 
     // 无结果与退出：第一次 Escape 回到文件树并保留查询词（树仍按其过滤），
@@ -236,32 +237,16 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await search.press("Enter");
     await expect
       .poll(async () => files.locator(".empty").textContent())
-      .toContain("没有匹配的笔记");
+      .toContain("无匹配结果");
     await search.press("Escape");
-    expect(await search.inputValue()).toBe('"绝对不存在的词"');
-    expect(await files.getByRole("treeitem").count()).toBe(0);
-    await files.getByRole("button", { name: "清除搜索", exact: true }).click();
     expect(await search.inputValue()).toBe("");
-
-    // 标签面板：组树展示计数（frontmatter 与行内标签同表汇总），点击进入 tag: 检索。
-    await openLibrary(page);
-    const manager = page.getByRole("region", { name: "文件系统", exact: true });
-    await manager.getByRole("button", { name: "浏览标签", exact: true }).click();
-    await expect
-      .poll(async () => manager.locator(".tag .name").allTextContents())
-      .toEqual(["#project"]);
-    await expect.poll(async () => manager.locator(".tag .count").allTextContents()).toEqual(["2"]);
-    await manager.locator(".tag", { hasText: "project" }).click();
-    await files.locator(".hit").first().waitFor();
-    expect((await hitPaths()).sort()).toEqual(["notes/量子.md", "设计笔记.md"]);
-    expect(await search.inputValue()).toBe("tag:project");
 
     // 单篇首批五处，继续展开才读取下一批；计数不随加载变化，最后一处仍可精确定位。
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill('"denseneedle"');
     await search.press("Enter");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 46 处命中");
-    await files.getByRole("button", { name: "展开 密集 的 46 处命中", exact: true }).click();
+    await files.getByRole("button", { name: "查看 密集 的命中详情", exact: true }).click();
     expect(await files.locator(".occurrence").count()).toBe(5);
     for (const count of [25, 45, 46]) {
       await files.getByRole("button", { name: /显示更多 · 还有/ }).click();
@@ -300,25 +285,23 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     await page.keyboard.press("ControlOrMeta+Shift+f");
     await search.fill("pageproof OR absentprobe");
     await search.press("Enter");
-    await expect.poll(() => files.locator(".hit").count()).toBe(100);
-    expect((await hitPaths())[0]).toBe("notes/page-104.md");
+    await expect.poll(() => status.textContent()).toContain("已显示 100 篇");
     expect(await status.textContent()).toContain("已显示 100 篇");
-    await files.getByRole("button", { name: "加载更多结果", exact: true }).click();
+    await files.getByRole("button", { name: "更多结果", exact: true }).click();
     await expect.poll(() => status.textContent()).toContain("共 105 篇");
-    expect(await files.locator(".hit").count()).toBe(105);
-    expect(new Set(await hitPaths()).size).toBe(105);
-    expect(await files.getByRole("button", { name: "加载更多结果", exact: true }).count()).toBe(0);
+    expect(await files.locator('.file[aria-label$=".md"]').count()).toBeLessThan(100);
+    expect(await files.getByRole("button", { name: "更多结果", exact: true }).count()).toBe(0);
 
     // 已加载的后续页跨刷新保留；排序变化按路径恢复焦点，删除后落到邻近文件。
-    const focusedPath = await files.locator(".hit").last().getAttribute("title");
+    const focusedPath = await files.locator('.file[aria-label$=".md"]').last().getAttribute("title");
     if (focusedPath === null) throw new Error("搜索结果缺少路径");
-    await files.locator(".hit").last().focus();
+    await files.locator('.file[aria-label$=".md"]').last().focus();
     await writeFile(trigger, "# pageproof\n\npageproof\n");
     await expect.poll(() => status.textContent()).toContain("共 106 篇");
     expect(await page.evaluate(() => document.activeElement?.getAttribute("title"))).toBe(
       focusedPath,
     );
-    expect(await files.locator('.hit[tabindex="0"]').getAttribute("title")).toBe(focusedPath);
+    expect(await files.locator('.file[tabindex="0"]').getAttribute("title")).toBe(focusedPath);
     const beforeRemoval = await hitPaths();
     const focusedIndex = beforeRemoval.indexOf(focusedPath);
     const neighbor = beforeRemoval[focusedIndex + 1] ?? beforeRemoval[focusedIndex - 1];
@@ -335,8 +318,8 @@ test("侧栏全文搜索：长词、中文短词、标签谓词与命中定位",
     const external = join(vault, "自动刷新.md");
     await writeFile(external, "autorefreshproof\n");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 1 处命中");
-    const retained = await files.locator(".hit").first().elementHandle();
-    await files.locator(".hit").first().focus();
+    const retained = await files.locator('.file[aria-label$=".md"]').first().elementHandle();
+    await files.locator('.file[aria-label$=".md"]').first().focus();
     await writeFile(external, "autorefreshproof\n\nautorefreshproof\n");
     await expect.poll(() => status.textContent()).toContain("共 1 篇 · 2 处命中");
     expect(

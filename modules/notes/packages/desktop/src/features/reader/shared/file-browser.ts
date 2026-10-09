@@ -10,13 +10,6 @@ export type FilePresentation = {
   preview: boolean;
 };
 
-/** 旧会话采用稳定的默认对象，避免仅选择文件时重排列表并回放旧滚动位置。 */
-export const DEFAULT_FILE_PRESENTATION: Readonly<FilePresentation> = {
-  layout: "list",
-  sort: "name",
-  preview: true,
-};
-
 /** 资料管理的浏览入口；只保存查询文本，结果恢复时从当前索引重新读取。 */
 type LibraryBrowse = {
   query: string;
@@ -26,6 +19,8 @@ type LibraryBrowse = {
 
 /** 目录的持久化工作现场；旧会话缺少 browse 时显示全部资料。 */
 export type FileTreeState = {
+  /** 对话节点的展开与统一视口位置独立保存，不能流入文件路径操作。 */
+  discussions?: DiscussionTreeState;
   presentation?: FilePresentation;
   browse?: LibraryBrowse;
   expanded: string[];
@@ -35,6 +30,50 @@ export type FileTreeState = {
   /** 左侧导航与资料管理可同时显示，滚动锚点必须按视口独立。 */
   navigationScroll?: FileTreePosition | null;
 };
+
+/** 合成节点可以包含非路径身份；文件选择仍只允许真实库内路径。 */
+export type DiscussionTreeState = {
+  expanded: string[];
+  archived: boolean;
+  scroll: { key: string; offset: number } | null;
+};
+function treeKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 16384 &&
+    (isEntryPath(value) || /^\0(?:conversation|source|workspace):[^\0]+$/u.test(value))
+  );
+}
+function parseDiscussions(value: unknown): DiscussionTreeState | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("expanded" in value) ||
+    !Array.isArray(value.expanded) ||
+    !value.expanded.every(treeKey) ||
+    !("archived" in value) ||
+    typeof value.archived !== "boolean" ||
+    !("scroll" in value)
+  )
+    return null;
+  const scroll = value.scroll;
+  if (scroll === null)
+    return { expanded: [...new Set(value.expanded)], archived: value.archived, scroll: null };
+  if (
+    typeof scroll !== "object" ||
+    !("key" in scroll) ||
+    !treeKey(scroll.key) ||
+    !("offset" in scroll) ||
+    typeof scroll.offset !== "number" ||
+    !Number.isFinite(scroll.offset)
+  )
+    return null;
+  return {
+    expanded: [...new Set(value.expanded)],
+    archived: value.archived,
+    scroll: { key: scroll.key, offset: Math.max(0, Math.min(500, scroll.offset)) },
+  };
+}
 
 /** 返回互不共享数组的空目录状态，不触发磁盘读写。 */
 export function emptyFileTreeState(): FileTreeState {
@@ -110,8 +149,10 @@ export function parseFileTreeState(value: unknown): FileTreeState | null {
     Array.isArray(input) ? [...new Set(input.filter(isEntryPath))] : [];
   const browse = parseBrowse(record.browse);
   const presentation = parsePresentation(record.presentation);
+  const discussions = parseDiscussions(record.discussions);
   return {
     ...(presentation === null ? {} : { presentation }),
+    ...(discussions === null ? {} : { discussions }),
     ...(browse === null ? {} : { browse }),
     expanded: paths(record.expanded),
     selected: paths(record.selected),
@@ -130,6 +171,7 @@ export function parseFileTreeMessage(value: unknown): FileTreeState {
   const state = parseFileTreeState(value);
   if (
     state === null ||
+    (item.discussions !== undefined && parseDiscussions(item.discussions) === null) ||
     (item.presentation !== undefined && parsePresentation(item.presentation) === null) ||
     !Array.isArray(item.expanded) ||
     !item.expanded.every(isEntryPath) ||
@@ -170,7 +212,25 @@ export function mapFileTreeState(
     const path = map(position.path);
     return path === null ? null : { path, offset: position.offset };
   };
+  const mapKey = (key: string) => (key.startsWith("\0") ? key : map(key));
+  const discussions = state.discussions;
+  const scrollKey = discussions?.scroll ? mapKey(discussions.scroll.key) : null;
   return {
+    ...(discussions
+      ? {
+          discussions: {
+            ...discussions,
+            expanded: discussions.expanded.flatMap((key) => {
+              const next = mapKey(key);
+              return next === null ? [] : [next];
+            }),
+            scroll:
+              scrollKey !== null && discussions.scroll
+                ? { key: scrollKey, offset: discussions.scroll.offset }
+                : null,
+          },
+        }
+      : {}),
     ...(state.presentation === undefined ? {} : { presentation: { ...state.presentation } }),
     ...(state.browse === undefined
       ? {}

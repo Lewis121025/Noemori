@@ -2,6 +2,19 @@ import type { Options } from "remark-stringify";
 import type { Nodes } from "mdast";
 
 /**
+ * CommonMark 的空列表项与非 1 起始的编号不能打断段落，两条保存路径须遵循同一边界规则。
+ * @param orderedStart 编号起点；无序列表传 null。
+ * @param emptyFirstItem 首项是否没有正文或任务标记。
+ * @returns 是否必须先写入空行；不抛出异常。
+ */
+export function listNeedsParagraphBoundary(
+  orderedStart: number | null,
+  emptyFirstItem: boolean,
+): boolean {
+  return emptyFirstItem || (orderedStart !== null && orderedStart !== 1);
+}
+
+/**
  * 空段落的缩进属于其容器；保留空行上的缩进，重新解析时才能区分项内空段与项外空段。
  * 仅提供流式容器的生成器，行内转义、列表标记选择及源码位置跟踪仍使用共用处理器。
  */

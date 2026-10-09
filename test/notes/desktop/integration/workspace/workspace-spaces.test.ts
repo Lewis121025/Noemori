@@ -84,6 +84,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (component !== undefined) await unmount(component);
   target.remove();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -102,7 +103,7 @@ async function start(): Promise<void> {
     if (disk.has("note.md")) expect(prose()?.textContent).toContain("继续写作");
   });
 }
-const library = () => target.querySelector<HTMLElement>(".library")!;
+const library = () => target.querySelector<HTMLElement>(".list[aria-label=文件列表]")!;
 const prose = () => target.querySelector<HTMLElement>(".ProseMirror")!;
 function click(text: string): void {
   const button = [...target.querySelectorAll("button")].find(
@@ -139,386 +140,93 @@ async function createBoard(): Promise<void> {
   });
 }
 
-describe("资料管理与读写空间", () => {
-  it("连续用键盘调整侧栏宽度只提交最终布局", async () => {
-    await start();
-    vi.useFakeTimers();
-    vi.mocked(api.sessionSetPanes).mockClear();
-    try {
-      const handle = target.querySelector<HTMLElement>(
-        '[role="separator"][aria-label="调整侧栏宽度"]',
-      )!;
-      for (let index = 0; index < 12; index++) {
-        handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-        flushSync();
-      }
-      await vi.advanceTimersByTimeAsync(299);
-      expect(api.sessionSetPanes).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(api.sessionSetPanes).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(api.sessionSetPanes).mock.calls[0]?.[0].leftWidth).toBe(
-        Number(handle.getAttribute("aria-valuenow")),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+describe("统一工作台", () => {
+  it("目录和笔记库共用正文，切换导航不卸载编辑器", async () => {
+    await start(); const editor = prose();
+    click("文章大纲"); expect(library().hidden).toBe(true);
+    await manage(); expect(library().hidden).toBe(false);
+    expect(prose()).toBe(editor);
+    expect(target.querySelector(".library-preview")).toBeNull();
   });
-
-  it("文件系统保留白板文档，返回时不读取另一篇笔记", async () => {
-    await start();
-    await createBoard();
-    const board = target.querySelector(".whiteboard");
-    command("open-library");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().hidden).toBe(false);
-    });
-    vi.mocked(api.fileSnapshot).mockClear();
-    click("目录");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false");
-    });
-    expect(target.querySelector(".whiteboard")).toBe(board);
-    expect(api.fileSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("在另一栏打开先选择文件，取消不创建空栏", async () => {
-    HTMLDialogElement.prototype.showModal = function () {
-      this.open = true;
-    };
-    await start();
-    command("toggle-split");
-    flushSync();
-    const picker = target.querySelector("dialog.picker")!;
-    picker.dispatchEvent(new Event("cancel", { cancelable: true }));
-    flushSync();
-    expect(target.querySelectorAll(".pane-column")).toHaveLength(1);
-    expect(prose().textContent).toContain("继续写作");
-  });
-
-  it("工作台搜索保留原文档，切换浏览页面不重置查询", async () => {
-    await start();
+  it("单击打开同一文档表面，修饰键多选不切换文档", async () => {
+    await start(); await manage();
+    library().querySelector<HTMLButtonElement>('[data-path="other.md"]')!.click();
+    await vi.waitFor(() => { flushSync(); expect(prose().textContent).toContain("仅供预览"); });
     const editor = prose();
-    command("find-files");
-    flushSync();
-    const input = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]')!;
-    input.value = "设计";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
-    expect(prose()).toBe(editor);
-    await manage();
-    expect(input.value).toBe("设计");
-    click("目录");
-    await vi.waitFor(() => expect(library().hidden).toBe(true));
-    expect(input.value).toBe("设计");
-    expect(prose()).toBe(editor);
+    library().querySelector<HTMLButtonElement>('[data-path="note.md"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    flushSync(); expect(prose()).toBe(editor);
+    expect(library().querySelector(".selection-status")?.textContent).toContain("已选 2 项");
   });
-
-  it("文件管理页仍能打开侧栏全文搜索，查询聚焦且不切走当前网格", async () => {
-    await start();
-    await manage();
-    command("find-files");
-    await vi.waitFor(() => {
-      flushSync();
-      const input = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]')!;
-      expect(target.querySelector<HTMLElement>(".quick-navigation")!.hidden).toBe(false);
-      expect(document.activeElement).toBe(input);
-      expect(library().hidden).toBe(false);
-    });
-  });
-
-  it("浏览入口位于左栏，切换文件系统不卸载当前编辑器", async () => {
-    await start();
-    const editor = prose();
-    expect(target.querySelector(".spaces")).toBeNull();
-    command("open-library");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().hidden).toBe(false);
-    });
-    expect(prose()).toBe(editor);
-    target.querySelector<HTMLButtonElement>('[data-component="outline"]')!.focus();
-    click("目录");
-    await vi.waitFor(() =>
-      expect(target.querySelector(".reading-space")?.getAttribute("aria-hidden")).toBe("false"),
-    );
-    expect(prose()).toBe(editor);
-    await vi.waitFor(() => expect(document.activeElement).toBe(editor));
-  });
-
-  it("文件系统也遵守保存门禁，冲突时不隐藏待处理的正文", async () => {
+  it("打开另一文件仍先保存，冲突时正文和输入保持可处理", async () => {
     await start();
     prose().querySelector("p")!.textContent = "不能丢失的编辑";
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    flushSync();
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
     vi.mocked(api.fileWrite).mockResolvedValue({ status: "conflict", disk: encode("外部修改") });
-    command("open-library");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(target.querySelector(".save-notice")?.textContent).toContain("原文件已在其他地方修改");
-    });
-    expect(library().hidden).toBe(true);
+    library().querySelector<HTMLButtonElement>('[data-path="other.md"]')!.click();
+    await vi.waitFor(() => { flushSync(); expect(target.querySelector(".save-notice")?.textContent).toContain("原文件已在其他地方修改"); });
     expect(prose().textContent).toContain("不能丢失的编辑");
+    expect(target.querySelector(".reading-space")?.hasAttribute("inert")).toBe(false);
   });
-
-  it("旧关联会话迁移到文件系统，创建白板后进入文档", async () => {
-    vi.mocked(api.sessionGetPanes).mockResolvedValue({
-      filesCollapsed: false,
-      leftWidth: 232,
-      space: "connections",
-    });
-    await start();
-    expect(library().querySelector(".vault-name")?.textContent).toBe("notes");
-    await createBoard();
-    expect(library().hidden).toBe(true);
-    expect(library().hidden).toBe(true);
-  });
-
-  it("新版目的地与搜索偏好优先恢复，不依赖活动文档类型", async () => {
-    vi.mocked(api.sessionGetPanes).mockResolvedValue({
-      filesCollapsed: false,
-      leftWidth: 250,
-      space: "connections",
-      destination: "library",
-      sidebarView: "search",
-      searchQuery: "工作台",
-    });
-    await start();
-    expect(library().hidden).toBe(false);
-    expect(target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]')?.value).toBe(
-      "工作台",
-    );
+  it("全局搜索只有一个输入与查询，切换目录保持正文和查询", async () => {
+    await start(); const editor = prose(); command("find-files");
+    await vi.waitFor(() => expect(document.activeElement).toBe(library().querySelector("input")));
+    const search = library().querySelector<HTMLInputElement>("input")!;
+    search.value = "继续"; search.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
+    click("文章大纲"); await manage();
+    expect(search.value).toBe("继续"); expect(prose()).toBe(editor);
+    expect(target.querySelectorAll('[role="searchbox"]')).toHaveLength(1);
   });
-
-  it("返回读写后立刻卸载工作区，待执行的焦点交接应取消", async () => {
-    await start();
-    await manage();
-    vi.mocked(api.sessionSetPanes).mockClear();
-    vi.mocked(api.sessionSetDocuments).mockClear();
-    click("目录");
-    const removing = unmount(component!);
-    component = undefined;
-    await removing;
-    await Promise.resolve();
-    expect(document.activeElement?.isConnected).toBe(true);
-    expect(api.sessionSetPanes).not.toHaveBeenCalled();
-    expect(api.sessionSetDocuments).not.toHaveBeenCalled();
-  });
-  it("通过键盘进入管理前也提交属性输入，不能把仍在输入的值留在隐藏面板", async () => {
-    disk.set("note.md", encode("---\nstatus: 旧值\n---\n\n继续写作。\n"));
-    await start();
-    const input = target.querySelector<HTMLInputElement>('[aria-label="属性 status 的值"]')!;
-    input.focus();
-    input.value = "新值";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-    await manage();
-    expect(new TextDecoder().decode(disk.get("note.md"))).toContain("status: 新值");
-  });
-  it("开启预览后单击只预览，回到写作保留编辑器与管理选择，双击才打开资料", async () => {
-    await start();
-    const editor = prose();
-    await manage();
-    click("预览");
-    const reads = vi.mocked(api.fileSnapshot).mock.calls.length;
-    library().querySelector<HTMLButtonElement>('[data-path="other.md"]')!.click();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().querySelector(".library-document")?.textContent).toContain("仅供预览");
-    });
-    expect(api.fileSnapshot).toHaveBeenCalledTimes(reads);
-    expect(prose()).toBe(editor);
-    click("目录");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().hidden).toBe(true);
-    });
-    expect(prose()).toBe(editor);
+  it("旧文件页面会话迁入同一文档工作台，恢复查询和侧栏宽度", async () => {
+    vi.mocked(api.sessionGetPanes).mockResolvedValue({ filesCollapsed: false, leftWidth: 250, destination: "library", sidebarView: "search", searchQuery: "工作台", rightWidth: 420 });
+    await start(); expect(library().hidden).toBe(false);
+    expect(library().querySelector<HTMLInputElement>("input")?.value).toBe("工作台");
     expect(prose().textContent).toContain("继续写作");
-    await manage();
-    expect(
-      library()
-        .querySelector('[data-path="other.md"]')
-        ?.closest('[role="gridcell"]')
-        ?.getAttribute("aria-selected"),
-    ).toBe("true");
-    library()
-      .querySelector('[data-path="other.md"]')!
-      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().hidden).toBe(true);
-      expect(prose().textContent).toContain("仅供预览");
-    });
+    expect(target.querySelector('.right [role="separator"]')?.getAttribute("aria-valuenow")).toBe("420");
   });
-  it("离开写作前的保存冲突阻止页面切换，原编辑仍可处理", async () => {
-    await start();
-    prose().querySelector("p")!.textContent = "没有保存的想法";
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    flushSync();
-    vi.mocked(api.fileWrite).mockResolvedValue({ status: "conflict", disk: encode("外部修改") });
-    command("open-library");
-    await vi.waitFor(() => {
-      flushSync();
-      expect(target.querySelector(".save-notice")?.textContent).toContain("原文件已在其他地方修改");
-    });
-    expect(library().hidden).toBe(true);
-    expect(prose().textContent).toContain("没有保存的想法");
-    expect(api.sessionSetPanes).not.toHaveBeenCalledWith(
-      expect.objectContaining({ destination: "library" }),
-    );
+  it("左右侧栏都保留挂载；开关 Agent 不影响文档操作", async () => {
+    await start(); const editor = prose(); const agent = target.querySelector(".agent-panel");
+    click("工作区助手"); expect(target.querySelector<HTMLElement>(".file-sidebar.right")?.hidden).toBe(false);
+    expect(target.querySelector(".panes")?.hasAttribute("inert")).toBe(false);
+    command("new-note"); await confirmCreate();
+    await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalled());
+    expect(target.querySelector<HTMLElement>(".file-sidebar.right")?.hidden).toBe(false);
+    click("工作区助手");
+    await vi.waitFor(() => { flushSync(); expect(target.querySelector<HTMLElement>(".file-sidebar.right")?.hidden).toBe(true); });
+    expect(target.querySelector(".agent-panel")).toBe(agent);
+    expect(editor?.isConnected).toBe(false);
   });
-  it("多选计数留在目录底部，预览继续跟随焦点文件", async () => {
-    await start();
-    await manage();
-    click("预览");
-    const first = library().querySelector<HTMLButtonElement>('[data-path="note.md"]')!;
-    first.click();
-    library()
-      .querySelector<HTMLButtonElement>('[data-path="other.md"]')!
-      .dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
-    flushSync();
-    const preview = library().querySelector(".library-preview")!;
-    expect(library().querySelector(".selection-status")?.textContent).toContain("已选 2 项");
-    expect(preview.textContent).not.toContain("选一份资料");
+  it("连续调整侧栏宽度只保存最终布局", async () => {
+    await start(); vi.useFakeTimers(); vi.mocked(api.sessionSetPanes).mockClear();
+    try {
+      const handle = target.querySelector<HTMLElement>('[aria-label="调整侧栏宽度"]')!;
+      for (let i = 0; i < 12; i++) { handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); flushSync(); }
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.sessionSetPanes).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.sessionSetPanes).mock.calls[0]?.[0].leftWidth).toBe(Number(handle.getAttribute("aria-valuenow")));
+    } finally { vi.useRealTimers(); }
   });
-  it("窄窗口预览用 Escape 返回原选中行，输入法拥有的 Escape 不关闭预览", async () => {
-    vi.stubGlobal("innerWidth", 640);
-    await start();
-    await manage();
-    const row = library().querySelector<HTMLButtonElement>('[data-path="other.md"]')!;
-    row.click();
-    flushSync();
-    click("预览");
-    const preview = library().querySelector<HTMLElement>(".library-preview")!;
-    const open = preview.querySelector<HTMLButtonElement>("button")!;
-    open.focus();
-    open.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true }),
-    );
-    flushSync();
-    expect(library().querySelector<HTMLElement>(".library-list")?.hidden).toBe(true);
-    open.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().querySelector<HTMLElement>(".library-list")?.hidden).toBe(false);
-      expect(document.activeElement).toBe(row);
-    });
-    expect(row.closest('[role="gridcell"]')?.getAttribute("aria-selected")).toBe("true");
+  it("窄窗口 Escape 收起文件抽屉，输入法 Escape 不触发导航", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 640 }); await start(); await manage();
+    const input = library().querySelector<HTMLInputElement>("input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true })); flushSync();
+    expect(target.querySelector<HTMLElement>(".content-space")?.inert).toBe(true);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); flushSync();
+    expect(target.querySelector<HTMLElement>(".content-space")?.inert).toBe(false);
   });
-  it("迟到的预览不能覆盖新选择，读取失败只影响预览", async () => {
-    let finish!: (bytes: Uint8Array) => void;
-    vi.mocked(api.fileRead).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    await start();
-    await manage();
-    click("预览");
-    await vi.waitFor(() => expect(api.fileRead).toHaveBeenCalled());
-    library().querySelector<HTMLButtonElement>('[data-path="other.md"]')!.click();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().querySelector(".library-document")?.textContent).toContain("仅供预览");
-    });
-    finish(encode("迟到的旧预览"));
-    await Promise.resolve();
-    flushSync();
-    expect(library().textContent).not.toContain("迟到的旧预览");
-    vi.mocked(api.fileRead).mockRejectedValueOnce(new Error("读取失败"));
-    library().querySelector<HTMLButtonElement>('[data-path="note.md"]')!.click();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(library().querySelector('[role="alert"]')?.textContent).toContain("读取失败");
-    });
-    expect(api.fileWrite).not.toHaveBeenCalled();
-    expect(prose().textContent).toContain("继续写作");
+  it("首次新建确认名称位置后才写盘，后续沿用当前目录", async () => {
+    vi.mocked(api.vaultRestore).mockResolvedValue(null); vi.mocked(api.vaultOpen).mockResolvedValue({ root: "/notes", entries: [] }); disk.clear();
+    await start(); command("new-note");
+    await vi.waitFor(() => { flushSync(); expect(target.querySelector<HTMLDialogElement>(".create-dialog")?.open).toBe(true); });
+    expect(api.entryCreate).not.toHaveBeenCalled(); await confirmCreate();
+    await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalledWith("未命名.md", "file", undefined));
+    await vi.waitFor(() => { flushSync(); expect(prose()).not.toBeNull(); });
+    command("new-note"); await confirmCreate();
+    await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalledWith("未命名 2.md", "file", undefined));
   });
-  it("资料管理的名称过滤不会覆盖工作台全文查询", async () => {
-    await start();
-    command("find-files");
-    flushSync();
-    const search = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]')!;
-    search.value = "设计";
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-    await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
-    await manage();
-    vi.mocked(api.searchQuery).mockClear();
-    const filter = library().querySelector<HTMLInputElement>('[aria-label="搜索笔记库"]')!;
-    filter.value = "other";
-    filter.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-    expect(library().querySelector('[data-path="other.md"]')).not.toBeNull();
-    expect(search.value).toBe("设计");
-    expect(api.searchQuery).not.toHaveBeenCalled();
-  });
-  it("资料管理的新建入口先确认名称和目录，确认后才创建并进入文档", async () => {
-    await start();
-    await manage();
-    click("新建笔记");
-    expect(api.entryCreate).not.toHaveBeenCalled();
-    await confirmCreate();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(api.entryCreate).toHaveBeenCalledWith("未命名.md", "file", undefined);
-    });
-    await vi.waitFor(() => expect(library().hidden).toBe(true));
-    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
-  });
-
-  it("首次新建先选择笔记库，每次确认名称和目录后才创建", async () => {
-    vi.mocked(api.vaultRestore).mockResolvedValue(null);
-    vi.mocked(api.vaultOpen).mockResolvedValue({ root: "/notes", entries: [] });
-    disk.clear();
-    await start();
-    expect(target.querySelector(".welcome-actions")).toBeNull();
-    command("new-note");
-    await confirmCreate();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(prose()).not.toBeNull();
-    });
-    expect(api.vaultOpen).toHaveBeenCalledOnce();
-    expect(api.vaultCreateDefault).not.toHaveBeenCalled();
-    expect(api.entryCreate).toHaveBeenCalledWith("未命名.md", "file", undefined);
-    expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(false);
-    command("new-note");
-    await confirmCreate();
-    await vi.waitFor(() =>
-      expect(api.entryCreate).toHaveBeenCalledWith("未命名 2.md", "file", undefined),
-    );
-    expect(api.vaultOpen).toHaveBeenCalledOnce();
-    expect(api.vaultCreateDefault).not.toHaveBeenCalled();
-  });
-
-  it.each(["writing", "library"])("%s 可通过命令新建白板并进入关联画布", async (space) => {
-    await start();
-    if (space === "library") await manage();
-    command("new-whiteboard");
-    await confirmCreate();
-    await vi.waitFor(() => {
-      flushSync();
-      expect(target.querySelector(".whiteboard")).not.toBeNull();
-      expect(library().hidden).toBe(true);
-    });
-    const created = disk.get("白板.noemoriboard");
-    expect(created).toBeDefined();
-    expect(JSON.parse(new TextDecoder().decode(created))).toEqual({ version: 2, strokes: [] });
-  });
-});
-
-it.each(["open-library"] as const)("窄窗口打开 %s 后收起抽屉，让目标页面可操作", async (action) => {
-  vi.stubGlobal("innerWidth", 640);
-  await start();
-  command(action);
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.querySelector(".files-scrim")?.hasAttribute("hidden")).toBe(true);
-    expect(target.querySelector(".content-space")?.hasAttribute("inert")).toBe(false);
+  it("切换笔记库与目录不重建白板", async () => {
+    await start(); await createBoard(); const board = target.querySelector(".whiteboard");
+    await manage(); click("文章大纲"); expect(target.querySelector(".whiteboard")).toBe(board);
   });
 });
 
@@ -553,29 +261,6 @@ it("沉浸阅读把文档操作与编辑工具放在顶栏，正文只保留内�
   expect(prose()?.textContent).toContain("继续写作");
 });
 
-it("顶部组件栏切换侧栏面板，保留全文查询与正文实例", async () => {
-  await start();
-  const editor = prose();
-  const bar = target.querySelector<HTMLElement>('[aria-label="组件栏"]')!;
-  expect(bar).not.toBeNull();
-  const select = (name: string) => {
-    bar.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!.click();
-    flushSync();
-  };
-  select("搜索");
-  const search = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]')!;
-  search.value = "继续";
-  search.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  select("目录");
-  expect(target.querySelector<HTMLElement>(".quick-navigation")!.hidden).toBe(true);
-  expect(target.querySelector<HTMLElement>(".document-tools")!.hidden).toBe(false);
-  select("搜索");
-  expect(search.value).toBe("继续");
-  expect(prose()).toBe(editor);
-  expect(target.querySelector(".pane-column [role=toolbar]")).toBeNull();
-});
-
 it("窗口按钮各有唯一入口，设置独立打开，不恢复模式与目录标题", async () => {
   await start();
   const sidebar = target.querySelector(".file-sidebar")!;
@@ -591,8 +276,7 @@ it("窗口按钮各有唯一入口，设置独立打开，不恢复模式与目�
   expect(settings.open).toBe(true);
   expect(sidebar.querySelector('[aria-label="阅读字体"]')).toBeNull();
   settings.querySelector<HTMLButtonElement>('[aria-label="关闭设置"]')!.click();
-  flushSync();
-  expect(settings.open).toBe(false);
+  await vi.waitFor(() => { flushSync(); expect(settings.open).toBe(false); });
   expect(prose()?.getAttribute("contenteditable")).toBe("true");
 });
 
@@ -774,57 +458,9 @@ it("双链拖动向上增高，其他指针不干扰，取消恢复拖动前高�
   expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
 });
 
-it("组件入口按职责收敛，文件系统通过独立组件进入且不并列显示文件树", async () => {
-  await start();
-  const editor = prose();
-  const bar = target.querySelector<HTMLElement>('[aria-label="组件栏"]')!;
-  expect(
-    [...bar.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")),
-  ).toEqual(["目录", "搜索", "文件系统"]);
-  expect(target.querySelector('[aria-label="所有组件"]')).toBeNull();
-  expect(target.querySelector('[aria-label="全部组件"]')).toBeNull();
-  bar.querySelector<HTMLButtonElement>('[aria-label="文件系统"]')!.click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(library().hidden).toBe(false);
-  });
-  expect(target.querySelector<HTMLElement>(".document-tools")!.hidden).toBe(true);
-  expect(bar.querySelector('[aria-label="文件系统"]')!.getAttribute("aria-pressed")).toBe("true");
-  expect(target.querySelectorAll('.file-menu button[role="menuitem"]')).toHaveLength(0);
-  expect(library().querySelectorAll('[aria-label="定位当前文件"]')).toHaveLength(1);
-  library().querySelector<HTMLButtonElement>('[aria-label="书签"]')!.click();
-  flushSync();
-  expect(library().querySelector('[aria-label="书签"]')!.getAttribute("aria-pressed")).toBe("true");
-  bar.querySelector<HTMLButtonElement>('[aria-label="目录"]')!.click();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(library().hidden).toBe(true);
-  });
-  expect(target.querySelector<HTMLElement>(".document-tools")!.hidden).toBe(false);
-  expect(prose()).toBe(editor);
-});
-
-it("文件系统的新建白板入口创建后进入文档", async () => {
-  await start();
-  await manage();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(library().querySelector(".vault-name")?.textContent).toBe("notes");
-  });
-  expect(target.querySelector('[aria-label="关联视图"]')).toBeNull();
-  expect(
-    [...library().querySelectorAll(".library-heading button")].filter((button) =>
-      button.getAttribute("aria-label") === "新建白板",
-    ),
-  ).toHaveLength(1);
-  [...library().querySelectorAll<HTMLButtonElement>(".library-heading button")]
-    .find((button) => button.getAttribute("aria-label") === "新建白板")!
-    .click();
-  await confirmCreate();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.querySelector(".whiteboard")).not.toBeNull();
-  });
+it("新建白板菜单和命令进入同一名称位置确认流程", async () => {
+  await start(); click("新建白板"); await confirmCreate();
+  await vi.waitFor(() => { flushSync(); expect(target.querySelector(".whiteboard")).not.toBeNull(); });
 });
 
 it("源码查找只有文档工具入口，双链面板不再提供图谱", async () => {
@@ -895,7 +531,7 @@ it.each(["new-note", "new-whiteboard"] as const)(
       .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     flushSync();
     library().querySelector<HTMLButtonElement>('[data-path="docs/other.md"]')!.click();
-    flushSync();
+    await vi.waitFor(() => { flushSync(); expect(prose().textContent).toContain("目录内文件"); });
     command(action);
     await confirmCreate();
     await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalled());
@@ -952,7 +588,7 @@ it.each([
       search.dispatchEvent(new Event("input", { bubbles: true }));
       flushSync();
       library().querySelector<HTMLButtonElement>('[data-path="docs/other.md"]')!.click();
-      flushSync();
+      await vi.waitFor(() => { flushSync(); expect(prose().textContent).toContain("目录内文件"); });
       vi.mocked(api.entryCreate).mockClear();
       if (entry === "command") command(action);
       else click(label);
@@ -960,7 +596,7 @@ it.each([
       await vi.waitFor(() => {
         flushSync();
         expect(api.entryCreate).toHaveBeenCalled();
-        expect(library().hidden).toBe(true);
+        expect(library().hidden).toBe(false);
       });
       expect(vi.mocked(api.entryCreate).mock.calls[0]?.[0]).toMatch(/^docs\//);
     }
@@ -977,7 +613,7 @@ it("文件系统使用单一层级目录，展开和搜索保留正文与应用�
   const editor = prose();
   await manage();
   expect(target.querySelector('[aria-label="文件夹导航"]')).toBeNull();
-  expect(target.querySelector(".file-sidebar.compact")).not.toBeNull();
+  expect(target.querySelector(".file-sidebar.compact")).toBeNull();
   expect(target.querySelector('[aria-label="设置"]')).not.toBeNull();
   library().querySelector<HTMLButtonElement>('[data-path="docs"]')!.click();
   flushSync();
@@ -993,20 +629,102 @@ it("文件系统使用单一层级目录，展开和搜索保留正文与应用�
   expect(library().hidden).toBe(false);
 });
 
-it("原白板入口统一为文件系统，表格管理只有一个一级入口", async () => {
+it("文件与大纲入口名称固定，切换视图保留正文与键盘焦点", async () => {
   await start();
-  const bar = target.querySelector<HTMLElement>('[aria-label="组件栏"]')!;
-  expect(
-    [...bar.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")),
-  ).toEqual(["目录", "搜索", "文件系统"]);
-  expect(target.querySelector('.sidebar-actions [aria-label="资料管理"]')).toBeNull();
-  bar.querySelector<HTMLButtonElement>('[aria-label="文件系统"]')!.click();
+  const editor = prose();
+  const outline = target.querySelector<HTMLButtonElement>('.navigation-heading [aria-label="文章大纲"]')!;
+  const files = target.querySelector<HTMLButtonElement>('.navigation-heading [aria-label="文件目录"]')!;
+  expect(outline.textContent?.trim()).toBe("大纲");
+  expect(files.textContent?.trim()).toBe("文件");
+  expect(files.getAttribute("aria-pressed")).toBe("true");
+  outline.focus();
+  outline.click();
+  flushSync();
+  expect(outline.getAttribute("aria-pressed")).toBe("true");
+  expect(files.getAttribute("aria-pressed")).toBe("false");
+  expect(library().hidden).toBe(true);
+  expect(document.activeElement).toBe(outline);
+  files.click();
+  flushSync();
+  expect(files.getAttribute("aria-pressed")).toBe("true");
+  expect(outline.getAttribute("aria-label")).toBe("文章大纲");
+  expect(library().hidden).toBe(false);
+  expect(prose()).toBe(editor);
+  expect(library().querySelectorAll('[role="treegrid"]')).toHaveLength(1);
+  expect(target.querySelector(".conversation-sidebar")).toBeNull();
+});
+
+it("关闭再打开右栏保留同一个会话、输入节点和未发送草稿，保存失败时保留面板", async () => {
+  const item = {
+    id: "session", title: "当前对话", workspace: "/notes", model: "fixture", createdAt: 1, updatedAt: 1,
+    archived: false, origin: null, article: null, draft: "原草稿", storageError: null, revision: 0,
+    closed: false, run: null, turns: [], messages: [], terminals: [], approvals: [],
+    browser: { status: "idle" as const, tabs: [], receipts: [], error: null },
+    ui: { status: "idle" as const, generation: 0, call: null, error: null, control: null, connections: [], receipts: [] },
+  };
+  window.noemori.agent.list = async () => ({ items: [{ ...item, status: null }], issues: [] });
+  window.noemori.agent.snapshot = vi.fn(async () => structuredClone(item));
+  const save = vi.fn(async (_id: string, text: string) => { item.draft = text; });
+  window.noemori.agent.saveDraft = save;
+  await start(); click("工作区助手");
+  await vi.waitFor(() => { flushSync(); expect(target.querySelector(".composer textarea")).not.toBeNull(); });
+  const field = target.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+  field.value = "下一次继续的内容"; field.dispatchEvent(new Event("input", { bubbles: true })); flushSync();
+  save.mockRejectedValueOnce(new Error("草稿写入失败"));
+  click("工作区助手");
+  await vi.waitFor(() => { flushSync(); expect(target.querySelector(".close-error")?.textContent).toContain("草稿写入失败"); });
+  expect(target.querySelector<HTMLElement>(".file-sidebar.right")!.hidden).toBe(false);
+  click("工作区助手");
+  await vi.waitFor(() => { flushSync(); expect(target.querySelector<HTMLElement>(".file-sidebar.right")!.hidden).toBe(true); });
+  click("工作区助手"); flushSync();
+  expect(target.querySelector(".composer textarea")).toBe(field);
+  expect(field.value).toBe("下一次继续的内容");
+  expect(window.noemori.agent.snapshot).toHaveBeenCalledTimes(1);
+});
+
+it("已有文件树中的空查询优先于旧版侧栏搜索，重启不会复活已清除的关键词", async () => {
+  vi.mocked(api.sessionGetPanes).mockResolvedValue({ filesCollapsed: false, leftWidth: 232, sidebarView: "files", searchQuery: "旧关键词" });
+  const restore = vi.mocked(api.vaultRestore).getMockImplementation()!;
+  vi.mocked(api.vaultRestore).mockImplementation(async (...args) => {
+    const restored = await restore(...args);
+    return restored ? { ...restored, fileTree: { expanded: [], selected: [], focused: null, scroll: null, browse: { query: "", section: "files" } } } : null;
+  });
+  await start();
+  expect(library().querySelector<HTMLInputElement>("input")?.value).toBe("");
+  expect(api.searchQuery).not.toHaveBeenCalled();
+});
+
+it("搜索只有一个输入入口，从大纲返回文件时保留查询与正文，搜索命令仍聚焦输入", async () => {
+  await start();
+  const editor = prose();
+  const heading = target.querySelector(".navigation-heading")!;
+  expect(heading.querySelector('[aria-label="搜索笔记库"]')).toBeNull();
+  expect(heading.querySelector('[aria-label="新建"]')).not.toBeNull();
+  expect(target.querySelectorAll('[role="searchbox"][aria-label="搜索笔记库"]')).toHaveLength(1);
+  const input = library().querySelector<HTMLInputElement>('[role="searchbox"]')!;
+  input.value = "继续";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  click("文章大纲");
+  expect(library().hidden).toBe(true);
+  click("文件目录");
+  expect(input.value).toBe("继续");
+  click("文章大纲");
+  command("find-files");
   await vi.waitFor(() => {
     flushSync();
     expect(library().hidden).toBe(false);
+    expect(document.activeElement).toBe(input);
   });
-  const table = library().querySelector('[role="treegrid"][aria-label="文件系统"]')!;
-  expect(table).not.toBeNull();
-  expect(table.querySelectorAll('[role="gridcell"]')).toHaveLength(2);
-  expect(target.querySelector(".boards-space")).toBeNull();
+  expect(input.value).toBe("继续");
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe(input.value.length);
+  expect(prose()).toBe(editor);
+});
+
+it("笔记菜单和编辑器不再提供属性入口或属性面板", async () => {
+  await start();
+  expect([...target.querySelectorAll(".note-menu button")].some(button => button.textContent?.includes("笔记属性"))).toBe(false);
+  expect(target.querySelector('[aria-label="笔记属性"]')).toBeNull();
+  expect(target.querySelector(".properties")).toBeNull();
 });

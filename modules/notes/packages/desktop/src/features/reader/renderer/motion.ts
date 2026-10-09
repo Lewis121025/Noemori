@@ -1,17 +1,18 @@
 import type { Action } from "svelte/action";
+import { tick } from "svelte";
 
 /** 动效仅接收展示状态的稳定标识；禁止传入编辑器事务或逐帧指针坐标。 */
 type MotionValue = string | number | boolean | null;
 
 /** 内容角色决定视觉重量；标识只在对应展示内容真正变化时更新。 */
-type ContentMotion = {
-  key: MotionValue;
-  kind: "document" | "panel" | "preview" | "media";
-};
+type ContentMotion =
+  | { key: MotionValue; kind: "document" | "panel" | "preview" | "media" }
+  | { key: MotionValue; kind: "navigation"; direction: -1 | 1 };
 
 const contentProfiles = {
   document: { opacity: 0.97, offset: 0, token: "--motion-scene" },
-  panel: { opacity: 0.94, offset: 2, token: "--motion-enter" },
+  panel: { opacity: 0.9, offset: 4, token: "--motion-enter" },
+  navigation: { opacity: 0.9, offset: 8, token: "--motion-enter" },
   preview: { opacity: 0.9, offset: 3, token: "--motion-enter" },
   media: { opacity: 0.98, offset: 0, token: "--motion-scene" },
 };
@@ -33,9 +34,26 @@ function motionScope(host: HTMLElement) {
   };
   media?.addEventListener("change", preferenceChanged);
   return {
-    play(target: HTMLElement, kind: ContentMotion["kind"] | "keyboard"): void {
-      if (!view || media?.matches || !target.isConnected || typeof target.animate !== "function")
+    play(
+      target: HTMLElement,
+      kind: ContentMotion["kind"] | "keyboard",
+      direction: -1 | 1 = 1,
+    ): void {
+      if (
+        !view ||
+        media?.matches ||
+        !target.isConnected ||
+        target.closest("[hidden], [inert]") ||
+        typeof target.animate !== "function"
+      ) {
+        const previous = running.get(target);
+        if (previous) {
+          previous.onfinish = null;
+          previous.cancel();
+          running.delete(target);
+        }
         return;
+      }
       const profile = kind === "keyboard" ? null : contentProfiles[kind];
       const style = view.getComputedStyle(target);
       const duration = Number.parseFloat(style.getPropertyValue(profile?.token ?? "--motion-fast"));
@@ -64,7 +82,13 @@ function motionScope(host: HTMLElement) {
               {
                 opacity: previous ? Number(shown.opacity || 1) : opacity * profile.opacity,
                 ...(profile.offset > 0
-                  ? { translate: previous ? shown.translate : `0 ${profile.offset}px` }
+                  ? {
+                      translate: previous
+                        ? shown.translate
+                        : kind === "navigation"
+                          ? `${direction * profile.offset}px 0`
+                          : `0 ${profile.offset}px`,
+                    }
                   : {}),
               },
               {
@@ -131,12 +155,24 @@ export const interactionFeedback: Action<HTMLElement> = (node) => {
 export const revealOnChange: Action<HTMLElement, ContentMotion> = (node, value) => {
   const motion = motionScope(node);
   let current = value;
+  let pending = false;
+  let active = true;
   return {
     update(next) {
       if (Object.is(current.key, next.key) && current.kind === next.kind) return;
       current = next;
-      motion.play(node, next.kind);
+      if (pending) return;
+      pending = true;
+      // action 更新可能早于 hidden/inert 属性提交，先完成本轮 DOM 更新再判断可见性。
+      void tick().then(() => {
+        pending = false;
+        if (active)
+          motion.play(node, current.kind, current.kind === "navigation" ? current.direction : 1);
+      });
     },
-    destroy: motion.destroy,
+    destroy() {
+      active = false;
+      motion.destroy();
+    },
   };
 };

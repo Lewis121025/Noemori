@@ -208,7 +208,15 @@
 .app :is(.hover-preview, .suggest-popup) {
   animation: anchored-arrive var(--motion-menu) var(--motion-ease);
 }
-.app :is(.attachment-progress, .search-panel, .save-notice, .opening, .preview-message) {
+.app
+  :is(
+    .attachment-progress,
+    .search-panel,
+    .save-notice,
+    .opening,
+    .preview-message,
+    .message-region
+  ) {
   animation: panel-arrive var(--motion-enter) var(--motion-ease);
 }
 .app :is(.inline-rename, .feedback-button) {
@@ -219,8 +227,8 @@
 }
 @keyframes panel-arrive {
   from {
-    opacity: 0.94;
-    translate: 0 2px;
+    opacity: 0.9;
+    translate: 0 4px;
   }
   to {
     opacity: 1;

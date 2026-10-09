@@ -273,7 +273,7 @@ describe("EXP-CONTENT 真实冻结源的完整转换", () => {
       join(fixture.native.snapshot.outputDirectory, "documents/a.md"),
       "utf8",
     );
-    expect(text).toContain("<mark>需要高亮</mark>");
+    expect(text).toContain('<mark style="background-color: #f6e7a3">需要高亮</mark>');
     expect(text).not.toContain("==需要高亮==");
     expect(text).toContain("**普通粗体**");
   });

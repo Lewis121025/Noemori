@@ -17,10 +17,10 @@
   let error = $state("");
   const composition = createCompositionGuard();
 
-  /** 打开尚未创建的会话表单；目录选择、取消和改名都不会启动模型或写入会话。 */
-  export async function open(initialWorkspace = ""): Promise<void> {
+  /** 打开尚未创建的会话表单；目录关联可选，取消不会启动模型或写入会话。 */
+  export async function open(initialWorkspace: string | null = null): Promise<void> {
     title = "新对话";
-    workspace = initialWorkspace;
+    workspace = initialWorkspace ?? "";
     error = "";
     dialog.showModal();
     await tick();
@@ -29,6 +29,7 @@
   }
   async function pick(): Promise<void> {
     picking = true;
+    error = "";
     try {
       const selected = await api.pickWorkspace();
       if (selected) workspace = selected;
@@ -39,11 +40,11 @@
     }
   }
   async function create(): Promise<void> {
-    if (busy || picking || composition.active || !workspace || !title.trim()) return;
+    if (busy || picking || composition.active || !title.trim()) return;
     busy = true;
     error = "";
     try {
-      const item = await api.create(workspace, title.trim());
+      const item = await api.create(workspace || null, title.trim());
       dialog.close();
       onCreated(item);
     } catch (cause) {
@@ -71,7 +72,7 @@
   >
     <header>
       <h2 id="new-conversation-title">新建对话</h2>
-      <p>先确认工作目录，再开始任务。</p>
+      <p>可以直接创建，也可以关联文件夹。</p>
     </header>
     <label for="conversation-title">会话名称</label>
     <input
@@ -83,26 +84,34 @@
       autocomplete="off"
       disabled={busy}
     />
-    <label for="conversation-workspace">工作目录</label>
-    <select
-      class="reader-input"
-      id="conversation-workspace"
-      bind:value={workspace}
-      disabled={busy || picking}
-    >
-      <option value="">选择工作目录</option>
-      {#each [...new Set([...workspaces, ...(workspace ? [workspace] : [])])] as path (path)}<option
-          value={path}>{path}</option
-        >{/each}
-    </select>
+    {#if workspaces.length > 0}<label for="conversation-workspace">关联目录（可选）</label>
+      <select
+        class="reader-input"
+        id="conversation-workspace"
+        aria-label="关联目录"
+        bind:value={workspace}
+        disabled={busy || picking}
+      >
+        <option value="">不关联目录</option>
+        {#each [...new Set( [...workspaces, ...(workspace ? [workspace] : [])] )] as path (path)}<option
+            value={path}>{path}</option
+          >{/each}
+      </select>
+    {:else if workspace}<p class="linked-folder" title={workspace}>{workspace}</p>{/if}
     <button
       class="reader-button choose-folder"
       type="button"
       disabled={busy || picking}
       onclick={() => void pick()}
-      >{picking ? "正在选择…" : workspace ? "更换文件夹…" : "选择文件夹…"}</button
+      >{picking ? "正在选择…" : workspace ? "更换关联文件夹…" : "关联文件夹…"}</button
     >
-    <p class="hint">助手将在这个文件夹中工作。需要访问其他位置时，会请求你的确认。</p>
+    {#if workspace}<button
+        class="reader-button"
+        type="button"
+        disabled={busy || picking}
+        onclick={() => (workspace = "")}>取消目录关联</button
+      >
+      <p class="hint">关联后，助手可在这个文件夹中工作。</p>{/if}
     {#if error}<p role="alert" class="error">{error}</p>{/if}
     <footer>
       <button
@@ -116,8 +125,7 @@
       <button
         class="reader-button primary"
         type="submit"
-        disabled={busy || picking || !workspace || !title.trim()}
-        >{busy ? "正在创建…" : "创建对话"}</button
+        disabled={busy || picking || !title.trim()}>{busy ? "正在创建…" : "创建对话"}</button
       >
     </footer>
   </form>
@@ -159,6 +167,11 @@
   }
   .choose-folder {
     align-self: flex-start;
+  }
+  .linked-folder {
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+    margin: 0;
   }
   .error {
     color: var(--danger);

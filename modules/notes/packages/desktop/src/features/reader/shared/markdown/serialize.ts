@@ -1,4 +1,5 @@
 /** 编辑器映射回 Markdown 语法树，转义、围栏与嵌套缩进交给共用处理器。 */
+import { isTextColor, isHighlightColor } from "./text-style";
 import type {
   AlignType,
   BlockContent,
@@ -180,11 +181,13 @@ type MarkedNode = { node: PmNode; marks: readonly Mark[] };
 // 行内代码只能包纯文本，必须排在最内层；高亮包在其他格式外层，避免被加粗等切成两段。
 const markOrder: Record<string, number> = {
   link: 0,
-  highlight: 1,
-  strong: 2,
-  em: 3,
-  strike: 4,
-  code: 5,
+  text_color: 1,
+  highlight: 2,
+  underline: 3,
+  strong: 4,
+  em: 5,
+  strike: 6,
+  code: 7,
 };
 
 function inline(node: PmNode): PhrasingContent[] {
@@ -192,7 +195,7 @@ function inline(node: PmNode): PhrasingContent[] {
     node.content.content.map((child) => ({
       node: child,
       marks: [...child.marks].sort(
-        (left, right) => (markOrder[left.type.name] ?? 6) - (markOrder[right.type.name] ?? 6),
+        (left, right) => (markOrder[left.type.name] ?? 8) - (markOrder[right.type.name] ?? 8),
       ),
     })),
     0,
@@ -237,8 +240,20 @@ function wrapMark(mark: Mark, children: PhrasingContent[]): PhrasingContent {
       return { type: "emphasis", children };
     case "strike":
       return { type: "delete", children };
-    case "highlight":
-      return { type: "highlight", children };
+    case "underline":
+      return { type: "textStyle", style: { kind: "underline" }, children };
+    case "text_color": {
+      const color: unknown = mark.attrs["color"];
+      if (!isTextColor(color)) throw new Error("未知文字颜色");
+      return { type: "textStyle", style: { kind: "text_color", color }, children };
+    }
+    case "highlight": {
+      const color: unknown = mark.attrs["color"];
+      if (!isHighlightColor(color)) throw new Error("未知高亮颜色");
+      return color === "yellow"
+        ? { type: "highlight", children }
+        : { type: "textStyle", style: { kind: "highlight", color }, children };
+    }
     case "code": {
       const value = children
         .map((child) =>

@@ -58,6 +58,59 @@
   font-size: 0.88em;
   color: var(--muted);
 }
+
+/* 章节控制放在标题留白处；装饰不属于文档，复制和导出仍使用完整正文。 */
+.markdown-content .heading-foldable {
+  position: relative;
+}
+.markdown-content .heading-fold-toggle {
+  position: absolute;
+  inset-inline-start: -24px;
+  top: calc((1lh - 22px) / 2);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) ease,
+    background var(--motion-fast) ease;
+}
+.markdown-content .heading-fold-toggle svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.markdown-content .heading-fold-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.markdown-content .heading-foldable:hover > .heading-fold-toggle,
+.markdown-content .heading-fold-toggle:focus-visible,
+.markdown-content .heading-fold-toggle[aria-expanded="false"] {
+  opacity: 1;
+}
+.markdown-content .heading-fold-toggle:hover {
+  background: var(--selected);
+}
+.markdown-content .heading-fold-hidden {
+  display: none !important;
+}
+@media (hover: none) {
+  .markdown-content .heading-fold-toggle {
+    opacity: 1;
+  }
+}
 .markdown-content > :first-child,
 .markdown-content > [data-frontmatter] + * {
   margin-top: 0.5rem;
@@ -357,9 +410,18 @@
 
 .markdown-content mark {
   color: inherit;
-  background: light-dark(#fff3a3, #5c4a12);
+  background: var(--noemori-highlight, light-dark(#f6e7a3, #685827)) !important;
   border-radius: 0.15em;
   padding: 0 0.05em;
+}
+
+.markdown-content [data-text-color] {
+  color: var(--noemori-text) !important;
+}
+
+.markdown-content u {
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 0.06em;
 }
 
 .markdown-content :is(.comment-inline, .comment-block) {
@@ -559,20 +621,9 @@
   color: var(--fg);
 }
 
-.app:has(.reading-space:not([hidden]) .surface > .markdown-content) .component-button svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 1.5;
-}
-
 .app:has(.reading-space:not([hidden]) .surface > .markdown-content) .window-toolbar .reader-icon {
   width: 1rem;
   height: 1rem;
-}
-
-.app .quick-navigation .file[aria-selected="true"] {
-  background: var(--selected);
-  box-shadow: none;
 }
 
 .main:has(> .document-body > .surface > .markdown-content) {
@@ -642,10 +693,6 @@
   background: var(--scrim);
 }
 
-.app[data-reading-palette="green"] .quick-navigation .file[aria-selected="true"] {
-  box-shadow: inset 2px 0 var(--accent);
-}
-
 /* 白纸、浅苔色内容底与深绿代码块呼应外框；标题仍按感知明度区分六个层级。 */
 .app[data-reading-palette="green"] .main:has(> .document-body > .surface > .markdown-content) {
   --reading-heading: light-dark(#124e34, #8adaaf);
@@ -676,10 +723,10 @@
 /* 纸页边缘只通过绘制建立层次，不改变正文宽度、内边距和滚动布局。 */
 .main > .document-body:has(> .surface > .markdown-content) {
   background: var(--bg);
-  border-radius: 0.5rem;
+  border-radius: 0.25rem;
   box-shadow:
     0 0 0 0.75rem var(--bg),
-    0 6px 26px 14px var(--reading-shadow);
+    0 18px 40px 6px var(--reading-shadow);
 }
 
 /* 可变字体略增笔画厚度，避免浅纸面上的宋体细笔画在小字号下显得发虚。 */

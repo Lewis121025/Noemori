@@ -25,7 +25,6 @@ function markdownApi(snapshot: () => EditorSnapshot): MarkdownEditorApi {
     jumpToMention: () => {},
     jumpToSearch: () => {},
     jumpToHeading: () => false,
-    currentHeading: () => null,
     visibleHeading: () => null,
   };
 }

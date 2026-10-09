@@ -8,6 +8,7 @@
    */
   import { onMount, tick, type Snippet } from "svelte";
   import { revealOnChange } from "../motion";
+  import { sidebarMotion, type SidebarLayout } from "../sidebar-motion";
   import PaneToolbar from "./PaneToolbar.svelte";
   import DocumentSurface from "./DocumentSurface.svelte";
   import HoverPreview from "../preview/HoverPreview.svelte";
@@ -23,6 +24,7 @@
     pane,
     mediaIo,
     narrowInert,
+    sidebarLayout,
     hidden = false,
     onRename,
     registerControls,
@@ -41,6 +43,8 @@
     mediaIo: MediaIo;
     /** 窄屏且文件栏展开时正文 inert。 */
     narrowInert: boolean;
+    /** 左右侧栏的布局意图；本栏按自己的正文位置衔接。 */
+    sidebarLayout: SidebarLayout;
   } = $props();
 
   let scrollElement: HTMLElement | undefined = $state();
@@ -181,7 +185,7 @@
   }}
   onfocusin={() => workspace.activatePane(pane.id)}
 >
-  <div class="pane-content">
+  <div class="pane-content" use:sidebarMotion={sidebarLayout}>
     <div
       class="main"
       class:whiteboard-pane={doc.content?.kind === "whiteboard"}

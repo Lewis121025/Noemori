@@ -145,7 +145,7 @@ test("万项层级目录的虚拟滚动、键盘导航与隐藏恢复保持稳�
   try {
     const page = await app.firstWindow();
     await openLibrary(page);
-    const tree = page.getByRole("treegrid", { name: "文件系统" });
+    const tree = page.getByRole("treegrid", { name: "文件与对话" });
     await tree.waitFor();
     await tree.evaluate((node) => {
       node.scrollTop = node.scrollHeight / 2;
@@ -167,7 +167,7 @@ test("万项层级目录的虚拟滚动、键盘导航与隐藏恢复保持稳�
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     const beforeHide = await tree.evaluate((node) => node.scrollTop);
-    await page.getByRole("button", { name: "目录", exact: true }).click();
+    await sidebarComponent(page, "目录");
     await openLibrary(page);
     await page.evaluate(
       () =>
@@ -203,7 +203,9 @@ test("万项层级目录的虚拟滚动、键盘导航与隐藏恢复保持稳�
     const search = files.getByRole("searchbox");
     const row = (path: string) => tree.locator(`[data-path="${path}"]`);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await search.fill("笔记500");
+    await search.fill("path:笔记500");
+    await search.press("Enter");
+    await expect.poll(() => files.locator(".status").innerText()).toContain("共 11 篇");
     await search.press("ArrowDown");
     await page.keyboard.press(`${modifier}+ArrowDown`);
     expect(await row("笔记5000.md").evaluate((node) => node === document.activeElement)).toBe(true);
@@ -239,7 +241,7 @@ test("万项层级目录的虚拟滚动、键盘导航与隐藏恢复保持稳�
   }
 });
 
-test("文件网格支持目录导航、搜索、新建、重命名、移动、拖拽与窄屏预览", async (t) => {
+test("统一目录支持搜索、新建、重命名、移动、拖拽与窄屏打开", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "noemori-files-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -328,13 +330,9 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
       await row(path).click({ button: "right" });
       await page.getByRole("menuitem", { name: label, exact: true }).click();
     };
-    const locateCurrentFile = async () => {
-      await openLibrary(page);
-      await files.getByRole("button", { name: "定位当前文件", exact: true }).click();
-    };
     const createRootFolder = async () => {
       await openLibrary(page);
-      await files.getByRole("button", { name: "全部文件", exact: true }).click();
+      await files.getByRole("button", { name: "笔记库根目录", exact: true }).click();
       await newEntry(page, "文件夹");
     };
     const nameAndSubmit = async (name: string, label: string) => {
@@ -347,7 +345,7 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     page.setDefaultTimeout(6000);
     const browse = async (path: string) => {
       await openLibrary(page);
-      await files.getByRole("button", { name: "全部文件", exact: true }).click();
+      await files.getByRole("button", { name: "笔记库根目录", exact: true }).click();
       if (path) {
         await files.getByRole("searchbox").fill(path);
         await row(path).dblclick();
@@ -367,8 +365,8 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     expect(await row("项目/研究/笔记.md").isVisible()).toBe(true);
     expect(await row("归档/笔记.md").isVisible()).toBe(true);
     await search.press("Escape");
+    await row("项目/研究/笔记.md").click();
     expect(await row("项目/研究/笔记.md").count()).toBe(1);
-    await locateCurrentFile();
     expect(await row("项目/研究/笔记.md").evaluate((node) => document.activeElement === node)).toBe(
       true,
     );
@@ -388,17 +386,10 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
       node.scrollTop = 900;
     });
     await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(900);
-    for (const label of ["浏览标签", "书签"]) {
-      await files.getByRole("button", { name: label, exact: true }).click();
-      await grid.waitFor({ state: "detached" });
-      await files.getByRole("button", { name: label, exact: true }).click();
-      await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(900);
-    }
     await search.fill("研究/笔记");
     await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(0);
     await search.press("Escape");
     await expect.poll(() => grid.evaluate((node) => node.scrollTop)).toBe(900);
-    await locateCurrentFile();
 
     await browse("");
     await createRootFolder();
@@ -453,9 +444,10 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await row("资料/入门.md").dragTo(row("资料/计划"));
     await row("资料/计划/入门.md").waitFor();
     await row("资料/计划/入门.md").dragTo(
-      files.getByRole("button", { name: "全部文件", exact: true }),
+      files.getByRole("button", { name: "笔记库根目录", exact: true }),
     );
     await row("入门.md").waitFor();
+    await files.getByRole("button", { name: "目录操作", exact: true }).click();
     await files.getByRole("button", { name: "折叠全部目录", exact: true }).click();
     await row("入门.md").dragTo(row("收件箱"));
     await row("收件箱/入门.md").waitFor();
@@ -480,13 +472,9 @@ test("文件网格支持目录导航、搜索、新建、重命名、移动、�
     await page.setViewportSize({ width: 600, height: 700 });
     await openLibrary(page);
     await row("收件箱/完成.md").click();
-    await page.getByRole("button", { name: "预览", exact: true }).click();
-    await page.getByRole("button", { name: "返回列表", exact: true }).waitFor();
-    expect(await files.isVisible()).toBe(false);
-    await page.getByRole("button", { name: "返回列表", exact: true }).click();
-    expect(await row("收件箱/完成.md").evaluate((node) => node === document.activeElement)).toBe(
-      true,
-    );
+    await expect.poll(() => page.getByRole("complementary", { name: "文件栏", exact: true }).isVisible()).toBe(false);
+    await expect.poll(() => page.locator(".reading-space .ProseMirror").innerText()).toContain("创建后的内容");
+    await openLibrary(page);
     await row("收件箱/完成.md").press("F2");
     await renameFile.fill("../错误.md");
     expect(await files.getByRole("alert").isVisible()).toBe(true);
@@ -700,7 +688,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
       await page.screenshot({ path: join(screenshots, "files-multiple-selection.png") });
 
     // 活动文档保持打开，浏览目录和滚动位置独立保存。
-    await files.getByRole("button", { name: "全部文件", exact: true }).click();
+    await files.getByRole("button", { name: "笔记库根目录", exact: true }).click();
     await row("browse").dblclick();
     const tree = files.getByRole("treegrid");
     await tree.evaluate((node) => {
@@ -716,7 +704,7 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
         writeFile(join(vault, `browse/000-new-${i}.md`), "# 外部新增\n"),
       ),
     );
-    await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeCloseTo(before + 28, 0);
+    await expect.poll(() => tree.evaluate((node) => node.scrollTop)).toBeCloseTo(before + 30, 0);
     await expect.poll(async () => (await session()).fileTree.scroll.path).toBe(stored.scroll.path);
     const after = await tree.evaluate((node) => node.scrollTop);
     await rm(join(vault, "source"), { recursive: true });
@@ -730,8 +718,8 @@ test("批量移动整批预检，外部变更与重启保留目录现场", async
     await app.close();
     app = await launch();
     const reopened = await app.firstWindow();
-    await reopened.getByRole("region", { name: "文件系统", exact: true }).waitFor();
-    const restoredTree = reopened.getByRole("treegrid", { name: "文件系统" });
+    await reopened.getByRole("region", { name: "笔记库", exact: true }).waitFor();
+    const restoredTree = reopened.getByRole("treegrid", { name: "文件与对话" });
     await expect.poll(() => restoredTree.evaluate((node) => node.scrollTop)).toBeCloseTo(after, 0);
     expect(await reopened.locator('.library [data-path="target/a.md"]').count()).toBe(0);
     expect((await session()).fileTree.scroll.path).toBe(stored.scroll.path);

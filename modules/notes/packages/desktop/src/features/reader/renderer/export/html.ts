@@ -1,6 +1,7 @@
 import { DOMParser as PmParser, Fragment, type Node as PmNode } from "prosemirror-model";
 import DOMPurify from "dompurify";
 import { documentSchema } from "../../shared/markdown/schema";
+import { cssTextStyle } from "../../shared/markdown/text-style";
 
 /**
  * 将静态 HTML 映射到现有内容模型；图片先记录来源，不在解析阶段联网。
@@ -30,6 +31,7 @@ export function parseExportHtml(source: string): PmNode {
     "del",
     "strike",
     "mark",
+    "u",
     "code",
     "pre",
     "blockquote",
@@ -53,7 +55,7 @@ export function parseExportHtml(source: string): PmNode {
     if (!supported.has(element.localName))
       throw new Error(`HTML 元素不能可靠转换：${element.localName}`);
     if (
-      element.hasAttribute("style") ||
+      (element.hasAttribute("style") && !cssTextStyle(element.localName, element.getAttribute("style") ?? "")) ||
       element.hasAttribute("hidden") ||
       element.hasAttribute("srcset")
     )

@@ -8,10 +8,9 @@ import { parseMarkdown } from "@reader/shared/markdown/parse";
 import { documentSchema } from "@reader/shared/markdown/schema";
 import {
   bodySelection,
-  frontmatterEditKey,
+  frontmatterBlock,
   frontmatterPresentation,
-} from "@reader/renderer/editor/properties/frontmatter-presentation";
-import { frontmatterBlock } from "@reader/renderer/editor/properties/frontmatter-edit";
+} from "@reader/renderer/editor/frontmatter";
 import { searchMatches } from "@reader/renderer/editor/search/search-navigation";
 import { replaceSearch } from "@reader/renderer/editor/search/search-replace";
 
@@ -38,7 +37,7 @@ describe("属性与正文的呈现边界", () => {
     expect(state.doc.lastChild?.textContent).toBe("新的正文。");
   });
 
-  it("正文开头退格与越界事务不能删除属性，面板变更仍可撤销和重做", () => {
+  it("正文开头退格与越界事务不能更改属性，正文仍可撤销和重做", () => {
     let state = stateFor(`${metadata}\n\n# 标题\n`);
     const original = state.doc;
     baseKeymap.Backspace!(state, (tr) => {
@@ -52,14 +51,10 @@ describe("属性与正文的呈现边界", () => {
       null,
       documentSchema.text("---\nstatus: done\n---"),
     );
-    state = state.apply(
-      closeHistory(
-        state.tr
-          .replaceWith(0, original.firstChild!.nodeSize, changed)
-          .setMeta(frontmatterEditKey, true),
-      ),
-    );
-    expect(frontmatterBlock(state.doc)?.text).toContain("status: done");
+    state = state.apply(state.tr.replaceWith(0, original.firstChild!.nodeSize, changed));
+    expect(state.doc.eq(original)).toBe(true);
+    state = state.apply(closeHistory(state.tr.insertText("新的正文")));
+    expect(frontmatterBlock(state.doc)?.text).toBe(metadata);
     undo(state, (tr) => {
       state = state.apply(tr);
     });
@@ -67,7 +62,8 @@ describe("属性与正文的呈现边界", () => {
     redo(state, (tr) => {
       state = state.apply(tr);
     });
-    expect(frontmatterBlock(state.doc)?.text).toContain("status: done");
+    expect(frontmatterBlock(state.doc)?.text).toBe(metadata);
+    expect(state.doc.lastChild?.textContent).toContain("新的正文");
   });
 
   it("文内查找与替换只处理正文，属性中的同名文字不计入命中", () => {

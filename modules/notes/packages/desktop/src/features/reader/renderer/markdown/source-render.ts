@@ -331,7 +331,11 @@ class SourceRenderer {
         if (marker.length > 2) text = text.replace(/\n/g, `\n${" ".repeat(marker.length - 2)}`);
       }
     }
-    const prefix = sourceLinePrefix(this.source, at);
+    // 勾选框属于首段内容，不属于列表续行缩进；按其显示宽度缩进会把引用写成代码。
+    const prefix = sourceLinePrefix(this.source, at).replace(
+      /((?:[-*+]|\d+[.)])[ \t]+)\[[ xX]\][ \t]+$/,
+      "$1",
+    );
     // 嵌套块的范围从首行正文开始；后续行仍需携带引用标记或列表缩进。
     const continuation = /^[\s>*+\-\d.()[\]xX]*$/.test(prefix)
       ? prefix.replace(/[^\s>]/g, " ")

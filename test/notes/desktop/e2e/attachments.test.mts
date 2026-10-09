@@ -69,7 +69,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       await files.getByRole("treeitem", { name, exact: true }).click();
       await page.waitForFunction(
         (path) =>
-          document.querySelector(".quick-navigation .file.active")?.getAttribute("aria-label") ===
+          document.querySelector(".library .file[aria-current=page]")?.getAttribute("aria-label") ===
             path && !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
@@ -180,12 +180,12 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     await open("note.md");
     const embeddedImage = page.locator(".note-image");
     await embeddedImage.click();
-    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+    expect(await page.locator(".library .file[aria-current=page]").getAttribute("aria-label")).toBe(
       "note.md",
     );
     await embeddedImage.click({ modifiers: ["ControlOrMeta"] });
     await page.getByRole("region", { name: "图片画布" }).waitFor();
-    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+    expect(await page.locator(".library .file[aria-current=page]").getAttribute("aria-label")).toBe(
       "preview.svg",
     );
     await open("note.md");
@@ -197,7 +197,7 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     expect(await page.locator(".save-status").innerText()).toBe("已保存");
     await page.getByRole("button", { name: "打开附件", exact: true }).click();
     await ready(1);
-    expect(await page.locator(".quick-navigation .file.active").getAttribute("aria-label")).toBe(
+    expect(await page.locator(".library .file[aria-current=page]").getAttribute("aria-label")).toBe(
       "preview.pdf",
     );
 

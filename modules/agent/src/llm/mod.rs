@@ -12,7 +12,9 @@ mod transport;
 
 pub use auth::AwsSigV4;
 pub use aws_credential_types::Credentials as AwsCredentials;
-pub use config::{Authentication, ChatTokenLimit, ModelConfig, Protocol, RequestAuthenticator};
+pub use config::{
+    Authentication, ChatTokenLimit, ModelConfig, Protocol, ReasoningEffort, RequestAuthenticator,
+};
 pub use http::HttpModel;
 pub(crate) use model::checked_stream;
 pub use model::{Capabilities, Model, ModelStream, generate};

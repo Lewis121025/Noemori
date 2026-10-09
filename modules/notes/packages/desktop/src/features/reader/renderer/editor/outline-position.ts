@@ -1,6 +1,7 @@
 import type { Node as PmNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
 import { collectOutline } from "../../shared/markdown/outline";
+import { foldedHeadingRanges, type FoldedHeadingRange } from "./heading-fold";
 
 /**
  * 为一个不可变文档建立目录索引；滚动时复用条目，只读取定位所需的标题几何。
@@ -16,30 +17,41 @@ export function createOutlinePosition(doc: PmNode) {
     if (node.type.name === "heading") topLevel.add(pos);
   });
   const ordered = items.every((item) => topLevel.has(item.pos));
+  let hidden: readonly FoldedHeadingRange[] | undefined;
+  let visible = items;
   return {
     items,
     /** 当前视口上沿所属的标题；文首沿用第一项，空目录或没有滚动区时返回 null。 */
     visibleHeading(view: EditorView): number | null {
+      const ranges = foldedHeadingRanges(view.state);
+      if (ranges !== hidden) {
+        hidden = ranges;
+        let index = 0;
+        visible = items.filter((item) => {
+          while (ranges[index] && ranges[index]!.to <= item.pos) index++;
+          return !ranges[index] || item.pos < ranges[index]!.from;
+        });
+      }
       const viewport = view.dom.closest(".main")?.getBoundingClientRect();
-      if (!viewport || items.length === 0) return null;
+      if (!viewport || visible.length === 0) return null;
       const reached = (index: number): boolean => {
-        const node = view.nodeDOM(items[index]!.pos);
+        const node = view.nodeDOM(visible[index]!.pos);
         return node instanceof HTMLElement && node.getBoundingClientRect().top <= viewport.top + 24;
       };
       if (!ordered) {
-        let current = items[0]!.pos;
-        for (let index = 0; index < items.length; index += 1)
-          if (reached(index)) current = items[index]!.pos;
+        let current = visible[0]!.pos;
+        for (let index = 0; index < visible.length; index += 1)
+          if (reached(index)) current = visible[index]!.pos;
         return current;
       }
       let low = 0;
-      let high = items.length;
+      let high = visible.length;
       while (low < high) {
         const middle = low + Math.floor((high - low) / 2);
         if (reached(middle)) low = middle + 1;
         else high = middle;
       }
-      return items[Math.max(0, low - 1)]!.pos;
+      return visible[Math.max(0, low - 1)]!.pos;
     },
   };
 }

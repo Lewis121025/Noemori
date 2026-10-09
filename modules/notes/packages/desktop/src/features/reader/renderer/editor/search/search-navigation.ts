@@ -1,6 +1,6 @@
 import { TextSelection, type Command, type EditorState } from "prosemirror-state";
 import { getMatchHighlights } from "prosemirror-search";
-import { frontmatterBlock } from "../properties/frontmatter-edit";
+import { frontmatterBlock } from "../frontmatter";
 
 /** 一处实际高亮的文内命中；位置属于当前文档，跨格式的文字仍计为一处。 */
 export type SearchMatch = { readonly from: number; readonly to: number };

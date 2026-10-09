@@ -20,7 +20,7 @@ import { documentAccess } from "../../editor/read-only";
 import {
   frontmatterPresentation,
   frontmatterSourceView,
-} from "../../editor/properties/frontmatter-presentation";
+} from "../../editor/frontmatter";
 import { linkInteraction, type OpenContentLink } from "../../editor/links/link-interaction";
 import { mathNodeViews } from "./math-view";
 import { createHtmlNodeViews } from "./html-view";

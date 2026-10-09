@@ -399,3 +399,10 @@ it("目录修改时间使用毫秒，拒绝非法元数据而不是伪造日期"
   for (const modifiedAt of [-1, NaN, Infinity, "昨天"])
     expect(() => parseVaultEntries([{ ...entry, modifiedAt }])).toThrow();
 });
+
+it("统一工作台布局保留笔记库导航与右栏宽度，非法右栏参数不能静默丢弃", () => {
+  const layout = { filesCollapsed: false, leftWidth: 232, sidebarView: "files", rightWidth: 420 };
+  expect(parsePaneLayoutMessage(layout)).toEqual(layout);
+  for (const rightWidth of [319, 641, Infinity, "420", null])
+    expect(() => parsePaneLayoutMessage({ ...layout, rightWidth })).toThrow("文件栏布局参数无效");
+});

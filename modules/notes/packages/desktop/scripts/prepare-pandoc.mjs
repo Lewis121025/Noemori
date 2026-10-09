@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { unzipSync, zipSync } from "fflate";
+import { wordTextStyle } from "../src/features/reader/shared/markdown/word-text-style.ts";
 
 // 只在构建期下载固定摘要的上游产物；应用启动不访问网络，也不搜索系统 PATH。
 const directory = fileURLToPath(new URL("../.cache/pandoc-3.12/", import.meta.url));
@@ -52,14 +53,26 @@ try {
   await cp(join(directory, "source.tar.gz"), join(output, "pandoc-3.12-source.tar.gz"));
   const version = execFileSync(join(output, "pandoc"), ["--version"], { encoding: "utf8" });
   if (!version.startsWith("pandoc 3.12\n")) throw new Error("随包 Pandoc 版本不符");
-  // 模板来自同一锁定版本，只添加明确使用的原生高亮样式，不读取用户 Office 配置。
+  // Word 只能应用一个字符样式；有限配色组合同时承载前景、背景与代码字体。
   const reference = unzipSync(execFileSync(join(output, "pandoc"), ["--print-default-data-file=reference.docx"]));
   const styles = reference["word/styles.xml"];
   if (!styles) throw new Error("Pandoc 默认 Word 模板缺少样式");
   const xml = new TextDecoder("utf-8", { fatal: true }).decode(styles).trimEnd();
   const closing = "</w:styles>";
   if (!xml.endsWith(closing)) throw new Error("Pandoc 默认 Word 模板结构变化");
-  reference["word/styles.xml"] = new TextEncoder().encode(xml.slice(0, -closing.length) + '<w:style w:type="character" w:customStyle="1" w:styleId="NoemoriHighlight"><w:name w:val="NoemoriHighlight"/><w:basedOn w:val="DefaultParagraphFont"/><w:rPr><w:highlight w:val="yellow"/></w:rPr></w:style>' + closing);
+  const palette = JSON.parse(await readFile(new URL("../src/features/reader/shared/markdown/text-palette.json", import.meta.url), "utf8"));
+  const characterStyles = [];
+  for (const text of [null, ...Object.keys(palette.text)]) {
+    for (const highlight of [null, ...Object.keys(palette.highlight)]) {
+      if (text === null && highlight === null) continue;
+      for (const code of [false, true]) {
+        const name = wordTextStyle(text, highlight, code);
+        const properties = (text ? `<w:color w:val="${palette.text[text].light.slice(1)}"/>` : "") + (highlight ? `<w:shd w:val="clear" w:color="auto" w:fill="${palette.highlight[highlight].light.slice(1)}"/>` : "");
+        characterStyles.push(`<w:style w:type="character" w:customStyle="1" w:styleId="${name}"><w:name w:val="${name}"/><w:basedOn w:val="${code ? "VerbatimChar" : "DefaultParagraphFont"}"/><w:rPr>${properties}</w:rPr></w:style>`);
+      }
+    }
+  }
+  reference["word/styles.xml"] = new TextEncoder().encode(xml.slice(0, -closing.length) + characterStyles.join("") + closing);
   await writeFile(join(output, "reference.docx"), zipSync(reference, { mtime: new Date(2000, 0, 1) }));
   await writeFile(
     join(output, "manifest.json"),

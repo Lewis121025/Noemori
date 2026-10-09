@@ -1,5 +1,5 @@
 use super::*;
-use crate::ToolCall;
+use crate::{ToolCall, llm::ReasoningEffort};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
@@ -37,6 +37,12 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
         body["tools"]=json!(request.tools.iter().map(|tool|json!({"name":tool.name,"description":tool.description,"input_schema":tool.input_schema})).collect::<Vec<_>>());
     }
     common_options(&mut body, request, "max_tokens");
+    if let Some(effort) = &config.reasoning_effort {
+        match effort {
+            ReasoningEffort::None => body["thinking"] = json!({"type": "disabled"}),
+            _ => body["output_config"] = json!({"effort": effort}),
+        }
+    }
     if config.protocol == Protocol::VertexAnthropic {
         if let Some(object) = body.as_object_mut() {
             object.remove("model");

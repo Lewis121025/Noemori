@@ -51,7 +51,6 @@ describe("搜索导航时序", () => {
       jumpTo: () => {},
       jumpToMention: jump,
       jumpToHeading: jump,
-      currentHeading: () => null,
       visibleHeading: () => null,
     };
     const open = async () => {

@@ -24,7 +24,7 @@ pub struct BrowserConfig {
     pub browser: Option<PathBuf>,
     /// 已授权工作区的真实目录。
     pub workspace: PathBuf,
-    /// 测试或服务器可使用无头模式；桌面默认显示专用浏览器。
+    /// 是否使用无头模式；桌面使用独立预览画面，后台浏览器不抢系统焦点。
     pub headless: bool,
     /// 明确授权的内网来源，默认空列表；重定向与子资源同样受出口检查。
     pub private_origins: Vec<String>,
@@ -33,6 +33,9 @@ pub struct BrowserConfig {
 /// 页面观察与截图分离；原始图像不进入 JSON 工具正文。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserOutput {
+    /// 可信人工预览的输入凭据，不进入模型历史或普通操作回执。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_token: Option<String>,
     /// 批量操作各步骤的真实结算，不能仅凭顶层成功猜测全部步骤完成。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<BrowserStepReceipt>,
@@ -134,6 +137,9 @@ pub struct BrowserViewport {
 /// 下载记录不暴露临时目录；模型只能请求保存到授权工作区。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserDownload {
+    /// 发起下载的实际页面，早期历史可能没有此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
     /// 下载标识。
     pub id: String,
     /// 文件显示名。

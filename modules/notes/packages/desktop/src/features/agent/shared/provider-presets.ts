@@ -1,7 +1,7 @@
 import type { Authentication, Protocol } from "./api";
 import type { ProviderAddress } from "./providers";
 
-/** 预设仅提供已知的协议和连接方式；模型标识由服务商或用户提供。 */
+/** 预设提供协议和连接方式；模型由接口发现，未提供列表的部署允许手动填写。 */
 export type ProviderPreset = {
   id: string;
   name: string;

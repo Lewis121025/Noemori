@@ -100,6 +100,9 @@ fn user_content(message: &Message) -> Result<Value, Error> {
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     let mut body = json!({"model":config.model,"messages":messages(config,request)?,"stream":config.capabilities.streaming});
+    if let Some(effort) = &config.reasoning_effort {
+        body["reasoning_effort"] = json!(effort);
+    }
     if !request.tools.is_empty() {
         body["tools"] = json!(tool_definitions(request));
     }

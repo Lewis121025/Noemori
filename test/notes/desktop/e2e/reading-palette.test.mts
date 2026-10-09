@@ -35,11 +35,11 @@ async function documentMetrics(page: Page) {
 async function interfaceFrame(page: Page) {
   return page.locator(".app").evaluate((app) => {
     const toolbar = app.querySelector(".window-toolbar");
-    const sidebar = app.querySelector(".component-bar");
+    const sidebar = app.querySelector(".file-sidebar:not(.right)");
     if (!toolbar || !sidebar) throw new Error("缺少界面框架");
     return {
-      toolbar: getComputedStyle(toolbar).backgroundColor,
-      sidebar: getComputedStyle(sidebar).backgroundColor,
+      toolbar: getComputedStyle(toolbar, "::before").backgroundColor,
+      sidebar: getComputedStyle(sidebar, "::before").backgroundColor,
     };
   });
 }

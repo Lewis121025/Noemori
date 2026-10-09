@@ -16,6 +16,7 @@ import type { ExportResources } from "./resources";
 import { ExportDocumentStore, type ExportOrigin } from "./document-store";
 import { unpackExportSource, type ExportSourceParser } from "./source-parser";
 import { isMarkdownTable, portableTable, portableFootnoteAnchor } from "./portable-table";
+import { isHighlightColor, textStyleTags } from "../../shared/markdown/text-style";
 
 /** 原始节点位置用于跨文件、嵌入与块锚点映射，不写进原始 schema。 */
 type Origin = ExportOrigin;
@@ -604,12 +605,16 @@ export function portableMarkdown(document: PreparedExportDocument): string {
       current = current.copy(Fragment.fromArray(children));
     }
     const highlight = current.marks.find((mark) => mark.type.name === "highlight");
-    if (highlight && current.isInline)
+    if (highlight && current.isInline) {
+      const color: unknown = highlight.attrs["color"];
+      if (!isHighlightColor(color)) throw new Error("未知高亮颜色");
+      const [open, close] = textStyleTags({ kind: "highlight", color });
       return [
-        documentSchema.node("html_inline", { html: "<mark>" }),
+        documentSchema.node("html_inline", { html: open }),
         current.mark(current.marks.filter((mark) => mark !== highlight)),
-        documentSchema.node("html_inline", { html: "</mark>" }),
+        documentSchema.node("html_inline", { html: close }),
       ];
+    }
     const id = ids.get(position);
     if (!id) return [current];
     const html = `<a id="${id}"></a>`;

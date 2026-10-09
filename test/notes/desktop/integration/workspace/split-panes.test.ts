@@ -24,6 +24,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 let app: ReturnType<typeof mount>;
 let target: HTMLDivElement;
+let onClose: () => void;
 let onCommand: (command: AppCommand) => void;
 let disk: Map<string, Uint8Array>;
 let documents: SessionDocuments;
@@ -130,6 +131,7 @@ beforeEach(() => {
     }),
   });
   const appApi: AppApi = createAppApiMock({
+    subscribeFlushBeforeClose: callback => { onClose = callback; return () => {}; },
     subscribeCommand: (callback) => {
       onCommand = callback;
       return () => {};
@@ -228,16 +230,14 @@ describe("双栏编辑", () => {
     expect(prose(1)).toBe("other");
   });
 
-  it("进入资料管理被另一栏保存失败阻止时，说明文件名并允许定位该栏", async () => {
+  it("关闭前另一栏保存失败时说明文件名并允许定位该栏", async () => {
     await start();
     await chooseOtherPane("other.md");
     await openInPane(1, "other.md", "other");
     await editPane(0, "尚未保存");
     activatePane(1);
     vi.mocked(api.fileWrite).mockRejectedValue(new Error("磁盘暂不可写"));
-    [...target.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.getAttribute("aria-label") === "文件系统")!
-      .click();
+    onClose();
     await vi.waitFor(() => {
       flushSync();
       expect(target.querySelector(".message")?.textContent).toContain("note.md");
@@ -305,7 +305,7 @@ describe("双栏编辑", () => {
 
     expect(blocked(1)).toBe(false);
     expect(prose(1)).toBe("other");
-    const searchBox = target.querySelector<HTMLInputElement>('[aria-label="搜索文件和全文"]');
+    const searchBox = target.querySelector<HTMLInputElement>('[role="searchbox"][aria-label="搜索笔记库"]');
     expect(searchBox?.disabled).toBe(false);
     searchBox?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(api.searchQuery).not.toHaveBeenCalled();

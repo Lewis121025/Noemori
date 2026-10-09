@@ -1,5 +1,6 @@
 import type { Nodes, Paragraph, Root } from "mdast";
 import { markdownProcessor } from "./markdown-processor";
+import { restoreTextStyles } from "./text-style";
 
 type Line = { start: number; end: number; text: string };
 
@@ -20,6 +21,7 @@ export function parseMarkdownLayout(source: string): Root {
   }
   lines.push({ start, end: source.length, text: source.slice(start) });
   restoreLayout(tree, lines, lines.length + 1);
+  restoreTextStyles(tree);
   return tree;
 }
 
@@ -37,6 +39,12 @@ function restoreLayout(node: Nodes, lines: Line[], limit: number): void {
       position.end = child.position.end;
   });
   extendIndentedContainer(node, lines, limit);
+  // 列表自身没有空段；解析器计入范围的尾随空行应交给外层引用或文档恢复。
+  if (node.type === "list") {
+    const end = node.children.at(-1)?.position?.end;
+    if (end !== undefined) position.end = end;
+    return;
+  }
   if (
     node.type !== "root" &&
     node.type !== "blockquote" &&
@@ -80,8 +88,8 @@ function restoreEmptyTask(node: Nodes, lines: Line[]): void {
   if (text?.type !== "text" || range === undefined || range.start.line !== range.end.line) return;
   const raw = lines[range.start.line - 1]?.text.slice(range.start.column - 1, range.end.column - 1);
   // GFM 不识别没有正文的任务；只有未经转义的独立标记才是任务，字面文本不能被改义。
-  if (raw !== text.value || !/^\[[ xX]\]$/.test(raw)) return;
-  node.checked = raw !== "[ ]";
+  if (raw?.trimEnd() !== text.value || !/^\[[ xX]\]$/.test(text.value)) return;
+  node.checked = text.value !== "[ ]";
   paragraph.children = [];
   paragraph.position = { start: range.end, end: range.end };
 }

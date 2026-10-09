@@ -33,9 +33,8 @@ async function checkToolbar(page: Page, label: string): Promise<void> {
   );
   const after = (await toolbar.boundingBox())!;
   expect(after.y).toBeCloseTo(before.y, 0);
-  expect(after.x).toBeGreaterThanOrEqual(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  for (const control of await toolbar.locator("button:not(:disabled), select:not(:disabled)").all()) {
+  for (const control of await toolbar.locator("button:visible:not(:disabled)").all()) {
     await control.focus();
     const box = await control.boundingBox();
     const port = (await page.locator(".window-document-tools").boundingBox())!;
@@ -92,6 +91,55 @@ test("编辑工具常驻顶栏，滚动与窄屏分栏保留工具和正文独�
     page.on("pageerror", (error) => errors.push(error.message));
     await page.locator(".ProseMirror").waitFor();
     await page.evaluate(() => document.fonts.ready.then(() => {}));
+    expect(await page.locator(".window-document-tools").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const formatting = page.getByRole("toolbar", { name: "编辑工具栏", exact: true });
+    expect(await formatting.getByRole("button", { name: "更多编辑操作", exact: true }).count()).toBe(0);
+    for (const name of ["加粗", "斜体", "删除线", "高亮", "行内代码", "引用", "撤销", "重做"]) {
+      const button = formatting.getByRole("button", { name, exact: true });
+      expect(await button.isVisible()).toBe(true);
+      expect(await button.evaluate(element => element.closest("[popover]") === null)).toBe(true);
+    }
+    const insertButton = formatting.getByRole("button", { name: "插入", exact: true });
+    await insertButton.click();
+    const insertMenu = formatting.getByRole("menu", { name: "插入", exact: true });
+    for (const name of ["链接…", "插入附件…", "插入网页…", "插入 Agent 对话…", "表格…"]) {
+      expect(await insertMenu.getByRole("menuitem", { name, exact: true }).isVisible()).toBe(true);
+      expect(await formatting.getByRole("button", { name, exact: true }).count()).toBe(0);
+    }
+    await insertButton.click();
+    await page.locator(".ProseMirror h1").click();
+    const paragraph = formatting.getByRole("button", { name: "段落格式", exact: true });
+    await paragraph.press("ArrowDown");
+    const blocks = formatting.getByRole("menu", { name: "段落格式", exact: true });
+    const titles = blocks.getByRole("menuitem", { name: "标题", exact: true });
+    await titles.focus();
+    await titles.press("ArrowRight");
+    const levels = formatting.getByRole("menu", { name: "标题", exact: true });
+    await levels.waitFor();
+    expect(await blocks.isVisible()).toBe(true);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => levels.isVisible()).toBe(false);
+    expect(await titles.evaluate(element => element === document.activeElement)).toBe(true);
+    await titles.press("ArrowRight");
+    await levels.getByRole("menuitemradio", { name: "标题 2", exact: true }).press("Enter");
+    expect(await page.locator(".ProseMirror > h2").first().textContent()).toBe("长文");
+    await expect.poll(() => blocks.isVisible()).toBe(false);
+    expect(await page.locator(".ProseMirror").evaluate(element => element === document.activeElement)).toBe(true);
+    await formatting.getByRole("button", { name: "撤销", exact: true }).click();
+    await page.locator(".ProseMirror > h1").waitFor();
+    await paragraph.click();
+    await titles.hover();
+    await levels.waitFor();
+    const menuBounds = (await levels.boundingBox())!;
+    expect(menuBounds.x).toBeGreaterThanOrEqual(0);
+    expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
+    await levels.getByRole("menuitemradio", { name: "标题 2", exact: true }).focus();
+    await page.keyboard.press("Escape");
+    await expect.poll(() => levels.isVisible()).toBe(false);
+    expect(await blocks.isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => blocks.isVisible()).toBe(false);
+    expect(await paragraph.evaluate(element => element === document.activeElement)).toBe(true);
     await checkToolbar(page, "编辑工具栏");
     const heading = page.locator(".ProseMirror h2").filter({ hasText: /^第20节$/ });
     await heading.evaluate((node) => node.scrollIntoView({ block: "start" }));

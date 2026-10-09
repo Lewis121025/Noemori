@@ -85,7 +85,7 @@ beforeEach(async () => {
   edit = vi.fn();
   component = mount(LibraryBrowser, {
     target,
-    props: { workspace, readFile: api.fileRead, onEdit: edit, onOpen: vi.fn() },
+    props: { workspace, onEdit: edit, onOpen: vi.fn() },
   });
   flushSync();
   const menu = target.querySelector<HTMLDivElement>(".file-menu")!;
@@ -197,7 +197,7 @@ describe("文件树多选与批量整理", () => {
     entries = entries.filter((entry) => entry.path !== "c.md");
     await workspace.refreshList();
     await settle();
-    expect(document.activeElement).toBe(row("folder"));
+    expect(document.activeElement).toBe(row("a.md"));
   });
 
   it("目录清空后焦点回到搜索；编辑其他控件时目录变化不抢焦点", async () => {
@@ -242,7 +242,7 @@ describe("文件树多选与批量整理", () => {
     await settle();
     expect(selected()).toEqual(["folder"]);
     expect(row("folder/note.md")).not.toBeNull();
-    const root = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "全部文件")!;
+    const root = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "笔记库根目录")!;
     root.click();
     const search = target.querySelector<HTMLInputElement>('[role="searchbox"]')!;
     search.value = "folder";
@@ -321,7 +321,7 @@ describe("文件树多选与批量整理", () => {
     );
     component = mount(LibraryBrowser, {
       target,
-      props: { workspace, readFile: api.fileRead, onEdit: vi.fn(), onOpen: vi.fn() },
+      props: { workspace, onEdit: vi.fn(), onOpen: vi.fn() },
     });
     flushSync();
     expect(workspace.fileTree.state.expanded).toEqual([]);
@@ -331,7 +331,7 @@ describe("文件树多选与批量整理", () => {
     entries = [...entries, { path: "0.md", kind: "file" }];
     await workspace.refreshList();
     flushSync();
-    expect(tree.scrollTop).toBeCloseTo(before + 28);
+    expect(tree.scrollTop).toBeCloseTo(before + 30);
     expect(workspace.fileTree.state.scroll).toEqual({ path: "b.md", offset: 7 });
     entries = entries.filter((entry) => entry.path !== "c.md");
     await workspace.refreshList();
