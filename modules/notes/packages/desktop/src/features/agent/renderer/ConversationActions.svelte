@@ -80,13 +80,13 @@
     {:else}<p>「{item?.title}」</p>
       <p class="hint">
         {action === "archive"
-          ? "归档后可以在「已归档」中找回并继续。"
-          : "对话记录删除后无法恢复，工作目录中的文件会保留。"}
+          ? "归档后可恢复。"
+          : "删除后无法恢复，工作目录文件保留。"}
       </p>
       {#if item?.run?.status === "running" || item?.terminals.some((entry) => entry.process.status === "running")}<p
           class="hint"
         >
-          此对话正在执行的任务和终端将停止。
+          正在执行的任务和终端将停止。
         </p>{/if}
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -112,7 +112,10 @@
 
 <style>
   dialog {
+    --radius-panel: 16px;
     width: min(27rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
     color: var(--fg);
     background: var(--bg);
     border: 1px solid var(--border);
@@ -131,7 +134,9 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.15rem;
+    font-size: 18px;
+    font-weight: 550;
+    line-height: 1.5;
   }
   p {
     margin: 0;
@@ -140,7 +145,7 @@
   }
   label,
   .hint {
-    font-size: 0.82rem;
+    font-size: 13px;
     color: var(--muted);
   }
   .error {
@@ -151,10 +156,15 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 0.4rem;
+    margin-top: 0.75rem;
+  }
+  footer button {
+    min-height: 34px;
+    font-size: 12px;
   }
   .danger {
-    background: var(--danger);
-    color: var(--bg);
+    --accent: var(--danger);
+    --accent-fill: var(--danger);
+    --accent-text: light-dark(#ffffff, #391c15);
   }
 </style>

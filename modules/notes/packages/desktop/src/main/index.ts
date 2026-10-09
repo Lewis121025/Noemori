@@ -178,7 +178,10 @@ app.whenReady().then(async () => {
     }
   });
   core = client;
-  registerIpc(() => mainWindow, closeGate, client);
+  registerIpc(() => mainWindow, closeGate, client, async (source, root, path) => {
+    if (agent === null) throw new Error("Agent 尚未准备好，请重新打开应用以接入文章历史");
+    await agent.importArticleLibrary(source, root, path);
+  });
   registerAgentIpc(
     () => mainWindow,
     () => agent,

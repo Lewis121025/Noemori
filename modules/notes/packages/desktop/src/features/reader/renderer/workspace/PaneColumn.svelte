@@ -6,6 +6,7 @@
    * 哪一栏就成为活动栏（命令、侧栏打开与工具栏状态的目标）。
    * 本栏正在切换文件时只锁住自己，另一栏继续可编辑。
    */
+  import type { SelectedContent } from "../../shared/selected-content";
   import { onMount, tick, type Snippet } from "svelte";
   import { revealOnChange } from "../motion";
   import { sidebarMotion, type SidebarLayout } from "../sidebar-motion";
@@ -30,11 +31,13 @@
     registerControls,
     onShowTools,
     articleAgent,
+    onAddReference,
   }: {
     /** 将本栏操作与目录交给工作区，注销后不保留过期编辑器引用。 */
     registerControls: (id: number, controls: PaneControls | null) => void;
     onShowTools: () => void;
     articleAgent?: ArticleAgentActions;
+    onAddReference?: (reference: SelectedContent) => Promise<void>;
     hidden?: boolean;
     onRename: () => void;
     workspace: ReaderWorkspaceController;
@@ -49,6 +52,7 @@
 
   let scrollElement: HTMLElement | undefined = $state();
   let paneElement: HTMLElement;
+  let referenceHost = $state<HTMLElement>();
   let lastPosition: ReturnType<ReaderPane["navigation"]["capturePosition"]> = null;
   let positionEpoch = -1;
   let viewportWidth = 0;
@@ -196,12 +200,15 @@
     >
       <div
         use:revealOnChange={{ key: JSON.stringify([doc.path, pane.viewMode]), kind: "document" }}
+        bind:this={referenceHost}
         class:document-body={doc.content?.kind === "markdown"}
         class:whiteboard-body={doc.content?.kind === "whiteboard"}
       >
         {#if doc.path !== null}
           <DocumentSurface
             {...articleAgent ? { articleAgent } : {}}
+            {...onAddReference ? { onAddReference } : {}}
+            {...referenceHost ? { referenceHost } : {}}
             {workspace}
             {pane}
             {mediaIo}

@@ -17,6 +17,16 @@ fn image() -> noemori_agent::Image {
     use noemori_agent::{Image, ImageFormat};
     Image::new(ImageFormat::Png, STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhXcAAAAASUVORK5CYII=").unwrap()).unwrap()
 }
+
+#[test]
+fn image_history_uses_base64_and_restores_legacy_byte_arrays() {
+    let image = image();
+    let saved = serde_json::to_value(&image).unwrap();
+    assert_eq!(saved["data"], image.base64());
+    assert_eq!(serde_json::from_value::<noemori_agent::Image>(saved).unwrap(), image);
+    let legacy = json!({"format":"png","data":image.data()});
+    assert_eq!(serde_json::from_value::<noemori_agent::Image>(legacy).unwrap(), image);
+}
 fn input(part: ContentPart) -> ModelRequest {
     ModelRequest::new(vec![Message {
         role: Role::User,

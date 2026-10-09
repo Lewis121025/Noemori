@@ -1,3 +1,5 @@
+import { parseReferences, type AgentReference } from "../shared/references";
+import { parseAttachments, parseAttachmentIds, type AgentAttachment } from "../shared/attachments";
 import { mkdir, readdir, readFile, rename, rm, writeFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,6 +10,7 @@ import type { ArticleBinding } from "../shared/article";
 import { articleConversationHref } from "../shared/article";
 import { parseModelSelection, type ModelSelection } from "../shared/providers";
 import { isEntryPath } from "../../reader/shared/file-browser";
+import { newConversationQueue, parseConversationQueue, type ConversationQueue } from "../shared/queue";
 const conversationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 /** 对话独立持有下一轮选择与最后使用的模型；首次运行前没有原生检查点，不保存认证。 */
@@ -22,6 +25,12 @@ export type ConversationRecord = {
   /** 用户确认的目录关联，与原生快照里的运行目录独立。 */
   linkedWorkspace: string | null;
   draft: string;
+  /** 引用是草稿的一部分；没有引用时省略，不改变旧记录的纯文字含义。 */
+  draftReferences?: AgentReference[];
+  /** 不可变副本属于历史；草稿移除不删除已发送或排队的附件。 */
+  attachments?: AgentAttachment[];
+  draftAttachmentIds?: string[];
+  queue: ConversationQueue;
   model: string | null;
   modelSelection: ModelSelection | null;
   checkpoint: string | null;
@@ -57,21 +66,15 @@ function parseOrigin(value: unknown): ConversationOrigin | null {
 
 function parseConversation(value: unknown): ConversationRecord {
   const item = record(value);
-  if (
-    item["version"] !== 1 &&
-    item["version"] !== 2 &&
-    item["version"] !== 3 &&
-    item["version"] !== 4 &&
-    item["version"] !== 5 &&
-    item["version"] !== 6
-  )
+  const version = integer(item, "version");
+  if (version < 1 || version > 9)
     throw new Error("对话记录版本不支持");
   const id = text(item, "id");
   if (!conversationId.test(id)) throw new Error("对话标识无效");
   const storedSnapshot = record(item["snapshot"]);
   const snapshot = parseSnapshot(
     JSON.stringify(
-      item["version"] === 1
+      version === 1
         ? { ...storedSnapshot, turns: storedSnapshot["turns"] ?? [] }
         : storedSnapshot,
     ),
@@ -80,7 +83,7 @@ function parseConversation(value: unknown): ConversationRecord {
   const draft = text(item, "draft");
   if (draft.length > 128 * 1024) throw new Error("对话草稿超过限制");
   const checkpoint =
-    (item["version"] === 5 || item["version"] === 6) && item["checkpoint"] === null
+    version >= 5 && item["checkpoint"] === null
       ? null
       : text(item, "checkpoint");
   if (checkpoint !== null) {
@@ -100,10 +103,7 @@ function parseConversation(value: unknown): ConversationRecord {
   }
   let article: ArticleBinding | null = null;
   if (
-    (item["version"] === 3 ||
-      item["version"] === 4 ||
-      item["version"] === 5 ||
-      item["version"] === 6) &&
+    version >= 3 &&
     item["article"] !== null
   ) {
     const value = record(item["article"]);
@@ -116,7 +116,7 @@ function parseConversation(value: unknown): ConversationRecord {
   }
   // 旧连接和密文已经不参与恢复，只读取展示元数据，避免过期认证阻断历史迁移。
   const linkedWorkspace =
-    item["version"] === 6
+    version >= 6
       ? item["linkedWorkspace"] === null
         ? null
         : text(item, "linkedWorkspace")
@@ -125,25 +125,34 @@ function parseConversation(value: unknown): ConversationRecord {
     throw new Error("关联目录与运行目录不一致");
   if (article !== null && linkedWorkspace === null) throw new Error("文章关联必须包含所属笔记库");
   const model =
-    (item["version"] === 5 || item["version"] === 6) && item["model"] === null
+    version >= 5 && item["model"] === null
       ? null
-      : item["version"] === 4 || item["version"] === 5 || item["version"] === 6
+      : version >= 4
         ? text(item, "model")
         : text(record(record(item["model"])["settings"]), "model");
   if (model !== null && (!model.trim() || model.length > 8192)) throw new Error("历史模型标识无效");
+  const attachments = version >= 9 ? parseAttachments(item["attachments"]) : [];
+  const draftAttachmentIds = version >= 9 ? parseAttachmentIds(item["draftAttachmentIds"]) : [];
+  if (draftAttachmentIds.some((id) => !attachments.some((file) => file.id === id)))
+    throw new Error("附件草稿引用了不属于此对话的文件");
   return {
     id,
     title: conversationTitle(item["title"]),
     createdAt: integer(item, "createdAt"),
     updatedAt: integer(item, "updatedAt"),
     archived: boolean(item, "archived"),
-    origin: item["version"] === 1 ? null : parseOrigin(item["origin"]),
+    origin: version === 1 ? null : parseOrigin(item["origin"]),
     article,
     linkedWorkspace,
     draft,
+    ...(attachments.length ? { attachments } : {}),
+    ...(draftAttachmentIds.length ? { draftAttachmentIds } : {}),
+    ...(version >= 8 && item["draftReferences"] !== undefined
+      ? { draftReferences: parseReferences(item["draftReferences"]) } : {}),
+    queue: version >= 7 ? parseConversationQueue(item["queue"]) : newConversationQueue(),
     model,
     modelSelection:
-      (item["version"] === 5 || item["version"] === 6) && item["modelSelection"] !== null
+      version >= 5 && item["modelSelection"] !== null
         ? parseModelSelection(item["modelSelection"])
         : null,
     checkpoint,
@@ -190,7 +199,7 @@ export class ConversationStore {
         const item = parseConversation(value);
         if (name !== `${item.id}.json`) throw new Error("文件名与对话标识不一致");
         records.push(item);
-        if (value["version"] !== 5 && value["version"] !== 6) legacyIds.push(item.id);
+        if (value["version"] !== 5 && value["version"] !== 6 && value["version"] !== 7 && value["version"] !== 8 && value["version"] !== 9) legacyIds.push(item.id);
       } catch (error) {
         issues.push(`${name}：${error instanceof Error ? error.message : String(error)}`);
       }
@@ -207,7 +216,7 @@ export class ConversationStore {
   save(item: ConversationRecord): Promise<void> {
     const destination = this.path(item.id);
     const content = JSON.stringify({
-      version: 6,
+      version: 9,
       ...item,
     });
     return this.enqueue(async () => {

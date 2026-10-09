@@ -32,6 +32,7 @@ function conversation(): ConversationRecord {
     article: null,
     linkedWorkspace: "/workspace",
     draft: "继续整理",
+    queue: { messages: [], paused: false, error: null },
     model: "fixture",
     modelSelection: { providerId: "provider", modelId: "fixture", reasoningEffort: "high" },
     checkpoint: JSON.stringify({ version: 1, workspace: "/workspace", history: [] }),
@@ -59,6 +60,20 @@ function conversation(): ConversationRecord {
   };
 }
 
+it("引用与草稿共同恢复，损坏引用保留记录并报告，不把来源变成目录关联", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-reference-storage-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory);
+  const item = conversation();
+  item.draftReferences = [{ id: "quote", text: "原文😀", source: { root: "/other-vault", path: "资料/原文.md", offset: 0, sourceText: "原文😀" } }];
+  await store.save(item);
+  expect((await new ConversationStore(directory).load()).records).toEqual([item]);
+  const path = join(directory, "conversations", `${item.id}.json`);
+  await writeFile(path, JSON.stringify({ ...item, version: 8, draftReferences: [{ ...item.draftReferences[0], source: { root: "/other-vault", path: "../原文.md", offset: 0, sourceText: "原文😀" } }] }));
+  expect((await store.load()).issues[0]).toContain("引用来源无效");
+  expect(await readFile(path, "utf8")).toContain("原文😀");
+});
+
 it("独立保存记录、归档与草稿，会话只保存最后使用的模型标识", async (test) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-conversations-"));
   test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
@@ -73,6 +88,23 @@ it("独立保存记录、归档与草稿，会话只保存最后使用的模型�
     "private-session-key",
   );
   expect(loaded.records[0]!.model).toBe("fixture");
+});
+
+it("新版保存有界追问队列，旧版迁移为空队列，非法队列保留文件并报告错误", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-queue-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory), item = conversation();
+  item.queue = { messages: [{ id: "next", text: "待发送追问", state: "sending" }], paused: true, error: "待核对" };
+  await store.save(item);
+  expect((await store.load()).records[0]!.queue).toEqual(item.queue);
+  const path = join(directory, "conversations", `${item.id}.json`);
+  const legacy = { ...item, version: 6 };
+  Reflect.deleteProperty(legacy, "queue");
+  await writeFile(path, JSON.stringify(legacy));
+  expect((await store.load()).records[0]!.queue.messages).toEqual([]);
+  await writeFile(path, JSON.stringify({ ...item, version: 7, queue: { ...item.queue, messages: [...item.queue.messages, ...item.queue.messages] } }));
+  expect((await store.load()).issues[0]).toContain("追问标识重复");
+  expect(await readFile(path, "utf8")).toContain("待发送追问");
 });
 
 it("排队删除不会被之前的写入复活，损坏记录保留并明确上报", async (test) => {

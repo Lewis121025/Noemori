@@ -39,6 +39,7 @@ it("真实 HTTP 获取列表，拒绝跟随重定向，密钥不交给重定向�
     address: { type: "base_url", url: `${base}/v1` },
   });
   expect(discovered[0]?.id).toBe("real-model");
+  expect(discovered[0]?.vision).toBeNull();
   await expect(
     discoverModels({ ...connection, address: { type: "base_url", url: `${base}/redirect` } }),
   ).rejects.toThrow("无法连接");

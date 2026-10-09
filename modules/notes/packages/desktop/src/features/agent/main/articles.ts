@@ -1,5 +1,5 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { join, relative, isAbsolute } from "node:path";
+import { lstat, readFile, realpath, readdir } from "node:fs/promises";
+import { join, relative, isAbsolute, sep } from "node:path";
 import { ConversationStore, type ConversationRecord } from "./conversations";
 import { locateArticle, type ArticleLocation } from "../shared/article";
 import { isEntryPath } from "../../reader/shared/file-browser";
@@ -11,6 +11,39 @@ export class ArticleLibrary {
     null;
   /** 绑定本机认证目录，不读写笔记库。 */
   constructor(private readonly userData: string) {}
+
+  /**
+   * 枚举已导入的目录副本，归属从仓库内的实际层级计算，目录移动后仍能恢复文章历史。
+   * @param root 应用仓库的规范绝对路径。
+   * @returns 副本的原始目录身份及当前库内前缀；不访问原始目录。
+   * @throws 仓库不可读、导入元数据损坏或被符号链接置换时拒绝。
+   */
+  async imports(root: string): Promise<{ source: string; path: string }[]> {
+    const result: { source: string; path: string }[] = [];
+    const pending = [root];
+    while (pending.length) {
+      const directory = pending.pop()!;
+      if (directory !== root) {
+        const manifest = join(directory, ".noemori-library-source.json");
+        try {
+          const info = await lstat(manifest);
+          if (!info.isFile() || info.isSymbolicLink()) throw new Error("导入元数据不是普通文件");
+          const value: unknown = JSON.parse(await readFile(manifest, "utf8"));
+          if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1 || !("source" in value) || typeof value.source !== "string" || !isAbsolute(value.source))
+            throw new Error("导入元数据归属无效");
+          const path = relative(root, directory).split(sep).join("/");
+          if (!isEntryPath(path)) throw new Error("导入目录路径无效");
+          result.push({ source: value.source, path });
+          continue;
+        } catch (error) {
+          if (!missing(error)) throw error;
+        }
+      }
+      for (const entry of await readdir(directory, { withFileTypes: true }))
+        if (entry.isDirectory() && !entry.name.startsWith(".")) pending.push(join(directory, entry.name));
+    }
+    return result;
+  }
 
   /** 绑定真实库根，拒绝配套数据目录的符号链接；不创建空目录，路径错误抛出。 */
   async store(root: string): Promise<ConversationStore> {

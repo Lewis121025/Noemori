@@ -96,9 +96,12 @@ async function addProvider(
   await expect
     .poll(async () => page.getByRole("textbox", { name: "模型标识 1", exact: true }).inputValue())
     .toBe(model);
+  expect(await page.getByRole("combobox", { name: "图像能力 1", exact: true }).inputValue()).toBe("");
   await page.getByRole("checkbox", { name: "流式输出", exact: true }).uncheck();
   await page.getByRole("button", { name: "保存供应商", exact: true }).click();
   await page.getByText("供应商已保存。", { exact: true }).waitFor();
+  const catalog = await page.evaluate(() => window.noemori.agent.providersGet());
+  expect(catalog.providers.find((provider) => provider.name === name)?.models[0]?.vision).toBeNull();
 }
 
 test("真实窗口按对话切换模型与强度，当前轮不变、其他对话独立，重启后保留选择", async (context) => {
@@ -194,7 +197,7 @@ test("真实窗口按对话切换模型与强度，当前轮不变、其他对�
   await newConversation(page);
   const creation = page.getByRole("dialog", { name: "新建对话", exact: true });
   await creation.getByRole("textbox", { name: "会话名称", exact: true }).fill("历史会话");
-  await creation.getByRole("button", { name: "关联文件夹…", exact: true }).click();
+  await creation.getByRole("button", { name: /^(?:更换)?关联文件夹…$/ }).click();
   await creation.getByRole("button", { name: "创建对话", exact: true }).click();
   const conversation = (await page.evaluate(() => window.noemori.agent.list())).items[0]!;
   await page.getByRole("button", { name: "选择对话模型", exact: true }).click();

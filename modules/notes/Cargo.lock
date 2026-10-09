@@ -1668,6 +1668,7 @@ version = "0.1.0"
 dependencies = [
  "noemori-vault",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

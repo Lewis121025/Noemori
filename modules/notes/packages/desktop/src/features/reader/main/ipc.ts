@@ -39,12 +39,22 @@ export type ReaderClient = {
 };
 
 /**
+ * 文件副本提交后接入文章对话；回调属于公开装配边界，外壳不依赖开库内部实现。
+ * @param source 原始目录身份，只用于匹配历史，不修改原目录。
+ * @param root 副本所属的当前仓库根。
+ * @param path 副本在仓库内的相对路径。
+ * @returns 历史对话接入完成后兑现。
+ * @throws 接入失败时拒绝，由开库流程作为附属数据警告交付，不重复复制文件。
+ */
+export type DirectoryImported = (source: string, root: string, path: string) => Promise<void>;
+
+/**
  * 注册阅读器 IPC，文件操作与持久化均在 Rust 后台任务中执行。
  * @param getWindow 目录选择框的父窗口。
  * @param core 注入的阅读器命令客户端。
  * @throws IPC 重复注册或单次命令失败时由 Electron 传播错误。
  */
-export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: ReaderClient): void {
+export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: ReaderClient, onDirectoryImported?: DirectoryImported): void {
   registerWhiteboardIpc(getWindow);
   registerWebPageIpc(getWindow);
   registerExportIpc(getWindow, {
@@ -57,7 +67,7 @@ export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: R
   ipcMain.handle("reader.links.openExternal", (_event, url: unknown) =>
     shell.openExternal(externalUrl(url)),
   );
-  registerVaultOpenIpc(getWindow, core);
+  registerVaultOpenIpc(getWindow, core, onDirectoryImported);
 
   ipcMain.handle("reader.session.setDocuments", (_event, documents: unknown) =>
     core.call("readerSessionPatch", { documents: parseSessionDocumentsMessage(documents) }),

@@ -65,26 +65,28 @@ test("选中底色连续移动，按压可撤销，目录折叠可反向且正�
     }
     expect(await page.locator(".settings-window").getAttribute("open")).toBeNull();
 
-    const bar = page.locator(".component-scroll[data-selection-ready]");
+    const bar = page.locator(".panel-switch[data-selection-ready]");
     await bar.waitFor();
     const indicatorX = () =>
       bar.evaluate((element) => Number.parseFloat(getComputedStyle(element, "::before").translate));
     const origin = await indicatorX();
-    await bar.getByRole("button", { name: "搜索", exact: true }).click();
-    const samples = await bar.evaluate(async (element) => {
-      const values: number[] = [];
-      for (let frame = 0; frame < 6; frame += 1) {
-        await new Promise(requestAnimationFrame);
-        values.push(Number.parseFloat(getComputedStyle(element, "::before").translate));
-      }
-      return values;
-    });
+    const [samples] = await Promise.all([
+      bar.evaluate(async (element) => {
+        const values: number[] = [];
+        for (let frame = 0; frame < 8; frame += 1) {
+          await new Promise(requestAnimationFrame);
+          values.push(Number.parseFloat(getComputedStyle(element, "::before").translate));
+        }
+        return values;
+      }),
+      bar.getByRole("button", { name: "文章大纲", exact: true }).click(),
+    ]);
     expect(samples.at(-1)).toBeGreaterThan(samples[0]!);
-    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
+    await bar.getByRole("button", { name: "文件目录", exact: true }).click();
     await expect.poll(indicatorX).toBeCloseTo(origin, 1);
     await page.keyboard.press("ArrowRight");
     expect(await indicatorX()).toBeCloseTo(origin, 1);
-    await bar.getByRole("button", { name: "搜索", exact: true }).click();
+    await bar.getByRole("button", { name: "文章大纲", exact: true }).click();
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect
       .poll(() =>
@@ -100,8 +102,10 @@ test("选中底色连续移动，按压可撤销，目录折叠可反向且正�
       )
       .toBeCloseTo(0, 1);
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
+    await bar.getByRole("button", { name: "文件目录", exact: true }).click();
     await expect.poll(indicatorX).toBeCloseTo(origin, 1);
+    await bar.getByRole("button", { name: "文章大纲", exact: true }).click();
+    await page.waitForFunction(() => document.getAnimations().length === 0);
 
     const fold = page
       .locator(".outline-sidebar")

@@ -44,6 +44,12 @@ pub struct State {
     notify: Arc<dyn Fn(VaultEvent) + Send + Sync>,
 }
 
+/// 恢复资料库时的阅读现场与未提交草稿，在发布新库前一并准备。
+pub(crate) struct Restoration {
+    pub reader: Value,
+    pub drafts: Vec<(String, noemori_vault::Draft)>,
+}
+
 impl State {
     pub(crate) fn new(
         user_data: PathBuf,
@@ -104,6 +110,14 @@ impl State {
     /// # Errors
     /// 扫描、监听、会话提交失败均在切换前传播。
     pub fn open(&mut self, root: &str, restore: bool, control: &OperationControl) -> Result<Value> {
+        let restoration = restore.then(|| Restoration {
+            reader: self.sessions.load()["reader"].clone(),
+            drafts: Vec::new(),
+        });
+        self.open_restoring(root, control, restoration)
+    }
+
+    pub(crate) fn index_directory(&self, root: &str) -> PathBuf {
         let hash = Sha256::digest(root.as_bytes()).iter().take(8).fold(
             String::with_capacity(16),
             |mut text, byte| {
@@ -112,7 +126,11 @@ impl State {
                 text
             },
         );
-        let index = self.user_data.join("vaults").join(&hash[..16]);
+        self.user_data.join("vaults").join(&hash[..16])
+    }
+
+    pub(crate) fn open_restoring(&mut self, root: &str, control: &OperationControl, restoration: Option<Restoration>) -> Result<Value> {
+        let index = self.index_directory(root);
         let report = |item: noemori_vault::OpenProgress, verifying: bool| {
             let phase = if verifying {
                 "verifying"
@@ -135,6 +153,11 @@ impl State {
             Err(error) => return Err(error.into()),
         };
         vault.configure_search_model(&self.user_data.join("models"))?;
+        if let Some(restoration) = &restoration {
+            for (path, draft) in &restoration.drafts {
+                vault.restore_draft(path, draft)?;
+            }
+        }
         self.sequence += 1;
         let generation = self.sequence;
         let candidate = WatchedVault::new(
@@ -161,10 +184,11 @@ impl State {
             return Ok(Value::Null);
         }
         let mut result = json!({"root": root, "entries": entries});
-        if restore {
-            let session = self.sessions.load();
+        if let Some(mut restoration) = restoration {
+            restoration.reader["vaultRoot"] = json!(root);
+            self.sessions.patch_reader(&restoration.reader)?;
             for key in ["documents", "viewModes", "recentFiles", "fileTree"] {
-                result[key] = session["reader"][key].clone();
+                result[key] = restoration.reader[key].clone();
             }
         } else {
             self.sessions.patch_reader(&json!({"vaultRoot": root, "documents": crate::session::empty_documents(), "viewModes": {}, "recentFiles": [], "fileTree": null}))?;
@@ -187,6 +211,9 @@ impl State {
     pub fn create(&mut self, root: &str, control: &OperationControl) -> Result<Value> {
         if control.cancelled() {
             return Ok(Value::Null);
+        }
+        if self.active.as_ref().is_some_and(|active| active.vault.root() == std::path::Path::new(root)) {
+            return self.open(root, true, control);
         }
         std::fs::create_dir_all(root)?;
         self.open(root, false, control)

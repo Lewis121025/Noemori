@@ -19,7 +19,7 @@
     error: string;
     opened?: boolean;
     onopen: () => void;
-    onselect: (effort: ReasoningEffort) => Promise<boolean>;
+    onselect: (effort: ReasoningEffort | undefined) => Promise<boolean>;
   } = $props();
   let element: HTMLDivElement;
   let trigger: HTMLButtonElement;
@@ -53,7 +53,7 @@
   function showMenu(node: HTMLDivElement): void {
     node.showPopover();
   }
-  async function select(effort: ReasoningEffort): Promise<void> {
+  async function select(effort: ReasoningEffort | undefined): Promise<void> {
     if (saving) return;
     if (effort === value) {
       close(true);
@@ -69,6 +69,7 @@
     const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
     if (!keys.includes(event.key)) return;
     const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+    if (!items.length) return;
     event.preventDefault();
     const index = items.findIndex((item) => item === document.activeElement);
     const next =
@@ -99,19 +100,20 @@
 >
   <button
     class="reasoning-trigger"
+    class:unselected={value === undefined}
     type="button"
     aria-label="选择推理强度"
     aria-haspopup="menu"
     aria-expanded={opened}
     aria-controls={`${instanceId}-efforts`}
-    title={value === undefined ? "选择推理强度" : `推理强度：${value}`}
+    title={value === undefined ? "推理强度：服务商默认" : `推理强度：${value}`}
     style:anchor-name={anchorName}
     bind:this={trigger}
     disabled={saving}
     onclick={toggle}
   >
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 14h12M7 3v6M13 11v6" /></svg>
-    <span>{value ?? "推理强度"}</span>
+    <span>{value ?? "服务商默认"}</span>
     <svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
   </button>
   {#if opened}<div
@@ -125,6 +127,21 @@
       use:showMenu
     >
       <p class="menu-title">推理强度</p>
+      <button
+        class="effort-option"
+        type="button"
+        role="menuitemradio"
+        aria-checked={value === undefined}
+        disabled={saving}
+        onkeydown={navigate}
+        onclick={() => void select(undefined)}
+      >
+        <span>服务商默认</span>
+        <svg class:chosen={value === undefined} viewBox="0 0 20 20" aria-hidden="true"
+          ><path d="m4 10 4 4 8-8" /></svg
+        >
+      </button>
+      {#if !efforts.length}<p class="next-turn" role="status">服务商未提供可选推理档位</p>{/if}
       {#each efforts as effort (effort)}
         <button
           class="effort-option"
@@ -153,6 +170,9 @@
   button {
     font: inherit;
     cursor: pointer;
+    transition:
+      background var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease);
   }
   button:disabled {
     opacity: 0.5;
@@ -172,16 +192,20 @@
     display: flex;
     align-items: center;
     gap: 5px;
+    min-width: 28px;
     min-height: 28px;
     padding: 4px 6px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--muted);
     font-size: 11px;
     white-space: nowrap;
   }
-  .reasoning-trigger:hover,
+  .reasoning-trigger:hover:not(:disabled) {
+    background: var(--control-hover, var(--selected));
+    color: var(--fg);
+  }
   .reasoning-trigger[aria-expanded="true"] {
     background: var(--selected);
     color: var(--fg);
@@ -189,9 +213,19 @@
   .reasoning-trigger:focus-visible {
     outline-offset: -1px;
   }
+  .reasoning-trigger.unselected > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
   .chevron {
     width: 12px;
     height: 12px;
+  }
+  .reasoning-trigger.unselected .chevron {
+    display: none;
   }
   .reasoning-picker .reasoning-menu {
     --menu-width: min(208px, calc(100vw - 24px));
@@ -206,15 +240,15 @@
     max-height: min(360px, calc(100dvh - 24px));
     overflow: auto;
     box-sizing: border-box;
-    padding: 6px;
+    padding: 8px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--fg);
     box-shadow: var(--shadow-popover);
   }
   .menu-title {
-    margin: 2px 8px 6px;
+    margin: 4px 8px 8px;
     font-size: 11px;
     color: var(--muted);
   }
@@ -223,16 +257,18 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    min-height: 30px;
-    padding: 5px 8px;
+    min-height: 34px;
+    padding: 6px 8px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--fg);
     text-align: left;
     font-size: 12px;
   }
-  .effort-option:hover,
+  .effort-option:hover:not(:disabled) {
+    background: var(--control-hover, var(--selected));
+  }
   .effort-option[aria-checked="true"] {
     background: var(--selected);
   }
@@ -255,5 +291,10 @@
   }
   .error {
     color: var(--danger);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button {
+      transition: none;
+    }
   }
 </style>

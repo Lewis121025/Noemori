@@ -109,7 +109,7 @@ test("导航固定在侧栏顶部，滚动与键盘可达，面板切换保留�
     await outlineButton.focus();
     await page.keyboard.press("Enter");
     expect(await outlineButton.getAttribute("aria-pressed")).toBe("true");
-    expect(await outlineButton.evaluate(node => node === document.activeElement)).toBe(true);
+    expect(await outlineButton.evaluate((node) => node === document.activeElement)).toBe(true);
     await filesButton.focus();
     await page.keyboard.press("Space");
     expect(await filesButton.getAttribute("aria-pressed")).toBe("true");
@@ -135,9 +135,7 @@ test("导航固定在侧栏顶部，滚动与键盘可达，面板切换保留�
     );
     await sidebarComponent(page, "目录");
     await sidebarComponent(page, "文件系统");
-    expect(
-      await outlineButton.getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(await outlineButton.getAttribute("aria-pressed")).toBe("false");
     await sidebarComponent(page, "目录");
     expect(await page.getByRole("button", { name: /图谱/u }).count()).toBe(0);
     await page.getByRole("button", { name: "双链", exact: true }).click();

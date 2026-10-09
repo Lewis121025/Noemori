@@ -35,7 +35,9 @@
   --radius-control: 8px;
   --radius-panel: 12px;
   --motion-fast: 140ms;
-  --motion-press: 70ms;
+  --motion-hover-in: 60ms;
+  --motion-hover-out: 180ms;
+  --motion-press: 45ms;
   --motion-select: 200ms;
   --motion-enter: 220ms;
   --motion-exit: 130ms;

@@ -2,7 +2,7 @@
 .app[data-reading-palette] {
   --stage-floor: light-dark(#dfe2df, #171b18);
   --stage-light: light-dark(#fafbf8, #2d332e);
-  --stage-line: light-dark(rgb(40 54 44 / 4%), rgb(220 234 220 / 4%));
+  --stage-line: light-dark(rgb(40 54 44 / 2%), rgb(220 234 220 / 2%));
   --glass-solid: light-dark(#f0f2ed, #252b26);
   --glass-fill: light-dark(rgb(245 247 242 / 88%), rgb(30 36 31 / 92%));
   --glass-overlay: light-dark(rgb(252 253 250 / 97%), rgb(36 42 37 / 97%));
@@ -19,10 +19,11 @@
   --glass-rim: inset 0 1px 0 var(--glass-highlight);
   --glass-shadow: 0 12px 32px light-dark(rgb(22 40 28 / 5%), rgb(0 0 0 / 24%));
   --glass-overlay-shadow:
-    0 1px 0 var(--glass-highlight), 0 20px 50px light-dark(rgb(18 26 22 / 16%), rgb(0 0 0 / 42%));
+    0 2px 8px light-dark(rgb(18 26 22 / 7%), rgb(0 0 0 / 24%)),
+    0 24px 64px light-dark(rgb(18 26 22 / 12%), rgb(0 0 0 / 36%));
   --glass-filter: blur(16px) saturate(100%);
-  --radius-control: 4px;
-  --radius-panel: 6px;
+  --radius-control: 6px;
+  --radius-panel: 10px;
   font-family: "Inter Variable", var(--font-interface);
   background:
     linear-gradient(180deg, transparent 40%, var(--stage-floor)),
@@ -36,7 +37,7 @@
 .app[data-reading-palette="green"] {
   --stage-floor: light-dark(#dce3d8, #142019);
   --stage-light: light-dark(#f2f6e9, #2a3a2d);
-  --stage-line: light-dark(rgb(43 71 47 / 4%), rgb(206 230 200 / 4%));
+  --stage-line: light-dark(rgb(43 71 47 / 2%), rgb(206 230 200 / 2%));
 }
 .app[data-reading-palette="green"] :is(.file-sidebar, .window-toolbar, .settings-window nav) {
   --glass-solid: light-dark(#24483b, #18392c);
@@ -109,55 +110,27 @@
 }
 
 /* 输入与选中态采用小面积高光，不为目录的每一行单独建立模糊层。 */
-.app[data-reading-palette] :is(.library .search, .agent-panel .composer, .reader-input) {
+.app[data-reading-palette] .reader-input {
   background: var(--glass-sheen), var(--glass-control);
   border-color: var(--glass-edge);
   box-shadow:
     var(--glass-rim),
     0 2px 8px light-dark(rgb(35 51 68 / 4%), rgb(0 0 0 / 12%));
 }
-.app[data-reading-palette] .library .search {
-  background: color-mix(in srgb, var(--fg) 4%, var(--sidebar));
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: none;
-}
-.app[data-reading-palette] .agent-panel .composer {
-  border-radius: var(--radius-panel);
-}
-.app[data-reading-palette] :is(.library .search, .agent-panel .composer):focus-within {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--glass-edge));
-  outline: 2px solid color-mix(in srgb, var(--accent) 16%, transparent);
-  outline-offset: 1px;
-}
-/* 整个输入容器承担焦点高光，内部文本控件保留清晰的单层边缘。 */
-.app[data-reading-palette]
-  :is(.library .search input, .agent-panel .composer textarea):focus-visible {
-  outline: none;
-  box-shadow: none;
-}
 .app[data-reading-palette] .window-toolbar .reader-button {
   border-radius: var(--radius-control);
+}
+/* 顶栏的焦点边界画在控件内，横向滚动时仍保留完整轮廓。 */
+.app[data-reading-palette] .window-toolbar button:focus-visible {
+  outline-offset: -3px;
 }
 .app[data-reading-palette] .window-toolbar .reader-button[aria-pressed="true"] {
   background: var(--glass-control);
   box-shadow: inset 0 0 0 1px var(--glass-edge);
 }
-.app[data-reading-palette] .reader-button.primary {
+.app[data-reading-palette] :where(.reader-button.primary) {
   background: var(--accent-fill);
   box-shadow: inset 0 0 0 1px var(--glass-edge);
-}
-.app[data-reading-palette] .file-row.active {
-  background: var(--glass-control);
-  box-shadow: inset 0 1px 0 var(--glass-edge);
-}
-.app[data-reading-palette] .file-row.selected:not(.folder) {
-  box-shadow:
-    inset 2px 0 var(--accent),
-    inset 0 1px 0 var(--glass-edge);
-}
-.app[data-reading-palette] .agent-panel .message-region {
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
 }
 
 /* 背景滤镜仅放在框架和顶层浮层，滚动长文时不叠加多层滤镜。 */
@@ -192,7 +165,7 @@
     border-color: var(--border);
     box-shadow: inset 0 0 0 1px var(--border);
   }
-  .app[data-reading-palette] :is(.library .search, .agent-panel .composer, .reader-input) {
+  .app[data-reading-palette] :is(.library .search, .reader-input) {
     background: var(--surface);
     border-color: var(--muted);
     box-shadow: none;
@@ -203,9 +176,6 @@
   }
   .app[data-reading-palette] dialog::backdrop {
     backdrop-filter: none;
-  }
-  .app[data-reading-palette] .agent-panel .message-region {
-    background: var(--bg);
   }
 }
 @media (forced-colors: active) {

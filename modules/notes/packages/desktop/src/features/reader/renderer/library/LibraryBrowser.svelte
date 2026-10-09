@@ -22,6 +22,7 @@
   import FileBatchDialog from "./FileBatchDialog.svelte";
   import { selectFileRows } from "./file-selection";
   import { type FileTreePosition } from "../../shared/file-browser";
+  import { LIBRARY_ENTRIES_MIME } from "../../shared/file-drag";
   import type { EntryBatchResult } from "../../shared/entry-batch";
   import type { EntryDialogAction } from "./FileEntryDialog.svelte";
   import FileMenu, { type FileMenuAction } from "./FileMenu.svelte";
@@ -47,7 +48,7 @@
     workspace: ReaderWorkspaceController;
     conversations?: WorkspaceConversations;
     onEdit: (
-      action: EntryDialogAction | "file" | "directory",
+      action: EntryDialogAction | "file" | "directory" | "whiteboard" | "import",
       entry: VaultEntry | null,
       parent: string,
     ) => void;
@@ -374,6 +375,11 @@
       if (entry !== null) void beginRename(entry);
       return;
     }
+    if (kind === "file" || kind === "whiteboard" || kind === "directory" || kind === "import") {
+      const parent = entry?.kind === "directory" ? entry.path : currentDirectory;
+      onEdit(kind, null, parent);
+      return;
+    }
     const parent = entry === null ? currentDirectory : parentDirectory(entry.path);
     onEdit(kind, entry, parent);
   }
@@ -472,7 +478,7 @@
   /** 清空搜索，恢复之前的目录选择与滚动位置。 */
   function clearSearch(): void {
     if (workspace.isComposing) return;
-    browser.setQuery("");
+    updateQuery("");
     searchInput.focus();
   }
   function searchKeydown(event: KeyboardEvent): void {
@@ -646,7 +652,12 @@
 
   function inputQuery(event: Event & { currentTarget: HTMLInputElement }): void {
     if (event instanceof InputEvent && event.isComposing) return;
-    browser.setQuery(event.currentTarget.value);
+    updateQuery(event.currentTarget.value);
+  }
+  // 先向当前场景提交位置，再让查询接管目录；不能依赖异步 scroll 事件的交付顺序。
+  function updateQuery(value: string): void {
+    treeViewport?.rememberPosition();
+    browser.setQuery(value);
     filteredScroll = null;
   }
   async function openConversation(id: string): Promise<void> {
@@ -812,23 +823,26 @@
 
 <nav class="list" aria-label="文件列表" {hidden}>
   <div class="view-options">
-    <button
+    <div
       class="root-label"
-      type="button"
-      aria-label="笔记库根目录"
-      title={workspace.vaultRoot ?? "笔记库"}
+      role="presentation"
+      title={workspace.vaultRoot ?? "Noemori 仓库"}
       class:drop-target={dropTarget === ""}
-      onclick={() => enterDirectory("")}
       ondragover={(event) => allowDrop(event, "")}
       ondrop={(event) => void drop(event, "")}
-      ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 5h6l2 2h8v10H2z" /></svg>
-      <span>{workspace.vaultRoot?.split("/").at(-1) ?? "笔记库"}</span></button
     >
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3zM3 8h14M7 8v8" /></svg>
+      <h2>Noemori</h2>
+    </div>
     <LibraryOptions
       expanded={searching ? searchClosed.size === 0 : expanded.size > 0}
       disabled={busy}
       archived={showArchived}
       onExpand={collapseAll}
+      onAction={(action) => {
+        if (action === "reveal") void workspace.revealVault();
+        else onEdit(action, null, "");
+      }}
       {...conversations
         ? {
             onArchive: () =>
@@ -922,12 +936,23 @@
         }}
         <div
           class="file-row"
+          data-hover-target
+          role="presentation"
           class:folder={row.node.kind === "directory"}
           class:active={row.node.kind === "file" && row.node.path === active}
           class:nested={item.depth > 0}
           class:selected={selected.has(row.node.path)}
           class:dragging={dragging?.path === row.node.path}
           class:drop-target={dropTarget === row.node.path}
+          ondragover={(event) => {
+            if (row.node.kind === "directory") allowDrop(event, row.node.path);
+          }}
+          ondragleave={() => {
+            dropTarget = null;
+          }}
+          ondrop={(event) => {
+            if (row.node.kind === "directory") void drop(event, row.node.path);
+          }}
         >
           {@render disclosure(item)}
           {#if renaming?.path === row.node.path}
@@ -984,21 +1009,17 @@
                   "text/plain",
                   draggedEntries.map((entry) => entry.path).join("\n"),
                 );
-                if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+                const root = workspace.vaultRoot;
+                if (root && event.dataTransfer) event.dataTransfer.setData(
+                  LIBRARY_ENTRIES_MIME,
+                  JSON.stringify({ root, entries: draggedEntries.map(({ path, kind }) => ({ path, kind })) }),
+                );
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
               }}
               ondragend={() => {
                 dragging = null;
                 draggedEntries = [];
                 dropTarget = null;
-              }}
-              ondragover={(event) => {
-                if (row.node.kind === "directory") allowDrop(event, row.node.path);
-              }}
-              ondragleave={() => {
-                dropTarget = null;
-              }}
-              ondrop={(event) => {
-                if (row.node.kind === "directory") void drop(event, row.node.path);
               }}
             >
               {@render entryIcon(row)}
@@ -1025,10 +1046,25 @@
               >
             {/if}
           {/if}
+          {#if row.node.kind === "directory" && renaming?.path !== row.node.path}
+            <button
+              type="button"
+              class="row-actions"
+              tabindex="-1"
+              aria-label={`${row.node.name} 的操作`}
+              title="文件夹操作"
+              onclick={(event) => context(event, row.node)}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true"
+                ><path d="M4 10h.01M10 10h.01M16 10h.01" /></svg
+              >
+            </button>
+          {/if}
         </div>
       {:else}
         <div
           class="file-row conversation-row"
+          data-hover-target
           class:nested={item.depth > 0}
           class:current-conversation={item.conversation?.id === conversations?.selected}
           class:archived={item.conversation?.archived}
@@ -1056,12 +1092,22 @@
             }}
             onkeydown={(event) => conversationKeydown(event, item)}
           >
-            <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
-              {#if item.conversation?.origin}<path d="M6 3v10a3 3 0 0 0 6 0V7M4 3h4M10 7h4M4 17h4" />
-              {:else if item.kind === "conversation"}<path d="M3 3.5h14v10H8l-5 3zM6 7h8M6 10h5" />
-              {:else if item.kind === "source"}<path d="M5 3h7l3 3v11H5zM8 10h4M8 13h4" />
-              {:else}<path d="M2 5h6l2 2h8v10H2z" />{/if}
-            </svg>
+            <span class="conversation-icon">
+              <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
+                {#if item.conversation?.origin}<path
+                    d="M6 3v10a3 3 0 0 0 6 0V7M4 3h4M10 7h4M4 17h4"
+                  />
+                {:else if item.kind === "conversation"}<path
+                    d="M3 3.5h14v10H8l-5 3zM6 7h8M6 10h5"
+                  />
+                {:else if item.kind === "source"}<path d="M5 3h7l3 3v11H5zM8 10h4M8 13h4" />
+                {:else}<path d="M2 5h6l2 2h8v10H2z" />{/if}
+              </svg>
+              {#if item.conversation?.id === conversations?.selected}<span
+                  class="conversation-active"
+                  aria-hidden="true"
+                ></span>{/if}
+            </span>
             <span class="name"
               ><HighlightedText
                 text={item.kind === "workspace"
@@ -1074,11 +1120,10 @@
             {#if item.conversation?.status === "running"}<span
                 class="run-indicator"
                 aria-label="运行中"
-                title="运行中"
-              ></span>{/if}
+                title="运行中"><i></i><i></i><i></i></span
+              >{/if}
             {#if item.conversation?.archived}<span class="row-meta">已归档</span>{/if}
           </button>
-          {#if item.conversation?.id === conversations?.selected}<span class="current-status">对话中</span>{/if}
         </div>
       {/if}
     {/snippet}
@@ -1203,11 +1248,72 @@
     flex-shrink: 0;
   }
   .run-indicator {
-    width: 5px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+  .run-indicator i {
+    width: 2px;
+    height: 7px;
+    border-radius: 1px;
+    background: var(--accent);
+    animation: conversation-running 1.2s ease-in-out infinite;
+  }
+  .run-indicator i:nth-child(2) {
+    animation-delay: -0.4s;
+    height: 11px;
+  }
+  .run-indicator i:nth-child(3) {
+    animation-delay: -0.8s;
     height: 5px;
+  }
+  .conversation-icon {
+    position: relative;
+    display: flex;
+    flex-shrink: 0;
+  }
+  .conversation-active {
+    position: absolute;
+    top: -1px;
+    right: -2px;
+    width: 4px;
+    height: 4px;
     border-radius: 50%;
     background: var(--accent);
-    flex-shrink: 0;
+    box-shadow: 0 0 0 2px var(--sidebar);
+    animation: conversation-open 320ms var(--motion-ease-spatial);
+  }
+  .current-conversation .file .entry-icon {
+    color: var(--accent);
+  }
+  @keyframes conversation-open {
+    from {
+      opacity: 0;
+      scale: 0.4;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
+  @keyframes conversation-running {
+    0%,
+    100% {
+      scale: 1 0.4;
+      opacity: 0.5;
+    }
+    50% {
+      scale: 1 1;
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .run-indicator i,
+    .conversation-active {
+      animation: none;
+    }
   }
   .archived {
     color: var(--muted);
@@ -1224,21 +1330,21 @@
   .search-wrap {
     display: flex;
     align-items: center;
-    padding: 2px 10px 9px;
+    padding: 0 12px 10px;
     min-height: 41px;
     box-sizing: border-box;
   }
   .search {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     width: 100%;
     min-height: 31px;
     padding: 0 8px;
     box-sizing: border-box;
-    background: color-mix(in srgb, var(--fg) 4%, var(--sidebar));
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+    border-radius: 7px;
     color: var(--muted);
   }
   input {
@@ -1253,11 +1359,12 @@
   }
   input::placeholder {
     color: var(--muted);
-    opacity: 1;
+    opacity: 0.75;
   }
   .search:focus-within {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    outline-offset: 0;
   }
   .search input:focus-visible {
     outline: none;
@@ -1299,8 +1406,9 @@
   .view-options {
     display: flex;
     align-items: center;
-    min-height: 41px;
-    padding: 6px 10px 3px;
+    min-height: 36px;
+    padding: 2px 10px 7px;
+    box-sizing: border-box;
     gap: 6px;
     color: var(--muted);
   }
@@ -1313,10 +1421,13 @@
     padding: 5px 6px;
     text-align: left;
     font-size: 12px;
-    font-weight: 500;
+    color: var(--muted);
     border-radius: 6px;
   }
-  .root-label span {
+  .root-label h2 {
+    margin: 0;
+    font: inherit;
+    font-weight: 500;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1326,7 +1437,7 @@
     display: flex;
     height: 100%;
     align-items: center;
-    border-radius: 5px;
+    border-radius: 6px;
     margin-left: min(calc(var(--tree-depth) * 16px), 32%);
     position: relative;
   }
@@ -1337,11 +1448,11 @@
     top: 0;
     bottom: 0;
     border-left: 1px solid var(--border);
-    opacity: 0.6;
+    opacity: 0.4;
   }
   .file-row.active {
-    background: var(--selected);
-    box-shadow: inset 2px 0 var(--accent);
+    background: color-mix(in srgb, var(--fg) 9%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
   }
   .file-row.active .name {
     font-weight: 500;
@@ -1349,11 +1460,31 @@
   .file-row.selected:not(.active) {
     background: color-mix(in srgb, var(--selected) 55%, transparent);
   }
-  .current-status {
-    flex-shrink: 0;
-    margin: 0 6px 0 3px;
-    font-size: 11px;
-    color: var(--accent);
+  .file-row:has(.file:focus-visible) {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .file:focus-visible {
+    outline: none;
+  }
+  .row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    height: 24px;
+    margin-right: 3px;
+    padding: 0;
+    color: var(--muted);
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .row-actions svg {
+    stroke-width: 3;
+  }
+  .file-row:hover .row-actions,
+  .file-row:focus-within .row-actions {
+    opacity: 1;
   }
   .file-row.dragging {
     opacity: 0.5;
@@ -1365,21 +1496,22 @@
   .file {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     flex: 1;
     min-width: 0;
     height: 100%;
     padding: 2px 5px 2px 2px;
     text-align: left;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 18px;
   }
   .file .entry-icon {
-    color: var(--muted);
+    color: color-mix(in srgb, var(--muted) 78%, transparent);
     width: 13px;
     height: 13px;
   }
   .folder .file {
-    color: var(--muted);
+    color: color-mix(in srgb, var(--fg) 82%, transparent);
   }
   .file-copy {
     min-width: 0;
@@ -1455,6 +1587,11 @@
     overflow-wrap: anywhere;
   }
   @media (pointer: coarse) {
+    .row-actions {
+      opacity: 1;
+      flex-basis: 44px;
+      height: 44px;
+    }
     .tree-toggle,
     .clear-search {
       min-width: 44px;

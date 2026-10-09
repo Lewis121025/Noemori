@@ -234,22 +234,60 @@ impl DesktopSession {
         snapshot
     }
 
-    /// 人工接管会先取消生成并等待正在执行的浏览器动作结算；交还不会自动启动模型。
-    ///
     /// 补充文字只作用于指定的当前运行，不创建新轮次，不切换当前模型或重放工具。
     /// # 参数与返回值
     /// `run_id` 为界面看到的当前运行编号，`text` 为非空且至多 128 KiB 的文字；返回接收它的运行编号。
     /// # 错误
     /// 会话关闭、运行已变化、已中断、正在结算或补充输入超限时拒绝，文字不会进入历史。
     pub fn steer(&self, run_id: &str, text: String) -> Result<String, Error> {
+        self.steer_with_images(run_id, text, Vec::new(), false)
+    }
+
+    /// 当前轮次接收正文与图片；能力采用本轮快照，不采用用户为下一轮新选的模型。
+    /// `run_id` 必须仍是运行身份；图片进入下一次请求，返回原轮编号。
+    /// 输入、图片、模型能力或运行状态无效时拒绝，不发布成功回执也不修改历史。
+    pub fn steer_with_images(
+        &self,
+        run_id: &str,
+        text: String,
+        images: Vec<crate::Image>,
+        requires_tools: bool,
+    ) -> Result<String, Error> {
         let state = &self.0.0.state;
         state.ensure_open()?;
         let mut data = state.data.lock().expect("桌面会话锁被污染");
-        let active = data.active.as_ref().filter(|active| active.id == run_id)
+        let active = data
+            .active
+            .as_ref()
+            .filter(|active| active.id == run_id)
             .ok_or_else(|| Error::Config("运行已变化，补充指令未接收".into()))?;
-        if active.cancellation.is_cancelled() { return Err(Error::Config("运行正在停止，补充指令未接收".into())); }
-        active.control.push(text.clone())?;
-        data.messages.push(HostMessage { role: crate::Role::User, content: vec![crate::ContentPart::Text(text)] });
+        if active.cancellation.is_cancelled() {
+            return Err(Error::Config("运行正在停止，补充指令未接收".into()));
+        }
+        if !images.is_empty() && !active.agent.capabilities().vision {
+            return Err(Error::Unsupported("当前运行的模型不支持图片".into()));
+        }
+        if requires_tools && !active.agent.capabilities().tools {
+            return Err(Error::Unsupported(
+                "当前运行的模型不能通过工具读取文件".into(),
+            ));
+        }
+        let mut message = crate::Message::text(crate::Role::User, text);
+        message
+            .content
+            .extend(images.into_iter().map(crate::ContentPart::Image));
+        let mut history = data.history.clone();
+        history.push(message.clone());
+        active
+            .agent
+            .validate_request(&history, &self.0.0.generation)?;
+        active.control.push(message.clone())?;
+        // 运行报告尚未交付时检查点也必须保留已接受的输入，不能只依赖模型流的局部历史。
+        data.history.push(message.clone());
+        data.messages.push(HostMessage {
+            role: crate::Role::User,
+            content: message.content,
+        });
         drop(data);
         state.notify();
         Ok(run_id.to_owned())
@@ -336,7 +374,7 @@ impl DesktopSession {
     /// # 错误
     /// 会话关闭、输入为空或超过 128 KiB、运行忙碌、历史或生成参数不合法时返回错误。
     pub fn start(&self, text: String) -> Result<String, Error> {
-        self.0.0.start(text, None, None)
+        self.0.0.start(text, None, None, Vec::new())
     }
 
     /// 在本轮模型输入中附加宿主读取的上下文，可见历史仍只显示用户实际输入。
@@ -345,7 +383,7 @@ impl DesktopSession {
         if context.len() > 64 * 1024 {
             return Err(Error::Config("文章上下文超过 64 KiB".into()));
         }
-        self.0.0.start(text, Some(context), None)
+        self.0.0.start(text, Some(context), None, Vec::new())
     }
 
     /// 用本轮最新模型启动任务，资源与权限仍属于原会话；同一轮持有自己的模型快照。
@@ -358,6 +396,20 @@ impl DesktopSession {
         text: String,
         context: Option<String>,
     ) -> Result<String, Error> {
+        self.start_configured_with_images(model, binding, text, context, Vec::new())
+    }
+
+    /// 正文和已验证的不可变图片在同一原子边界启动，不把文件名或 Base64 当成文字图片。
+    /// `model` 和 `binding` 属于本轮配置；`context` 为可选事实，`images` 保持输入顺序。
+    /// 返回运行编号；能力、历史、图片、上下文或运行状态无效时拒绝且保留原状态。
+    pub fn start_configured_with_images(
+        &self,
+        model: Arc<dyn Model>,
+        binding: String,
+        text: String,
+        context: Option<String>,
+        images: Vec<crate::Image>,
+    ) -> Result<String, Error> {
         if binding.is_empty()
             || binding.len() > 16 * 1024
             || context
@@ -366,7 +418,9 @@ impl DesktopSession {
         {
             return Err(Error::Config("模型归属或文章上下文无效".into()));
         }
-        self.0.0.start(text, context, Some((model, binding)))
+        self.0
+            .0
+            .start(text, context, Some((model, binding)), images)
     }
 
     /// 取消当前运行和审批等待；已登记的后台终端仍由会话持有，直到显式停止或关闭。
@@ -494,6 +548,7 @@ impl Inner {
         text: String,
         context: Option<String>,
         configured: Option<(Arc<dyn Model>, String)>,
+        images: Vec<crate::Image>,
     ) -> Result<String, Error> {
         if text.trim().is_empty() || text.len() > 128 * 1024 {
             return Err(Error::Config("用户输入必须非空且不超过 128 KiB".into()));
@@ -521,7 +576,11 @@ impl Inner {
         if let Some(context) = context {
             history.push(crate::Message::text(crate::Role::User, context));
         }
-        history.push(crate::Message::text(crate::Role::User, &text));
+        let mut message = crate::Message::text(crate::Role::User, text);
+        message
+            .content
+            .extend(images.into_iter().map(crate::ContentPart::Image));
+        history.push(message.clone());
         let cancellation = self.state.closed.child_token();
         let input = RunInput {
             session: self.session.clone(),
@@ -539,13 +598,14 @@ impl Inner {
             done: waiting,
             draft: None,
             control,
+            agent,
         });
         data.history = history;
         data.model_binding = binding;
         data.pending_note = None;
         data.messages.push(HostMessage {
             role: crate::Role::User,
-            content: vec![crate::ContentPart::Text(text)],
+            content: message.content,
         });
         data.run = Some(HostRunView {
             id: id.clone(),

@@ -12,6 +12,7 @@ import { record, text } from "../shared/parse";
  * @param workspace 用户明确选择的工作目录。
  * @param model 激活时的模型配置；后续每轮由主进程提供最新配置。
  * @param changed 原生状态变化通知，不携带认证或模型私有载荷。
+ * @param attachmentDirectory 本对话已发布附件的只读目录；未发送草稿不在授权范围。
  * @returns 尚未开始生成的原生会话。
  * @throws 目录、运行资产、配置或权限无效时拒绝创建。
  */
@@ -22,6 +23,7 @@ export function createNativeSession(
   model: ModelSettings,
   changed: () => void,
   label = "工作区助手",
+  attachmentDirectory?: string,
 ): NativeAgentSession {
   const root = realpathSync(workspace);
   const readable_paths = [
@@ -29,6 +31,7 @@ export function createNativeSession(
     join(homedir(), ".rustup"),
     join(homedir(), ".local/share/pnpm"),
   ].filter(existsSync);
+  if (attachmentDirectory) readable_paths.push(realpathSync(attachmentDirectory));
   const variables: Record<string, string> = {};
   for (const name of ["CARGO_HOME", "RUSTUP_HOME"]) {
     const value = process.env[name];

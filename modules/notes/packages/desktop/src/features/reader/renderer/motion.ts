@@ -1,5 +1,6 @@
 import type { Action } from "svelte/action";
 import { tick } from "svelte";
+import { advanceMotion, type MotionCoordinate } from "./spatial-motion";
 
 /** 动效仅接收展示状态的稳定标识；禁止传入编辑器事务或逐帧指针坐标。 */
 type MotionValue = string | number | boolean | null;
@@ -17,13 +18,48 @@ const contentProfiles = {
   media: { opacity: 0.98, offset: 0, token: "--motion-scene" },
 };
 
+/** 导航位移保存起点和速度，按浏览器播放时钟接续；其他反馈不参与空间状态。 */
+type RunningMotion = {
+  animation: Animation;
+  navigation: { origin: MotionCoordinate; destination: number } | null;
+};
+
+/** 导航宿主使用像素位移；采样解析轨迹交给合成线程，保留呈现位置与上一段速度。 */
+function navigationFrames(
+  origin: MotionCoordinate,
+  destination: number,
+  firstTranslate: string,
+  restingTranslate: string,
+  initialOpacity: number,
+  opacity: number,
+) {
+  const coordinates = [origin];
+  let step = 0;
+  let sample = origin;
+  while (Math.abs(sample.position - destination) >= 0.1 || Math.abs(sample.velocity) >= 1) {
+    sample = advanceMotion(origin, destination, ++step / 120);
+    coordinates.push(sample);
+  }
+  if (coordinates.length === 1) coordinates.push({ position: destination, velocity: 0 });
+  const y = restingTranslate === "none" ? "0" : restingTranslate.split(" ")[1] || "0";
+  const frames: Keyframe[] = coordinates.map((coordinate, index) => {
+    const progress = index / (coordinates.length - 1);
+    return {
+      translate: index === 0 ? firstTranslate : `${coordinate.position}px ${y}`,
+      opacity: opacity + (initialOpacity - opacity) * (1 - progress) ** 3,
+    };
+  });
+  frames[frames.length - 1] = { translate: restingTranslate, opacity };
+  return { frames, duration: (step / 120) * 1000 };
+}
+
 /** 每个挂载边界只管理自己创建的动画，取消时不触碰编辑器或浏览器的动画。 */
 function motionScope(host: HTMLElement) {
   const view = host.ownerDocument.defaultView;
   const media = view?.matchMedia?.("(prefers-reduced-motion: reduce)");
-  const running = new Map<HTMLElement, Animation>();
+  const running = new Map<HTMLElement, RunningMotion>();
   const cancel = () => {
-    for (const animation of running.values()) {
+    for (const { animation } of running.values()) {
       animation.onfinish = null;
       animation.cancel();
     }
@@ -48,8 +84,8 @@ function motionScope(host: HTMLElement) {
       ) {
         const previous = running.get(target);
         if (previous) {
-          previous.onfinish = null;
-          previous.cancel();
+          previous.animation.onfinish = null;
+          previous.animation.cancel();
           running.delete(target);
         }
         return;
@@ -61,14 +97,22 @@ function motionScope(host: HTMLElement) {
       const previous = running.get(target);
       // 必须在取消前复制呈现值，再读取底层样式，避免快速切换回到动画起点。
       const shown = { opacity: style.opacity, translate: style.translate, shadow: style.boxShadow };
+      const elapsed =
+        typeof previous?.animation.currentTime === "number"
+          ? Math.max(0, previous.animation.currentTime) / 1000
+          : 0;
+      const velocity = previous?.navigation
+        ? advanceMotion(previous.navigation.origin, previous.navigation.destination, elapsed)
+            .velocity
+        : 0;
       if (previous) {
-        previous.onfinish = null;
-        previous.cancel();
+        previous.animation.onfinish = null;
+        previous.animation.cancel();
       }
       const resting = view.getComputedStyle(target);
       const opacity = Number(resting.opacity || 1);
       const shadow = resting.boxShadow || "none";
-      const frames: Keyframe[] =
+      let frames: Keyframe[] =
         profile === null
           ? [
               {
@@ -96,11 +140,36 @@ function motionScope(host: HTMLElement) {
                 ...(profile.offset > 0 ? { translate: resting.translate || "none" } : {}),
               },
             ];
+      let navigation: RunningMotion["navigation"] = null;
+      let playbackDuration = duration;
+      if (kind === "navigation") {
+        const destination = Number.parseFloat(resting.translate) || 0;
+        const origin = {
+          position: previous
+            ? Number.parseFloat(shown.translate) || 0
+            : destination + direction * contentProfiles.navigation.offset,
+          velocity,
+        };
+        navigation = { origin, destination };
+        const y = resting.translate === "none" ? "0" : resting.translate.split(" ")[1] || "0";
+        const trajectory = navigationFrames(
+          origin,
+          destination,
+          previous ? shown.translate : `${origin.position}px ${y}`,
+          resting.translate || "none",
+          previous ? Number(shown.opacity || 1) : opacity * contentProfiles.navigation.opacity,
+          opacity,
+        );
+        frames = trajectory.frames;
+        playbackDuration = trajectory.duration || duration;
+      }
       const animation = target.animate(frames, {
-        duration,
-        easing: resting.getPropertyValue("--motion-ease").trim() || "ease-out",
+        duration: playbackDuration,
+        easing: navigation
+          ? "linear"
+          : resting.getPropertyValue("--motion-ease").trim() || "ease-out",
       });
-      running.set(target, animation);
+      running.set(target, { animation, navigation });
       animation.onfinish = () => {
         running.delete(target);
         animation.onfinish = null;

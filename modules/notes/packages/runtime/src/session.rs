@@ -494,12 +494,31 @@ fn remap_reader(reader: &mut Value, from: &str, to: Option<&str>) {
             value.clone()
         }
     };
+    rewrite_reader_paths(reader, &map);
+}
+
+/// 旧资料目录导入为子目录时，所有阅读现场统一增加相同前缀；对话身份不当作文件路径迁移。
+pub(crate) fn prefix_reader(reader: &mut Value, prefix: &str) {
+    let map = |value: &Value| -> Value {
+        match value.as_str() {
+            Some("") => json!(prefix),
+            Some(path) if entry_path(path) => json!(format!("{prefix}/{path}")),
+            _ => value.clone(),
+        }
+    };
+    rewrite_reader_paths(reader, &map);
+    if let Some(expanded) = reader["fileTree"]["expanded"].as_array_mut() {
+        expanded.insert(0, json!(prefix));
+    }
+}
+
+fn rewrite_reader_paths(reader: &mut Value, map: &impl Fn(&Value) -> Value) {
     let map_list = |value: &mut Value, dedup: bool| {
         if let Some(items) = value.as_array_mut() {
             let mut seen = HashSet::new();
             *items = items
                 .iter()
-                .map(&map)
+                .map(map)
                 .filter(|v| !v.is_null() && (!dedup || seen.insert(v.to_string())))
                 .collect();
         }

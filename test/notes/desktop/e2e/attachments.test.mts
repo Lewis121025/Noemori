@@ -66,25 +66,26 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     const files = page.getByRole("navigation", { name: "文件列表" });
     const open = async (name: string) => {
       await sidebarComponent(page, "文件");
-      await files.getByRole("treeitem", { name, exact: true }).click();
+      await files.getByRole("button", { name, exact: true }).click();
       await page.waitForFunction(
         (path) =>
-          document.querySelector(".library .file[aria-current=page]")?.getAttribute("aria-label") ===
-            path && !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
+          document
+            .querySelector(".library .file[aria-current=page]")
+            ?.getAttribute("aria-label") === path &&
+          !document.querySelector("section[data-pane]")?.hasAttribute("inert"),
         name,
       );
-      await expect
-        .poll(() =>
-          page
-            .locator("section[data-pane]")
-            .evaluate((node) => node.contains(document.activeElement)),
-        )
-        .toBe(true);
+      expect(
+        await files
+          .getByRole("button", { name, exact: true })
+          .evaluate((node) => node === document.activeElement),
+      ).toBe(true);
       await documentTools(page);
     };
     const ready = (number: number) =>
       page.waitForFunction(
         (value) =>
+          document.querySelector('.preview-stage[aria-busy="false"]') !== null &&
           document
             .querySelector(".preview-stage:not(.concealed) .textLayer")
             ?.textContent?.includes(`page ${value}`),
@@ -93,6 +94,13 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
 
     await ready(1);
     await documentTools(page);
+    const zoomControl = page.getByRole("button", { name: "原始大小", exact: true });
+    const initialZoomWidth = (await zoomControl.boundingBox())!.width;
+    await zoomControl.click();
+    await ready(1);
+    expect((await zoomControl.boundingBox())!.width).toBeCloseTo(initialZoomWidth, 1);
+    await page.getByRole("button", { name: "适应窗口", exact: true }).click();
+    await ready(1);
     const mentions = await page.evaluate(() =>
       window.noemori.reader.indexMentionsTo("preview.pdf"),
     );
@@ -124,6 +132,9 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     await page.getByRole("button", { name: "下一页", exact: true }).click();
     await ready(2);
     await page.getByRole("button", { name: "放大", exact: true }).click();
+    expect(
+      await page.locator(".preview-stage:not(.concealed) .pdf-page:not([aria-hidden])").count(),
+    ).toBe(1);
     await ready(2);
     expect(
       await page.locator(".pdf-page canvas").evaluate((canvas) => {
@@ -156,6 +167,33 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
       const image = document.querySelector(".attachment-preview img");
       return image instanceof HTMLImageElement && image.complete && image.naturalWidth === 1200;
     });
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]!.setContentSize(640, 480),
+    );
+    await page.waitForFunction(() => innerWidth === 640);
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => done())),
+        ),
+    );
+    const headerHeight = (await page.locator(".window-toolbar").boundingBox())!.height;
+    expect(
+      (await page.locator(".window-document-tools").boundingBox())!.height,
+    ).toBeLessThanOrEqual(headerHeight);
+    expect(await page.locator(".attachment-preview img").getAttribute("title")).toBe("1200 × 800");
+    for (const name of ["原始大小", "放大", "适应窗口"]) {
+      const control = page.getByRole("button", { name, exact: true });
+      await control.focus();
+      const box = (await control.boundingBox())!;
+      const port = (await page.locator(".window-document-tools").boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(port.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(port.x + port.width + 1);
+    }
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]!.setContentSize(1100, 720),
+    );
+    await page.waitForFunction(() => innerWidth === 1100);
     await page.getByRole("button", { name: "原始大小", exact: true }).click();
     expect(
       await page
@@ -165,11 +203,32 @@ test("生产窗口离线预览图片与 PDF，嵌入交互不修改文档或附�
     const imageViewport = page.getByRole("region", { name: "图片画布" });
     const bounds = await imageViewport.boundingBox();
     if (bounds === null) throw new Error("图片预览区域不可见");
+    const originalScroll = await imageViewport.evaluate((element) => element.scrollLeft);
     await page.mouse.move(bounds.x + 200, bounds.y + 100);
     await page.mouse.down();
     await page.mouse.move(bounds.x + 80, bounds.y + 100);
     await page.mouse.up();
-    expect(await imageViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(100);
+    expect(await imageViewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(
+      originalScroll + 120,
+      0,
+    );
+    const center = () =>
+      imageViewport.evaluate((element) => {
+        const image = element.querySelector("img")!.getBoundingClientRect();
+        const view = element.getBoundingClientRect();
+        return (view.left + element.clientWidth / 2 - image.left) / image.width;
+      });
+    const viewpoint = await center();
+    await page.getByRole("button", { name: "放大", exact: true }).click();
+    expect(await center()).toBeCloseTo(viewpoint, 3);
+    const scroll = await imageViewport.evaluate((element) => element.scrollLeft);
+    await page.mouse.move(bounds.x + 240, bounds.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + 160, bounds.y + 120);
+    expect(await imageViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(scroll);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    expect(await imageViewport.evaluate((element) => element.scrollLeft)).toBe(scroll);
     await page.getByRole("button", { name: "适应窗口", exact: true }).click();
     expect(
       await page

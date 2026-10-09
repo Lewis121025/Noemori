@@ -251,7 +251,7 @@ describe("会话写入失败与已完成操作的边界", () => {
   );
 
   it.each(["/other", "/notes"])(
-    "打开 %s 后不再显示上次开库期间延迟返回的会话错误",
+    "初始化 %s 时保留同一仓库的会话问题，只有更换仓库才丢弃旧归属错误",
     async (root) => {
       let reject!: (error: Error) => void;
       const writing = new Promise<void>((_resolve, fail) => {
@@ -268,7 +268,8 @@ describe("会话写入失败与已完成操作的边界", () => {
       reject(new Error("旧库不可写"));
       await expect(writing).rejects.toThrow("旧库不可写");
       expect(workspace.vaultRoot).toBe(root);
-      expect(workspace.message).toBe("");
+      if (root === "/notes") expect(workspace.message).toContain("视图记忆未能保存");
+      else expect(workspace.message).toBe("");
     },
   );
 });

@@ -9,7 +9,7 @@
   <section class="opening" aria-label="打开资料库">
     <div>
       <p role="status">
-        {workspace.cancellingOpen ? "正在取消打开，请稍候…" : VAULT_OPEN_LABELS[progress.phase]}
+        {workspace.cancellingOpen ? "正在取消，请稍候…" : VAULT_OPEN_LABELS[progress.phase]}
       </p>
       {#if progress.total !== null && progress.total > 0}
         <progress
@@ -26,7 +26,7 @@
       class="reader-button"
       type="button"
       disabled={workspace.cancellingOpen || progress.phase === "committing"}
-      onclick={() => void workspace.cancelOpening()}>取消打开</button
+      onclick={() => void workspace.cancelOpening()}>取消</button
     >
   </section>
 {/if}

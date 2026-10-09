@@ -13,7 +13,9 @@ export type ProviderModel = {
   reasoning?: ReasoningCapability;
   /** 只用于迁移旧配置；新的推理强度选择由对话持有。 */
   reasoningEffort?: ReasoningEffort;
-} & Pick<ModelSettings, "tools" | "streaming" | "vision" | "audio" | "video">;
+  /** null 表示接口未报告，由服务商判断真实图片请求；false 才表示明确关闭。 */
+  vision: boolean | null;
+} & Pick<ModelSettings, "tools" | "streaming" | "audio" | "video">;
 /** Base URL 包含 API 版本路径；完整地址可用 {model} 表达部署路径中的模型。 */
 export type ProviderAddress = { type: "base_url" | "endpoint"; url: string };
 /** 连接与可用模型目录独立；尚未获取列表时仍可保存认证与地址。 */
@@ -59,7 +61,7 @@ export const providerModelLimit = 4096;
  * @returns 可编辑模型草稿，不抛出异常。
  */
 export function newProviderModel(id = ""): ProviderModel {
-  return { id, tools: true, streaming: true, vision: false, audio: false, video: false };
+  return { id, tools: true, streaming: true, vision: null, audio: false, video: false };
 }
 
 /**
@@ -178,7 +180,7 @@ function parseProviderModel(value: unknown): ProviderModel {
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     tools: boolean(item, "tools"),
     streaming: boolean(item, "streaming"),
-    vision: boolean(item, "vision"),
+    vision: item["vision"] === null ? null : boolean(item, "vision"),
     audio: boolean(item, "audio"),
     video: boolean(item, "video"),
   };

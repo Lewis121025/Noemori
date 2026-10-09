@@ -4,6 +4,7 @@ import type { ReaderApi, VaultEvent } from "../shared/api";
 import { parseVaultEvent } from "../shared/api";
 import { parseVaultOpenProgress, type VaultOpenProgress } from "../shared/vault-opening";
 import { parseEntryBatchProgress, parseEntryBatchResult } from "../shared/entry-batch";
+import { parseDirectoryImportResult, parseImportParent } from "../shared/directory-import";
 import { parseAttachmentReply } from "../shared/attachments";
 import {
   parseExportResult,
@@ -45,6 +46,7 @@ export function createReaderApi(): ReaderApi {
     channel: string,
     parse: (value: unknown) => T,
     onProgress?: (progress: VaultOpenProgress) => void,
+    args: unknown[] = [],
   ): Promise<T> {
     if (opening !== null) throw new Error("已有资料库正在打开");
     const id = crypto.randomUUID();
@@ -54,7 +56,7 @@ export function createReaderApi(): ReaderApi {
     };
     ipcRenderer.on("reader.vault.progress", listener);
     try {
-      return parse(await ipcRenderer.invoke(channel, id));
+      return parse(await ipcRenderer.invoke(channel, id, ...args));
     } finally {
       ipcRenderer.removeListener("reader.vault.progress", listener);
       opening = null;
@@ -134,6 +136,12 @@ export function createReaderApi(): ReaderApi {
     vaultOpen: (progress) => open("reader.vault.open", parseVaultOpen, progress),
     vaultCreateDefault: (progress) => open("reader.vault.createDefault", parseVaultOpen, progress),
     vaultRestore: (progress) => open("reader.vault.restore", parseVaultRestore, progress),
+    vaultReveal: async () => parseEmptyReply(await ipcRenderer.invoke("reader.vault.reveal")),
+    directoryImport: (root, parent, progress) =>
+      open("reader.directory.import", parseDirectoryImportResult, progress, [
+        root,
+        parseImportParent(parent),
+      ]),
     vaultOpenCancel: async () => {
       if (opening === null) return false;
       const result: unknown = await ipcRenderer.invoke("reader.vault.cancel", opening);

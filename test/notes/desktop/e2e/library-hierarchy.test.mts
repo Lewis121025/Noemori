@@ -94,7 +94,7 @@ test("层级工作台：真实全文、修改时间、文章对话、创建位�
     await page.getByRole("dialog", { name: "设置", exact: true }).getByRole("button", { name: "关闭设置" }).click();
     const conversation = await page.evaluate(
       async ({ root, path, endpoint }) => {
-        await window.noemori.agent.providersSave({
+        const catalog = await window.noemori.agent.providersSave({
           protocol: "openai-chat",
           id: null,
           name: "本地测试供应商",
@@ -111,8 +111,15 @@ test("层级工作台：真实全文、修改时间、文章对话、创建位�
             },
           ],
         });
+        const provider = catalog.providers.find((item) => item.name === "本地测试供应商");
+        if (!provider) throw new Error("本地测试供应商未保存");
         await window.noemori.agent.attachVault(root);
-        return window.noemori.agent.createArticle({ root, path, title: "理解折射" });
+        const item = await window.noemori.agent.createArticle({ root, path, title: "理解折射" });
+        await window.noemori.agent.modelSelect(item.id, {
+          providerId: provider.id,
+          modelId: "local-fixture",
+        });
+        return item;
       },
       { root: vault, path, endpoint },
     );
@@ -121,11 +128,14 @@ test("层级工作台：真实全文、修改时间、文章对话、创建位�
       `${source}\n[讨论：理解折射](noemori://conversation/${conversation.id})\n`,
     );
     await editor.locator(`a[href="noemori://conversation/${conversation.id}"]`).waitFor();
-    const expandChats = files.getByRole("button", { name: /折射与斯涅尔定律：展开或收起对话/ });
+    const expandChats = files.getByRole("button", { name: /^(展开|收起) 折射与斯涅尔定律$/ });
     if (await expandChats.getAttribute("aria-expanded") !== "true") await expandChats.click();
     const chat = files.getByRole("button", { name: "理解折射", exact: true });
     const original = await editor.elementHandle();
     await chat.click();
+    expect(await chat.getAttribute("aria-pressed")).toBe("true");
+    expect(await files.locator(".current-conversation .conversation-active").count()).toBe(1);
+    expect(await files.locator(".current-status").count()).toBe(0);
     const panel = page.locator(".agent-panel");
     await panel.getByRole("heading", { name: "理解折射", exact: true }).waitFor();
     expect(await original!.evaluate(element => element.isConnected)).toBe(true);

@@ -13,46 +13,47 @@ import {
 import type { Protocol } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/api";
 import { modelReasoningEfforts } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/reasoning";
 
-it("GPT-6 Sol 只使用官网六档，网关扩展不会改写官方列表", () => {
-  expect(modelReasoningEfforts(undefined, "gpt-6-sol")).toEqual([
-    "none",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-  ]);
-  expect(modelReasoningEfforts({ supported: true, efforts: ["ULTRA"] }, "gpt-6-sol")).toEqual([
-    "none",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-  ]);
+it("视觉能力未知时由服务商判断图片请求，明确不支持时保持关闭", () => {
+  const model = newProviderModel("接口没有报告能力");
+  expect(model.vision).toBeNull();
+  const selection = { providerId: "provider", modelId: model.id };
+  expect(modelParameters(requireModelSelection(catalog("openai-chat", model), selection)).vision).toBe(true);
+  model.vision = false;
+  expect(modelParameters(requireModelSelection(catalog("openai-chat", model), selection)).vision).toBe(false);
 });
 
-it("官方模型档位不按前缀套给服务商的其他模型标识", () => {
-  expect(modelReasoningEfforts(undefined, "gpt-6-sol-custom")).toEqual([]);
-});
+it.each(["gpt-6-sol", "openai/gpt-6.1-sol", "claude-opus-4-6", "google/gemini-3-flash-preview"])(
+  "%s 的档位必须以当前接口为准，缺失能力时不按模型名补齐",
+  (modelId) => {
+    const model = newProviderModel(modelId);
+    expect(modelReasoningEfforts(model.reasoning)).toEqual([]);
+    model.reasoning = { supported: true, efforts: ["ULTRA"] };
+    expect(modelReasoningEfforts(model.reasoning)).toEqual(["ULTRA"]);
+    model.reasoning = { supported: true, efforts: [] };
+    expect(modelReasoningEfforts(model.reasoning)).toEqual([]);
+  },
+);
 
 it.each([
-  ["gpt-6-astra", ["low", "medium", "high", "xhigh", "max"]],
-  ["gpt-6.1-sol", ["low", "medium", "high", "xhigh", "max"]],
-  ["gpt-5.5", ["none", "low", "medium", "high", "xhigh"]],
-  ["gpt-5.5-2026-04-23", ["none", "low", "medium", "high", "xhigh"]],
-  ["gpt-5.5-pro", ["medium", "high", "xhigh"]],
-  ["gemini-3.1-pro-preview", ["low", "medium", "high"]],
-  ["gemini-3-pro-preview", ["low", "high"]],
-  ["gemini-3-flash-preview", ["minimal", "low", "medium", "high"]],
-] as const)("%s 按该模型官方定义列出全部档位", (modelId, efforts) => {
-  expect(modelReasoningEfforts(undefined, modelId)).toEqual(efforts);
+  "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1",
+  "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-opus-4-6-v1",
+  "arn:aws:bedrock:ap-northeast-1:123456789012:inference-profile/jp.anthropic.claude-sonnet-4-6",
+  "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.amazon.nova-2-lite-v1:0",
+])("Bedrock 资源 %s 发送时保留原始模型标识", (modelId) => {
+  const selection = { providerId: "provider", modelId, reasoningEffort: "high" };
+  const selected = requireModelSelection(catalog("bedrock", newProviderModel(modelId)), selection);
+  expect(modelParameters(selected)).toMatchObject({ model: modelId, reasoningEffort: "high" });
 });
 
-it("未知模型只采用接口明确报告的列表，不补入其他模型的档位", () => {
-  expect(modelReasoningEfforts({ supported: true, efforts: ["low", "ULTRA"] }, "private-model")).toEqual(["low", "ULTRA"]);
-  expect(modelReasoningEfforts({ supported: true, efforts: [] }, "private-model")).toEqual([]);
-  expect(modelReasoningEfforts({ supported: null, efforts: null }, "private-model")).toEqual([]);
+it("采用接口明确报告的原名，能力缺失或列表为空时不生成候选", () => {
+  expect(modelReasoningEfforts({ supported: true, efforts: ["low", "ULTRA"] })).toEqual([
+    "low",
+    "ULTRA",
+  ]);
+  expect(modelReasoningEfforts()).toEqual([]);
+  expect(modelReasoningEfforts({ supported: true, efforts: [] })).toEqual([]);
+  expect(modelReasoningEfforts({ supported: true, efforts: null })).toEqual([]);
+  expect(modelReasoningEfforts({ supported: null, efforts: null })).toEqual([]);
 });
 
 function catalog(

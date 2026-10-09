@@ -242,8 +242,7 @@ describe("文件树多选与批量整理", () => {
     await settle();
     expect(selected()).toEqual(["folder"]);
     expect(row("folder/note.md")).not.toBeNull();
-    const root = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "笔记库根目录")!;
-    root.click();
+    click("folder", { metaKey: true });
     const search = target.querySelector<HTMLInputElement>('[role="searchbox"]')!;
     search.value = "folder";
     search.dispatchEvent(new Event("input", { bubbles:true }));

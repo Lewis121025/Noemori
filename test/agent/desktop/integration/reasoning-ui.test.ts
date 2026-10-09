@@ -5,6 +5,62 @@ import ConversationModel from "../../../../modules/notes/packages/desktop/src/fe
 import { newProviderModel } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
 import { createAgentApiMock } from "../../../notes/desktop/fixtures/agent-api-mock";
 
+it("同名模型缺少接口能力时只提供默认选项，旧选择可恢复默认且不发送推理参数", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const originalPopover = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "showPopover");
+  Object.defineProperty(HTMLElement.prototype, "showPopover", { configurable: true, value() {} });
+  const api = createAgentApiMock();
+  api.providersGet = vi.fn<typeof api.providersGet>(async () => ({
+    providers: [
+      {
+        id: "provider",
+        name: "同名模型的网关",
+        protocol: "openai-responses",
+        address: { type: "base_url", url: "https://example.com/v1" },
+        authentication: { type: "none", configured: false, name: "", region: "" },
+        models: [newProviderModel("gpt-6-sol")],
+      },
+    ],
+  }));
+  api.modelSelect = vi.fn<typeof api.modelSelect>(async (_id, value) => value);
+  const changed = vi.fn();
+  const component = mount(ConversationModel, {
+    target,
+    props: {
+      api,
+      conversationId: "conversation",
+      selection: { providerId: "provider", modelId: "gpt-6-sol", reasoningEffort: "high" },
+      running: false,
+      changed,
+      configure: () => {},
+    },
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    target.remove();
+    if (originalPopover)
+      Object.defineProperty(HTMLElement.prototype, "showPopover", originalPopover);
+    else Reflect.deleteProperty(HTMLElement.prototype, "showPopover");
+  });
+  await vi.waitFor(() => {
+    flushSync();
+    expect(target.querySelector('button[aria-label="选择推理强度"]')).not.toBeNull();
+  });
+  target.querySelector<HTMLButtonElement>('button[aria-label="选择推理强度"]')!.click();
+  flushSync();
+  const options = [...target.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  expect(options.map((option) => option.textContent?.trim())).toEqual(["服务商默认"]);
+  options[0]!.click();
+  await vi.waitFor(() =>
+    expect(changed).toHaveBeenCalledWith({ providerId: "provider", modelId: "gpt-6-sol" }),
+  );
+  expect(api.modelSelect).toHaveBeenCalledWith("conversation", {
+    providerId: "provider",
+    modelId: "gpt-6-sol",
+  });
+});
+
 it.each([
   { protocol: "openai-chat", reasoning: { supported: false, efforts: null } },
   { protocol: "openai-responses", reasoning: { supported: true, efforts: ["low"] } },
@@ -68,13 +124,17 @@ it.each([
     target.querySelector<HTMLButtonElement>('button[aria-label="选择推理强度"]')!.click();
     flushSync();
     const options = [...target.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    expect(options.some((option) => option.getAttribute("aria-checked") === "true")).toBe(false);
-    expect(target.textContent).not.toContain("服务商默认");
-    expect(options.map((option) => option.textContent?.trim())).toEqual(reasoning.efforts ?? []);
+    expect(options.filter((option) => option.getAttribute("aria-checked") === "true")).toEqual([
+      options[0],
+    ]);
+    expect(options.map((option) => option.textContent?.trim())).toEqual([
+      "服务商默认",
+      ...(reasoning.efforts ?? []),
+    ]);
     expect(target.textContent).toContain("切换从下一轮生效");
     const selectedEffort = reasoning.efforts?.at(-1);
     if (selectedEffort === undefined) {
-      expect(target.textContent).toContain("暂无可核实的官方推理档位");
+      expect(target.textContent).toContain("服务商未提供可选推理档位");
       expect(api.modelSelect).not.toHaveBeenCalled();
       expect(target.textContent).not.toContain("模型已不可用");
       return;

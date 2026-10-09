@@ -260,6 +260,35 @@ it("本地服务不需要密钥，自定义连接只需地址和密钥；高级�
   );
 });
 
+it.each([null, true, false])("打开模型能力编辑不会改变已保存的图像能力：%s", async (vision) => {
+  const original = provider("first", "现有连接");
+  original.models[0]!.vision = vision;
+  const { api } = await setup({ providers: [original] });
+  button("高级设置").click();
+  flushSync();
+  submit();
+  await vi.waitFor(() => expect(api.providersSave).toHaveBeenCalledWith(
+    expect.objectContaining({ models: [{ ...newProviderModel("fixture"), vision }] }),
+  ));
+});
+
+it("图像能力支持明确覆盖，也能恢复为服务商判断", async () => {
+  const { api } = await setup({ providers: [provider("first", "现有连接")] });
+  for (const [value, vision] of [["true", true], ["false", false], ["", null]] as const) {
+    button("高级设置").click();
+    flushSync();
+    select("图像能力 1", value);
+    submit();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(api.providersSave).toHaveBeenLastCalledWith(
+        expect.objectContaining({ models: [{ ...newProviderModel("fixture"), vision }] }),
+      );
+      expect(target.textContent).toContain("供应商已保存");
+    });
+  }
+});
+
 it("连接变化使迟到发现结果失效，新连接的结果不会被旧请求覆盖", async () => {
   const { api } = await setup();
   let complete: (models: DiscoveredModel[]) => void = () => {};

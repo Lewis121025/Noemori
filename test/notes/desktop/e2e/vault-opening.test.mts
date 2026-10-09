@@ -69,7 +69,7 @@ test("真实窗口开库进度、取消、文件错误和修正重试", async (t
     await open(large);
     const opening = page.getByRole("region", { name: "打开资料库", exact: true });
     await opening.waitFor();
-    await opening.getByRole("button", { name: "取消打开", exact: true }).click();
+    await opening.getByRole("button", { name: "取消", exact: true }).click();
     await opening.waitFor({ state: "hidden" });
     expect(await page.locator(".ProseMirror").textContent()).toContain("原工作区继续使用");
     expect(JSON.parse(await readFile(join(state, "session.json"), "utf8")).reader.vaultRoot).toBe(

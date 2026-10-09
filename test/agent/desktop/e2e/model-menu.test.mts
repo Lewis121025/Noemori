@@ -67,6 +67,10 @@ test.each(["light", "dark"])(
             vision: false,
             audio: false,
             video: false,
+            reasoning: {
+              supported: true,
+              efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+            },
           })),
         });
       }
@@ -109,6 +113,7 @@ test.each(["light", "dark"])(
         },
       );
       const composer = page.locator(".composer");
+      expect(await composer.getByRole("button", { name: "对话工具", exact: true }).count()).toBe(0);
       expect(await composer.innerText()).not.toContain("草稿已保存");
       const composerBounds = await composer.boundingBox();
       expect(composerBounds!.height).toBeLessThanOrEqual(128);
@@ -199,7 +204,7 @@ test.each(["light", "dark"])(
       const efforts = page.getByRole("menu", { name: "对话推理强度", exact: true });
       expect(
         (await efforts.getByRole("menuitemradio").allTextContents()).map((text) => text.trim()),
-      ).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+      ).toEqual(["服务商默认", "none", "low", "medium", "high", "xhigh", "max"]);
       if (captures)
         await efforts.screenshot({
           path: join(captures, `reasoning-${appearance}-${width}.png`),
@@ -213,10 +218,37 @@ test.each(["light", "dark"])(
       await page.keyboard.press("Escape");
       await efforts.waitFor({ state: "hidden" });
       expect(await effortTrigger.evaluate((node) => document.activeElement === node)).toBe(true);
+      await effortTrigger.click();
+      await efforts.getByRole("menuitemradio", { name: "服务商默认", exact: true }).click();
+      await efforts.waitFor({ state: "hidden" });
+      await expect
+        .poll(
+          async () =>
+            (await page.evaluate((id) => window.noemori.agent.snapshot(id), conversation.id))
+              .modelSelection,
+        )
+        .toEqual({ providerId: conversation.modelSelection!.providerId, modelId: "gpt-6-sol" });
     }
     await input.fill("第一行\n第二行\n第三行\n第四行\n第五行");
     const expanded = await input.boundingBox();
     expect(expanded!.height).toBeGreaterThan(44);
     expect(expanded!.height).toBeLessThanOrEqual(160);
+    await page.getByRole("button", { name: "对话操作", exact: true }).click();
+    await page.getByRole("button", { name: "查看会话终端", exact: true }).click();
+    await page.getByRole("region", { name: "会话终端", exact: true }).waitFor();
+    await page.getByRole("button", { name: "收起终端", exact: true }).click();
+    await page.getByRole("button", { name: "对话操作", exact: true }).click();
+    await page.getByRole("button", { name: "浏览器连接与权限…", exact: true }).click();
+    const connections = page.getByRole("region", { name: "浏览器与应用控制", exact: true });
+    await connections
+      .getByRole("button", { name: "设置 Chrome / Edge 连接", exact: true })
+      .waitFor();
+    expect(
+      await page.evaluate((id) => window.noemori.agent.snapshot(id), conversation.id),
+    ).toMatchObject({
+      terminals: [],
+      run: null,
+      ui: { status: "idle", connections: [] },
+    });
   },
 );

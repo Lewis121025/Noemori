@@ -96,8 +96,6 @@ describe("文件树原位重命名", () => {
   });
 
   it("目录改名保留子文档，根目录中的选择跟随新名称", async () => {
-    [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "笔记库根目录")!.click();
-    flushSync();
     row("项目").click();
     flushSync();
     await begin("项目");
@@ -181,8 +179,8 @@ describe("文件树原位重命名", () => {
     key("Escape");
     expect(input()).not.toBeNull();
     expect(api.entryRename).toHaveBeenCalledTimes(1);
-    // 保存门禁会禁用搜索框；根目录按钮仍可接收用户焦点。
-    const root = target.querySelector<HTMLButtonElement>(".root-label")!;
+    // 保存完成后保留用户已移到目录操作入口的焦点。
+    const root = target.querySelector<HTMLButtonElement>('[aria-label="目录操作"]')!;
     root.focus();
     finish();
     await settle();

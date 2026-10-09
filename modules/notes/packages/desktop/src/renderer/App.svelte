@@ -16,6 +16,7 @@
   import type { AgentConversationInfo } from "../features/agent/shared/api";
   import type { WorkspaceConversations } from "../features/reader/shared/workspace-conversations";
   import type { ReaderCommand } from "../features/reader/shared/commands";
+  import type { AgentReference } from "../features/agent/shared/references";
   import { InputHistory } from "./input-history";
 
   const { app, reader: readerApi } = window.noemori;
@@ -78,6 +79,17 @@
       await tick();
       if (selectedConversation) agentPanel?.focusComposer(selectedConversation);
     }
+  }
+  async function addSelectedReference(reference: AgentReference): Promise<void> {
+    showAgent = true;
+    await tick();
+    if (!agentPanel) throw new Error("对话输入框尚未就绪，请重试");
+    await agentPanel.addSelectedReference(reference);
+  }
+  async function openReference(reference: AgentReference): Promise<void> {
+    if (!reference.source || !reader) throw new Error("此引用没有可打开的文件来源");
+    await agentPanel?.flushDraft();
+    await reader.openReference(reference.source);
   }
   async function returnToArticle(root: string, path: string, marker: string): Promise<void> {
     await agentPanel?.flushDraft();
@@ -193,6 +205,7 @@
     bind:articleFilter
     beforeSend={prepareAgentRun}
     onOpenArticle={returnToArticle}
+    onOpenReference={openReference}
     bind:this={agentPanel}
     bind:selected={selectedConversation}
     api={window.noemori.agent}
@@ -205,6 +218,7 @@
 {/snippet}
 <ReaderWorkspace
   {articleAgent}
+  onAddReference={addSelectedReference}
   {conversations}
   onCommand={executeCommand}
   agentPanel={agentContent}

@@ -101,6 +101,7 @@
   function pointerDown(event: PointerEvent): void {
     if (event.button !== 0 || !expanded || !enabled || resize !== null) return;
     event.preventDefault();
+    handle.focus({ preventScroll: true });
     resize = { pointerId: event.pointerId, startY: event.clientY, startHeight: height, height };
     handle.setPointerCapture(event.pointerId);
   }
@@ -116,6 +117,13 @@
   }
   function resizeKey(event: KeyboardEvent): void {
     if (event.isComposing) return;
+    if (event.key === "Escape" && resize !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelResize();
+      return;
+    }
+    if (resize !== null) return;
     const step = event.shiftKey ? 48 : 16;
     const next =
       event.key === "ArrowUp"
@@ -148,7 +156,7 @@
       hidden={compact}
       type="button"
       aria-label="双链"
-      title={`双链 · ${incoming} 个来源 · ${outgoing} 个目标；圆点代表当前笔记`}
+      title={`双链 · ${incoming} 条入链 · ${outgoing} 条出链`}
       aria-expanded={expanded}
       aria-controls={id}
       disabled={!enabled || pane.document.path === null}
@@ -161,8 +169,7 @@
       >
       <span class="dock-title">双链</span>
       {#if !expanded}<span class="dock-count"
-          ><span>{incoming} 入链</span><span>·</span><span>{outgoing} 出链</span
-          ></span
+          ><span>{incoming} 入链</span><span>·</span><span>{outgoing} 出链</span></span
         >{/if}
       <span class="chevron" aria-hidden="true">⌃</span>
     </button>
@@ -285,8 +292,8 @@
     flex-direction: column;
     flex: 0 0 auto;
     min-height: 0;
-    border-top: 1px solid var(--border);
-    background: var(--sidebar);
+    border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    background: transparent;
     margin-top: auto;
   }
   .dock-actions {
@@ -294,7 +301,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 8px;
+    padding: 5px 10px;
   }
   .dock-toggle {
     display: flex;
@@ -306,7 +313,7 @@
     border: 0;
     border-radius: 7px;
     padding: 5px;
-    color: var(--fg);
+    color: var(--muted);
     background: transparent;
     font: inherit;
     text-align: left;
@@ -329,8 +336,8 @@
     cursor: default;
   }
   .dock-toggle svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.6;
@@ -346,6 +353,10 @@
   }
   .dock-title {
     font-size: 12px;
+  }
+  .dock-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
   @container (max-width: 250px) {
     .dock-count {

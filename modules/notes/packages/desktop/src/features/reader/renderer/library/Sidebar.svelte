@@ -2,7 +2,7 @@
   /**
    * 文件栏宽度可拖拽调整；隐藏时保留挂载，避免丢失目录展开和搜索状态。
    */
-  import type { Snippet } from "svelte";
+  import { onDestroy, type Snippet } from "svelte";
   import { SIDEBAR_LAYOUT } from "../../shared/api";
 
   type Props = {
@@ -34,13 +34,27 @@
     startWidth: number;
     width: number;
   } | null>(null);
+  let handle = $state<HTMLDivElement>();
+
+  function cancelResize(event?: PointerEvent): void {
+    if (resize === null || (event && resize.pointerId !== event.pointerId)) return;
+    const pointerId = resize.pointerId;
+    resize = null;
+    if (handle?.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+  }
+  $effect(() => {
+    if (hidden) cancelResize();
+  });
+  onDestroy(() => cancelResize());
 
   function clampWidth(value: number): number {
     return Math.min(maxWidth, Math.max(minWidth, Math.round(value)));
   }
   function onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return;
+    if (event.button !== 0 || resize !== null || !(event.currentTarget instanceof HTMLElement))
+      return;
     event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
     resize = { pointerId: event.pointerId, startX: event.clientX, startWidth: width, width };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -54,11 +68,22 @@
     if (resize?.pointerId !== event.pointerId) return;
     const next = resize.width;
     resize = null;
-    if (event.currentTarget instanceof HTMLElement)
+    if (
+      event.currentTarget instanceof HTMLElement &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    )
       event.currentTarget.releasePointerCapture(event.pointerId);
     if (next !== width) onWidth(next);
   }
   function onKeydown(event: KeyboardEvent): void {
+    if (event.isComposing) return;
+    if (event.key === "Escape" && resize !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelResize();
+      return;
+    }
+    if (resize !== null) return;
     const next =
       event.key === "ArrowLeft"
         ? width + (side === "right" ? 10 : -10)
@@ -88,6 +113,7 @@
   <!-- 按 WAI-ARIA 分隔条模式，带范围值的 separator 需要键盘焦点；Svelte 将该角色一律归为静态元素。 -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
+    bind:this={handle}
     class="resize"
     class:resizing={resize !== null}
     role="separator"
@@ -101,12 +127,8 @@
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
-    onpointercancel={() => {
-      resize = null;
-    }}
-    onlostpointercapture={() => {
-      resize = null;
-    }}
+    onpointercancel={cancelResize}
+    onlostpointercapture={cancelResize}
     onkeydown={onKeydown}
     ondblclick={() => onWidth(defaultWidth)}
   ></div>

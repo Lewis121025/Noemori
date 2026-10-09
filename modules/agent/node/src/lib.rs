@@ -74,6 +74,22 @@ pub struct NativeAgentSession {
 // 构造与每轮覆盖共用预算，避免界面允许的 URL 编码扩展在续轮入口被不同上限拒绝。
 const MAX_CONFIGURATION_BYTES: usize = 1024 * 1024;
 
+/// 桥接只接受有界图片 JSON；格式与图像有效性仍由核心在发布运行之前核验。
+fn decode_images(value: Option<String>) -> Result<Vec<noemori_agent::Image>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.len() > 20 * 1024 * 1024 {
+        return Err(Error::from_reason("附件图片载荷超过 20 MiB"));
+    }
+    let images: Vec<noemori_agent::Image> =
+        serde_json::from_str(&value).map_err(|_| Error::from_reason("附件图片格式无效"))?;
+    if images.len() > 8 {
+        return Err(Error::from_reason("一次最多发送八个图片附件"));
+    }
+    Ok(images)
+}
+
 #[napi]
 impl NativeAgentSession {
     /// 解析宿主目录、权限与初始模型；不运行模型或 shell，通知合并为一个待交付事件。
@@ -231,22 +247,56 @@ impl NativeAgentSession {
         text: String,
         context: Option<String>,
     ) -> Result<String> {
+        self.start_configured_with_attachments(configuration, binding, text, context, None)
+    }
+
+    /// 附件使用独立桥接入口，旧二进制缺少该方法会明确拒绝，不会忽略额外参数而伪报成功。
+    /// configuration、binding、text 与普通发送相同；images 是有界原生图片 JSON。
+    /// 返回运行编号；配置、媒体、历史或运行状态不合法时拒绝且保留草稿。
+    #[napi]
+    pub fn start_configured_with_attachments(
+        &self,
+        configuration: String,
+        binding: String,
+        text: String,
+        context: Option<String>,
+        images: Option<String>,
+    ) -> Result<String> {
         if configuration.len() > MAX_CONFIGURATION_BYTES {
             return Err(Error::from_reason("模型配置超过 1 MiB"));
         }
         let settings: model::Settings = serde_json::from_str(&configuration).map_err(to_napi)?;
         let model = settings.build().map_err(Error::from_reason)?;
         self.inner
-            .start_configured(model, binding, text, context)
+            .start_configured_with_images(model, binding, text, context, decode_images(images)?)
             .map_err(to_napi)
     }
 
-    /// 取消当前运行和审批，不自动重放命令。
     /// 当前运行接收补充文字，在下一次模型请求中生效，不新建轮次。
     /// run_id 必须匹配当前运行；text 非空且至多 128 KiB；失效、停止或输入超限返回错误。
     #[napi]
     pub fn steer(&self, run_id: String, text: String) -> Result<String> {
-        self.inner.steer(&run_id, text).map_err(to_napi)
+        self.steer_with_attachments(run_id, text, None, None)
+    }
+
+    /// 同轮附件采用原运行能力，images 为图片 JSON，requires_tools 表示文件需要工具读取。
+    /// 返回原运行编号；能力、运行身份或媒体失败时在接受之前拒绝，不污染历史。
+    #[napi]
+    pub fn steer_with_attachments(
+        &self,
+        run_id: String,
+        text: String,
+        images: Option<String>,
+        requires_tools: Option<bool>,
+    ) -> Result<String> {
+        self.inner
+            .steer_with_images(
+                &run_id,
+                text,
+                decode_images(images)?,
+                requires_tools.unwrap_or(false),
+            )
+            .map_err(to_napi)
     }
 
     /// 取消当前运行和审批，不自动重放命令。

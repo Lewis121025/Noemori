@@ -23,6 +23,7 @@ let viewportHeight = 600;
 function pdfPage(number: number) {
   return {
     number,
+    pageNumber: number,
     getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
   };
 }
@@ -108,14 +109,133 @@ function button(label: string): HTMLButtonElement {
   return element;
 }
 
+function startImage() {
+  components.add(
+    mount(ImagePreview, {
+      target: document.body,
+      props: { path: "picture.png", bytes: new Uint8Array([1, 2]) },
+    }),
+  );
+  flushSync();
+  const image = document.querySelector("img")!;
+  const viewport = document.querySelector<HTMLDivElement>(".preview-viewport")!;
+  Object.defineProperties(image, {
+    naturalWidth: { value: 1600 },
+    naturalHeight: { value: 1200 },
+  });
+  image.dispatchEvent(new Event("load"));
+  flushSync();
+  vi.spyOn(viewport, "getBoundingClientRect").mockImplementation(
+    () => new DOMRect(0, 0, viewportWidth, viewportHeight),
+  );
+  vi.spyOn(image, "getBoundingClientRect").mockImplementation(() => {
+    const width = Number.parseFloat(image.style.width);
+    const height = Number.parseFloat(image.style.height);
+    return new DOMRect(
+      Math.max(16, (viewportWidth - width) / 2) - viewport.scrollLeft,
+      Math.max(16, (viewportHeight - height) / 2) - viewport.scrollTop,
+      width,
+      height,
+    );
+  });
+  const capture = new Set<number>();
+  viewport.setPointerCapture = vi.fn((id: number) => capture.add(id));
+  viewport.hasPointerCapture = (id: number) => capture.has(id);
+  viewport.releasePointerCapture = vi.fn((id: number) => capture.delete(id));
+  return { image, viewport };
+}
+
+function pointer(node: HTMLElement, type: string, pointerId: number, x: number, y: number) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    button: { value: 0 },
+    pointerType: { value: "mouse" },
+    clientX: { value: x },
+    clientY: { value: y },
+  });
+  node.dispatchEvent(event);
+}
+
 async function pageReady(number: number) {
   await vi.waitFor(() => {
     flushSync();
-    expect(document.querySelector(".pdf-page")?.textContent).toBe(`page ${number}`);
+    expect(document.querySelector(".pdf-page:not([aria-hidden])")?.textContent).toBe(
+      `page ${number}`,
+    );
   });
 }
 
 describe("附件预览生命周期与交互", () => {
+  it("图片放大保留画布中心的阅读视点，连续缩放不漂移", async () => {
+    const { viewport } = startImage();
+    button("原始大小").click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(viewport.scrollLeft).toBe(416);
+      expect(viewport.scrollTop).toBe(316);
+    });
+    viewport.scrollLeft = 600;
+    viewport.scrollTop = 400;
+    button("放大").click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(viewport.scrollLeft).toBeCloseTo(846, 5);
+      expect(viewport.scrollTop).toBeCloseTo(571, 5);
+    });
+    button("缩小").click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(viewport.scrollLeft).toBeCloseTo(600, 5);
+      expect(viewport.scrollTop).toBeCloseTo(400, 5);
+    });
+  });
+
+  it("图片拖动只归属于起始指针，Escape 取消并释放画布捕获", () => {
+    const { viewport } = startImage();
+    viewport.scrollLeft = 400;
+    viewport.scrollTop = 300;
+    pointer(viewport, "pointerdown", 1, 300, 200);
+    expect(document.activeElement).toBe(viewport);
+    pointer(viewport, "pointermove", 2, 200, 100);
+    expect(viewport.scrollLeft).toBe(400);
+    pointer(viewport, "pointercancel", 2, 200, 100);
+    pointer(viewport, "pointermove", 1, 250, 150);
+    expect(viewport.scrollLeft).toBe(450);
+    viewport.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(viewport.scrollLeft).toBe(400);
+    expect(viewport.scrollTop).toBe(300);
+    expect(viewport.releasePointerCapture).toHaveBeenCalledWith(1);
+    pointer(viewport, "pointermove", 1, 200, 100);
+    expect(viewport.scrollLeft).toBe(400);
+  });
+
+  it("PDF 缩放在新画面完成前保留当前页，迟到的旧绘制不夺回展示", async () => {
+    startPdf();
+    await pageReady(1);
+    const original = document.querySelector(".pdf-page");
+    const pending = deferred<void>();
+    const renders = renderPdfPage.mock.calls.length;
+    renderPdfPage.mockImplementationOnce((page, _scale, host: HTMLElement) => {
+      host.textContent = `zoom ${page.number}`;
+      return { promise: pending.promise, cancel };
+    });
+    button("放大").click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(document.body.textContent).toContain("正在渲染");
+      expect(renderPdfPage).toHaveBeenCalledTimes(renders + 1);
+    });
+    expect(original?.isConnected).toBe(true);
+    expect(original?.parentElement?.classList.contains("concealed")).toBe(false);
+    button("下一页").click();
+    await pageReady(2);
+    pending.resolve();
+    await vi.dynamicImportSettled();
+    flushSync();
+    expect(document.querySelector(".pdf-page")?.textContent).toBe("page 2");
+  });
+
   it("PDF 固定比例下调整窗口不重新绘制页面", async () => {
     startPdf();
     await pageReady(1);

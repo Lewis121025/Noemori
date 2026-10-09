@@ -6,12 +6,14 @@
     archived,
     onExpand,
     onArchive,
+    onAction,
   }: {
     expanded: boolean;
     disabled: boolean;
     archived: boolean;
     onExpand: () => void;
     onArchive?: () => void;
+    onAction: (action: "file" | "directory" | "import" | "reveal") => void;
   } = $props();
   const id = $props.id();
   let menu: HTMLDivElement;
@@ -37,6 +39,31 @@
     type="button"
     {disabled}
     onclick={() => {
+      menu.hidePopover();
+      onAction("file");
+    }}>新建笔记…</button
+  >
+  <button
+    type="button"
+    {disabled}
+    onclick={() => {
+      menu.hidePopover();
+      onAction("directory");
+    }}>新建文件夹…</button
+  >
+  <button
+    type="button"
+    {disabled}
+    onclick={() => {
+      menu.hidePopover();
+      onAction("import");
+    }}>导入文件夹…</button
+  >
+  <div class="separator" role="separator"></div>
+  <button
+    type="button"
+    {disabled}
+    onclick={() => {
       onExpand();
       menu.hidePopover();
     }}>{expanded ? "折叠全部目录" : "展开全部目录"}</button
@@ -44,6 +71,15 @@
   {#if onArchive}<button type="button" aria-pressed={archived} onclick={() => onArchive?.()}
       >显示归档对话<span aria-hidden="true">{archived ? "✓" : ""}</span></button
     >{/if}
+  <div class="separator" role="separator"></div>
+  <button
+    type="button"
+    {disabled}
+    onclick={() => {
+      menu.hidePopover();
+      onAction("reveal");
+    }}>在系统文件夹中显示仓库</button
+  >
 </div>
 
 <style>
@@ -92,5 +128,10 @@
   }
   .options-menu span {
     width: 12px;
+  }
+  .separator {
+    height: 1px;
+    background: var(--border);
+    margin: 5px 3px;
   }
 </style>

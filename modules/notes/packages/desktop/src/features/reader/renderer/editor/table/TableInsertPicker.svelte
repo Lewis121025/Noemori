@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
+  import { selectionIndicator } from "../../selection-indicator";
   import { tableInsertLimits, validTableInsertOptions, type TableInsertOptions } from "./table";
   import { createCompositionGuard } from "../../../shared/composition";
 
@@ -203,7 +204,7 @@
     </button>
     <div class="alignment-row">
       <span>列对齐</span>
-      <div role="group" aria-label="列对齐">
+      <div role="group" aria-label="列对齐" use:selectionIndicator={align}>
         {#each alignments as alignment (alignment.value)}
           <button
             class="reader-button icon-button"
@@ -307,6 +308,9 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     background: var(--surface);
+    transition:
+      background-color 80ms var(--motion-ease),
+      border-color 80ms var(--motion-ease);
   }
   .table-size-picker span.selected {
     border-color: var(--accent);

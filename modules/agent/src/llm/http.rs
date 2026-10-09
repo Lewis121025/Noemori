@@ -59,11 +59,7 @@ impl HttpModel {
         })
     }
 
-    async fn send(
-        &self,
-        request: &ModelRequest,
-        context: &ExecutionContext,
-    ) -> Result<reqwest::Response, Error> {
+    fn encoded_request(&self, request: &ModelRequest) -> Result<Vec<u8>, Error> {
         request.validate_inline_budget(self.config.max_request_bytes)?;
         let body = providers::request(&self.config, request)?;
         let body = serde_json::to_vec(&body)
@@ -75,6 +71,15 @@ impl HttpModel {
                 self.config.max_request_bytes
             )));
         }
+        Ok(body)
+    }
+
+    async fn send(
+        &self,
+        request: &ModelRequest,
+        context: &ExecutionContext,
+    ) -> Result<reqwest::Response, Error> {
+        let body = self.encoded_request(request)?;
         let mut builder = self
             .client
             .post(endpoint(&self.config)?)
@@ -104,9 +109,15 @@ impl HttpModel {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok())
             .map(std::time::Duration::from_secs);
-        let bytes =
-            transport::read_body(response, context.clone(), self.config.max_response_bytes).await?;
-        let message = String::from_utf8_lossy(&bytes).chars().take(2048).collect();
+        // 状态码已确定失败性质；错误正文的读取故障只补充诊断，不能抹掉重试依据。
+        let message =
+            match transport::read_body(response, context.clone(), self.config.max_response_bytes)
+                .await
+            {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).chars().take(2048).collect(),
+                Err(error @ (Error::Cancelled | Error::Timeout)) => return Err(error),
+                Err(error) => format!("错误响应正文读取失败：{error}"),
+            };
         Err(Error::Http {
             status,
             message,
@@ -118,6 +129,11 @@ impl HttpModel {
 impl Model for HttpModel {
     fn capabilities(&self) -> Capabilities {
         self.config.capabilities
+    }
+
+    fn validate_request(&self, request: &ModelRequest) -> Result<(), Error> {
+        request.validate(self.capabilities())?;
+        self.encoded_request(request).map(|_| ())
     }
 
     fn generate(&self, request: ModelRequest, mut context: ExecutionContext) -> ModelStream {

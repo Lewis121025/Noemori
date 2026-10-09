@@ -7,6 +7,10 @@ import type {
   ProviderUpdate,
 } from "./providers";
 import type { ReasoningEffort } from "./reasoning";
+import type { ConversationQueue } from "./queue";
+import type { AgentReference } from "./references";
+import type { AgentAttachment, AttachmentPreview, AttachmentUpload } from "./attachments";
+import type { LibraryEntriesDrag } from "../../reader/shared/file-drag";
 /** Agent 的窗口协议只交付可见状态，认证材料由主进程单独持有。 */
 export type Protocol =
   | "openai-chat"
@@ -267,6 +271,10 @@ export type AgentConversationInfo = {
 export type AgentConversation = Omit<AgentSnapshot, "workspace"> &
   Omit<AgentConversationInfo, "status"> & {
     draft: string;
+    /** 显式引用随草稿保存；省略表示没有引用。 */
+    draftReferences?: AgentReference[];
+    /** 未发送附件由对话独立保存，读取快照不激活模型。 */
+    draftAttachments?: AgentAttachment[];
     storageError: string | null;
   };
 /** 单条损坏记录不会阻断其余会话；issues 保留恢复失败的文件及原因。 */
@@ -320,6 +328,16 @@ export type AgentApi = {
   /** 只修改指定对话下一轮的模型，不改变运行中的配置或其他对话。 */
   modelSelect(id: string, selection: ModelSelection): Promise<ModelSelection>;
   pickWorkspace(): Promise<string | null>;
+  /** 系统选择器导入不可变副本；取消返回空列表，不运行模型。 */
+  attachmentsChoose(id: string): Promise<AgentAttachment[]>;
+  /** 拖拽和粘贴提供已读取字节，仍经过主进程的归属与大小校验。 */
+  attachmentsUpload(id: string, files: AttachmentUpload[]): Promise<AgentAttachment[]>;
+  /** 复制当前笔记库中的文件；越界、文件夹、切库和超限通过 Promise 拒绝，不移动原文件。 */
+  attachmentsFromLibrary(id: string, source: LibraryEntriesDrag): Promise<AgentAttachment[]>;
+  /** 只预览本对话拥有的附件，不能把任意路径作为身份。 */
+  attachmentPreview(id: string, attachmentId: string): Promise<AttachmentPreview>;
+  /** 用户明确打开时由系统查看私有副本，失败原样报告。 */
+  attachmentOpen(id: string, attachmentId: string): Promise<void>;
   /** 目录关联可选；null 创建独立对话，运行目录由主进程管理。 */
   create(workspace: string | null, title: string): Promise<AgentConversation>;
   /** 加载已打开笔记库中的文章对话；无记录时不创建目录。 */
@@ -333,13 +351,24 @@ export type AgentApi = {
   rename(id: string, title: string): Promise<void>;
   archive(id: string, archived: boolean): Promise<void>;
   remove(id: string): Promise<void>;
-  saveDraft(id: string, draft: string): Promise<void>;
+  /** 只更新文字时缺省附件列表以保留异步导入结果；显式空列表才移除全部草稿附件。 */
+  saveDraft(id: string, draft: string, references?: AgentReference[], attachments?: string[]): Promise<void>;
   flush(): Promise<void>;
-  start(id: string, text: string): Promise<string>;
+  start(id: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<string>;
   /** 中断指定运行，只有终态结算后兑现；迟到的旧运行编号会被拒绝。 */
   cancel(id: string, runId: string): Promise<void>;
   /** 明确继续最近未完成的任务，保留草稿；返回新运行编号。 */
   resume(id: string, runId: string): Promise<string>;
+  /** 补充指定的当前任务，下一次模型请求使用该文字；返回原任务编号。 */
+  steer(id: string, runId: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<string>;
+  /** 读取对话持有的追问队列，不恢复或启动任务。 */
+  queueGet(id: string): Promise<ConversationQueue>;
+  /** 保存下一轮追问；匹配已保存草稿时才清空草稿。 */
+  queueAdd(id: string, runId: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<ConversationQueue>;
+  /** 用户明确移除未发送追问，不停止已经开始的任务。 */
+  queueRemove(id: string, messageId: string): Promise<ConversationQueue>;
+  /** 暂停队列，或明确继续发送；发送结果未确认的条目不能自动重发。 */
+  queuePause(id: string, paused: boolean): Promise<ConversationQueue>;
   approve(id: string, approval: string, reply: ApprovalReply): Promise<void>;
   terminalRead(id: string, terminal: string, offset: string): Promise<TerminalPage>;
   terminalInput(id: string, terminal: string, data: Uint8Array): Promise<void>;

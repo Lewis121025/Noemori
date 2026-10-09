@@ -160,11 +160,8 @@ impl DesktopSession {
         let mut run = data.run.clone();
         let mut pending_note = data.pending_note.clone();
         if data.active.is_some() {
-            let from = data
-                .messages
-                .iter()
-                .rposition(|message| message.role == Role::User)
-                .unwrap_or(0);
+            // 同一轮可以接受多次用户补充，观察事实必须从整轮起点保留。
+            let from = data.turns.last().map_or(0, |turn| turn.view.message_start);
             pending_note = Some(super::progress::observed_note(
                 &data.messages[from..],
                 &data.calls.keys().cloned().collect::<Vec<_>>(),

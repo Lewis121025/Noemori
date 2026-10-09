@@ -1,6 +1,7 @@
 <script lang="ts">
   /** 顶栏常用命令平铺，分类菜单只承载同一类子操作；状态与执行均来自所属编辑器。 */
   import { tick } from "svelte";
+  import { pointerIndicator } from "../../pointer-indicator";
   import type { Command, EditorState } from "prosemirror-state";
   import type { EditorView } from "prosemirror-view";
   import { undo, redo } from "prosemirror-history";
@@ -266,6 +267,7 @@
   aria-label="编辑工具栏"
   aria-keyshortcuts="Alt+F10"
   bind:this={panel}
+  use:pointerIndicator
   onmousedown={(event) => {
     // SVG 图标也属于按钮；阻止浏览器先清掉正文选区，再派发格式命令。
     if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();

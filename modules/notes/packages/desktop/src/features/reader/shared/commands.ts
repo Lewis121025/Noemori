@@ -24,7 +24,7 @@ export const READER_COMMANDS = [
   { id: "quick-switcher", label: "快速打开…", shortcut: cmd("o") },
   { id: "command-palette", label: "命令面板…", shortcut: cmd("p") },
   { id: "open-settings", label: "设置…", shortcut: cmd(",") },
-  { id: "open-vault", label: "打开笔记库…", shortcut: cmdShift("o") },
+  { id: "open-vault", label: "导入文件夹…", shortcut: cmdShift("o") },
   { id: "open-library", label: "笔记库", shortcut: cmdShift("l") },
   { id: "new-note", label: "新建笔记", shortcut: cmd("n") },
   { id: "new-whiteboard", label: "新建白板", shortcut: null },

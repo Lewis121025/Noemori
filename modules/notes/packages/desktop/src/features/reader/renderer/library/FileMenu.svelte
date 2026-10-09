@@ -1,6 +1,16 @@
 <script module lang="ts">
   /** 文件菜单可以发出的管理动作。 */
-  export type FileMenuAction = "rename" | "move" | "trash" | "reveal" | "export" | "conversations";
+  export type FileMenuAction =
+    | "rename"
+    | "move"
+    | "trash"
+    | "reveal"
+    | "export"
+    | "conversations"
+    | "file"
+    | "whiteboard"
+    | "directory"
+    | "import";
 </script>
 
 <script lang="ts">
@@ -23,7 +33,19 @@
       [];
     if (articleConversations && !multiple && target?.path.toLowerCase().endsWith(".md"))
       result.push({ id: "conversations", label: "查看文章对话" });
-    if (!multiple) result.push({ id: "rename", label: "重命名…" });
+    if (!multiple && target?.kind === "directory")
+      result.push(
+        { id: "file", label: "新建笔记…" },
+        { id: "whiteboard", label: "新建白板…" },
+        { id: "directory", label: "新建子文件夹…" },
+        { id: "import", label: "导入文件夹…" },
+      );
+    if (!multiple)
+      result.push({
+        id: "rename",
+        label: "重命名…",
+        ...(target?.kind === "directory" ? { separator: true } : {}),
+      });
     result.push({ id: "move", label: "移动到…" }, { id: "export", label: "导出…" });
     if (!multiple && target) result.push({ id: "reveal", label: "在系统文件夹中显示" });
     result.push({ id: "trash", label: "移到废纸篓…", danger: true, separator: true });

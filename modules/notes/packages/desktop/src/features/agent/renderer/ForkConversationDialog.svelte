@@ -69,7 +69,6 @@
   >
     <header>
       <h2 id="fork-conversation-title">分叉对话</h2>
-      <p>保留已有思路，从这里探索另一个方向。</p>
     </header>
     <label for="fork-conversation-name">分支名称</label>
     <input
@@ -107,10 +106,10 @@
       </div>
     </div>
     <p class="hint">
-      分支拥有独立的后续对话，原会话保持不变。两条对话使用同一工作目录，文件修改会互相可见。
+      对话独立；目录共享，文件修改互相可见。
     </p>
     {#if source?.run?.status === "running" && afterTurnId === ""}<p class="hint">
-        当前运行会保留在原会话中。分支会记录此刻的中断现场，等待你发送新任务。
+        原任务继续运行，分支等待新任务。
       </p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <footer>
@@ -131,6 +130,7 @@
 
 <style>
   dialog {
+    --radius-panel: 16px;
     width: min(32rem, calc(100vw - 2rem));
     max-height: calc(100dvh - 2rem);
     overflow: auto;
@@ -152,7 +152,9 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 18px;
+    font-weight: 550;
+    line-height: 1.5;
   }
   p {
     margin: 0.3rem 0 0;
@@ -162,7 +164,9 @@
   p {
     font-size: 0.8rem;
   }
-  header p,
+  label {
+    font-weight: 500;
+  }
   .hint,
   .source {
     color: var(--muted);
@@ -209,7 +213,11 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 0.3rem;
+    margin-top: 0.75rem;
+  }
+  footer button {
+    min-height: 34px;
+    font-size: 12px;
   }
   @media (max-height: 600px) {
     dialog {
@@ -217,9 +225,6 @@
     }
     form {
       gap: 0.5rem;
-    }
-    header p {
-      display: none;
     }
   }
 </style>

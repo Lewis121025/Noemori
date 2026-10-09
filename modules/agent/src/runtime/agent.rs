@@ -73,6 +73,24 @@ pub struct Agent {
 }
 
 impl Agent {
+    /// 返回本轮冻结的模型能力，宿主用它在接受媒体补充前核对当前运行。
+    pub(crate) fn capabilities(&self) -> crate::llm::Capabilities {
+        self.model.capabilities()
+    }
+
+    /// 宿主在发布启动或同轮补充前使用相同请求构造与校验，避免先接受后发现预算超限。
+    pub(crate) fn validate_request(
+        &self,
+        messages: &[Message],
+        generation: &GenerationOptions,
+    ) -> Result<(), Error> {
+        self.model.validate_request(&ModelRequest {
+            messages: super::browser_history::for_model(messages, self.model.capabilities().vision),
+            tools: self.tools.definitions(),
+            options: generation.clone(),
+        })
+    }
+
     /// 绑定模型、工具快照与预算；不会发送模型请求。
     ///
     /// `model` 与工具实现可被多个运行共享，`options` 约束每次运行。
@@ -126,15 +144,7 @@ impl Agent {
         input: RunInput,
         control: Option<super::RunControl>,
     ) -> Result<AgentStream, Error> {
-        ModelRequest {
-            messages: super::browser_history::for_model(
-                &input.messages,
-                self.model.capabilities().vision,
-            ),
-            tools: self.tools.definitions(),
-            options: input.generation.clone(),
-        }
-        .validate(self.model.capabilities())?;
+        self.validate_request(&input.messages, &input.generation)?;
         let context =
             ExecutionContext::new(input.cancellation.child_token(), self.options.timeout)?;
         let lease = input.session.register(context.cancellation.clone())?;

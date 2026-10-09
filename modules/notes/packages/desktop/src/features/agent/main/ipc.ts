@@ -1,4 +1,8 @@
-import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { parseReferences } from "../shared/references";
+import { attachmentId, parseAttachmentIds, parseAttachmentUploads } from "../shared/attachments";
+import { libraryAttachmentUploads } from "./attachments";
+import { parseLibraryEntriesDrag } from "../../reader/shared/file-drag";
+import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import type { AgentService } from "./service";
 import { parseApprovalReply, record, text } from "../shared/parse";
 import {
@@ -10,6 +14,14 @@ import { isEntryPath } from "../../reader/shared/file-browser";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { parsePreviewTarget, parseBrowserHumanInput } from "../shared/preview";
+/** 图片或文件可独立发送；纯文字空输入仍在 IPC 第一边界拒绝。 */
+function sentInput(value: unknown, attachments: unknown): { text: string; attachments: string[] } {
+  const files = parseAttachmentIds(attachments);
+  if (typeof value !== "string" || new TextEncoder().encode(value).length > 128 * 1024)
+    throw new Error("Agent 用户输入无效或超过 128 KiB");
+  if (!value.trim() && !files.length) throw new Error("Agent 用户输入无效：消息必须非空或包含附件");
+  return { text: value, attachments: files };
+}
 
 /** 所有 Agent 请求验证当前主窗口和主框架，导出窗口与嵌入网页不能调用。 */
 export function registerAgentIpc(
@@ -138,6 +150,37 @@ export function registerAgentIpc(
     selectedWorkspaces.add(workspace);
     return workspace;
   });
+  ipcMain.handle("agent.attachmentsChoose", async (event, session: unknown) => {
+    const service = own(event), owner = id(session), window = getWindow();
+    if (!window) throw new Error("主窗口不存在");
+    const current = await service.snapshot(owner);
+    if (current.archived) throw new Error("请先恢复已归档的对话");
+    const chosen = await dialog.showOpenDialog(window, { title: "添加附件", properties: ["openFile", "multiSelections"] });
+    if (chosen.canceled) return [];
+    if (own(event) !== service) throw new Error("选择附件期间窗口已改变");
+    return service.addAttachments(owner, chosen.filePaths);
+  });
+  ipcMain.handle("agent.attachmentPreview", (event, session: unknown, file: unknown) =>
+    own(event).attachmentPreview(id(session), attachmentId(file)),
+  );
+  ipcMain.handle("agent.attachmentsUpload", (event, session: unknown, files: unknown) =>
+    own(event).addAttachments(id(session), parseAttachmentUploads(files)),
+  );
+  ipcMain.handle("agent.attachmentsFromLibrary", async (event, session: unknown, value: unknown) => {
+    const service = own(event), owner = id(session), request = parseLibraryEntriesDrag(value);
+    const root = await requireVault(request.root);
+    const files = await libraryAttachmentUploads(root, request.entries);
+    await requireVault(root);
+    if (own(event) !== service) throw new Error("添加附件期间窗口已改变");
+    return service.addAttachments(owner, files);
+  });
+  ipcMain.handle("agent.attachmentOpen", async (event, session: unknown, file: unknown) => {
+    const service = own(event);
+    const path = await service.attachmentPath(id(session), attachmentId(file));
+    if (own(event) !== service) throw new Error("打开附件期间窗口已改变");
+    const error = await shell.openPath(path);
+    if (error) throw new Error(`无法打开附件：${error}`);
+  });
   ipcMain.handle("agent.create", async (event, workspace: unknown, title: unknown) => {
     const service = own(event);
     if (typeof title !== "string") throw new Error("会话名称无效");
@@ -173,10 +216,9 @@ export function registerAgentIpc(
   });
   ipcMain.handle("agent.list", (event) => own(event).list());
   ipcMain.handle("agent.snapshot", (event, session: unknown) => own(event).snapshot(id(session)));
-  ipcMain.handle("agent.start", (event, session: unknown, value: unknown) => {
-    if (typeof value !== "string" || value.length > 128 * 1024)
-      throw new Error("Agent 用户输入无效");
-    return own(event).start(id(session), value);
+  ipcMain.handle("agent.start", (event, session: unknown, value: unknown, references: unknown, attachments: unknown) => {
+    const input = sentInput(value, attachments);
+    return own(event).start(id(session), input.text, parseReferences(references), input.attachments);
   });
   ipcMain.handle("agent.cancel", (event, session: unknown, run: unknown) =>
     own(event).cancel(id(session), id(run)),
@@ -184,6 +226,22 @@ export function registerAgentIpc(
   ipcMain.handle("agent.resume", (event, session: unknown, run: unknown) =>
     own(event).resume(id(session), id(run)),
   );
+  ipcMain.handle("agent.steer", (event, session: unknown, run: unknown, value: unknown, references: unknown, attachments: unknown) => {
+    const input = sentInput(value, attachments);
+    return own(event).steer(id(session), id(run), input.text, parseReferences(references), input.attachments);
+  });
+  ipcMain.handle("agent.queueGet", (event, session: unknown) => own(event).queueGet(id(session)));
+  ipcMain.handle("agent.queueAdd", (event, session: unknown, run: unknown, value: unknown, references: unknown, attachments: unknown) => {
+    const input = sentInput(value, attachments);
+    return own(event).queueAdd(id(session), id(run), input.text, parseReferences(references), input.attachments);
+  });
+  ipcMain.handle("agent.queueRemove", (event, session: unknown, message: unknown) =>
+    own(event).queueRemove(id(session), id(message)),
+  );
+  ipcMain.handle("agent.queuePause", (event, session: unknown, paused: unknown) => {
+    if (typeof paused !== "boolean") throw new Error("队列暂停状态无效");
+    return own(event).queuePause(id(session), paused);
+  });
   ipcMain.handle("agent.browserControl", (event, session: unknown, resume: unknown) => {
     if (typeof resume !== "boolean") throw new Error("浏览器控制请求无效");
     return own(event).browserControl(id(session), resume);
@@ -197,10 +255,10 @@ export function registerAgentIpc(
     return own(event).archive(id(session), archived);
   });
   ipcMain.handle("agent.remove", (event, session: unknown) => own(event).remove(id(session)));
-  ipcMain.handle("agent.saveDraft", (event, session: unknown, draft: unknown) => {
+  ipcMain.handle("agent.saveDraft", (event, session: unknown, draft: unknown, references: unknown, attachments: unknown) => {
     if (typeof draft !== "string" || draft.length > 128 * 1024)
       throw new Error("会话草稿无效或过长");
-    return own(event).saveDraft(id(session), draft);
+    return own(event).saveDraft(id(session), draft, parseReferences(references), attachments === undefined ? undefined : parseAttachmentIds(attachments));
   });
   ipcMain.handle("agent.flush", (event) => own(event).flush());
   ipcMain.handle("agent.approve", (event, session: unknown, approval: unknown, reply: unknown) =>

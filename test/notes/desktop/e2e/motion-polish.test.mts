@@ -188,6 +188,7 @@ test("编辑弹窗快速重开不残留旧输入，退出动画不干扰正文�
 test("键盘候选筛选后第一项可见，中途减少动态效果会完成目录折叠", async (t) => {
   const { app, page } = await launch(t);
   try {
+    await page.locator(".ProseMirror").click();
     await page.keyboard.press("ControlOrMeta+o");
     const input = page.locator(".picker[open]").getByRole("combobox");
     await input.fill("笔记");

@@ -5,6 +5,7 @@ const VAULT_OPEN_PHASES = [
   "scanning",
   "checking",
   "reading",
+  "copying",
   "indexing",
   "ranking",
   "verifying",
@@ -20,15 +21,16 @@ export type VaultOpenProgress = {
 
 /** 界面与主进程使用同一阶段词汇，避免把可取消准备和最终提交混淆。 */
 export const VAULT_OPEN_LABELS: Record<VaultOpenProgress["phase"], string> = {
-  preparing: "正在准备打开资料库…",
+  preparing: "正在准备仓库…",
   recovering: "正在恢复资料库…",
   scanning: "正在扫描文件…",
   checking: "正在核对文件…",
   reading: "正在读取和解析文件…",
+  copying: "正在复制文件…",
   indexing: "正在建立笔记索引…",
   ranking: "正在建立搜索索引…",
   verifying: "正在检查打开期间的文件变化…",
-  committing: "正在完成打开…",
+  committing: "正在完成接入…",
 };
 
 /** 校验跨进程进度；未知阶段、不可能的数量或溢出均抛错。 */

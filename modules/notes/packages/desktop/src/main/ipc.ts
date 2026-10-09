@@ -2,7 +2,7 @@ import { app, ipcMain, nativeTheme, type BrowserWindow } from "electron";
 import { parseAppearance, parseHistoryAvailability } from "../shared/api";
 import { parseReadingFont } from "../features/reader/shared/reading-font";
 import { parseReadingPalette } from "../features/reader/shared/reading-palette";
-import { registerReaderIpc } from "../features/reader/main/ipc";
+import { registerReaderIpc, type DirectoryImported } from "../features/reader/main/ipc";
 import { onFlushResult, type CloseGate } from "./close-gate";
 import type { CoreClient } from "./core-client";
 import { updateHistoryMenu } from "./menu";
@@ -18,8 +18,9 @@ export function registerIpc(
   getWindow: () => BrowserWindow | null,
   closeGate: CloseGate,
   core: CoreClient,
+  onDirectoryImported?: DirectoryImported,
 ): void {
-  registerReaderIpc(getWindow, core);
+  registerReaderIpc(getWindow, core, onDirectoryImported);
   ipcMain.on("app.historyChanged", (event, value: unknown) => {
     const contents = getWindow()?.webContents;
     if (

@@ -1,7 +1,10 @@
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 #[path = "../../support/model.rs"]
 mod model;
+mod recovery;
+mod attachments;
 mod steering;
+mod terminal_order;
 use noemori_agent::{
     host::{DesktopSession, DesktopSessionOptions, HostApprovalReply, HostRunStatus},
     llm::ModelEvent,

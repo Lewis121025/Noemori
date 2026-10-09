@@ -25,8 +25,19 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
       "# 神经网络与深度学习\n\n理解知识，也让知识之间建立联系。\n\n## 前言\n\n安静地阅读。\n",
     ),
     writeFile(join(vault, "章节/第一章.md"), "# 第一章\n\n从基础开始。\n"),
-    ...["00-README.md", "01-Using-Neural-Nets-to-Recognize-Handwritten-Digits.md", "02-How-the-Backpropagation-Algorithm-Works.md", longName, "04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md", "05-Why-Are-Deep-Neural-Networks-Hard-to-Train.md", "06-Deep-Learning.md"].map(name =>
-      writeFile(join(vault, name), "# 改进神经网络的学习方式\n\n理解知识，也让知识之间建立联系。\n\n## 交叉熵代价函数\n\n从误差开始改进。\n"),
+    ...[
+      "00-README.md",
+      "01-Using-Neural-Nets-to-Recognize-Handwritten-Digits.md",
+      "02-How-the-Backpropagation-Algorithm-Works.md",
+      longName,
+      "04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md",
+      "05-Why-Are-Deep-Neural-Networks-Hard-to-Train.md",
+      "06-Deep-Learning.md",
+    ].map((name) =>
+      writeFile(
+        join(vault, name),
+        "# 改进神经网络的学习方式\n\n理解知识，也让知识之间建立联系。\n\n## 交叉熵代价函数\n\n从误差开始改进。\n",
+      ),
     ),
     writeFile(
       join(state, "session.json"),
@@ -42,26 +53,32 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
   const app = await electron.launch({
     executablePath,
     args: [fileURLToPath(new URL("out/main/index.js", desktop)), `--user-data-dir=${state}`],
-    env: { ...process.env, ELECTRON_RENDERER_URL: "" },
+    // focus-visible 属于真实窗口的键盘模态，不能依赖后台窗口的焦点模拟。
+    env: { ...process.env, ELECTRON_RENDERER_URL: "", NOEMORI_TEST_WINDOW: "visible" },
   });
   try {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.focus());
     const page = await app.firstWindow();
     page.setDefaultTimeout(6000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.locator(".ProseMirror").waitFor();
+    await page.evaluate(() => document.fonts.ready);
     const sidebar = page.locator(".file-sidebar:not(.right)");
     const headingNavigation = sidebar.locator(".navigation-heading");
     const filesButton = headingNavigation.getByRole("button", { name: "文件目录", exact: true });
     const outlineButton = headingNavigation.getByRole("button", { name: "文章大纲", exact: true });
     const searchInput = sidebar.getByRole("searchbox", { name: "搜索笔记库", exact: true });
-    expect(await headingNavigation.getByRole("button", { name: "搜索笔记库", exact: true }).count()).toBe(0);
+    expect(
+      await headingNavigation.getByRole("button", { name: "搜索笔记库", exact: true }).count(),
+    ).toBe(0);
     await searchInput.fill("首页");
     await outlineButton.click();
     expect(await filesButton.isVisible()).toBe(true);
     await filesButton.press("Enter");
     expect(await searchInput.inputValue()).toBe("首页");
+    await searchInput.waitFor({ state: "visible" });
     await searchInput.focus();
     await searchInput.press("Escape");
     const heading = sidebar.locator(".view-options");
@@ -70,16 +87,32 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
     const row = (path: string) => sidebar.locator(`.file[data-path="${path}"]`);
     await row(longName).focus();
     await row(longName).press("ArrowDown");
-    expect(await sidebar.locator(".file-row.active .file").getAttribute("data-path")).toBe(longName);
+    expect(
+      await row(longName).evaluate((element) => getComputedStyle(element.parentElement!).boxShadow),
+    ).toContain("inset");
+    expect(
+      await row("04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md").evaluate(
+        (element) => getComputedStyle(element.parentElement!).boxShadow,
+      ),
+    ).toBe("none");
+    expect(await sidebar.locator(".file-row.active .file").getAttribute("data-path")).toBe(
+      longName,
+    );
     const completeName = sidebar.getByRole("tooltip");
     await completeName.waitFor();
-    expect(await completeName.textContent()).toContain("04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md");
+    expect(await completeName.textContent()).toContain(
+      "04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md",
+    );
     const hintBounds = (await completeName.boundingBox())!;
     expect(hintBounds.x).toBeGreaterThanOrEqual(0);
-    expect(hintBounds.x + hintBounds.width).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
+    expect(hintBounds.x + hintBounds.width).toBeLessThanOrEqual(
+      await page.evaluate(() => innerWidth),
+    );
     await page.keyboard.press("Escape");
     await completeName.waitFor({ state: "hidden" });
-    expect(await heading.locator(":scope > button").count()).toBe(2);
+    expect(await heading.locator(":scope > button").count()).toBe(1);
+    expect(await heading.locator(".root-label h2").textContent()).toBe("Noemori");
+    expect(await heading.getByRole("button", { name: "笔记库根目录" }).count()).toBe(0);
     expect(await heading.locator(".result-count").count()).toBe(0);
     expect(await sidebar.getByRole("button", { name: /浏览标签|书签|定位当前文件/ }).count()).toBe(
       0,
@@ -122,7 +155,11 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
     if (captures) await page.screenshot({ path: join(captures, "sidebar-green.png") });
     await page.getByRole("separator", { name: "调整侧栏宽度", exact: true }).press("Home");
     const sidebarBounds = (await sidebar.boundingBox())!;
-    for (const button of [filesButton, outlineButton, headingNavigation.getByRole("button", { name: "新建", exact: true })]) {
+    for (const button of [
+      filesButton,
+      outlineButton,
+      headingNavigation.getByRole("button", { name: "新建", exact: true }),
+    ]) {
       const bounds = (await button.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(sidebarBounds.x);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(sidebarBounds.x + sidebarBounds.width);

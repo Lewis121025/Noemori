@@ -41,12 +41,14 @@
   let inputEpoch = 0;
   let disposed = false;
   let drag: { pointer: number; x: number; y: number; left: number; top: number } | null = null;
+  let dragHandle = $state<HTMLButtonElement>();
   const identity = $derived(JSON.stringify(target));
   const interactive = $derived(human && target.backend === "managed" && inputToken !== null);
   const error = $derived(inputError || previewError);
   onDestroy(() => {
     disposed = true;
     inputEpoch++;
+    finishDrag();
   });
 
   function place(): void {
@@ -130,8 +132,10 @@
     };
   });
   function pointerDown(event: PointerEvent): void {
-    if (event.currentTarget instanceof HTMLElement)
-      event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.button !== 0 || drag !== null || !dragHandle) return;
+    event.preventDefault();
+    dragHandle.focus({ preventScroll: true });
+    dragHandle.setPointerCapture(event.pointerId);
     drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, left: x, top: y };
   }
   function pointerMove(event: PointerEvent): void {
@@ -139,6 +143,12 @@
     x = drag.left + event.clientX - drag.x;
     y = drag.top + event.clientY - drag.y;
     place();
+  }
+  function finishDrag(event?: PointerEvent): void {
+    if (!drag || (event && drag.pointer !== event.pointerId)) return;
+    const pointer = drag.pointer;
+    drag = null;
+    if (dragHandle?.hasPointerCapture(pointer)) dragHandle.releasePointerCapture(pointer);
   }
   function input(value: BrowserHumanInput): void {
     if (!interactive || target.backend !== "managed" || inputToken === null) return;
@@ -234,6 +244,7 @@
   use:portal
   bind:this={surface}
   class="agent-preview"
+  data-motion-surface
   class:expanded
   style:left="{x}px"
   style:top="{y}px"
@@ -317,17 +328,26 @@
   {#if error}<p class="error" role="status">{error}</p>{/if}
   <footer aria-label="画面操作">
     <button
+      bind:this={dragHandle}
       class="drag"
       aria-label="拖动画面窗口"
       onpointerdown={pointerDown}
       onpointermove={pointerMove}
-      onpointerup={() => {
-        drag = null;
-      }}
-      onpointercancel={() => {
-        drag = null;
-      }}
+      onpointerup={finishDrag}
+      onpointercancel={finishDrag}
+      onlostpointercapture={finishDrag}
       onkeydown={(event) => {
+        if (event.isComposing) return;
+        if (event.key === "Escape" && drag) {
+          event.preventDefault();
+          event.stopPropagation();
+          x = drag.left;
+          y = drag.top;
+          finishDrag();
+          place();
+          return;
+        }
+        if (drag) return;
         const offsets: Record<string, [number, number]> = {
           ArrowLeft: [-20, 0],
           ArrowRight: [20, 0],
@@ -337,6 +357,7 @@
         const offset = offsets[event.key];
         if (offset) {
           event.preventDefault();
+          event.stopPropagation();
           x += offset[0];
           y += offset[1];
           place();

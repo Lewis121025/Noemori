@@ -562,14 +562,19 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(target.querySelector(".document-name")?.textContent).toBe("renamed.md");
   });
 
-  it("浏览草稿补出的缺失目录时，新建明确阻止提交，不退回笔记库根目录", async () => {
+  it("明确在草稿补出的缺失目录中新建时阻止提交，不退回笔记库根目录", async () => {
     disk.set("失踪/草稿.md", encode("recovered\n"));
     vi.mocked(api.entryCreate).mockRejectedValue(new Error("父文件夹不存在"));
     await start();
     await manageFiles();
-    target.querySelector<HTMLButtonElement>('.list[aria-label=文件列表] [data-path="失踪"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    target
+      .querySelector<HTMLButtonElement>('.list[aria-label=文件列表] [data-path="失踪"]')!
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     flushSync();
-    onCommand("new-note");
+    const create = [...target.querySelectorAll<HTMLButtonElement>(".file-menu button")].find(
+      (button) => button.textContent?.trim() === "新建笔记…",
+    )!;
+    create.click();
     flushSync();
     await vi.waitFor(() => {
       flushSync();
@@ -884,11 +889,11 @@ describe("保存、冲突与恢复的完整界面流程", () => {
     expect(target.querySelector(".comparison-stale")).toBeNull();
   });
 
-  it("保存冲突同时阻止切库和重命名，所有离开文档的操作共用保存门禁", async () => {
+  it("保存冲突同时阻止文件夹导入和重命名，所有离开文档的操作共用保存门禁", async () => {
     await start();
     await edit("keep my edits");
     vi.mocked(api.fileWrite).mockResolvedValue({ status: "conflict", disk: encode("external") });
-    click("打开笔记库…");
+    onCommand("open-vault");
     await vi.waitFor(() => expect(status()).toBe("存在保存冲突"));
     renameTo("renamed.md");
     await vi.waitFor(() => {
@@ -898,7 +903,7 @@ describe("保存、冲突与恢复的完整界面流程", () => {
       );
     });
     expect(target.querySelector<HTMLDialogElement>(".entry-dialog")?.open).toBe(true);
-    expect(api.vaultOpen).not.toHaveBeenCalled();
+    expect(api.directoryImport).not.toHaveBeenCalled();
     expect(api.entryRename).not.toHaveBeenCalled();
     expect(target.querySelector(".ProseMirror")?.textContent).toBe("keep my edits");
   });

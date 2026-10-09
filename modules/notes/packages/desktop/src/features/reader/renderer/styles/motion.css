@@ -1,7 +1,7 @@
 /* 颜色承担控件状态，空间承担导航；文字不随点击缩放或闪烁。 */
-.app
+:is(.app, [data-motion-surface])
   :where(
-    button,
+    button:not(.image),
     summary,
     input,
     select,
@@ -19,10 +19,17 @@
     box-shadow var(--motion-fast) var(--motion-ease),
     filter var(--motion-fast) var(--motion-ease);
 }
+[data-motion-surface] :where(button:not(.image)) {
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
 
-.app
+:is(.app, [data-motion-surface])
   :where(
-    button:active:is(:hover, :focus-visible):not(:disabled, [aria-disabled="true"]),
+    button:active:is(:hover, :focus-visible):not(.image, :disabled, [aria-disabled="true"]),
     summary:active:is(:hover, :focus-visible),
     [role="option"]:active:is(:hover, :focus-visible)
   ) {
@@ -32,9 +39,9 @@
 }
 
 @media (hover: hover) {
-  .app
+  :is(.app, [data-motion-surface])
     :where(
-      button:hover:not(:disabled, [aria-disabled="true"]),
+      button:hover:not(.image, :disabled, [aria-disabled="true"]),
       summary:hover,
       [role="option"]:hover
     ) {
@@ -65,6 +72,73 @@
 .app .reader-button.icon-button:active:is(:hover, :focus-visible):not(:disabled) > svg {
   translate: 0 1px;
   transition-duration: var(--motion-press);
+}
+
+/* 光标跨越相邻控件时共用一块底色；轻快接住动作，离开后留一点柔和的余韵。 */
+.app [data-motion-hover] {
+  isolation: isolate;
+}
+.app [data-motion-hover]:not([popover]) {
+  position: relative;
+}
+.app [data-motion-hover] > .pointer-highlight {
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  z-index: -1;
+  width: 32px;
+  height: 32px;
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity var(--motion-hover-out) cubic-bezier(0.22, 0.65, 0.3, 1);
+}
+.app [data-motion-hover] > .pointer-highlight > :is(.pointer-body, .pointer-wake) {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform-origin: center;
+  background:
+    radial-gradient(
+      ellipse at 42% 24%,
+      color-mix(in srgb, var(--glass-highlight, var(--fg)) 36%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse,
+      color-mix(in srgb, var(--fg) 16%, var(--selected)),
+      color-mix(in srgb, var(--fg) 8%, var(--selected)) 52%,
+      transparent 98%
+    );
+}
+.app [data-motion-hover] > .pointer-highlight > .pointer-wake {
+  opacity: 0;
+}
+.app [data-hover-visible] > .pointer-highlight {
+  opacity: 1;
+  transition-duration: var(--motion-hover-in);
+}
+@media (hover: hover) {
+  .app
+    [data-motion-hover]
+    button:hover:not(
+      :active,
+      :disabled,
+      :focus-visible,
+      .primary,
+      [aria-pressed="true"],
+      [aria-expanded="true"]
+    ) {
+    background: transparent;
+  }
+}
+@media (forced-colors: active) {
+  .app [data-motion-hover] > .pointer-highlight {
+    display: none;
+  }
+  .app [data-motion-hover] button:hover:not(:disabled) {
+    background: Highlight;
+    color: HighlightText;
+  }
 }
 
 /* 同组选择只有一块底色移动，按钮尺寸、文字与键盘焦点保持原位。 */
@@ -101,6 +175,15 @@
 .app [data-selection-ready] > button[aria-pressed="true"] {
   background: transparent;
   box-shadow: none;
+}
+.app
+  [data-selection-ready]
+  > button[aria-pressed="true"]:active:is(:hover, :focus-visible):not(:disabled) {
+  box-shadow: inset 0 1px 2px var(--shadow);
+}
+.app .panel-switch {
+  --selection-radius: 6px;
+  --selection-fill: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 .app .settings-window nav {
   --selection-radius: var(--radius-control);

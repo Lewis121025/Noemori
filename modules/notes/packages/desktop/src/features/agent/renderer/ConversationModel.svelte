@@ -45,7 +45,7 @@
   let live = true;
   const provider = $derived(catalog.providers.find((item) => item.id === selection?.providerId));
   const model = $derived(provider?.models.find((item) => item.id === selection?.modelId));
-  const efforts = $derived(modelReasoningEfforts(model?.reasoning, model?.id));
+  const efforts = $derived(modelReasoningEfforts(model?.reasoning));
   const valid = $derived(Boolean(model));
   const searchQuery = $derived(query.trim().toLocaleLowerCase());
   const groups = $derived(
@@ -198,7 +198,7 @@
               {
                 providerId: selection.providerId,
                 modelId: selection.modelId,
-                reasoningEffort,
+                ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
               },
               false,
             )
@@ -315,6 +315,9 @@
   }
   button {
     cursor: pointer;
+    transition:
+      background var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease);
   }
   button:disabled {
     opacity: 0.5;
@@ -328,13 +331,16 @@
     max-width: 100%;
     border: 0;
     background: transparent;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     min-height: 28px;
     padding: 4px 6px;
     font-size: 12px;
+    color: var(--muted);
+  }
+  .model-trigger:hover:not(:disabled) {
+    background: var(--control-hover, var(--selected));
     color: var(--fg);
   }
-  .model-trigger:hover,
   .model-trigger[aria-expanded="true"] {
     background: var(--selected);
     color: var(--fg);
@@ -346,6 +352,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .model-trigger > svg {
+    width: 12px;
+    height: 12px;
   }
   svg {
     width: 16px;
@@ -369,9 +379,9 @@
     width: var(--menu-width);
     max-height: min(360px, calc(100dvh - 24px));
     box-sizing: border-box;
-    padding: 6px;
+    padding: 8px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--surface);
     color: var(--fg);
     box-shadow: var(--shadow-popover);
@@ -399,7 +409,7 @@
     height: 28px;
     flex-shrink: 0;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--muted);
   }
@@ -414,11 +424,13 @@
     gap: 7px;
     padding: 5px 7px;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+    background: var(--bg);
     color: var(--muted);
+    transition: border-color var(--motion-fast) var(--motion-ease);
   }
   .model-search:focus-within {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   }
   input {
     width: 100%;
@@ -428,6 +440,10 @@
     border: 0;
     background: transparent;
     font-size: 12px;
+  }
+  input::placeholder {
+    color: var(--muted);
+    opacity: 1;
   }
   input:focus-visible {
     outline: none;
@@ -450,10 +466,10 @@
     gap: 8px;
     width: 100%;
     text-align: left;
-    min-height: 32px;
-    padding: 5px 8px;
+    min-height: 34px;
+    padding: 6px 8px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: transparent;
     font-size: 12px;
   }
@@ -469,6 +485,7 @@
   }
   .model-option svg.chosen {
     visibility: visible;
+    color: var(--accent);
   }
   .model-option .model-icon {
     visibility: visible;
@@ -476,7 +493,9 @@
     height: 14px;
     color: var(--muted);
   }
-  .model-option:hover,
+  .model-option:hover:not(:disabled) {
+    background: var(--control-hover, var(--selected));
+  }
   .model-option[aria-pressed="true"] {
     background: var(--selected);
   }
@@ -525,10 +544,21 @@
     color: var(--muted);
     font-size: 11px;
     padding: 5px;
+    border-radius: var(--radius-control);
+  }
+  footer button:hover {
+    background: var(--selected);
+    color: var(--fg);
   }
   .error {
     color: var(--danger);
     font-size: 11px;
     overflow-wrap: anywhere;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button,
+    .model-search {
+      transition: none;
+    }
   }
 </style>

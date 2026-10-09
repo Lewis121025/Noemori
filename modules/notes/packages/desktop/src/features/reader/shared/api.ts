@@ -12,6 +12,7 @@ import type { EntryBatchProgress, EntryBatchRequest, EntryBatchResult } from "./
 import type { ExportRequest, ExportProgress, ExportPlan, ExportResult } from "./export";
 import type { ShapeRepair } from "./whiteboard/recognition";
 import type { WebPageApi } from "./webpage";
+import type { DirectoryImportResult, ImportedLibrary } from "./directory-import";
 
 /** 历史动作由当前输入表面执行，不建立独立于编辑器的撤销记录。 */
 export type HistoryAction = "undo" | "redo";
@@ -313,6 +314,10 @@ export type VaultOpenSnapshot = {
 
 /** 已打开的库与用于恢复阅读现场的同一次响应。 */
 export type VaultRestore = VaultOpenSnapshot & {
+  /** 旧单目录已导入为子目录，原文件保留；主进程据此迁移文章对话。 */
+  imported?: ImportedLibrary;
+  /** 仓库已提交之后的附属数据或清理故障，不能据此重复导入。 */
+  warning?: string;
   /** 上次会话的分栏文档与阅读栈；渲染端按当前文件列表过滤失效条目。 */
   documents: SessionDocuments;
   /** 上次会话按文件记住的源码或阅读视图。 */
@@ -375,7 +380,7 @@ export type ReaderApi = {
   exportReveal: () => Promise<void>;
   /** 启动时核实并显示未确认的导出结果，不重放生成或覆盖。 */
   exportRecover: () => Promise<void>;
-  /** 弹出选目录对话框并打开库；取消时返回 `null`。 */
+  /** 初始化固定的应用仓库；取消时返回 null，不切换到外部目录。 */
   vaultOpen: (
     onProgress?: (progress: VaultOpenProgress) => void,
   ) => Promise<VaultOpenSnapshot | null>;
@@ -393,6 +398,12 @@ export type ReaderApi = {
   ) => Promise<VaultRestore | null>;
   /** 取消当前窗口的开库准备；提交已开始或没有活动请求时返回 false。 */
   vaultOpenCancel: () => Promise<boolean>;
+  /** 选择外部文件夹并导入完整副本；原文件保留，取消返回 null。 */
+  directoryImport: (
+    root: string,
+    parent: string,
+    onProgress?: (progress: VaultOpenProgress) => void,
+  ) => Promise<DirectoryImportResult | null>;
   /** 持久化各分栏的当前文档、阅读栈与分栏布局；路径与条目由主进程校验。 */
   sessionSetDocuments: (documents: SessionDocuments) => Promise<void>;
   /** 持久化视图记忆（源码/阅读）；损坏条目由会话解析丢弃。 */
@@ -407,6 +418,8 @@ export type ReaderApi = {
   sessionSetPanes: (panes: PaneLayout) => Promise<void>;
   /** 关闭当前库。 */
   vaultClose: () => Promise<void>;
+  /** 在系统文件管理器中显示固定应用仓库，不改变浏览和文档状态。 */
+  vaultReveal: () => Promise<void>;
   /** 列出库内相对路径。 */
   vaultList: () => Promise<string[]>;
   /** 完整目录快照，包含空文件夹和恢复草稿。 */

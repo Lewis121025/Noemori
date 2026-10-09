@@ -178,6 +178,132 @@ async fn partial_output_is_not_retried_or_committed() {
     assert_eq!(report.pending_turn.unwrap().deltas.len(), 1);
 }
 
+#[tokio::test(start_paused = true)]
+async fn retry_wait_respects_the_run_deadline_without_an_extra_request() {
+    let model = Arc::new(ScriptedModel::new(vec![vec![Err(Error::Http {
+        status: 429,
+        message: "limit".into(),
+        retry_after: Some(Duration::from_secs(10)),
+    })]]));
+    let agent = Agent::new(
+        model.clone(),
+        ToolRegistry::new(),
+        RunOptions {
+            timeout: Duration::from_secs(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let report = agent.run(input()).await.unwrap();
+    assert!(matches!(report.status, RunStatus::TimedOut));
+    assert_eq!(report.model_calls, 1);
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cancellation_during_retry_wait_stops_further_requests() {
+    let model = Arc::new(ScriptedModel::new(vec![vec![Err(Error::Http {
+        status: 503,
+        message: "retry".into(),
+        retry_after: Some(Duration::from_secs(10)),
+    })]]));
+    let input = input();
+    let cancellation = input.cancellation.clone();
+    let mut stream = agent(model.clone(), ToolRegistry::new(), 8)
+        .stream(input)
+        .unwrap();
+    let report = loop {
+        match stream.next().await.unwrap() {
+            AgentEvent::RetryScheduled { .. } => cancellation.cancel(),
+            AgentEvent::Finished(report) => break report,
+            _ => {}
+        }
+    };
+    assert!(matches!(report.status, RunStatus::Cancelled));
+    assert_eq!(report.model_calls, 1);
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn retry_exhaustion_is_bounded_and_preserves_the_original_request() {
+    let model = Arc::new(ScriptedModel::new(
+        (0..3)
+            .map(|_| {
+                vec![Err(Error::Http {
+                    status: 503,
+                    message: "unavailable".into(),
+                    retry_after: None,
+                })]
+            })
+            .collect(),
+    ));
+    let report = agent(model.clone(), ToolRegistry::new(), 8)
+        .run(input())
+        .await
+        .unwrap();
+    assert!(matches!(
+        report.status,
+        RunStatus::Failed(Error::Http { status: 503, .. })
+    ));
+    assert_eq!(report.model_calls, 3);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    for request in &requests[1..] {
+        assert_eq!(
+            serde_json::to_value(&request.messages).unwrap(),
+            serde_json::to_value(&requests[0].messages).unwrap()
+        );
+    }
+}
+
+#[tokio::test]
+async fn retry_limits_reset_after_a_committed_tool_step_without_reexecuting_it() {
+    let unavailable = || {
+        Err(Error::Http {
+            status: 503,
+            message: "retry".into(),
+            retry_after: None,
+        })
+    };
+    let model = Arc::new(ScriptedModel::new(vec![
+        vec![unavailable()],
+        vec![calls(&[("once", "double", json!({"value":2}))])],
+        vec![unavailable()],
+        vec![answer("4")],
+    ]));
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut tools = ToolRegistry::new();
+    tools.register(Double(count.clone())).unwrap();
+    let agent = Agent::new(
+        model.clone(),
+        tools,
+        RunOptions {
+            max_retries: 1,
+            retry_delay: Duration::ZERO,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let report = agent.run(input()).await.unwrap();
+    assert!(matches!(report.status, RunStatus::Completed));
+    assert_eq!(report.model_calls, 4);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    validate_history(&report.history).unwrap();
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(
+        serde_json::to_value(&requests[2].messages).unwrap(),
+        serde_json::to_value(&requests[3].messages).unwrap()
+    );
+    assert_eq!(
+        requests[3]
+            .messages
+            .iter()
+            .flat_map(|message| message.tool_calls())
+            .count(),
+        1
+    );
+}
+
 #[tokio::test]
 async fn incomplete_tool_arguments_never_execute() {
     let model = Arc::new(ScriptedModel::new(vec![vec![Ok(

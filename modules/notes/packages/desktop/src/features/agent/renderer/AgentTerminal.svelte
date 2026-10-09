@@ -63,6 +63,9 @@
     void emulator;
     void pump();
   });
+  $effect(() => {
+    if (emulator) emulator.options.disableStdin = !terminal.tty || terminal.process.status !== "running";
+  });
   onMount(() => {
     const current = new Terminal({
       fontFamily: '"JetBrains Mono Variable", monospace',
@@ -74,6 +77,13 @@
     const fit = new FitAddon();
     current.loadAddon(fit);
     current.open(container);
+    const scheme = matchMedia("(prefers-color-scheme: dark)");
+    function updateTheme(): void {
+      const colors = getComputedStyle(container);
+      current.options.theme = { background: colors.backgroundColor, foreground: colors.color };
+    }
+    updateTheme();
+    scheme.addEventListener("change", updateTheme);
     emulator = current;
     const typed = current.onData((value) => input(new TextEncoder().encode(value)));
     const binary = current.onBinary((value) =>
@@ -105,6 +115,7 @@
       cancelAnimationFrame(scheduled);
       typed.dispose();
       binary.dispose();
+      scheme.removeEventListener("change", updateTheme);
       current.dispose();
       emulator = null;
     };
@@ -113,7 +124,7 @@
 
 <section class="agent-terminal">
   <header>
-    <span>终端 · {terminal.process.status}</span>
+    <span>{terminal.process.status === "running" ? (terminal.tty ? "交互终端" : "命令输出") : "已结束"}</span>
     <div>
       <button
         onclick={() =>
@@ -143,18 +154,18 @@
   .agent-terminal {
     display: flex;
     flex-direction: column;
-    min-height: 220px;
-    height: 280px;
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 8px;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 10px;
-    font-size: 12px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    flex-shrink: 0;
   }
   header div {
     display: flex;
@@ -167,15 +178,27 @@
     background: transparent;
     cursor: pointer;
     padding: 3px 5px;
+    border-radius: var(--radius-control);
+  }
+  button:hover:not(:disabled) {
+    background: var(--control-hover, var(--selected));
+    color: var(--fg);
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
   .terminal-screen {
     flex: 1;
     min-height: 0;
-    background: #17191c;
+    --terminal-bg: var(--bg);
+    --terminal-fg: var(--fg);
+    background: var(--terminal-bg);
+    color: var(--terminal-fg);
     padding: 8px;
   }
   .error {
-    color: #c0392b;
+    color: var(--danger);
     font-size: 12px;
     margin: 4px 10px;
   }

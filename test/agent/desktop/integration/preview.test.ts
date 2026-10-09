@@ -7,6 +7,44 @@ import type { UiPreviewFrame } from "../../../../modules/notes/packages/desktop/
 import { createAgentApiMock } from "../../../notes/desktop/fixtures/agent-api-mock";
 
 const mounted: ReturnType<typeof mount>[] = [];
+
+it("浮窗拖动只响应主按钮和起始指针，Escape 恢复位置并释放捕获", () => {
+  vi.useFakeTimers();
+  const target = document.createElement("div");
+  document.body.append(target);
+  mounted.push(mount(AgentPreview, { target, props: {
+    api: createAgentApiMock(), session: "session", target: { backend: "managed", page: "page" },
+    title: "后台浏览器", close: () => {},
+  } }));
+  flushSync();
+  const window = document.querySelector<HTMLElement>(".agent-preview")!;
+  const handle = document.querySelector<HTMLButtonElement>('[aria-label="拖动画面窗口"]')!;
+  const origin = { left: window.style.left, top: window.style.top };
+  handle.setPointerCapture = vi.fn();
+  handle.hasPointerCapture = vi.fn(() => true);
+  handle.releasePointerCapture = vi.fn();
+  const pointer = (type: string, clientX: number, pointerId = 1, button = 0) => {
+    handle.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
+      button, pointerId, clientX, clientY: 100,
+    }));
+    flushSync();
+  };
+  pointer("pointerdown", 300, 1, 2);
+  expect(handle.setPointerCapture).not.toHaveBeenCalled();
+  pointer("pointerdown", 300);
+  expect(document.activeElement).toBe(handle);
+  pointer("pointermove", 200, 2);
+  expect(window.style.left).toBe(origin.left);
+  pointer("pointercancel", 200, 2);
+  pointer("pointermove", 200);
+  expect(window.style.left).not.toBe(origin.left);
+  handle.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  expect({ left: window.style.left, top: window.style.top }).toEqual(origin);
+  expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
+  pointer("pointermove", 150);
+  expect(window.style.left).toBe(origin.left);
+});
 afterEach(async () => {
   for (const component of mounted.splice(0)) await unmount(component);
   document.body.replaceChildren();

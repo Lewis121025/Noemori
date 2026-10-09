@@ -45,7 +45,10 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.4rem;
-    padding: 0.4rem 1.5rem;
+    align-self: center;
+    width: calc(100% - 2 * var(--conversation-inset, 20px));
+    max-width: var(--conversation-width, 44rem);
+    padding: 0.4rem 0;
     border-bottom: 1px solid var(--border);
     color: var(--muted);
     font-size: 0.75rem;
@@ -54,7 +57,7 @@
     font-size: inherit;
     padding: 0.2rem 0.4rem;
     min-width: 0;
-    max-width: 25rem;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -74,13 +77,5 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     padding: 0.3rem 0;
-  }
-  @media (max-width: 800px) {
-    .conversation-relations {
-      padding-inline: 0.75rem;
-    }
-    button {
-      max-width: calc(100vw - 6rem);
-    }
   }
 </style>

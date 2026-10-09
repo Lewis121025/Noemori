@@ -25,6 +25,14 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* 尺寸、页码和绘制状态作为完整信息组换行，窄顶栏通过横向滚动容纳。 */
+.preview-toolbar > label,
+.preview-toolbar > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .preview-toolbar button,
 .preview-toolbar input,
 .preview-message button,

@@ -2,9 +2,11 @@
 
 mod batch;
 mod control;
+mod directory_import;
 mod export;
 mod files;
 mod models;
+mod library;
 mod publication;
 mod scheduler;
 pub mod session;

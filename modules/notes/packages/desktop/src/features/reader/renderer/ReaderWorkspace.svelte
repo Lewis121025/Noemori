@@ -36,6 +36,8 @@
   import { createSessionWrite } from "./session-write";
   import { READING_FONTS, type ReadingFont } from "../shared/reading-font";
   import { DEFAULT_READING_PALETTE, type ReadingPalette } from "../shared/reading-palette";
+  import type { SelectedContent } from "../shared/selected-content";
+  import type { SelectionSource } from "../shared/selected-content";
   import type { ArticleAgentActions } from "../shared/article-conversations";
 
   /** 每次挂载对应一个阅读器实例，api 在该实例存活期间保持不变。 */
@@ -48,6 +50,7 @@
     agentOpen = false,
     onOpenAgent,
     articleAgent,
+    onAddReference,
     conversations,
     agentPanel,
     onCommand,
@@ -61,6 +64,7 @@
     agentOpen?: boolean;
     onOpenAgent?: () => void;
     articleAgent?: ArticleAgentActions;
+    onAddReference?: (reference: SelectedContent) => Promise<void>;
     conversations?: WorkspaceConversations;
     agentPanel?: Snippet;
     onCommand?: (command: ReaderCommand) => void;
@@ -348,21 +352,37 @@
     await fileList?.focusSearch();
   }
   async function openVault(): Promise<void> {
-    const before = workspace.vaultRoot;
-    await workspace.openVault();
-    if (workspace.vaultRoot !== null && workspace.vaultRoot !== before) {
+    await importDirectory("");
+  }
+
+  async function importDirectory(parent: string): Promise<void> {
+    const imported = await workspace.importDirectory(parent);
+    if (imported !== null) {
       sidebarPanel = "files";
       filesCollapsed = false;
       persistPanes();
+      await fileList?.reflectChange(
+        { action: "create", entry: { path: imported.path, kind: "directory" } },
+        true,
+      );
     }
   }
 
-  /** 新建默认目录使用侧栏当前选择；表单中仍可确认并修改位置。 */
+  /** 新建跟随明确选中的目录或文件父目录；缺失父目录回到最近的现有层级。 */
   function creationDirectory(): string {
-    return workspace.fileTree.state.browse?.directory ?? "";
+    const selected = workspace.fileTree.state.selected;
+    const path = selected.length === 1 ? selected[0] : workspace.document.path;
+    const entry = workspace.entries.find((entry) => entry.path === path);
+    let directory = entry?.kind === "directory" ? entry.path : parentDirectory(path ?? "");
+    while (
+      directory &&
+      !workspace.entries.some((entry) => entry.kind === "directory" && entry.path === directory)
+    )
+      directory = parentDirectory(directory);
+    return directory;
   }
 
-  /** 创建入口只准备用户可确认的表单；选中条目不会隐式改变保存目录。 */
+  /** 创建入口只准备可确认的表单；目录操作的明确位置优先于默认建议。 */
   async function startDocument(
     kind: CreateEntryKind,
     parentOverride?: string,
@@ -371,7 +391,7 @@
     if (creatingDocument || workspace.isComposing) return;
     creatingDocument = true;
     try {
-      if (workspace.vaultRoot === null) await workspace.openVault();
+      if (workspace.vaultRoot === null) await workspace.openVault("default");
       if (workspace.vaultRoot === null) return;
       await createDialog?.open(kind, parentOverride ?? creationDirectory(), suggestedName);
     } catch (error) {
@@ -520,6 +540,23 @@
     return workspace.vaultRoot;
   }
 
+  /**
+   * @param source 显式引用的文件来源，不改变对话的文件或目录关联。
+   * @returns 文档保存门禁完成、来源打开并核对原文位置后兑现。
+   * @throws 来源不属于当前笔记库、文件移除、保存未完成或原文已失效时拒绝。
+   */
+  export async function openReference(source: SelectionSource): Promise<void> {
+    if (source.root !== workspace.vaultRoot)
+      throw new Error(`请先打开引用所属的笔记库：${source.root}`);
+    if (!workspace.files.includes(source.path)) throw new Error("引用来源已移除，引用原文仍保留");
+    await workspace.openFile(source.path);
+    if (workspace.document.path !== source.path)
+      throw new Error("来源切换未完成，请先处理保存问题");
+    finishFileNavigation();
+    await tick();
+    workspace.navigation.selectReference(source);
+  }
+
   /** 从文章对话返回稳定入口；跨库或来源已移除时明确报错，不打开错误文章。 */
   export async function openArticle(root: string, path: string, markerId: string): Promise<void> {
     if (root !== workspace.vaultRoot) throw new Error(`请先打开此对话所属的笔记库：${root}`);
@@ -632,6 +669,8 @@
           onEdit={(action, entry, parent) => {
             if (action === "file") void startDocument("note", parent);
             else if (action === "directory") void startDocument("directory", parent);
+            else if (action === "whiteboard") void startDocument("whiteboard", parent);
+            else if (action === "import") void importDirectory(parent);
             else void entryDialog?.open(action, entry, parent);
           }}
         />
@@ -693,6 +732,7 @@
           {#each workspace.panes as pane (pane.id)}
             <PaneColumn
               {...articleAgent ? { articleAgent } : {}}
+              {...onAddReference ? { onAddReference } : {}}
               {workspace}
               {pane}
               {registerControls}

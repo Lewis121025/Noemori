@@ -42,7 +42,7 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
 fn reasoning_fields(model: &str, effort: &ReasoningEffort) -> Value {
     // 基础模型与跨区域 profile 的 ARN 都把模型身份放在最后一段资源路径。
     let resource = model.rsplit('/').next().unwrap_or(model);
-    let model_id = ["us.", "eu.", "apac.", "global."]
+    let model_id = ["us.", "eu.", "jp.", "apac.", "global."]
         .iter()
         .find_map(|prefix| resource.strip_prefix(prefix))
         .unwrap_or(resource);

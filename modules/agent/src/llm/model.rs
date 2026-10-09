@@ -26,6 +26,14 @@ pub trait Model: Send + Sync + 'static {
     /// 返回具体模型能力，不根据模型名称猜测。
     fn capabilities(&self) -> Capabilities;
 
+    /// 在接受用户输入前同步核对实际请求契约，不发送网络请求。
+    /// `request` 包含完整历史、参数和工具；默认检查公共能力，适配器可追加编码预算。
+    /// # 错误
+    /// 不支持的媒体、非法历史、协议参数或请求体超限时拒绝，调用方应保留未发送输入。
+    fn validate_request(&self, request: &ModelRequest) -> Result<(), Error> {
+        request.validate(self.capabilities())
+    }
+
     /// 生成标准化事件；响应结束前的工具参数不能被执行。
     ///
     /// # 错误
@@ -64,7 +72,7 @@ pub(crate) fn checked_stream(
 ) -> impl Stream<Item = Result<ModelEvent, Error>> + Send + '_ {
     async_stream::try_stream! {
         context.check()?;
-        request.validate(model.capabilities())?;
+        model.validate_request(&request)?;
         let previous_calls: std::collections::BTreeSet<_> = request.messages.iter()
             .flat_map(crate::Message::tool_calls).map(|call| call.id.clone()).collect();
         let mut stream = model.generate(request, context.clone());

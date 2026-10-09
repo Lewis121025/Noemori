@@ -1,5 +1,5 @@
 import { expect, it, onTestFinished, vi } from "vitest";
-import { mkdtemp, rm, realpath, writeFile, rename, readFile } from "node:fs/promises";
+import { mkdtemp, rm, realpath, writeFile, rename, readFile, mkdir, copyFile, cp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentService } from "../../../../modules/notes/packages/desktop/src/features/agent/main/service";
@@ -9,14 +9,18 @@ import {
   record,
 } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/parse";
 import { newProviderModel } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
+import { readConversationInput } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/input";
 
 const runtime = vi.hoisted(() => ({
   created: 0,
   restored: 0,
   starts: 0,
+  terminalActions: 0,
   contexts: [] as string[],
   configurations: [] as string[],
   closed: 0,
+  rejectNextStart: false,
+  bridgeUpdated: true,
   notify: () => {},
 }));
 vi.mock("../../../../modules/agent/node/index.js", () => ({
@@ -67,17 +71,7 @@ vi.mock(
         },
         browser: { status: "idle", tabs: [], receipts: [], error: null },
       };
-      return {
-        snapshot: () => JSON.stringify(view),
-        checkpoint: () => JSON.stringify({ version: 1, workspace, snapshot: view }),
-        restore: (value: string) => {
-          runtime.restored += 1;
-          view = {
-            ...parseSnapshot(JSON.stringify(record(JSON.parse(value))["snapshot"])),
-            closed: false,
-          };
-        },
-        startConfigured: (
+      const startConfigured = (
           configuration: string,
           _binding: string,
           text: string,
@@ -85,6 +79,7 @@ vi.mock(
         ) => {
           if (context) runtime.contexts.push(context);
           if (view.run?.status === "running") throw new Error("已有运行");
+          if (runtime.rejectNextStart) { runtime.rejectNextStart = false; throw new Error("原生请求预算不足"); }
           runtime.configurations.push(configuration);
           runtime.starts += 1;
           view.messages.push({ role: "user", content: [{ type: "text", value: text }] });
@@ -97,7 +92,27 @@ vi.mock(
           view.revision += 1;
           changed();
           return `run-${runtime.starts}`;
+      };
+      return {
+        snapshot: () => JSON.stringify(view),
+        checkpoint: () => JSON.stringify({ version: 1, workspace, snapshot: view }),
+        restore: (value: string) => {
+          runtime.restored += 1;
+          view = {
+            ...parseSnapshot(JSON.stringify(record(JSON.parse(value))["snapshot"])),
+            closed: false,
+          };
         },
+        startConfigured,
+        startConfiguredWithAttachments: runtime.bridgeUpdated ? (configuration: string, binding: string, text: string, context?: string, images?: string) => {
+          const run = startConfigured(configuration, binding, text, context);
+          if (images) {
+            const raw: unknown = JSON.parse(images);
+            if (!Array.isArray(raw)) throw new Error("图片载荷无效");
+            for (const image of raw) view.messages.at(-1)!.content.push({ type: "image", value: image });
+          }
+          return run;
+        } : undefined,
         interrupt: async (id: string) => {
           if (view.run?.id !== id) throw new Error("运行已变化");
           if (view.run.status === "running") view.run.status = "cancelled";
@@ -106,6 +121,10 @@ vi.mock(
         cancel: () => {
           if (view.run) view.run.status = "cancelled";
           changed();
+        },
+        terminalAction: async () => {
+          runtime.terminalActions += 1;
+          return JSON.stringify({ outcome: "fixture" });
         },
         close: async () => {
           runtime.closed += 1;
@@ -142,6 +161,277 @@ async function createSelected(service: AgentService, workspace: string, title: s
   await selectFixture(service, item.id);
   return service.snapshot(item.id);
 }
+
+it("附件与草稿按对话保存，重启、排队和分叉保留副本，跨会话身份被拒绝", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-service-"));
+  const services: AgentService[] = [];
+  onTestFinished(async () => {
+    await Promise.all(services.map((service) => service.shutdown()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const service = await configured(directory);
+  services.push(service);
+  const first = await service.create(null, "文件资料"), second = await service.create(null, "另一个对话");
+  await selectFixture(service, first.id);
+  const path = join(directory, "资料.txt");
+  await writeFile(path, "真实附件原文");
+  const files = await service.addAttachments(first.id, [path]);
+  await service.saveDraft(first.id, "读取资料", [], files.map((file) => file.id));
+  await writeFile(path, "源文件随后修改");
+  await expect(service.attachmentPreview(second.id, files[0]!.id)).rejects.toThrow("不属于");
+  await service.shutdown();
+  const restored = new AgentService(directory, "/launcher", () => {});
+  services.push(restored);
+  expect((await restored.snapshot(first.id)).draftAttachments).toEqual(files);
+  expect(await restored.attachmentPreview(first.id, files[0]!.id)).toMatchObject({ text: "真实附件原文" });
+  const run = await restored.start(first.id, "读取资料", [], [files[0]!.id]);
+  const sent = await restored.snapshot(first.id);
+  expect(sent.draftAttachments ?? []).toEqual([]);
+  const input = readConversationInput(sent.messages[0]!.content.find((part) => part.type === "text")!.value.toString());
+  expect(input.attachments).toEqual(files);
+  await restored.saveDraft(first.id, "后续读取", [], [files[0]!.id]);
+  const queue = await restored.queueAdd(first.id, run, "后续读取", [], [files[0]!.id]);
+  expect(readConversationInput(queue.messages[0]!.text).attachments).toEqual(files);
+  await restored.cancel(first.id, run);
+  const fork = await restored.fork(first.id, { title: "附件分叉", afterTurnId: null });
+  await restored.remove(first.id);
+  expect(await restored.attachmentPreview(fork.id, files[0]!.id)).toMatchObject({ text: "真实附件原文" });
+});
+
+it("文件导入与输入草稿并发时保留新附件，只有显式空列表才移除附件", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-draft-race-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const conversation = await service.create(null, "上传中输入");
+  const importing = service.addAttachments(conversation.id, [{ name: "资料.txt", bytes: new TextEncoder().encode("资料") }]);
+  const typing = service.saveDraft(conversation.id, "上传时继续输入", []);
+  const [files] = await Promise.all([importing, typing]);
+  const saved = await service.snapshot(conversation.id);
+  expect(saved.draft).toBe("上传时继续输入");
+  expect(saved.draftAttachments).toEqual(files);
+  await service.saveDraft(conversation.id, "保留文字", [], []);
+  expect((await service.snapshot(conversation.id)).draftAttachments ?? []).toEqual([]);
+  expect(await readdir(join(directory, "agent-attachments/owned", conversation.id))).toEqual([]);
+});
+
+it("分叉只拥有历史实际引用的附件，移除队列和草稿会回收未发送副本", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-references-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const conversation = await service.create(null, "引用归属");
+  await selectFixture(service, conversation.id);
+  const [sent] = await service.addAttachments(conversation.id, [{ name: "已发送.txt", bytes: new TextEncoder().encode("已发送") }]);
+  const run = await service.start(conversation.id, "读取", [], [sent!.id]);
+  const [queued] = await service.addAttachments(conversation.id, [{ name: "待发送.txt", bytes: new TextEncoder().encode("待发送") }]);
+  const queue = await service.queueAdd(conversation.id, run, "下一轮", [], [queued!.id]);
+  const [draft] = await service.addAttachments(conversation.id, [{ name: "草稿.txt", bytes: new TextEncoder().encode("草稿") }]);
+  await service.cancel(conversation.id, run);
+  const fork = await service.fork(conversation.id, { title: "独立分支", afterTurnId: null });
+  await expect(service.attachmentPreview(fork.id, queued!.id)).rejects.toThrow("不属于");
+  await expect(service.attachmentPreview(fork.id, draft!.id)).rejects.toThrow("不属于");
+  expect(await readdir(join(directory, "agent-attachments/owned", fork.id))).toHaveLength(1);
+  await service.saveDraft(conversation.id, "", [], []);
+  expect(await service.attachmentPreview(conversation.id, queued!.id)).toMatchObject({ text: "待发送" });
+  await service.queueRemove(conversation.id, queue.messages[0]!.id);
+  await expect(service.attachmentPreview(conversation.id, queued!.id)).rejects.toThrow("不属于");
+  expect(await service.attachmentPreview(conversation.id, sent!.id)).toMatchObject({ text: "已发送" });
+  expect(await readdir(join(directory, "agent-attachments/owned", conversation.id))).toHaveLength(1);
+});
+
+it("原生接受前拒绝会撤销本次工具发布，保留草稿和冻结副本供用户重试", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-rejection-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "发送拒绝");
+  await selectFixture(service, item.id);
+  const files = await service.addAttachments(item.id, [{ name: "资料.txt", bytes: new TextEncoder().encode("不能丢失的副本") }]);
+  runtime.rejectNextStart = true;
+  await expect(service.start(item.id, "", [], [files[0]!.id])).rejects.toThrow("预算不足");
+  expect((await service.snapshot(item.id)).draftAttachments).toEqual(files);
+  expect(await readdir(join(directory, "agent-attachments/published", item.id))).toEqual([]);
+  expect(await service.attachmentPreview(item.id, files[0]!.id)).toMatchObject({ text: "不能丢失的副本" });
+  await service.start(item.id, "", [], [files[0]!.id]);
+  expect(await readdir(join(directory, "agent-attachments/published", item.id))).toHaveLength(1);
+});
+
+it("旧原生桥接明确拒绝附件，不伪报成功，也不消费草稿或发布文件", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-old-bridge-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { runtime.bridgeUpdated = true; await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "旧桥接");
+  await selectFixture(service, item.id);
+  const files = await service.addAttachments(item.id, [{ name: "资料.txt", bytes: new TextEncoder().encode("原文") }]);
+  runtime.bridgeUpdated = false;
+  const starts = runtime.starts;
+  await expect(service.start(item.id, "", [], [files[0]!.id])).rejects.toThrow("原生附件模块尚未更新");
+  expect(runtime.starts).toBe(starts);
+  expect((await service.snapshot(item.id)).draftAttachments).toEqual(files);
+  expect(await readdir(join(directory, "agent-attachments/published", item.id))).toEqual([]);
+});
+
+it("导入后保存失败整批回滚副本，原草稿与附件目录保持完整", async (test) => {
+  const { ConversationStore } = await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-save-failure-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "保存失败");
+  await service.saveDraft(item.id, "原草稿");
+  const save = vi.spyOn(ConversationStore.prototype, "save").mockRejectedValueOnce(new Error("磁盘写入失败"));
+  test.onTestFinished(() => save.mockRestore());
+  await expect(service.addAttachments(item.id, [{ name: "资料.txt", bytes: new TextEncoder().encode("原文") }])).rejects.toThrow("磁盘写入失败");
+  expect((await service.snapshot(item.id)).draft).toBe("原草稿");
+  expect((await service.snapshot(item.id)).draftAttachments ?? []).toEqual([]);
+  expect(await readdir(join(directory, "agent-attachments/owned", item.id))).toEqual([]);
+});
+
+it("目录副本保留文章对话身份与分支，新仓库中的路径重绑且原历史不改写", async (test) => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), "noemori-import-history-")));
+  const services: AgentService[] = [];
+  test.onTestFinished(async () => {
+    await Promise.all(services.map(service => service.shutdown()));
+    await rm(base, { recursive: true, force: true });
+  });
+  const source = join(base, "资料"), root = join(base, "Noemori"), data = join(base, "state");
+  await mkdir(join(source, "章节"), { recursive: true });
+  await mkdir(join(root, "资料/章节"), { recursive: true });
+  await writeFile(join(source, "章节/笔记.md"), "# 笔记\n");
+  const original = await configured(data);
+  services.push(original);
+  const article = await original.createArticle({ root: source, path: "章节/笔记.md", title: "讨论笔记" });
+  await original.saveDraft(article.id, "继续讨论", [{ id: "quoted", text: "笔记", source: { root: source, path: "章节/笔记.md", offset: 0, sourceText: "笔记" } }]);
+  const fork = await original.fork(article.id, { title: "进一步推导", afterTurnId: null });
+  await original.shutdown();
+  const history = join(source, ".noemori/agent/conversations", `${article.id}.json`);
+  const before = await readFile(history);
+  await copyFile(join(source, "章节/笔记.md"), join(root, "资料/章节/笔记.md"));
+  await cp(join(source, ".noemori"), join(root, "资料/.noemori"), { recursive: true });
+  await writeFile(join(root, "资料/.noemori-library-source.json"), JSON.stringify({ version: 1, source }));
+  const imported = new AgentService(data, "/launcher", () => {});
+  services.push(imported);
+  await imported.importArticleLibrary(source, root, "资料");
+  const current = await imported.snapshot(article.id);
+  expect(current.workspace).toBe(root);
+  expect(current.article?.path).toBe("资料/章节/笔记.md");
+  expect(current.draftReferences?.[0]?.source).toMatchObject({ root, path: "资料/章节/笔记.md" });
+  expect((await imported.snapshot(fork.id)).origin?.conversationId).toBe(article.id);
+  expect(await readFile(history)).toEqual(before);
+  await imported.importArticleLibrary(source, root, "资料");
+  await imported.shutdown();
+  await rm(source, { recursive: true, force: true });
+  const restored = new AgentService(data, "/launcher", () => {});
+  services.push(restored);
+  await restored.attachVault(root);
+  expect((await restored.snapshot(article.id)).article?.path).toBe("资料/章节/笔记.md");
+  expect((await restored.snapshot(fork.id)).workspace).toBe(root);
+});
+
+it("引用草稿跨重启保留，发送仅消费匹配的文字与引用，模型收到来源和选中原文", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-reference-service-"));
+  const services: AgentService[] = [];
+  test.onTestFinished(async () => {
+    await Promise.all(services.map((service) => service.shutdown()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const service = await configured(directory);
+  services.push(service);
+  const item = await createSelected(service, directory, "引用任务");
+  const quote = { id: "quoted", text: "原文😀", source: { root: "/another-vault", path: "资料/原文.md", offset: 0, sourceText: "原文😀" } };
+  await service.saveDraft(item.id, "解释引用", [quote]);
+  await service.shutdown();
+  const restored = new AgentService(directory, "/launcher", () => {});
+  services.push(restored);
+  expect((await restored.snapshot(item.id)).draftReferences).toEqual([quote]);
+  await restored.start(item.id, "解释引用", [quote]);
+  const sent = await restored.snapshot(item.id);
+  expect(sent.workspace).toBe(item.workspace);
+  expect(sent.draft).toBe("");
+  expect(sent.draftReferences).toBeUndefined();
+  expect(JSON.stringify(sent.messages)).toContain("资料/原文.md");
+  expect(JSON.stringify(sent.messages)).toContain("原文😀");
+});
+
+/** 挂起步骤也属于夹具；测试失败时先放行并结算服务，避免清理后的目录被迟到写入重建。 */
+async function closingFixture() {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-close-boundary-"));
+  const release = Promise.withResolvers<void>();
+  const services: AgentService[] = [];
+  onTestFinished(async () => {
+    release.resolve();
+    const results = await Promise.allSettled(services.map((service) => service.shutdown()));
+    await rm(directory, { recursive: true, force: true });
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length) throw new AggregateError(failures, "关闭边界测试未能清理服务");
+  });
+  const service = await configured(directory);
+  services.push(service);
+  const item = await createSelected(service, directory, "关闭边界");
+  return { directory, service, item, release, services };
+}
+
+it.each(["模型请求", "终端动作"])("关闭发生在%s的资源激活期间时，不创建迟到资源", async (kind) => {
+  const { AgentProviderStore } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/providers");
+  const { service, item, release } = await closingFixture();
+  const entered = Promise.withResolvers<void>();
+  const original = AgentProviderStore.prototype.selected;
+  const selected = vi
+    .spyOn(AgentProviderStore.prototype, "selected")
+    .mockImplementationOnce(async function (this: InstanceType<typeof AgentProviderStore>, value) {
+      entered.resolve();
+      await release.promise;
+      return original.call(this, value);
+    });
+  onTestFinished(() => selected.mockRestore());
+  const before = runtime.created;
+  const actionsBefore = runtime.terminalActions;
+  const pending =
+    kind === "模型请求"
+      ? service.start(item.id, "准备发送")
+      : service.terminalAction(item.id, { action: "exec", cmd: "printf fixture" });
+  const settled = Promise.allSettled([pending]);
+  await entered.promise;
+  const closing = service.shutdown();
+  release.resolve();
+  const [result] = await settled;
+  await closing;
+  expect(result).toMatchObject({ status: "rejected", reason: new Error("Agent 服务正在关闭") });
+  expect(runtime.created).toBe(before);
+  expect(runtime.terminalActions).toBe(actionsBefore);
+});
+
+it("关闭发生在发送前保存期间时，不再派发模型且保留未发送草稿", async () => {
+  const { ConversationStore } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const { directory, service, item, release, services } = await closingFixture();
+  await service.saveDraft(item.id, "必须保留的任务");
+  const entered = Promise.withResolvers<void>();
+  const original = ConversationStore.prototype.save;
+  const save = vi.spyOn(ConversationStore.prototype, "save").mockImplementationOnce(async function (
+    this: InstanceType<typeof ConversationStore>,
+    value,
+  ) {
+    entered.resolve();
+    await release.promise;
+    await original.call(this, value);
+  });
+  onTestFinished(() => save.mockRestore());
+  const before = runtime.starts;
+  const sending = service.start(item.id, "必须保留的任务");
+  const settled = Promise.allSettled([sending]);
+  await entered.promise;
+  const closing = service.shutdown();
+  release.resolve();
+  const [result] = await settled;
+  await closing;
+  expect(result).toMatchObject({ status: "rejected", reason: new Error("Agent 服务正在关闭") });
+  expect(runtime.starts).toBe(before);
+  const restored = new AgentService(directory, "/launcher", () => {});
+  services.push(restored);
+  expect((await restored.snapshot(item.id)).draft).toBe("必须保留的任务");
+  await restored.shutdown();
+});
 
 it("无文件或目录关联的对话可发送、分叉和重启恢复，内部工作目录不作为关联展示", async (test) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-independent-chat-"));

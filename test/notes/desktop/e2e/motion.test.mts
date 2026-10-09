@@ -155,7 +155,7 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
     expect(collapsing.left).toBeGreaterThan(-width);
     expect(
       await page
-        .locator(".content-space")
+        .locator(".pane-content")
         .evaluate((element) =>
           element
             .getAnimations()
@@ -221,9 +221,9 @@ test("动效支持中途反向、原生焦点交接和减少动态效果，保�
     await expect
       .poll(() => page.locator(".app").getAttribute("data-reading-palette"))
       .toBe("monochrome");
-    expect(await sidebar.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-      "rgba(0, 0, 0, 0)",
-    );
+    expect(
+      await sidebar.evaluate((element) => getComputedStyle(element, "::before").backgroundColor),
+    ).not.toBe("rgba(0, 0, 0, 0)");
     expect(await settings.evaluate((element) => getComputedStyle(element).translate)).toBe("none");
     await page.keyboard.press("Escape");
     expect(await settings.isVisible()).toBe(false);

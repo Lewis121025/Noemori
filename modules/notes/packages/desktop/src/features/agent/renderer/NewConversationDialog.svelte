@@ -72,7 +72,6 @@
   >
     <header>
       <h2 id="new-conversation-title">新建对话</h2>
-      <p>可以直接创建，也可以关联文件夹。</p>
     </header>
     <label for="conversation-title">会话名称</label>
     <input
@@ -110,8 +109,7 @@
         type="button"
         disabled={busy || picking}
         onclick={() => (workspace = "")}>取消目录关联</button
-      >
-      <p class="hint">关联后，助手可在这个文件夹中工作。</p>{/if}
+      >{/if}
     {#if error}<p role="alert" class="error">{error}</p>{/if}
     <footer>
       <button
@@ -133,6 +131,7 @@
 
 <style>
   dialog {
+    --radius-panel: 16px;
     width: min(30rem, calc(100vw - 2rem));
     max-height: calc(100dvh - 2rem);
     overflow: auto;
@@ -154,16 +153,13 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
-  }
-  header p,
-  .hint {
-    color: var(--muted);
-    font-size: 0.8rem;
-    line-height: 1.6;
+    font-size: 18px;
+    font-weight: 550;
+    line-height: 1.5;
   }
   label {
     font-size: 0.8rem;
+    font-weight: 500;
   }
   .choose-folder {
     align-self: flex-start;
@@ -181,6 +177,10 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  footer button {
+    min-height: 34px;
+    font-size: 12px;
   }
 </style>

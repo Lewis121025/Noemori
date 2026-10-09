@@ -1,5 +1,6 @@
 <script lang="ts">
   import WorkspaceFeedback from "./WorkspaceFeedback.svelte";
+  import { pointerIndicator } from "../pointer-indicator";
   import type { Snippet } from "svelte";
   import type { ReaderWorkspaceController } from "./state.svelte";
 
@@ -45,7 +46,7 @@
 </script>
 
 <header class="window-toolbar" class:mac aria-label="窗口工具栏">
-  <div class="window-navigation">
+  <div class="window-navigation" use:pointerIndicator>
     <button
       bind:this={sidebarToggle}
       class="reader-button icon-button"
@@ -94,7 +95,7 @@
   >
     {@render documentTools()}
   </div>
-  <div class="window-actions">
+  <div class="window-actions" use:pointerIndicator>
     <WorkspaceFeedback {workspace} />
     {#if workspace.split}
       <div class="pane-switch" role="group" aria-label="切换分栏">
@@ -248,5 +249,11 @@
   .pane-switch button {
     padding: 0.2rem 0.55rem;
     font-size: 0.75rem;
+  }
+  @media (max-width: 900px) {
+    /* 尺寸可悬停画面查看；窄顶栏优先保留直接操作，避免露出半截信息。 */
+    .window-document-tools :global(.preview-dimensions) {
+      display: none;
+    }
   }
 </style>

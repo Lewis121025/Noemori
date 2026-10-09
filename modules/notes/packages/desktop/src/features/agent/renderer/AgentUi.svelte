@@ -1,7 +1,12 @@
 <script lang="ts">
   import type { AgentApi, AgentUi, UiInstallation, UiPermissions, UiPreviewTarget } from "../shared/api";
   import AgentPreview from "./AgentPreview.svelte";
-  let { api, session, ui }: { api: AgentApi; session: string; ui: AgentUi } = $props();
+  let {
+    api,
+    session,
+    ui,
+    settingsOpen = false,
+  }: { api: AgentApi; session: string; ui: AgentUi; settingsOpen?: boolean } = $props();
   let changing = $state(false);
   let error = $state("");
   let preview = $state<{ target: UiPreviewTarget; title: string } | null>(null);
@@ -41,7 +46,7 @@
 </script>
 
 <section aria-label="浏览器与应用控制" class="ui-control">
-  <details open={ui.connections.length > 0 || ui.status === "busy"}>
+  <details open={settingsOpen || ui.connections.length > 0 || ui.status === "busy"}>
     <summary>浏览器与应用 <span>{labels[ui.status]}</span></summary>
     {#each ui.connections as connection (connection.id)}
       <div class="connection">
@@ -88,7 +93,7 @@
       {#if latest.outcome === "unknown"}<p>上一步可能已生效，请核验结果。</p>{/if}
       {#if latest.error}<p class="error">{latest.error}</p>{/if}
     {/if}
-    <details>
+    <details open={settingsOpen}>
       <summary>连接浏览器与系统权限</summary>
       <button
         disabled={changing}

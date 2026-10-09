@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { registerAgentIpc } from "../../../../modules/notes/packages/desktop/src/features/agent/main/ipc";
 import { AgentService } from "../../../../modules/notes/packages/desktop/src/features/agent/main/service";
-import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newProviderModel } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
@@ -22,10 +22,17 @@ vi.mock("../../../../modules/notes/packages/desktop/src/features/agent/main/serv
     providersRemove = vi.fn();
     modelSelect = vi.fn();
     start = vi.fn();
+    steer = vi.fn();
+    queueGet = vi.fn();
+    queueAdd = vi.fn();
+    queueRemove = vi.fn();
+    queuePause = vi.fn();
     terminalInput = vi.fn();
     create = vi.fn();
     list = vi.fn(async () => ({ items: [], issues: [] }));
     attachVault = vi.fn();
+    addAttachments = vi.fn(async () => []);
+    saveDraft = vi.fn();
   },
 }));
 vi.mock("electron", () => ({
@@ -85,6 +92,38 @@ function call(name: string, ...args: unknown[]) {
   if (!handler) throw new Error("入口缺失");
   return handler(...args);
 }
+
+it("笔记库文件附件只读取当前库内普通文件，拒绝越界、目录、过期库和超限文件", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-library-attachment-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const root = await realpath(directory), vault = join(root, "vault");
+  await mkdir(vault);
+  transport.root = vault;
+  await writeFile(join(vault, "资料.md"), "正文😀");
+  await writeFile(join(root, "outside.txt"), "不可读取");
+  await symlink(join(root, "outside.txt"), join(vault, "escape.txt"));
+  const request = (path: string, kind = "file") => ({ root: vault, entries: [{ path, kind }] });
+  await call("agent.attachmentsFromLibrary", event(), "session", request("资料.md"));
+  const [owner, files] = vi.mocked(service.addAttachments).mock.calls[0]!;
+  expect(owner).toBe("session");
+  expect(files[0]!.name).toBe("资料.md");
+  expect(Array.from(files[0]!.bytes)).toEqual(Array.from(new TextEncoder().encode("正文😀")));
+  vi.mocked(service.addAttachments).mockClear();
+  for (const value of [request("../outside.txt"), request("escape.txt"), request("資料", "directory"), { ...request("资料.md"), root }])
+    await expect(call("agent.attachmentsFromLibrary", event(), "session", value)).rejects.toThrow();
+  await writeFile(join(vault, "large.txt"), "");
+  await truncate(join(vault, "large.txt"), 25 * 1024 * 1024 + 1);
+  await expect(call("agent.attachmentsFromLibrary", event(), "session", request("large.txt"))).rejects.toThrow("25 MiB");
+  await expect(call("agent.attachmentsFromLibrary", event(), "session", { root: vault, entries: Array.from({ length: 9 }, (_, index) => ({ path: `${index}.txt`, kind: "file" })) })).rejects.toThrow("八个");
+  expect(service.addAttachments).not.toHaveBeenCalled();
+});
+
+it("草稿 IPC 保留缺省附件语义，显式空列表才清空附件", () => {
+  call("agent.saveDraft", event(), "session", "继续输入", []);
+  expect(service.saveDraft).toHaveBeenLastCalledWith("session", "继续输入", [], undefined);
+  call("agent.saveDraft", event(), "session", "移除附件", [], []);
+  expect(service.saveDraft).toHaveBeenLastCalledWith("session", "移除附件", [], []);
+});
 
 it("Agent 请求只接受当前主窗口主框架", () => {
   const current = event();
@@ -214,6 +253,27 @@ it("错误输入和超预算字节在进入原生层前被拒绝", () => {
   const data = new Uint8Array([0, 255, 3]);
   call("agent.terminalInput", current, "session", "terminal", data);
   expect(service.terminalInput).toHaveBeenCalledWith("session", "terminal", data);
+});
+
+it("补充与追问校验运行身份、窗口归属和 UTF-8 字节上限，不改写原文", () => {
+  const current = event(), text = "  分两步\n执行这项任务  ";
+  call("agent.steer", current, "session", "active", text);
+  call("agent.queueAdd", current, "session", "active", text);
+  call("agent.queueGet", current, "session");
+  call("agent.queueRemove", current, "session", "pending");
+  call("agent.queuePause", current, "session", true);
+  expect(service.steer).toHaveBeenCalledWith("session", "active", text, [], []);
+  expect(service.queueAdd).toHaveBeenCalledWith("session", "active", text, [], []);
+  expect(service.queuePause).toHaveBeenCalledWith("session", true);
+  for (const channel of ["agent.steer", "agent.queueAdd"]) {
+    expect(() => call(channel, current, "session", "", text)).toThrow("标识");
+    expect(() => call(channel, current, "session", "active", "中".repeat(45000))).toThrow("128 KiB");
+    expect(() => call(channel, current, "session", "active", "  ")).toThrow("用户输入无效");
+    expect(() => call(channel, { ...current, senderFrame: {} }, "session", "active", text)).toThrow("主窗口");
+  }
+  expect(() => call("agent.queuePause", current, "session", "false")).toThrow("暂停");
+  expect(service.steer).toHaveBeenCalledOnce();
+  expect(service.queueAdd).toHaveBeenCalledOnce();
 });
 
 it("统一目录新建对话接受当前库的真实文件夹，越界目录仍需显式选择", async (test) => {

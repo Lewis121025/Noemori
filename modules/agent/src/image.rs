@@ -31,7 +31,40 @@ impl ImageFormat {
 #[serde(deny_unknown_fields)]
 pub struct Image {
     format: ImageFormat,
+    #[serde(
+        serialize_with = "serialize_data",
+        deserialize_with = "deserialize_data"
+    )]
     data: Arc<[u8]>,
+}
+
+// 历史和窗口投影共用紧凑编码；旧字节数组只在读取边界迁移。
+fn serialize_data<S: serde::Serializer>(data: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&STANDARD.encode(data))
+}
+
+fn deserialize_data<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Arc<[u8]>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StoredData {
+        Base64(String),
+        Legacy(Vec<u8>),
+    }
+    let data = match StoredData::deserialize(deserializer)? {
+        StoredData::Base64(value) => {
+            if value.len() > (5_usize * 1024 * 1024).div_ceil(3) * 4 {
+                return Err(serde::de::Error::custom("图片超过 5 MiB"));
+            }
+            STANDARD.decode(value).map_err(serde::de::Error::custom)?
+        }
+        StoredData::Legacy(value) => value,
+    };
+    if data.is_empty() || data.len() > 5 * 1024 * 1024 {
+        return Err(serde::de::Error::custom("图片为空或超过 5 MiB"));
+    }
+    Ok(data.into())
 }
 
 impl Image {

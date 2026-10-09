@@ -41,7 +41,16 @@
         <legend>该模型支持的能力</legend>
         <label><input type="checkbox" bind:checked={model.tools} />工具调用</label>
         <label><input type="checkbox" bind:checked={model.streaming} />流式输出</label>
-        <label><input type="checkbox" bind:checked={model.vision} />图像</label>
+        <label
+          >图像<select
+            aria-label={`图像能力 ${index + 1}`}
+            bind:value={model.vision}
+            onchange={changed}
+            ><option value={null}>服务商判断</option><option value={true}>支持</option><option
+              value={false}>不支持</option
+            ></select
+          ></label
+        >
         <label><input type="checkbox" bind:checked={model.audio} />音频</label>
         <label><input type="checkbox" bind:checked={model.video} />视频</label>
       </fieldset>
@@ -77,6 +86,7 @@
     font-size: 12px;
   }
   input,
+  select,
   button {
     font: inherit;
     color: inherit;
@@ -89,6 +99,10 @@
   button {
     cursor: pointer;
     font-size: 12px;
+  }
+  select {
+    padding: 3px 6px;
+    font-size: 11px;
   }
   fieldset {
     width: 100%;

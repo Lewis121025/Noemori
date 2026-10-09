@@ -70,35 +70,57 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     );
     await notice.getByRole("button", { name: "关闭", exact: true }).click();
 
+    await page.getByRole("button", { name: "文章大纲", exact: true }).click();
+
     const heading = page
       .locator(".outline-sidebar")
       .getByRole("button", { name: "林间", exact: true });
     await heading.focus();
+    await heading.evaluate((element) => {
+      element.addEventListener(
+        "click",
+        () => {
+          const animations = element.getAnimations();
+          animations.forEach((animation) => animation.pause());
+          element.setAttribute("data-keyboard-animations", String(animations.length));
+        },
+        { once: true },
+      );
+    });
     await page.keyboard.press("Enter");
-    expect(
-      await heading.evaluate((element) => {
-        const animations = element.getAnimations();
-        animations.forEach((animation) => animation.pause());
-        return animations.length;
-      }),
-    ).toBeGreaterThan(0);
+    expect(Number(await heading.getAttribute("data-keyboard-animations"))).toBeGreaterThan(0);
     // 动画正在播放时切换系统偏好，JS 动效和 CSS 动效都必须立即释放。
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect.poll(() => heading.evaluate((element) => element.getAnimations().length)).toBe(0);
     await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
 
     const fold = page
       .locator(".outline-sidebar")
       .getByRole("button", { name: "折叠", exact: true })
       .first();
+    await fold.evaluate((element) => {
+      element.addEventListener(
+        "click",
+        () =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const animations = element.querySelector("span")!.getAnimations();
+              animations.forEach((animation) => animation.pause());
+              element.setAttribute("data-disclosure-animations", String(animations.length));
+            }),
+          ),
+        { once: true },
+      );
+    });
     await fold.click();
     const unfold = page
       .locator(".outline-sidebar")
       .getByRole("button", { name: "展开", exact: true })
       .first();
-    expect(
-      await unfold.locator("span").evaluate((element) => element.getAnimations().length),
-    ).toBeGreaterThan(0);
+    await expect
+      .poll(async () => Number(await unfold.getAttribute("data-disclosure-animations")))
+      .toBeGreaterThan(0);
     await unfold.click();
     await page.getByRole("button", { name: "文内查找", exact: true }).click();
     const query = page.getByRole("searchbox", { name: "查找", exact: true });
@@ -114,13 +136,32 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     expect(
       await original?.evaluate((element) => element === document.querySelector(".ProseMirror")),
     ).toBe(true);
-    await page.getByRole("button", { name: "文件与对话", exact: true }).click();
-    await page
-      .getByRole("treegrid")
-      .getByRole("button", { name: "森林.md", exact: true })
-      .click({ button: "right" });
+    await page.getByRole("button", { name: "文件目录", exact: true }).click();
+    const file = page.getByRole("treegrid").getByRole("button", { name: "森林.md", exact: true });
+    await file.evaluate((element) => {
+      element.addEventListener(
+        "contextmenu",
+        () =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const menu = document.querySelector('.file-menu[aria-label="文件操作"]');
+              if (!menu) throw new Error("缺少文件菜单");
+              const animations = menu.getAnimations();
+              animations.forEach((animation) => animation.pause());
+              menu.setAttribute("data-opening-animations", String(animations.length));
+            }),
+          ),
+        { once: true },
+      );
+    });
+    await file.click({ button: "right" });
     const menu = page.getByRole("menu", { name: "文件操作", exact: true });
-    expect(await menu.evaluate((element) => element.getAnimations().length)).toBeGreaterThan(0);
+    await expect
+      .poll(async () => Number(await menu.getAttribute("data-opening-animations")))
+      .toBeGreaterThan(0);
+    await menu.evaluate((element) =>
+      element.getAnimations().forEach((animation) => animation.play()),
+    );
     await page.waitForFunction(() =>
       document.getAnimations().every((animation) => animation.playState === "finished"),
     );
@@ -130,7 +171,7 @@ test("普通控件、目录、查找与附件反馈共享动效，减少动态�
     await page.keyboard.press("Escape");
     expect(
       await page
-        .locator(".file-menu")
+        .locator('.file-menu[aria-label="文件操作"]')
         .evaluate((element) => getComputedStyle(element).pointerEvents),
     ).toBe("none");
     expect(await readFile(join(vault, "森林.md"), "utf8")).toBe(source);

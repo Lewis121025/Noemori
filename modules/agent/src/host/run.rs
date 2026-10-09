@@ -48,7 +48,7 @@ impl Drop for Guard {
                     &data.calls.keys().cloned().collect::<Vec<_>>(),
                 ));
                 if let Some(active) = data.active.take() {
-                    data.history.extend(active.control.finish());
+                    active.control.finish();
                 }
                 data.calls.clear();
                 data.approvals.clear();

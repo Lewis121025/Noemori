@@ -7,6 +7,7 @@ import type {
   AppCommand,
 } from "../../../../../modules/notes/packages/desktop/src/shared/api";
 import type { ReaderApi, VaultEntry } from "@reader/shared/api";
+import type { AgentConversation } from "../../../../../modules/notes/packages/desktop/src/features/agent/shared/api";
 import { createReaderApiMock } from "../../fixtures/reader-api-mock";
 import { createAppApiMock } from "../../fixtures/app-api-mock";
 import { createAgentApiMock } from "../../fixtures/agent-api-mock";
@@ -142,9 +143,12 @@ async function createBoard(): Promise<void> {
 
 describe("统一工作台", () => {
   it("目录和笔记库共用正文，切换导航不卸载编辑器", async () => {
-    await start(); const editor = prose();
-    click("文章大纲"); expect(library().hidden).toBe(true);
-    await manage(); expect(library().hidden).toBe(false);
+    await start();
+    const editor = prose();
+    click("文章大纲");
+    expect(library().hidden).toBe(true);
+    await manage();
+    expect(library().hidden).toBe(false);
     expect(prose()).toBe(editor);
     expect(target.querySelector(".library-preview")).toBeNull();
   });
@@ -173,8 +177,10 @@ describe("统一工作台", () => {
     const search = library().querySelector<HTMLInputElement>("input")!;
     search.value = "继续"; search.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.waitFor(() => expect(api.searchQuery).toHaveBeenCalled());
-    click("文章大纲"); await manage();
-    expect(search.value).toBe("继续"); expect(prose()).toBe(editor);
+    click("文章大纲");
+    await manage();
+    expect(search.value).toBe("继续");
+    expect(prose()).toBe(editor);
     expect(target.querySelectorAll('[role="searchbox"]')).toHaveLength(1);
   });
   it("旧文件页面会话迁入同一文档工作台，恢复查询和侧栏宽度", async () => {
@@ -206,6 +212,40 @@ describe("统一工作台", () => {
       expect(vi.mocked(api.sessionSetPanes).mock.calls[0]?.[0].leftWidth).toBe(Number(handle.getAttribute("aria-valuenow")));
     } finally { vi.useRealTimers(); }
   });
+
+  it("拖动分隔条接管焦点，Escape 恢复原尺寸并释放捕获", async () => {
+    await start();
+    const handles = [
+      target.querySelector<HTMLElement>('[aria-label="调整侧栏宽度"]')!,
+    ];
+    target.querySelector<HTMLButtonElement>('[aria-label="双链"]')!.click();
+    flushSync();
+    handles.push(target.querySelector<HTMLElement>('[aria-label="调整双链高度"]')!);
+    for (const handle of handles) {
+      handle.setPointerCapture = vi.fn();
+      handle.hasPointerCapture = vi.fn(() => true);
+      handle.releasePointerCapture = vi.fn();
+      const original = handle.getAttribute("aria-valuenow");
+      const pointer = (type: string, clientX: number, clientY: number, pointerId = 1) => {
+        handle.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
+          button: 0, pointerId, clientX, clientY,
+        }));
+        flushSync();
+      };
+      pointer("pointerdown", 300, 400);
+      expect(document.activeElement).toBe(handle);
+      pointer("pointermove", 350, 350);
+      expect(handle.getAttribute("aria-valuenow")).not.toBe(original);
+      pointer("pointercancel", 350, 350, 2);
+      expect(handle.getAttribute("aria-valuenow")).not.toBe(original);
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      flushSync();
+      expect(handle.getAttribute("aria-valuenow")).toBe(original);
+      expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
+      pointer("pointerup", 350, 350);
+      expect(handle.getAttribute("aria-valuenow")).toBe(original);
+    }
+  });
   it("窄窗口 Escape 收起文件抽屉，输入法 Escape 不触发导航", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 640 }); await start(); await manage();
     const input = library().querySelector<HTMLInputElement>("input")!;
@@ -225,8 +265,12 @@ describe("统一工作台", () => {
     await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalledWith("未命名 2.md", "file", undefined));
   });
   it("切换笔记库与目录不重建白板", async () => {
-    await start(); await createBoard(); const board = target.querySelector(".whiteboard");
-    await manage(); click("文章大纲"); expect(target.querySelector(".whiteboard")).toBe(board);
+    await start();
+    await createBoard();
+    const board = target.querySelector(".whiteboard");
+    await manage();
+    click("文章大纲");
+    expect(target.querySelector(".whiteboard")).toBe(board);
   });
 });
 
@@ -540,7 +584,7 @@ it.each(["new-note", "new-whiteboard"] as const)(
 );
 
 it.each(["范围多选", "取消文件夹选择", "仅选择文件夹"])(
-  "新建沿用最后进入的目录，批量选择不改变保存位置（%s）",
+  "新建跟随明确目录选择，多选和取消选择回到当前文档父目录（%s）",
   async (selection) => {
     disk.set("docs/other.md", encode("# 目录内文件\n"));
     vi.mocked(api.vaultEntries).mockImplementation(async () => [
@@ -549,7 +593,7 @@ it.each(["范围多选", "取消文件夹选择", "仅选择文件夹"])(
     ]);
     await start();
     await manage();
-    library().querySelector<HTMLButtonElement>(".root-label")!.click();
+    library().querySelector<HTMLButtonElement>('[role="gridcell"][aria-selected="true"] .file')?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
     flushSync();
     const folder = library().querySelector<HTMLButtonElement>('[data-path="docs"]')!;
     if (selection !== "仅选择文件夹") folder.click();
@@ -564,7 +608,7 @@ it.each(["范围多选", "取消文件夹选择", "仅选择文件夹"])(
     await confirmCreate();
     await vi.waitFor(() => expect(api.entryCreate).toHaveBeenCalled());
     expect(vi.mocked(api.entryCreate).mock.calls[0]?.[0]).toBe(
-      selection === "仅选择文件夹" ? "未命名.md" : "docs/未命名.md",
+      selection === "仅选择文件夹" ? "docs/未命名.md" : "未命名.md",
     );
   },
 );
@@ -632,8 +676,12 @@ it("文件系统使用单一层级目录，展开和搜索保留正文与应用�
 it("文件与大纲入口名称固定，切换视图保留正文与键盘焦点", async () => {
   await start();
   const editor = prose();
-  const outline = target.querySelector<HTMLButtonElement>('.navigation-heading [aria-label="文章大纲"]')!;
-  const files = target.querySelector<HTMLButtonElement>('.navigation-heading [aria-label="文件目录"]')!;
+  const outline = target.querySelector<HTMLButtonElement>(
+    '.navigation-heading [aria-label="文章大纲"]',
+  )!;
+  const files = target.querySelector<HTMLButtonElement>(
+    '.navigation-heading [aria-label="文件目录"]',
+  )!;
   expect(outline.textContent?.trim()).toBe("大纲");
   expect(files.textContent?.trim()).toBe("文件");
   expect(files.getAttribute("aria-pressed")).toBe("true");
@@ -655,12 +703,13 @@ it("文件与大纲入口名称固定，切换视图保留正文与键盘焦点"
 });
 
 it("关闭再打开右栏保留同一个会话、输入节点和未发送草稿，保存失败时保留面板", async () => {
-  const item = {
+  const item: AgentConversation = {
     id: "session", title: "当前对话", workspace: "/notes", model: "fixture", createdAt: 1, updatedAt: 1,
+    modelSelection: null,
     archived: false, origin: null, article: null, draft: "原草稿", storageError: null, revision: 0,
     closed: false, run: null, turns: [], messages: [], terminals: [], approvals: [],
-    browser: { status: "idle" as const, tabs: [], receipts: [], error: null },
-    ui: { status: "idle" as const, generation: 0, call: null, error: null, control: null, connections: [], receipts: [] },
+    browser: { status: "idle", tabs: [], receipts: [], error: null },
+    ui: { status: "idle", generation: 0, call: null, error: null, control: null, connections: [], receipts: [] },
   };
   window.noemori.agent.list = async () => ({ items: [{ ...item, status: null }], issues: [] });
   window.noemori.agent.snapshot = vi.fn(async () => structuredClone(item));

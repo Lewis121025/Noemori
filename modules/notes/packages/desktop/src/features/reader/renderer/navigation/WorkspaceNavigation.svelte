@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CreateEntryKind } from "../library/CreateEntryDialog.svelte";
+  import { selectionIndicator } from "../selection-indicator";
   /** 视图切换和新建只发布意图，目录选择、焦点与创建生命周期由工作台负责。 */
   let {
     sidebarId,
@@ -21,7 +22,7 @@
 </script>
 
 <header class="navigation-heading">
-  <div class="panel-switch" role="group" aria-label="侧栏视图">
+  <div class="panel-switch" role="group" aria-label="侧栏视图" use:selectionIndicator={selected}>
     <button
       class="reader-button panel-toggle"
       type="button"
@@ -98,34 +99,34 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 10px;
+    padding: 5px 10px;
     min-height: 42px;
-    border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
   }
   .panel-switch {
     display: flex;
-    gap: 2px;
+    gap: 3px;
   }
   .panel-toggle {
     position: relative;
-    min-height: 41px;
-    padding: 0 8px;
+    min-height: 28px;
+    padding: 0 10px;
     border: 0;
-    border-radius: 0;
+    border-radius: 6px;
     color: var(--muted);
     background: transparent;
     font-size: 12px;
+    font-weight: 400;
   }
   .panel-toggle[aria-pressed="true"] {
     color: var(--fg);
     font-weight: 500;
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
   }
-  .panel-toggle[aria-pressed="true"]::after {
-    content: "";
-    position: absolute;
-    inset: auto 8px 0;
-    height: 2px;
-    background: var(--accent);
+  .panel-toggle:focus-visible,
+  .create-toggle:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
   .create-toggle {
     display: flex;
@@ -133,8 +134,9 @@
     justify-content: center;
     gap: 3px;
     margin-left: auto;
-    min-width: 30px;
-    height: 30px;
+    min-width: 28px;
+    min-height: 28px;
+    height: 28px;
     padding: 0 5px;
     border: 0;
     border-radius: 6px;
@@ -161,6 +163,13 @@
   @container (max-width: 250px) {
     .create-label {
       display: none;
+    }
+  }
+  @media (pointer: coarse) {
+    .panel-toggle,
+    .create-toggle {
+      min-width: 44px;
+      min-height: 44px;
     }
   }
   .create-menu {

@@ -84,7 +84,8 @@ export function modelParameters(selected: SelectedProvider): Omit<ModelSettings,
     endpoint: providerEndpoint(provider.protocol, provider.address, model.id),
     tools: model.tools,
     streaming: model.streaming,
-    vision: model.vision,
+    // 未报告不等于不支持；编码协议支持图片，真实模型能力交由服务商校验。
+    vision: model.vision !== false,
     audio: model.audio,
     video: model.video,
     ...(selected.selection.reasoningEffort === undefined

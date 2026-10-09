@@ -134,15 +134,17 @@
         {@render preferences()}
       </section>
       <section hidden={section !== "vault"} aria-label="笔记库设置">
-        <h2>当前笔记库</h2>
+        <h2>Noemori 仓库</h2>
         <p class="vault-path">{workspace.vaultRoot ?? "尚未打开笔记库"}</p>
         <button
           class="reader-button primary"
           type="button"
           disabled={workspace.switching || workspace.copying || workspace.isComposing}
-          onclick={() => void onOpenVault()}>打开笔记库…</button
+          onclick={() => void onOpenVault()}>导入文件夹…</button
         >
-        <p class="hint">笔记和附件保存在本地文件夹中。切换笔记库前会先保存当前编辑。</p>
+        <p class="hint">
+          笔记、附件和资料目录统一保存在这个仓库中。导入会创建副本，保留原文件和目录层级。
+        </p>
         {#if workspace.messageNeedsAttention}<p class="settings-error" role="alert">
             {workspace.message}
           </p>{/if}

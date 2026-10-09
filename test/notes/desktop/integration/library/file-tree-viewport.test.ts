@@ -61,7 +61,8 @@ function start(count: number) {
       onPosition: (value) => position.set(value),
       onEmptyFocus: empty,
       children: createRawSnippet<[WorkspaceTreeRow]>((row) => ({
-        render: () => `<button data-path="${row().key}" title="${row().title}"><span class="name">${row().title}</span></button>`,
+        render: () =>
+          `<button data-path="${row().key}" title="${row().title}"><span class="name">${row().title}</span></button>`,
       })),
     },
   });
@@ -106,7 +107,8 @@ it("万项层级列表只挂载可见行，远处焦点挂载后可见且缩放�
   } finally {
     await test.close();
   }
-  expect(test.disconnect).toHaveBeenCalledOnce();
+  // 列表测量和悬停底色各持有一个尺寸观察器，卸载必须全部释放。
+  expect(test.disconnect).toHaveBeenCalledTimes(2);
 });
 
 it("外部删除焦点条目后交给相邻项，空网格回交搜索入口", async () => {
@@ -153,7 +155,7 @@ it("行末的小数像素锚点原样恢复，不能向上取整造成触控板�
   }
 });
 
-it("键盘聚焦被截断名称时显示完整路径，Esc 和尺寸变化收起提示", async () => {
+it("键盘聚焦被截断名称时显示完整路径，Esc 收起，尺寸变化保持提示", async () => {
   const test = start(1);
   const show = vi.spyOn(HTMLElement.prototype, "showPopover");
   const hide = vi.spyOn(HTMLElement.prototype, "hidePopover");
@@ -162,11 +164,14 @@ it("键盘聚焦被截断名称时显示完整路径，Esc 和尺寸变化收起
     button.title = "资料/名称很长而且在窄侧栏中会被截断的笔记.md";
     const name = button.querySelector(".name")!;
     Object.defineProperties(name, { clientWidth: { value: 40 }, scrollWidth: { value: 240 } });
-    test.grid.addEventListener("focusin", () => console.log({ path: button.dataset.path, title: button.title, visible: button.matches(":focus-visible"), width: name.clientWidth, scroll: name.scrollWidth }));
+    // jsdom 在连续焦点用例间不能可靠维护键盘模态，真实伪类由 Electron 旅程验证。
+    const matches = button.matches.bind(button);
+    vi.spyOn(button, "matches").mockImplementation(
+      (selector) => selector === ":focus-visible" || matches(selector),
+    );
     await test.view.focusPath("0.md");
     flushSync();
     const label = test.target.querySelector('[role="tooltip"]')!;
-    console.log({ label: label.textContent, active: document.activeElement?.outerHTML, show: show.mock.calls.length });
     expect(show).toHaveBeenCalledOnce();
     expect(label.textContent?.trim()).toBe(button.title);
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -178,7 +183,7 @@ it("键盘聚焦被截断名称时显示完整路径，Esc 和尺寸变化收起
     flushSync();
     expect(label.textContent?.trim()).toBe(button.title);
     test.resize(192);
-    expect(label.textContent?.trim()).toBe("");
+    expect(label.textContent?.trim()).toBe(button.title);
   } finally {
     await test.close();
   }

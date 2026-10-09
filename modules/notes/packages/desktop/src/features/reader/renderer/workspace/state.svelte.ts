@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import type { ShapeRepair } from "../../shared/whiteboard/recognition";
 import type { VaultOpenProgress } from "../../shared/vault-opening";
+import type { DirectoryImportResult } from "../../shared/directory-import";
 import type {
   ExportFormat,
   ExportRequest,
@@ -59,6 +60,7 @@ type WorkspaceNotice =
  * 保存；监视事件在切换或写盘结束后重新读取。
  */
 export class ReaderWorkspaceController {
+  private importingDirectory = $state(false);
   /** 导出弹层的明确范围，打开后不跟随文件栏的后续选择变化。 */
   exportScope = $state.raw<ExportRequest["scope"] | null>(null);
   private exportRunning = false;
@@ -415,9 +417,9 @@ export class ReaderWorkspaceController {
   get switching(): boolean {
     return this.activePane.switching;
   }
-  /** 活动栏副本写入中。 */
+  /** 文件或目录副本写入中。 */
   get copying(): boolean {
-    return this.activePane.copying;
+    return this.activePane.copying || this.importingDirectory;
   }
   get openFile() {
     return this.activePane.openFile;
@@ -608,6 +610,7 @@ export class ReaderWorkspaceController {
       }
       await this.persistDocumentsSafe();
       this.fileTree.restore(restored.fileTree, this.listed);
+      if (restored.warning) this.report(restored.warning);
     } catch (error) {
       this.report(error instanceof Error ? error.message : "恢复会话失败");
     } finally {
@@ -631,6 +634,7 @@ export class ReaderWorkspaceController {
               ? await this.api.vaultCreateDefault(opening.report)
               : await this.api.vaultOpen(opening.report);
           if (opened === null) return;
+          if (opened.root === this.root) return;
           this.documentSession.reset();
           this.fileTree.reset();
           this.root = opened.root;
@@ -660,6 +664,45 @@ export class ReaderWorkspaceController {
       this.report(`打开库失败：${errorText(error)}`);
     }
   };
+
+  /**
+   * 全栏保存后导入外部目录副本，保留当前文档、分栏和阅读栈。
+   * @param parent 已确认的库内父目录，空字符串表示 Noemori 仓库根。
+   * @returns 成功交付实际路径；取消、保存门禁或失败返回 null，失败原因进入工作区提示。
+   */
+  async importDirectory(parent: string): Promise<DirectoryImportResult | null> {
+    if (this.importingDirectory) return null;
+    if (this.root === null) await this.openVault("default");
+    const root = this.root;
+    if (root === null) return null;
+    try {
+      return (
+        (await this.withAllPanesSaved(async () => {
+          this.importingDirectory = true;
+          const opening = this.beginOpening();
+          try {
+            const imported = await this.api.directoryImport(root, parent, opening.report);
+            if (imported === null) return null;
+            try {
+              await this.refreshList();
+            } catch (error) {
+              imported.warning = [imported.warning, `副本已导入，目录刷新失败：${errorText(error)}`]
+                .filter(Boolean)
+                .join("；");
+            }
+            if (imported.warning) this.report(imported.warning);
+            return imported;
+          } finally {
+            opening.finish();
+            this.importingDirectory = false;
+          }
+        })) ?? null
+      );
+    } catch (error) {
+      this.report(`导入文件夹失败：${errorText(error)}`);
+      return null;
+    }
+  }
 
   /** 关闭指定分栏（仅分栏时）；未保存编辑先冲刷，失败不关。 */
   closePane = async (id: number): Promise<void> => {
@@ -1011,6 +1054,15 @@ export class ReaderWorkspaceController {
       await this.api.entryReveal(path);
     } catch (error) {
       this.report(`无法显示文件：${errorText(error)}`);
+    }
+  };
+
+  /** 显示应用仓库的实际存储位置，不改变树选择或正在阅读的文件。 */
+  revealVault = async (): Promise<void> => {
+    try {
+      await this.api.vaultReveal();
+    } catch (error) {
+      this.report(`无法显示仓库：${errorText(error)}`);
     }
   };
 

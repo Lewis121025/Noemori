@@ -452,6 +452,10 @@ export declare class NativeRuntime {
   searchModelCancel(id: string): void
   /** 下载或导入固定 Harrier 模型并调度当前库索引；只等待模型安装，不阻塞保存。 */
   searchModelInstall(source: string | undefined | null, id: string): Promise<JsSemanticStatus>
+  /** 启动固定应用仓库；旧单目录会话以副本接入，草稿与阅读路径由 Rust 迁移。 */
+  vaultLibraryRestore(root: string, control: NativeControl): Promise<unknown>
+  /** 在当前仓库的指定父目录导入完整副本；取消返回 null，错误或警告保留提交边界。 */
+  directoryImport(root: string, source: string, parent: string, control: NativeControl): Promise<unknown>
   /** 准备候选库并原子切换；取消返回 null，失败保留旧库。 */
   vaultOpen(root: string, control: NativeControl): Promise<unknown>
   /** 在后台创建默认目录并打开，主线程只负责提供系统路径。 */

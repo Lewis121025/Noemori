@@ -28,6 +28,7 @@ import type {
 } from "./api";
 import { isReaderSpace, isWorkspaceDestination, SIDEBAR_LAYOUT } from "./api";
 import { parseFileTreeState } from "./file-browser";
+import { parseImportedLibrary } from "./directory-import";
 import {
   parseRecentFiles,
   parseSessionDocuments,
@@ -175,6 +176,8 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
       if (pane.currentPath !== null && !relativePath(pane.currentPath))
         throw new Error("笔记库恢复响应无效，请重新打开笔记库");
     }
+    if (value.warning !== undefined && typeof value.warning !== "string")
+      throw new Error("笔记库恢复警告无效");
     return {
       root: value.root,
       entries: parseVaultEntries(value.entries),
@@ -183,6 +186,8 @@ export function parseVaultRestore(value: unknown): VaultRestore | null {
       viewModes: parseViewModes(value.viewModes),
       recentFiles: parseRecentFiles(value.recentFiles),
       fileTree: parseFileTreeState(value.fileTree),
+      ...(value.imported === undefined ? {} : { imported: parseImportedLibrary(value.imported) }),
+      ...(value.warning === undefined ? {} : { warning: value.warning }),
     };
   }
   throw new Error("笔记库恢复响应无效，请重新打开笔记库");

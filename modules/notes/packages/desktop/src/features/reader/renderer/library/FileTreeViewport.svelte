@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack, type Snippet } from "svelte";
+  import { pointerIndicator } from "../pointer-indicator";
   import { SvelteSet } from "svelte/reactivity";
   import type { WorkspaceTreeRow } from "./workspace-tree";
   import type { FileTreePosition } from "../../shared/file-browser";
@@ -76,16 +77,19 @@
     const button = event.target;
     if (!(button instanceof HTMLButtonElement) || !button.matches(":focus-visible")) return;
     const name = button.querySelector<HTMLElement>(".name");
-    keyboardLabel = button.dataset.path && button.title && name && name.scrollWidth > name.clientWidth
-      ? { path: button.dataset.path, text: button.title }
-      : null;
+    keyboardLabel =
+      button.dataset.path && button.title && name && name.scrollWidth > name.clientWidth
+        ? { path: button.dataset.path, text: button.title }
+        : null;
   }
   $effect(() => {
     const label = keyboardLabel;
-    const button = label && positions.has(label.path)
-      ? Array.from(element.querySelectorAll<HTMLButtonElement>("button[data-path]"))
-          .find((button) => button.dataset.path === label.path)
-      : null;
+    const button =
+      label && positions.has(label.path)
+        ? Array.from(element.querySelectorAll<HTMLButtonElement>("button[data-path]")).find(
+            (button) => button.dataset.path === label.path,
+          )
+        : null;
     if (!label || !button?.isConnected) {
       labelElement.hidePopover();
       return;
@@ -100,7 +104,8 @@
   onMount(() => {
     const measure = () => {
       height = element.clientHeight;
-      keyboardLabel = null;
+      // 字体和布局的迟到测量只重新定位提示，不能取消仍然有效的键盘焦点。
+      if (keyboardLabel) keyboardLabel = { ...keyboardLabel };
     };
     const pointer = matchMedia("(pointer: coarse)");
     const updatePointer = () => {
@@ -158,7 +163,13 @@
       cancelled = true;
     };
   });
-  function rememberPosition(): void {
+  /**
+   * 查询切换前同步提交真实滚动锚点，避免尚未交付的 scroll 事件丢失浏览现场。
+   * @returns 无返回值；已卸载时不操作。
+   * @throws 位置提交回调抛出时原样传播。
+   */
+  export function rememberPosition(): void {
+    if (!element?.isConnected) return;
     const index = rowAt(element.scrollTop),
       row = rows[index];
     onPosition(
@@ -216,6 +227,7 @@
   aria-colcount="1"
   aria-multiselectable="true"
   bind:this={element}
+  use:pointerIndicator
   onfocusin={showKeyboardLabel}
   onfocusout={() => (keyboardLabel = null)}
   onkeydown={(event) => {
@@ -248,7 +260,12 @@
       </div>
     </div>
   {/each}
-  <div class="reader-popover keyboard-label" role="tooltip" popover="manual" bind:this={labelElement}>
+  <div
+    class="reader-popover keyboard-label"
+    role="tooltip"
+    popover="manual"
+    bind:this={labelElement}
+  >
     {keyboardLabel?.text ?? ""}
   </div>
 </div>

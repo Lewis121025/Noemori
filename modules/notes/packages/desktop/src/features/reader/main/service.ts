@@ -28,6 +28,7 @@ import {
   type EntryBatchRequest,
 } from "../shared/entry-batch";
 import type { FileTreeState } from "../shared/file-browser";
+import { parseDirectoryImportResult } from "../shared/directory-import";
 import { parseAttachmentRequest, parseImportedAttachment } from "../shared/attachments";
 import { parseDraftRequest } from "../shared/editor-recovery";
 import { parseReaderSession, type ReaderSession } from "../shared/session";
@@ -172,6 +173,19 @@ export function createReaderService(
       control: NativeModule.NativeControl = createControl(),
     ): Promise<VaultRestore | null> {
       return parseVaultRestore(await native.vaultRestore(control));
+    },
+    async vaultLibraryRestore(root: string, control: NativeModule.NativeControl = createControl()) {
+      return parseVaultRestore(await native.vaultLibraryRestore(root, control));
+    },
+    async directoryImport(
+      root: string,
+      source: string,
+      parent: string,
+      control: NativeModule.NativeControl = createControl(),
+    ) {
+      return parseDirectoryImportResult(
+        await native.directoryImport(root, source, parent, control),
+      );
     },
     vaultClose(): Promise<void> {
       return native.vaultClose();

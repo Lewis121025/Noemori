@@ -16,10 +16,13 @@ pub(super) struct Active {
     pub(super) done: watch::Receiver<bool>,
     pub(super) draft: Option<usize>,
     pub(super) control: crate::runtime::RunControl,
+    pub(super) agent: crate::runtime::Agent,
 }
 pub(super) struct TerminalEntry {
     pub(super) view: HostTerminal,
     pub(super) retention: Option<TerminalSubscription>,
+    /// 标签编号按创建顺序稳定，不能由随机会话 ID 的字典序决定。
+    ordinal: usize,
 }
 pub(super) struct Pending {
     pub(super) view: HostApproval,
@@ -100,6 +103,8 @@ impl State {
     }
     pub(super) fn snapshot(&self) -> HostSnapshot {
         let data = self.data.lock().expect("桌面会话锁被污染");
+        let mut terminals: Vec<_> = data.terminals.values().collect();
+        terminals.sort_by_key(|entry| entry.ordinal);
         HostSnapshot {
             ui: Default::default(),
             browser: Default::default(),
@@ -110,9 +115,8 @@ impl State {
             run: data.run.clone(),
             turns: super::turns::visible_turns(&data),
             messages: visible_messages(&data.messages),
-            terminals: data
-                .terminals
-                .values()
+            terminals: terminals
+                .into_iter()
                 .map(|entry| entry.view.clone())
                 .collect(),
             approvals: data
@@ -228,6 +232,7 @@ impl State {
                 .and_then(|call| call.arguments.get("tty"))
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
+            let ordinal = data.terminals.len();
             data.terminals.insert(
                 info.session_id.clone(),
                 TerminalEntry {
@@ -239,6 +244,7 @@ impl State {
                         error,
                     },
                     retention,
+                    ordinal,
                 },
             );
         }

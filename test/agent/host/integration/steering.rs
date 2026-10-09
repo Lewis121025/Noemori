@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 struct GatedModel {
     requests: Mutex<Vec<ModelRequest>>,
     release: Arc<Notify>,
+    block_second: bool,
 }
 
 impl GatedModel {
@@ -17,6 +18,7 @@ impl GatedModel {
         Self {
             requests: Mutex::new(Vec::new()),
             release: Arc::new(Notify::new()),
+            block_second: false,
         }
     }
 }
@@ -29,17 +31,74 @@ impl Model for GatedModel {
         }
     }
     fn generate(&self, request: ModelRequest, _: ExecutionContext) -> ModelStream {
-        let first = {
+        let call = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(request);
-            requests.len() == 1
+            requests.len()
         };
+        let first = call == 1;
+        let blocked = first || (call == 2 && self.block_second);
         let release = self.release.clone();
         Box::pin(async_stream::stream! {
-            if first { release.notified().await; }
+            if blocked { release.notified().await; }
             yield model::answer(if first { "原请求完成" } else { "已处理补充指令" });
         })
     }
+}
+
+#[tokio::test]
+async fn checkpoint_preserves_steering_already_consumed_by_the_active_request() {
+    let root = tempfile::tempdir().unwrap();
+    let model = Arc::new(GatedModel {
+        block_second: true,
+        ..GatedModel::new()
+    });
+    let host = DesktopSession::new(
+        model.clone(),
+        DesktopSessionOptions::new(root.path()),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    let run = host.start("开始检查".into()).unwrap();
+    wait(&host, |_| model.requests.lock().unwrap().len() == 1).await;
+    host.steer(&run, "重启后仍须执行这条指令".into()).unwrap();
+    model.release.notify_one();
+    wait(&host, |_| model.requests.lock().unwrap().len() == 2).await;
+    let checkpoint = host.checkpoint().unwrap();
+    host.close().await.unwrap();
+    let restored = DesktopSession::new(
+        model.clone(),
+        DesktopSessionOptions::new(root.path()),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    restored.restore(checkpoint).unwrap();
+    restored.start("继续任务".into()).unwrap();
+    wait(&restored, |view| {
+        view.run
+            .as_ref()
+            .is_some_and(|run| run.status == HostRunStatus::Completed)
+    })
+    .await;
+    {
+        let requests = model.requests.lock().unwrap();
+        let history = &requests[2].messages;
+        assert_eq!(
+            history
+                .iter()
+                .filter(|message| message.role == Role::User
+                    && message.text_content() == "重启后仍须执行这条指令")
+                .count(),
+            1
+        );
+        assert!(
+            history
+                .iter()
+                .any(|message| message.text_content().contains("原请求完成"))
+        );
+        noemori_agent::validate_history(history).unwrap();
+    }
+    restored.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -70,15 +129,16 @@ async fn steering_stays_in_the_active_turn_and_rejects_stale_or_settled_runs() {
     assert_eq!(finished.run.as_ref().unwrap().id, run);
     assert_eq!(finished.run.as_ref().unwrap().model_calls, 2);
     assert_eq!(finished.turns.len(), 1);
-    let requests = model.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[1].messages.last().unwrap().role, Role::User);
-    assert_eq!(
-        requests[1].messages.last().unwrap().text_content(),
-        "先修复测试，再整理项目"
-    );
-    noemori_agent::validate_history(&requests[1].messages).unwrap();
-    drop(requests);
+    {
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].messages.last().unwrap().role, Role::User);
+        assert_eq!(
+            requests[1].messages.last().unwrap().text_content(),
+            "先修复测试，再整理项目"
+        );
+        noemori_agent::validate_history(&requests[1].messages).unwrap();
+    }
     assert!(host.steer(&run, "不能进入已结束轮次".into()).is_err());
     host.close().await.unwrap();
 }
@@ -104,17 +164,18 @@ async fn accepted_steering_survives_cancellation_before_the_next_model_call() {
             .is_some_and(|run| run.status == HostRunStatus::Completed)
     })
     .await;
-    let requests = model.requests.lock().unwrap();
-    let history = &requests[1].messages;
-    assert_eq!(
-        history
-            .iter()
-            .filter(|message| message.role == Role::User
-                && message.text_content() == "保留这条补充指令")
-            .count(),
-        1
-    );
-    noemori_agent::validate_history(history).unwrap();
-    drop(requests);
+    {
+        let requests = model.requests.lock().unwrap();
+        let history = &requests[1].messages;
+        assert_eq!(
+            history
+                .iter()
+                .filter(|message| message.role == Role::User
+                    && message.text_content() == "保留这条补充指令")
+                .count(),
+            1
+        );
+        noemori_agent::validate_history(history).unwrap();
+    }
     host.close().await.unwrap();
 }

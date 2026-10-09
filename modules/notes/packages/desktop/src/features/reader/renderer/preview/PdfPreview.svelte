@@ -3,6 +3,7 @@
   import type { Snippet } from "svelte";
   import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
   import type { PdfPageRender } from "./pdf";
+  import { captureViewportAnchor, restoreViewportAnchor } from "./viewport-anchor";
   import PreviewZoom from "./PreviewZoom.svelte";
   import "pdfjs-dist/web/pdf_viewer.css";
   import "./preview.css";
@@ -26,6 +27,11 @@
   let host: HTMLDivElement | undefined = $state();
   let error = $state("");
   let rendering = $state(false);
+  let hasFrame = $state(false);
+  let displayedPage = $state(1);
+  let committed: PdfPageRender | undefined;
+  let committedSurface: HTMLElement | undefined;
+  let viewport: HTMLDivElement;
   let password = $state("");
   let passwordRequest = $state.raw<{
     submit: (password: string) => void;
@@ -48,6 +54,7 @@
     page = null;
     pageNumber = 1;
     zoom = null;
+    hasFrame = false;
     error = "";
     passwordRequest = null;
     void (async () => {
@@ -68,6 +75,9 @@
     })();
     return () => {
       active = false;
+      committed?.cancel();
+      committed = undefined;
+      committedSurface = undefined;
       // 销毁同时终止解析、密码等待与工作线程；任务失败已由上面的 catch 呈现。
       void task?.destroy().catch(() => undefined);
     };
@@ -100,10 +110,15 @@
     const currentScale = renderScale;
     if (currentPage === null || target === undefined || currentScale === null) return;
     let active = true;
+    let promoted = false;
     let render: PdfPageRender | undefined;
     const surface = document.createElement("div");
     surface.className = "pdf-page";
-    target.replaceChildren(surface);
+    // 待绘制层参与样式计算但不占布局；完成后才交接画面所有权。
+    surface.style.position = "absolute";
+    surface.style.visibility = "hidden";
+    surface.setAttribute("aria-hidden", "true");
+    target.append(surface);
     rendering = true;
     error = "";
     void (async () => {
@@ -112,7 +127,25 @@
         if (!active) return;
         render = renderPdfPage(currentPage, currentScale, surface);
         await render.promise;
+        if (!active) return;
+        const anchor =
+          committedSurface && displayedPage === currentPage.pageNumber
+            ? captureViewportAnchor(viewport, committedSurface)
+            : null;
+        committed?.cancel();
+        target.replaceChildren(surface);
+        surface.style.removeProperty("position");
+        surface.style.removeProperty("visibility");
+        surface.removeAttribute("aria-hidden");
+        committed = render;
+        committedSurface = surface;
+        promoted = true;
+        displayedPage = currentPage.pageNumber;
+        hasFrame = true;
+        if (anchor) restoreViewportAnchor(viewport, surface, anchor);
       } catch (cause) {
+        render?.cancel();
+        surface.remove();
         if (active)
           error = `无法显示此页：${cause instanceof Error ? cause.message : String(cause)}`;
       } finally {
@@ -122,8 +155,10 @@
     return () => {
       active = false;
       rendering = false;
-      render?.cancel();
-      surface.remove();
+      if (!promoted) {
+        render?.cancel();
+        surface.remove();
+      }
     };
   });
 
@@ -181,7 +216,12 @@
 
 <section class="attachment-preview" class:compact aria-label="PDF 预览">
   {#if registerToolbar === undefined}{@render previewTools()}{/if}
-  <div class="preview-viewport" bind:clientWidth={width} bind:clientHeight={height}>
+  <div
+    class="preview-viewport"
+    bind:this={viewport}
+    bind:clientWidth={width}
+    bind:clientHeight={height}
+  >
     {#if passwordRequest !== null}
       <form
         class="preview-message"
@@ -200,14 +240,14 @@
       </form>
     {:else if error !== ""}
       <p class="preview-message" role="alert">{error}</p>
-    {:else if page === null}
+    {:else if page === null && !hasFrame}
       <p class="preview-message" role="status">正在加载 PDF…</p>
     {/if}
     <div
       class="preview-stage"
-      use:revealOnChange={{ key: JSON.stringify([pageNumber, zoom]), kind: "media" }}
-      class:concealed={page === null || error !== "" || rendering}
-      aria-label={`第 ${pageNumber} 页内容`}
+      use:revealOnChange={{ key: displayedPage, kind: "media" }}
+      class:concealed={!hasFrame || error !== ""}
+      aria-label={`第 ${displayedPage} 页内容`}
       aria-busy={rendering}
       bind:this={host}
     ></div>

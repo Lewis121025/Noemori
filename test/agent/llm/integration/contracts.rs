@@ -1,6 +1,70 @@
 use super::*;
 
 #[tokio::test]
+async fn retryable_http_status_survives_an_oversized_error_body() {
+    use noemori_agent::{
+        runtime::{Agent, RunInput, RunOptions, RunStatus},
+        tool::ToolRegistry,
+    };
+    let mut server = Server::start(vec![
+        Fixture {
+            status: 503,
+            content_type: "text/plain",
+            body: vec![b'x'; 4096],
+        },
+        Fixture::json(chat("已恢复")),
+    ])
+    .await;
+    let mut settings = config(Protocol::OpenAiChat, &server.url, false);
+    settings.max_response_bytes = 256;
+    let agent = Agent::new(
+        Arc::new(HttpModel::new(settings).unwrap()),
+        ToolRegistry::new(),
+        RunOptions {
+            retry_delay: Duration::ZERO,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut messages = request().messages;
+    messages.insert(1, Message::text(Role::User, "本轮文章上下文"));
+    let report = agent.run(RunInput::new(messages)).await.unwrap();
+    assert!(
+        matches!(report.status, RunStatus::Completed),
+        "{:?}",
+        report.status
+    );
+    assert_eq!(report.model_calls, 2);
+    server.finish().await;
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests[0].body, requests[1].body);
+    assert!(requests[1].body.to_string().contains("本轮文章上下文"));
+}
+
+#[tokio::test]
+async fn unreadable_http_error_bodies_preserve_status_and_retry_classification() {
+    for status in [400, 503] {
+        let mut server = Server::start(vec![Fixture {
+            status,
+            content_type: "text/plain",
+            body: vec![b'x'; 4096],
+        }])
+        .await;
+        let mut settings = config(Protocol::OpenAiResponses, &server.url, true);
+        settings.max_response_bytes = 256;
+        let error = generate(&HttpModel::new(settings).unwrap(), request(), context())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::Http { status: actual, message, .. } if *actual == status && message.contains("错误响应正文读取失败"))
+        );
+        assert_eq!(error.is_retryable(), status == 503);
+        server.finish().await;
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn native_assistant_payloads_cannot_replay_a_different_role() {
     let mut mismatches = Vec::new();
     for protocol in [Protocol::OpenAiChat, Protocol::Ollama] {

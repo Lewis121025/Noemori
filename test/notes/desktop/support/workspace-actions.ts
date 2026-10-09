@@ -16,9 +16,12 @@ export async function sidebarComponent(page: Page, name: string): Promise<void> 
   const label = name === "目录" ? "目录" : "笔记库";
   const panel = sidebar.getByRole("region", { name: label, exact: true });
   if (!(await panel.isVisible()))
-    await sidebar.getByRole("button", {
-      name: label === "目录" ? "文章大纲" : "文件目录", exact: true,
-    }).click();
+    await sidebar
+      .getByRole("button", {
+        name: label === "目录" ? "文章大纲" : "文件目录",
+        exact: true,
+      })
+      .click();
   await panel.waitFor();
   if (name === "搜索") await sidebar.getByRole("searchbox").focus();
 }

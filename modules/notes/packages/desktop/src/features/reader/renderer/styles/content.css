@@ -641,6 +641,7 @@
   --reading-code: light-dark(#f0efec, #353129);
   --reading-formula: light-dark(#faf9f6, #2b2a25);
   --reading-shadow: light-dark(#38383108, #00000026);
+  --reading-paper-edge: light-dark(rgb(69 65 51 / 9%), rgb(235 233 216 / 9%));
   --font-reading: 19px;
   --line-reading: 1.85;
   color: var(--fg);
@@ -723,10 +724,11 @@
 /* 纸页边缘只通过绘制建立层次，不改变正文宽度、内边距和滚动布局。 */
 .main > .document-body:has(> .surface > .markdown-content) {
   background: var(--bg);
-  border-radius: 0.25rem;
+  border-radius: 0.375rem;
   box-shadow:
     0 0 0 0.75rem var(--bg),
-    0 18px 40px 6px var(--reading-shadow);
+    0 0 0 calc(0.75rem + 1px) var(--reading-paper-edge),
+    0 20px 48px 8px var(--reading-shadow);
 }
 
 /* 可变字体略增笔画厚度，避免浅纸面上的宋体细笔画在小字号下显得发虚。 */
@@ -745,7 +747,7 @@
 }
 
 .surface > .markdown-content :is(h1, h2, h3, h4, h5, h6) {
-  font-weight: 600;
+  font-weight: 550;
   line-height: 1.5;
 }
 
@@ -756,12 +758,12 @@
 .surface > .markdown-content h1 {
   padding-bottom: 0.65em;
   color: var(--reading-heading);
-  background: linear-gradient(var(--reading-moss), var(--reading-moss)) left bottom / 2.5rem 2px
+  background: linear-gradient(var(--reading-moss), var(--reading-moss)) left bottom / 2.25rem 1px
     no-repeat;
   font-size: 2.25em;
-  font-weight: 650;
-  line-height: 1.4;
-  letter-spacing: 0.015em;
+  font-weight: 560;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
 }
 
 .surface > .markdown-content h2 {

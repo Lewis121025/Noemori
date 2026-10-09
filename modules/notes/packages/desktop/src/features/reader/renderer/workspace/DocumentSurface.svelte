@@ -1,5 +1,7 @@
 <script lang="ts">
+  import type { SelectedContent } from "../../shared/selected-content";
   import { type Snippet } from "svelte";
+  import SelectionToAgent from "./SelectionToAgent.svelte";
   import CodeEditor from "../editor/CodeEditor.svelte";
   import DocumentEditor from "../editor/DocumentEditor.svelte";
   import ImagePreview from "../preview/ImagePreview.svelte";
@@ -22,6 +24,8 @@
     registerToolbar,
     onShowTools,
     articleAgent,
+    onAddReference,
+    referenceHost,
   }: {
     workspace: ReaderWorkspaceController;
     /** 本栏文档面；文档、导航与链接动作都归属这一栏。 */
@@ -31,6 +35,8 @@
     registerToolbar: (toolbar: Snippet | null) => void;
     onShowTools: () => void;
     articleAgent?: ArticleAgentActions;
+    onAddReference?: (reference: SelectedContent) => Promise<void>;
+    referenceHost?: HTMLElement;
   } = $props();
   const doc = $derived(pane.document);
   const navigation = $derived(pane.navigation);
@@ -82,6 +88,16 @@
     return () => register(null);
   });
 </script>
+
+{#if onAddReference && workspace.vaultRoot && doc.path && referenceHost}
+  <SelectionToAgent
+    root={workspace.vaultRoot}
+    path={doc.path}
+    host={referenceHost}
+    captureSource={() => navigation.captureSelectedSource()}
+    onAdd={onAddReference}
+  />
+{/if}
 
 {#if doc.path !== null}
   {#key workspace.vaultRoot}

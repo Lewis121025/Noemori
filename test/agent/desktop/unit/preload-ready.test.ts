@@ -25,3 +25,21 @@ it("每个新页面的 Agent 调用等待宿主就绪，后续调用共用已完
   transport.ready(); await next;
   expect(transport.invoke).toHaveBeenCalledOnce();
 });
+
+it("主进程业务失败去除 IPC 包装，保留原始错误作为原因", async () => {
+  const api = createAgentApi();
+  transport.ready();
+  const original = new Error("Error invoking remote method 'agent.start': Error: 当前模型不支持图片");
+  transport.invoke.mockRejectedValueOnce(original);
+  await expect(api.start("conversation", "问题")).rejects.toMatchObject({
+    message: "当前模型不支持图片", cause: original,
+  });
+});
+
+it("非 IPC 包装错误原样传播，不改写未知异常", async () => {
+  const api = createAgentApi();
+  transport.ready();
+  const original = new Error("连接断开");
+  transport.invoke.mockRejectedValueOnce(original);
+  await expect(api.list()).rejects.toBe(original);
+});

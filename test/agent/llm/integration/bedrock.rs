@@ -6,6 +6,7 @@ async fn bedrock_effort_uses_the_official_model_family_field() {
     for (model_id, field) in [
         ("anthropic.claude-opus-4-6-v1", "claude"),
         ("us.anthropic.claude-opus-4-6-v1", "claude"),
+        ("jp.anthropic.claude-opus-4-6-v1", "claude"),
         ("global.anthropic.claude-opus-4-6-v1", "claude"),
         (
             "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1",
@@ -13,6 +14,10 @@ async fn bedrock_effort_uses_the_official_model_family_field() {
         ),
         (
             "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-6-v1",
+            "claude",
+        ),
+        (
+            "arn:aws:bedrock:ap-northeast-1:123456789012:inference-profile/jp.anthropic.claude-opus-4-6-v1",
             "claude",
         ),
         ("openai.gpt-oss-120b-1:0", "openai"),

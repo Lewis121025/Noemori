@@ -16,7 +16,10 @@
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
+  import { approachesSubmenu, type MenuPointer } from "./submenu-intent";
+  import { pointerIndicator } from "../../pointer-indicator";
   let {
     id,
     label,
@@ -41,8 +44,33 @@
   let trigger: HTMLButtonElement;
   let root: HTMLDivElement;
   let opened = $state<string[]>([]);
+  /** 每层菜单独立保存指针和待切换项；关闭或键盘接管即释放。 */
+  const hoverState = new SvelteMap<
+    HTMLElement,
+    {
+      point: MenuPointer;
+      pending: { button: HTMLButtonElement; timer: ReturnType<typeof setTimeout> } | null;
+    }
+  >();
+
+  function cancelHover(menu: HTMLElement): void {
+    const state = hoverState.get(menu);
+    if (state?.pending) clearTimeout(state.pending.timer);
+    if (state) state.pending = null;
+  }
+  function cancelPendingHovers(): void {
+    for (const menu of hoverState.keys()) cancelHover(menu);
+  }
+  onDestroy(() => {
+    cancelPendingHovers();
+    hoverState.clear();
+  });
 
   function track(menuId: string, event: ToggleEvent): void {
+    if (event.newState === "closed" && event.currentTarget instanceof HTMLElement) {
+      cancelHover(event.currentTarget);
+      hoverState.delete(event.currentTarget);
+    }
     opened =
       event.newState === "open"
         ? [...opened.filter((value) => value !== menuId), menuId]
@@ -59,15 +87,19 @@
   async function enter(button: HTMLButtonElement, last = false): Promise<void> {
     const menu = target(button);
     if (!menu || button.disabled) return;
+    cancelPendingHovers();
     if (!menu.matches(":popover-open")) button.click();
     await tick();
     const options = children(menu);
     (last ? options.at(-1) : options[0])?.focus();
   }
-  function hover(event: PointerEvent): void {
-    if (event.pointerType !== "mouse" || !(event.currentTarget instanceof HTMLButtonElement))
-      return;
-    const button = event.currentTarget;
+  function activeSubmenu(menu: HTMLElement): HTMLElement | undefined {
+    return Array.from(menu.children).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement && child.matches("[popover]:popover-open"),
+    );
+  }
+  function activateHover(button: HTMLButtonElement): void {
     const menu = button.parentElement;
     if (!menu) return;
     const next = button.disabled ? null : target(button);
@@ -78,9 +110,72 @@
     }
     if (next && !next.matches(":popover-open")) button.click();
   }
+  function hover(event: PointerEvent): void {
+    if (event.pointerType !== "mouse" || !(event.currentTarget instanceof HTMLButtonElement))
+      return;
+    const button = event.currentTarget;
+    const menu = button.parentElement;
+    if (!menu) return;
+    const state = hoverState.get(menu);
+    cancelHover(menu);
+    const child = activeSubmenu(menu);
+    if (
+      state &&
+      child &&
+      child !== target(button) &&
+      approachesSubmenu(
+        state.point,
+        { x: event.clientX, y: event.clientY },
+        child.getBoundingClientRect(),
+      )
+    ) {
+      state.pending = {
+        button,
+        timer: setTimeout(() => {
+          state.pending = null;
+          if (menu.matches(":popover-open") && button.isConnected && button.matches(":hover"))
+            activateHover(button);
+        }, 180),
+      };
+    } else activateHover(button);
+  }
+  function movePointer(event: PointerEvent): void {
+    if (
+      event.pointerType !== "mouse" ||
+      !(event.currentTarget instanceof HTMLElement) ||
+      !(event.target instanceof Element) ||
+      event.target.closest('[role="menu"]') !== event.currentTarget
+    )
+      return;
+    const menu = event.currentTarget;
+    const next = { x: event.clientX, y: event.clientY };
+    const state = hoverState.get(menu);
+    if (!state) {
+      hoverState.set(menu, { point: next, pending: null });
+      return;
+    }
+    if (state.pending) {
+      const child = activeSubmenu(menu);
+      if (!child || !approachesSubmenu(state.point, next, child.getBoundingClientRect())) {
+        const button = state.pending.button;
+        cancelHover(menu);
+        if (button.matches(":hover")) activateHover(button);
+      }
+    }
+    state.point = next;
+  }
+  function enterMenu(event: PointerEvent): void {
+    if (
+      event.pointerType === "mouse" &&
+      event.currentTarget instanceof HTMLElement &&
+      event.currentTarget.parentElement
+    )
+      cancelHover(event.currentTarget.parentElement);
+  }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || !(event.currentTarget instanceof HTMLElement)) return;
     const menu = event.currentTarget;
+    cancelPendingHovers();
     const options = children(menu);
     const focused = document.activeElement;
     const index = options.findIndex((button) => button === focused);
@@ -151,12 +246,14 @@
 <div
   {id}
   bind:this={root}
+  use:pointerIndicator
   class="reader-popover formatting-menu"
   popover="auto"
   role="menu"
   aria-label={label}
   tabindex="-1"
   onbeforetoggle={(event) => track(id, event)}
+  onpointermove={movePointer}
   onkeydown={keydown}
 >
   {@render entries(items, id)}
@@ -188,11 +285,14 @@
       <div
         id={itemId}
         class="reader-popover formatting-menu submenu"
+        use:pointerIndicator
         popover="auto"
         role="menu"
         aria-label={item.label}
         tabindex="-1"
         onbeforetoggle={(event) => track(itemId, event)}
+        onpointerenter={enterMenu}
+        onpointermove={movePointer}
         onkeydown={keydown}
       >
         {@render entries(item.items, itemId)}

@@ -1,3 +1,4 @@
+import { referenceRange, type SelectionSource } from "../../shared/selected-content";
 import { tick } from "svelte";
 import type {
   HistoryAction,
@@ -286,6 +287,45 @@ export class ReaderNavigation {
       void this.applyPosition();
     }
   };
+
+  /**
+   * 从编辑器快照捕获完整选区，不能用虚拟化 DOM 里尚可见的片段代替原文。
+   * @returns 源码原文与 UTF-16 偏移；空选区或没有可靠文本表面时返回 null。
+   * @throws 保真快照读取失败时原样传播，不用另一分栏或旧版本文字替代。
+   */
+  captureSelectedSource(): { text: string; offset: number; displayText?: string } | null {
+    const editor = this.currentEditor();
+    const selection = editor?.capturePosition()?.selection;
+    if (!editor || !selection || selection.anchor === selection.head) return null;
+    const source = new TextDecoder("utf-8", { ignoreBOM: true }).decode(editor.snapshot().bytes);
+    const offset = Math.min(selection.anchor, selection.head);
+    const text = source.slice(offset, Math.max(selection.anchor, selection.head));
+    // 源码编辑器会虚拟化 DOM；其完整选区必须取自快照，保留原始换行。
+    return { text, offset, ...("jumpToByte" in editor ? { displayText: text } : {}) };
+  }
+
+  /**
+   * @param location 添加引用时捕获的来源，必须已经打开其所属文件。
+   * @returns 无返回值；核对原文后选中并滚入视口，不修改文本。
+   * @throws 没有文本表面、原文失效或不能唯一定位时拒绝，禁止盲用旧偏移。
+   */
+  selectReference(location: SelectionSource): void {
+    const editor = this.currentEditor();
+    if (!editor) throw new Error("来源已打开，此文件暂无文本定位能力");
+    const snapshot = editor.snapshot();
+    const source = new TextDecoder("utf-8", { ignoreBOM: true }).decode(snapshot.bytes);
+    const { from, to } = referenceRange(source, location);
+    const encoder = new TextEncoder();
+    this.cancelPositionRestore();
+    editor.jumpToSearch(
+      {
+        startByte: encoder.encode(source.slice(0, from)).length,
+        endByte: encoder.encode(source.slice(0, to)).length,
+        line: source.slice(0, from).split("\n").length,
+      },
+      snapshot,
+    );
+  }
 
   /** 读取当前表面的源码位置；挂载尚未完成时保留待恢复锚点，不用旧表面覆盖它。 */
   capturePosition(): EditorPosition | null {

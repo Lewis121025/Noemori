@@ -16,7 +16,7 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
   };
@@ -28,6 +28,10 @@ beforeEach(() => {
     props: { api: createAgentApiMock(), close, openLink: async () => {} },
   });
   flushSync();
+  await vi.waitFor(() => {
+    flushSync();
+    button("开始新对话");
+  });
 });
 
 afterEach(async () => {

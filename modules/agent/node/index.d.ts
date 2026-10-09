@@ -42,6 +42,22 @@ export declare class NativeAgentSession {
    * 配置、历史或上下文无效，或会话关闭、正在运行时返回错误，不修改已有运行。
    */
   startConfigured(configuration: string, binding: string, text: string, context?: string | undefined | null): string
+  /**
+   * 附件使用独立桥接入口，旧二进制缺少该方法会明确拒绝，不会忽略额外参数而伪报成功。
+   * configuration、binding、text 与普通发送相同；images 是有界原生图片 JSON。
+   * 返回运行编号；配置、媒体、历史或运行状态不合法时拒绝且保留草稿。
+   */
+  startConfiguredWithAttachments(configuration: string, binding: string, text: string, context?: string | undefined | null, images?: string | undefined | null): string
+  /**
+   * 当前运行接收补充文字，在下一次模型请求中生效，不新建轮次。
+   * run_id 必须匹配当前运行；text 非空且至多 128 KiB；失效、停止或输入超限返回错误。
+   */
+  steer(runId: string, text: string): string
+  /**
+   * 同轮附件采用原运行能力，images 为图片 JSON，requires_tools 表示文件需要工具读取。
+   * 返回原运行编号；能力、运行身份或媒体失败时在接受之前拒绝，不污染历史。
+   */
+  steerWithAttachments(runId: string, text: string, images?: string | undefined | null, requiresTools?: boolean | undefined | null): string
   /** 取消当前运行和审批，不自动重放命令。 */
   cancel(): void
   /**
