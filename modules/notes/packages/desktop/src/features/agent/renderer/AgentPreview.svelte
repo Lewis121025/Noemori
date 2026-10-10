@@ -2,7 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import { on } from "svelte/events";
   import type { AgentApi, BrowserHumanInput, UiPreviewTarget } from "../shared/api";
-  import { parsePreviewTarget, previewPosition } from "../shared/preview";
+  import { parsePreviewTarget, previewPosition, previewImagePoint } from "../shared/preview";
 
   let {
     api,
@@ -12,6 +12,7 @@
     human = false,
     dialog = null,
     fileChooser = false,
+    control = null,
     close,
   }: {
     api: AgentApi;
@@ -21,14 +22,25 @@
     human?: boolean;
     dialog?: { type: string; message: string } | null;
     fileChooser?: boolean;
+    control?: ((resume: boolean) => Promise<void>) | null;
     close: () => void;
   } = $props();
   let frame = $state("");
   let previewError = $state("");
   let inputError = $state("");
+  let changingControl = $state(false);
   let inputToken = $state<string | null>(null);
   let surface = $state<HTMLElement>();
   let picture = $state<HTMLImageElement>();
+  let keyboard = $state<HTMLTextAreaElement>();
+  let requestFrame: () => void = () => {};
+  let gesture: {
+    pointer: number;
+    x: number;
+    y: number;
+    button: "left" | "right" | "middle";
+    token: string;
+  } | null = null;
   let textField = $state<HTMLInputElement>();
   let x = $state(0),
     y = $state(0);
@@ -40,10 +52,15 @@
   let inputQueue: Promise<void> = Promise.resolve();
   let inputEpoch = 0;
   let disposed = false;
+  let composing = false;
+  let composition: { epoch: number; token: string | null } | null = null;
+  let dragged = false;
   let drag: { pointer: number; x: number; y: number; left: number; top: number } | null = null;
   let dragHandle = $state<HTMLButtonElement>();
   const identity = $derived(JSON.stringify(target));
-  const interactive = $derived(human && target.backend === "managed" && inputToken !== null);
+  const interactive = $derived(
+    human && (target.backend === "managed" || target.backend === "computer") && inputToken !== null,
+  );
   const error = $derived(inputError || previewError);
   onDestroy(() => {
     disposed = true;
@@ -97,6 +114,7 @@
     const owner = session,
       selected = parsePreviewTarget(JSON.parse(identity));
     let ended = false;
+    let reading = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     frame = "";
     previewError = "";
@@ -108,6 +126,8 @@
       return;
     }
     async function refresh(): Promise<void> {
+      if (ended || reading) return;
+      reading = true;
       try {
         const result = await api.uiPreview(owner, selected);
         if (!ended) {
@@ -121,14 +141,21 @@
           previewError = reason instanceof Error ? reason.message : String(reason);
         }
       } finally {
+        reading = false;
         if (!ended) timer = setTimeout(() => void refresh(), 1000);
       }
     }
+    const redraw = () => {
+      clearTimeout(timer);
+      void refresh();
+    };
+    requestFrame = redraw;
     void refresh();
     return () => {
       ended = true;
       inputEpoch++;
       clearTimeout(timer);
+      if (requestFrame === redraw) requestFrame = () => {};
     };
   });
   function pointerDown(event: PointerEvent): void {
@@ -151,8 +178,8 @@
     if (dragHandle?.hasPointerCapture(pointer)) dragHandle.releasePointerCapture(pointer);
   }
   function input(value: BrowserHumanInput): void {
-    if (!interactive || target.backend !== "managed" || inputToken === null) return;
-    const page = target.page,
+    if (!interactive || inputToken === null) return;
+    const selected = parsePreviewTarget(JSON.parse(identity)),
       owner = session,
       token = inputToken,
       epoch = inputEpoch;
@@ -161,7 +188,10 @@
       .then(async () => {
         if (disposed || epoch !== inputEpoch || !human || session !== owner || inputToken !== token)
           return;
-        await api.browserInput(owner, page, token, value);
+        if (selected.backend === "computer") await api.uiInput(owner, selected, token, value);
+        else if (selected.backend === "managed")
+          await api.browserInput(owner, selected.page, token, value);
+        requestFrame();
       })
       .catch((reason: unknown) => {
         if (disposed || epoch !== inputEpoch) return;
@@ -170,14 +200,62 @@
       });
   }
   function click(event: MouseEvent): void {
-    if (!picture) return;
-    const bounds = picture.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return;
-    input({
-      type: "pointer",
-      x: Math.floor(((event.clientX - bounds.left) * picture.naturalWidth) / bounds.width),
-      y: Math.floor(((event.clientY - bounds.top) * picture.naturalHeight) / bounds.height),
-    });
+    const point = imagePoint(event.clientX, event.clientY);
+    if (target.backend === "computer") {
+      if (!dragged && point)
+        input({
+          type: "pointer",
+          ...point,
+          button: "left",
+          clicks: Math.max(1, Math.min(3, event.detail || 1)),
+        });
+      dragged = false;
+    } else if (point) input({ type: "pointer", ...point });
+  }
+  function imagePoint(x: number, y: number): { x: number; y: number } | null {
+    return picture
+      ? previewImagePoint(
+          picture.getBoundingClientRect(),
+          picture.naturalWidth,
+          picture.naturalHeight,
+          x,
+          y,
+        )
+      : null;
+  }
+  function imageDown(event: PointerEvent): void {
+    if (!interactive || target.backend !== "computer" || inputToken === null) return;
+    const point = imagePoint(event.clientX, event.clientY);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragged = false;
+    gesture = {
+      pointer: event.pointerId,
+      ...point,
+      button: event.button === 2 ? "right" : event.button === 1 ? "middle" : "left",
+      token: inputToken,
+    };
+    if (event.currentTarget instanceof HTMLElement)
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    keyboard?.focus({ preventScroll: true });
+  }
+  function imageUp(event: PointerEvent): void {
+    const start = gesture;
+    if (!start || start.pointer !== event.pointerId) return;
+    gesture = null;
+    const point = imagePoint(event.clientX, event.clientY);
+    if (!point) return;
+    if (start.token !== inputToken) {
+      dragged = true;
+      inputError = "窗口已经变化，请等待新画面后操作";
+      return;
+    }
+    if (start.button === "left" && Math.hypot(point.x - start.x, point.y - start.y) > 3) {
+      dragged = true;
+      input({ type: "drag", from_x: start.x, from_y: start.y, to_x: point.x, to_y: point.y });
+    } else if (start.button !== "left")
+      input({ type: "pointer", ...point, button: start.button, clicks: 1 });
   }
   function browserEvents(node: HTMLElement) {
     const removeKey = on(node, "keydown", key);
@@ -192,6 +270,12 @@
           type: "scroll",
           x: Math.max(-10000, Math.min(10000, event.deltaX)),
           y: Math.max(-10000, Math.min(10000, event.deltaY)),
+          ...(target.backend === "computer"
+            ? (() => {
+                const point = imagePoint(event.clientX, event.clientY);
+                return point ? { at_x: point.x, at_y: point.y } : {};
+              })()
+            : {}),
         });
       },
       { passive: false },
@@ -207,6 +291,14 @@
     if (!interactive || event.isComposing) return;
     event.stopPropagation();
     if (["Shift", "Control", "Meta", "Alt"].includes(event.key)) return;
+    // 本地输入框先让输入法及粘贴完成，再发送确定的文字；首个按键不能阻断组合输入。
+    if (
+      event.target === keyboard &&
+      (event.key === "Process" ||
+        (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) ||
+        ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v"))
+    )
+      return;
     event.preventDefault();
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
       input({ type: "text", text: event.key });
@@ -225,6 +317,29 @@
     if (showInput) {
       await tick();
       textField?.focus();
+    }
+  }
+  function beginComposition(): void {
+    composing = true;
+    composition = { epoch: inputEpoch, token: inputToken };
+  }
+  function endComposition(event: CompositionEvent): void {
+    const accepted = composition?.epoch === inputEpoch && composition.token === inputToken;
+    composing = false;
+    composition = null;
+    if (accepted && event.data) input({ type: "text", text: event.data });
+    if (keyboard) keyboard.value = "";
+  }
+  async function switchControl(): Promise<void> {
+    if (!control || changingControl) return;
+    changingControl = true;
+    inputError = "";
+    try {
+      await control(human);
+    } catch (reason) {
+      inputError = reason instanceof Error ? reason.message : String(reason);
+    } finally {
+      changingControl = false;
     }
   }
   async function chooseFiles(): Promise<void> {
@@ -260,6 +375,14 @@
         aria-label="浏览器画面"
         disabled={!interactive}
         onclick={click}
+        onpointerdown={imageDown}
+        onpointerup={imageUp}
+        onpointercancel={() => {
+          gesture = null;
+        }}
+        oncontextmenu={(event) => {
+          if (interactive) event.preventDefault();
+        }}
         use:browserEvents
         ><img bind:this={picture} src={frame} alt={title} draggable="false" /></button
       >
@@ -267,6 +390,25 @@
         {error ? "画面暂不可用" : dialog ? "请处理网页对话框" : "正在连接画面…"}
       </p>{/if}
   </div>
+  {#if human && target.backend === "computer"}<textarea
+      bind:this={keyboard}
+      class="input-sink"
+      aria-label="向画面输入"
+      use:browserEvents
+      oncompositionstart={beginComposition}
+      oncompositionend={endComposition}
+      oninput={(event) => {
+        if (!composing && !(event instanceof InputEvent && event.isComposing) && keyboard?.value) {
+          input({ type: "text", text: keyboard.value });
+          keyboard.value = "";
+        }
+      }}
+      onpaste={(event) => {
+        event.preventDefault();
+        const text = event.clipboardData?.getData("text/plain");
+        if (text) input({ type: "text", text });
+      }}
+    ></textarea>{/if}
   {#if human && target.backend === "managed" && dialog}
     <div class="page-dialog">
       <p>{dialog.message}</p>
@@ -327,6 +469,9 @@
   {/if}
   {#if error}<p class="error" role="status">{error}</p>{/if}
   <footer aria-label="画面操作">
+    {#if control}<button disabled={changingControl} onclick={() => void switchControl()}
+        >{human ? "完成并继续" : "接管"}</button
+      >{/if}
     <button
       bind:this={dragHandle}
       class="drag"
@@ -402,6 +547,13 @@
 </div>
 
 <style>
+  .input-sink {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
   .agent-preview {
     position: fixed;
     z-index: 1100;

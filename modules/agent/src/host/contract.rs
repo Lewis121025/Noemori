@@ -22,6 +22,8 @@ pub struct HostMessage {
 pub enum HostRunStatus {
     /// 正在生成或执行工具。
     Running,
+    /// 已暂停当前节点，等待用户操作；仍属于同一运行。
+    Paused,
     /// 正常完成。
     Completed,
     /// 用户或宿主取消。
@@ -36,6 +38,20 @@ pub enum HostRunStatus {
     Filtered,
     /// 模型、协议或基础设施故障。
     Failed,
+}
+
+impl HostRunStatus {
+    /// 仅未完成且已经结算的状态允许显式恢复，内容过滤不能通过重试绕过。
+    pub(super) fn can_resume(self) -> bool {
+        matches!(
+            self,
+            Self::Cancelled
+                | Self::TimedOut
+                | Self::BudgetExhausted
+                | Self::Truncated
+                | Self::Failed
+        )
+    }
 }
 
 /// 最近一次运行的只读状态，终端可在该运行结束后继续存活。
@@ -70,6 +86,10 @@ pub struct HostTerminal {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", content = "request", rename_all = "snake_case")]
 pub enum HostApprovalRequest {
+    /// 当前页面文档的扩展能力，独立于网站网络访问授权。
+    BrowserCapability(crate::tool::ui::BrowserCapabilityRequest),
+    /// 仅启动由系统解析的应用，不授予窗口读取或输入权限。
+    UiLaunch(crate::tool::ui::computer::UiLaunchRequest),
     /// 原生前台接管，不代表批准系统权限授予或具体业务操作。
     Ui(crate::tool::ui::computer::UiAccessRequest),
     /// 当前浏览器会话的精确网络来源。
@@ -98,6 +118,10 @@ pub struct HostApproval {
     deny_unknown_fields
 )]
 pub enum HostApprovalReply {
+    /// 扩展能力仅在申请绑定的页面文档中有效。
+    BrowserCapability(crate::tool::ui::BrowserCapabilityDecision),
+    /// 应用启动只有单次批准或拒绝。
+    UiLaunch(crate::tool::ui::computer::UiLaunchDecision),
     /// 仅对当前有效窗口申请作出决定。
     Ui(crate::tool::ui::computer::UiAccessDecision),
     /// 浏览器来源授权，不接受终端命令前缀。

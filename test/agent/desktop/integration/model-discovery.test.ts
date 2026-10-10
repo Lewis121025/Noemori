@@ -96,6 +96,7 @@ it("Ollama 保留接口报告的全部推理名称和布尔开关，不依赖 ca
   expect(models[0]?.reasoning).toEqual({
     supported: true,
     efforts: ["false", "true", "low", "ULTRA"],
+    defaultEffort: "low",
   });
 });
 

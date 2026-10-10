@@ -81,19 +81,20 @@ export function pointerContour(flow: PointerFlow): PointerContour {
   const energy = Math.min(1, distance);
   const x = distance ? flow.x / distance : 0,
     y = distance ? flow.y / distance : 0;
-  const shear = 0.24 * energy * x * y;
+  const shear = 0.16 * energy * x * y;
+  // 主体留出边缘余量，让尾部真正延伸出轮廓，仍不超出 32px 装饰平面。
   return {
     body: [
-      0.9 + energy * (0.1 * x * x - 0.14 * y * y),
+      0.84 + energy * (0.04 * x * x - 0.12 * y * y),
       shear,
       shear,
-      0.9 + energy * (0.1 * y * y - 0.14 * x * x),
+      0.84 + energy * (0.04 * y * y - 0.12 * x * x),
     ],
     wake: {
       x: -5.2 * energy * x,
       y: -5.2 * energy * y,
       scale: 0.54 + energy * 0.13,
-      opacity: energy * 0.55,
+      opacity: energy * 0.72,
     },
     stretch: energy * 0.12,
   };

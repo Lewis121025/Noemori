@@ -1,8 +1,8 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { Authentication, ModelSettings, PublicModelSettings } from "../shared/api";
-import { parsePrivateJson } from "./private-json";
+import { parsePrivateJson, writePrivateJson } from "./private-json";
 import {
   parseModelSelection,
   parseProviderUpdate,
@@ -263,16 +263,7 @@ export class AgentProviderStore {
       const catalog = await this.read();
       change(catalog);
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const temporary = join(this.directory, `.agent-model-${randomUUID()}`);
-      try {
-        await writeFile(temporary, JSON.stringify({ version: 2, ...catalog }), {
-          flag: "wx",
-          mode: 0o600,
-        });
-        await rename(temporary, this.file);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      await writePrivateJson(this.file, JSON.stringify({ version: 2, ...catalog }));
       return projectCatalog(catalog);
     });
     // 队列恢复仅用于后续操作排序；原调用的拒绝仍完整交付，不能吞掉保存错误。

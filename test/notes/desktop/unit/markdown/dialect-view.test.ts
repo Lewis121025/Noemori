@@ -170,7 +170,25 @@ describe("Mermaid 视图", () => {
     expect(render).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(300);
     expect(render).toHaveBeenCalledTimes(2);
-    expect(render).toHaveBeenLastCalledWith(expect.any(String), "ABC", expect.any(Boolean));
+    expect(render).toHaveBeenLastCalledWith(expect.any(String), "ABC", expect.any(Boolean), expect.any(AbortSignal));
+  });
+
+  it("新源码进入防抖等待时立即作废旧结果，卸载会取消当前任务", async () => {
+    vi.useFakeTimers();
+    const pending = Promise.withResolvers<string>();
+    const render = vi.fn((_id: string, _source: string, _dark: boolean, _signal?: AbortSignal) => pending.promise);
+    const view = mountEditor("```mermaid\nA\n```\n", createCodeBlockViews(render));
+    const signal = render.mock.calls[0]?.[3];
+    view.dispatch(view.state.tr.insertText("B", 2));
+    pending.resolve("<svg>过期结果</svg>");
+    await pending.promise;
+    expect(view.dom.querySelector(".mermaid-preview")?.textContent).not.toContain("过期结果");
+    expect(signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(300);
+    const current = render.mock.calls[1]?.[3];
+    view.destroy();
+    views = views.filter((item) => item !== view);
+    expect(current?.aborted).toBe(true);
   });
 });
 

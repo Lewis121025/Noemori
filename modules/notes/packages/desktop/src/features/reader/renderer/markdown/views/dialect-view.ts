@@ -17,6 +17,8 @@ import { createCompositionGuard, isCompositionKey } from "../../../shared/compos
 import { applyMarkdownHistory } from "../../editor/history";
 import { focusDocument } from "../../editor/read-only";
 import { SourceNodeView } from "./source-node-view";
+import { renderMermaid, type MermaidRenderer } from "./mermaid";
+export type { MermaidRenderer } from "./mermaid";
 
 /** 注释预览只显示原文；编辑复用源码节点的输入生命周期。 */
 const createCommentView: NodeViewConstructor = (node, view, getPos, decorations) =>
@@ -231,22 +233,7 @@ export function calloutRevealPlugin(): Plugin<DecorationSet> {
   });
 }
 
-/** Mermaid 图表渲染器；测试注入替身，生产环境按需加载 mermaid。 */
-export type MermaidRenderer = (id: string, source: string, dark: boolean) => Promise<string>;
-
 let mermaidSequence = 0;
-let initializedTheme: string | null = null;
-
-/** 按需加载 mermaid 并以严格安全级别渲染；主题随系统外观切换时重新初始化。 */
-const renderMermaid: MermaidRenderer = async (id, source, dark) => {
-  const mermaid = (await import("mermaid")).default;
-  const theme = dark ? "dark" : "default";
-  if (initializedTheme !== theme) {
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme });
-    initializedTheme = theme;
-  }
-  return (await mermaid.render(id, source)).svg;
-};
 
 /** 源码停止变化后再重排，连续输入不会为每个按键跑一次布局。 */
 const MERMAID_DEBOUNCE_MS = 250;
@@ -262,7 +249,7 @@ class MermaidView implements NodeView {
   private readonly preview: HTMLElement;
   private source: string;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private generation = 0;
+  private controller: AbortController | null = null;
 
   constructor(
     private node: PmNode,
@@ -306,6 +293,7 @@ class MermaidView implements NodeView {
   }
 
   private schedule(): void {
+    this.controller?.abort();
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -314,7 +302,9 @@ class MermaidView implements NodeView {
   }
 
   private draw(): void {
-    const generation = ++this.generation;
+    this.controller?.abort();
+    const controller = new AbortController();
+    this.controller = controller;
     const source = this.source;
     if (source.trim() === "") {
       this.preview.textContent = "空白图表";
@@ -322,14 +312,19 @@ class MermaidView implements NodeView {
     }
     const dark = globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
     mermaidSequence += 1;
-    void this.render(`noemori-mermaid-${String(mermaidSequence)}`, source, dark).then(
+    void this.render(
+      `noemori-mermaid-${String(mermaidSequence)}`,
+      source,
+      dark,
+      controller.signal,
+    ).then(
       (svg) => {
-        if (generation !== this.generation) return;
+        if (controller.signal.aborted) return;
         this.preview.classList.remove("mermaid-error");
         this.preview.innerHTML = svg;
       },
       (error: unknown) => {
-        if (generation !== this.generation) return;
+        if (controller.signal.aborted) return;
         this.preview.classList.add("mermaid-error");
         this.preview.textContent = `图表无法渲染：${error instanceof Error ? error.message : String(error)}`;
       },
@@ -361,7 +356,7 @@ class MermaidView implements NodeView {
 
   destroy(): void {
     if (this.timer !== null) clearTimeout(this.timer);
-    this.generation += 1;
+    this.controller?.abort();
   }
 }
 

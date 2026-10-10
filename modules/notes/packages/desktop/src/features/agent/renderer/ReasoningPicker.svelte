@@ -19,7 +19,7 @@
     error: string;
     opened?: boolean;
     onopen: () => void;
-    onselect: (effort: ReasoningEffort | undefined) => Promise<boolean>;
+    onselect: (effort: ReasoningEffort) => Promise<boolean>;
   } = $props();
   let element: HTMLDivElement;
   let trigger: HTMLButtonElement;
@@ -53,7 +53,7 @@
   function showMenu(node: HTMLDivElement): void {
     node.showPopover();
   }
-  async function select(effort: ReasoningEffort | undefined): Promise<void> {
+  async function select(effort: ReasoningEffort): Promise<void> {
     if (saving) return;
     if (effort === value) {
       close(true);
@@ -106,14 +106,14 @@
     aria-haspopup="menu"
     aria-expanded={opened}
     aria-controls={`${instanceId}-efforts`}
-    title={value === undefined ? "推理强度：服务商默认" : `推理强度：${value}`}
+    title={value === undefined ? "选择推理强度" : `推理强度：${value}`}
     style:anchor-name={anchorName}
     bind:this={trigger}
     disabled={saving}
     onclick={toggle}
   >
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 14h12M7 3v6M13 11v6" /></svg>
-    <span>{value ?? "服务商默认"}</span>
+    <span>{value ?? "推理强度"}</span>
     <svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
   </button>
   {#if opened}<div
@@ -127,21 +127,6 @@
       use:showMenu
     >
       <p class="menu-title">推理强度</p>
-      <button
-        class="effort-option"
-        type="button"
-        role="menuitemradio"
-        aria-checked={value === undefined}
-        disabled={saving}
-        onkeydown={navigate}
-        onclick={() => void select(undefined)}
-      >
-        <span>服务商默认</span>
-        <svg class:chosen={value === undefined} viewBox="0 0 20 20" aria-hidden="true"
-          ><path d="m4 10 4 4 8-8" /></svg
-        >
-      </button>
-      {#if !efforts.length}<p class="next-turn" role="status">服务商未提供可选推理档位</p>{/if}
       {#each efforts as effort (effort)}
         <button
           class="effort-option"

@@ -3,12 +3,16 @@
 #[path = "../../support/model.rs"]
 mod support;
 
+use async_trait::async_trait;
 use noemori_agent::{
     AgentSession, CancellationToken, ExecutionContext, Message, Role, ToolCall,
     runtime::{Agent, RunInput, RunOptions, RunStatus},
     tool::{
-        ToolRegistry,
-        terminal::{SandboxConfig, SandboxMode, TerminalTool, WorkspaceAccess},
+        Tool, ToolConcurrency, ToolContext, ToolError, ToolRegistry,
+        terminal::{
+            SandboxConfig, SandboxMode, TerminalInput, TerminalOutput, TerminalTool,
+            WorkspaceAccess,
+        },
     },
 };
 use serde_json::{Value, json};
@@ -204,14 +208,50 @@ async fn session_log_quota_is_shared_and_reclaimed_after_release() {
     );
 }
 
-async fn batch_duration(workspace: &Path, parallelism: usize) -> Duration {
-    let tools = registry(
-        workspace,
-        SandboxMode::Restricted(SandboxConfig {
-            workspace_access: WorkspaceAccess::ReadOnly,
-            ..Default::default()
-        }),
-    );
+/// 串行基线通过工具声明形成屏障，避免给生产调度器重新引入数量限制。
+struct ScheduledTerminal {
+    terminal: TerminalTool,
+    concurrency: ToolConcurrency,
+}
+
+#[async_trait]
+impl Tool for ScheduledTerminal {
+    type Args = TerminalInput;
+    type Output = TerminalOutput;
+    fn name(&self) -> &str {
+        self.terminal.name()
+    }
+    fn description(&self) -> &str {
+        self.terminal.description()
+    }
+    fn concurrency(&self, _: &TerminalInput) -> ToolConcurrency {
+        self.concurrency
+    }
+    async fn execute(
+        &self,
+        args: TerminalInput,
+        context: ToolContext,
+    ) -> Result<TerminalOutput, ToolError> {
+        self.terminal.execute(args, context).await
+    }
+}
+
+async fn batch_duration(workspace: &Path, concurrency: ToolConcurrency) -> Duration {
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(ScheduledTerminal {
+            terminal: TerminalTool::configured(
+                workspace,
+                "/bin/sh",
+                SandboxMode::Restricted(SandboxConfig {
+                    workspace_access: WorkspaceAccess::ReadOnly,
+                    ..Default::default()
+                }),
+            )
+            .unwrap(),
+            concurrency,
+        })
+        .unwrap();
     let ids: Vec<_> = (0..8).map(|index| format!("call-{index}")).collect();
     let requests: Vec<_> = ids
         .iter()
@@ -227,15 +267,7 @@ async fn batch_duration(workspace: &Path, parallelism: usize) -> Duration {
         vec![calls(&requests)],
         vec![answer("done")],
     ]));
-    let agent = Agent::new(
-        model,
-        tools,
-        RunOptions {
-            max_parallel_tools: parallelism,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let agent = Agent::new(model, tools, RunOptions::default()).unwrap();
     let session = AgentSession::new();
     let mut input = RunInput::new(vec![Message::text(Role::User, "并发读取")]);
     input.session = session.clone();
@@ -255,8 +287,8 @@ async fn independent_readonly_commands_report_measured_parallel_speedup() {
     let mut serial = Vec::new();
     let mut parallel = Vec::new();
     for _ in 0..3 {
-        serial.push(batch_duration(workspace.path(), 1).await);
-        parallel.push(batch_duration(workspace.path(), 4).await);
+        serial.push(batch_duration(workspace.path(), ToolConcurrency::Sequential).await);
+        parallel.push(batch_duration(workspace.path(), ToolConcurrency::Concurrent).await);
     }
     serial.sort();
     parallel.sort();

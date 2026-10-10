@@ -2,6 +2,12 @@ import { beforeEach } from "vitest";
 
 /** jsdom 不计算布局或原生浮层；几何和顶层交互由 Electron 测试验证。 */
 if (typeof document !== "undefined") {
+  // jsdom 只验证节点归属；原子移动对 iframe 状态的保留由 Electron 旅程验证。
+  if (typeof Element.prototype.moveBefore !== "function") {
+    Element.prototype.moveBefore = function (node: Node, child: Node | null): void {
+      this.insertBefore(node, child);
+    };
+  }
   // jsdom 不实现系统媒体偏好；默认不减少动效，偏好切换用例可覆盖此入口。
   if (typeof window.matchMedia !== "function") {
     window.matchMedia = (query) =>

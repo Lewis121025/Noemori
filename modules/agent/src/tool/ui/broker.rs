@@ -112,6 +112,11 @@ fn changes_ui(action: &str) -> bool {
             | "batch"
             | "ax_action"
             | "set_value"
+            | "locator"
+            | "select_text"
+            | "paste"
+            | "launch_app"
+            | "webmcp_invoke"
             | "grant_control"
     )
 }
@@ -440,6 +445,7 @@ impl UiBroker {
                                 | "tabs"
                                 | "preview"
                                 | "permissions"
+                                | "human_input"
                                 | "apps"
                                 | "windows"
                         )
@@ -467,18 +473,18 @@ impl UiBroker {
                 );
                 let stream = port.stream.clone();
                 if action_name != "preview" {
-                let receipts = state.receipts.entry(session.into()).or_default();
-                receipts.push(UiReceipt {
-                    id: id.clone(),
-                    backend: backend.into(),
-                    action: action_name,
-                    outcome: "unknown".into(),
-                    pending: true,
-                    error: None,
-                });
-                if receipts.len() > 256 {
-                    receipts.remove(0);
-                }
+                    let receipts = state.receipts.entry(session.into()).or_default();
+                    receipts.push(UiReceipt {
+                        id: id.clone(),
+                        backend: backend.into(),
+                        action: action_name,
+                        outcome: "unknown".into(),
+                        pending: true,
+                        error: None,
+                    });
+                    if receipts.len() > 256 {
+                        receipts.remove(0);
+                    }
                 }
                 (connection, stream)
             };

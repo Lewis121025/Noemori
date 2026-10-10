@@ -713,12 +713,7 @@
         }}
       />
     </Sidebar>
-    <div
-      class="content-space"
-      bind:this={contentElement}
-      tabindex="-1"
-      inert={drawerOpen}
-    >
+    <div class="content-space" bind:this={contentElement} tabindex="-1" inert={drawerOpen}>
       <div
         class="reading-space"
         data-motion="document"

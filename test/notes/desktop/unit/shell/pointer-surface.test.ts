@@ -112,10 +112,17 @@ it("斜向轮廓包含倾斜与尾部，持续往返保持有界，静止后尾�
     flow = samplePointerFlow(flow, { x: frame % 24 < 12 ? 3 : -3, y: 1 }, 8);
     const contour = pointerContour(flow);
     expect(contour.stretch).toBeLessThanOrEqual(0.12);
-    expect(contour.wake.opacity).toBeLessThanOrEqual(0.55);
+    expect(contour.wake.opacity).toBeLessThanOrEqual(0.72);
     expect(Math.hypot(contour.wake.x, contour.wake.y)).toBeLessThanOrEqual(5.2 + 1e-10);
   }
   expect(pointerContour(flow).body[1]).not.toBe(0);
   expect(pointerContour(resting).wake.opacity).toBe(0);
-  expect(pointerContour(resting).body).toEqual([0.9, 0, 0, 0.9]);
+  expect(pointerContour(resting).body).toEqual([0.84, 0, 0, 0.84]);
+});
+
+it("拖曳尾部超出主体轮廓，形成可见形状且保持在装饰平面内", () => {
+  const contour = pointerContour({ ...resting, x: 1 });
+  const trailingEdge = -contour.wake.x + contour.wake.scale * 16;
+  expect(trailingEdge - contour.body[0] * 16).toBeGreaterThan(1.5);
+  expect(trailingEdge).toBeLessThanOrEqual(16);
 });

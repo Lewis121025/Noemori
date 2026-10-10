@@ -14,10 +14,11 @@ fn resource_watch_drop_releases_its_vault_across_repeated_lifecycles() {
         let vault = Arc::new(Vault::open(root.path(), index.path()).unwrap());
         let lifetime = Arc::downgrade(&vault);
         let watched = Arc::clone(&vault);
-        let handle = noemori_vault::start_watch(root.path(), Duration::from_millis(20), move |_| {
-            watched.refresh_index().unwrap();
-        })
-        .unwrap();
+        let handle =
+            noemori_vault::start_watch(root.path(), Duration::from_millis(20), move |_| {
+                watched.refresh_index().unwrap();
+            })
+            .unwrap();
         drop(vault);
         assert!(lifetime.upgrade().is_some());
         drop(handle);
@@ -36,12 +37,13 @@ fn external_edit_refreshes_backlinks_after_debounce() {
 
     let (tx, rx) = mpsc::channel();
     let watched = Arc::clone(&vault);
-    let _handle = noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
-        assert!(event.is_ok());
-        let _ = watched.refresh_index();
-        let _ = tx.send(());
-    })
-    .expect("监视");
+    let _handle =
+        noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
+            assert!(event.is_ok());
+            let _ = watched.refresh_index();
+            let _ = tx.send(());
+        })
+        .expect("监视");
 
     fs::write(root.path().join("A.md"), "[[B]]\n").expect("外改");
     rx.recv_timeout(Duration::from_secs(3))
@@ -59,12 +61,13 @@ fn removing_an_empty_directory_refreshes_the_inventory() {
     let vault = Arc::new(Vault::open(root.path(), index.path()).expect("打开"));
     let (tx, rx) = mpsc::channel();
     let watched = Arc::clone(&vault);
-    let _handle = noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
-        assert!(event.is_ok());
-        watched.refresh_index().expect("更新目录");
-        let _ = tx.send(watched.list_entries().expect("目录快照"));
-    })
-    .expect("监视");
+    let _handle =
+        noemori_vault::start_watch(root.path(), Duration::from_millis(80), move |event| {
+            assert!(event.is_ok());
+            watched.refresh_index().expect("更新目录");
+            let _ = tx.send(watched.list_entries().expect("目录快照"));
+        })
+        .expect("监视");
     fs::remove_dir(root.path().join("source")).expect("外部删除");
     let entries = rx
         .recv_timeout(Duration::from_secs(3))

@@ -254,14 +254,14 @@ impl Endpoints {
         }
     }
     #[cfg(target_os = "macos")]
-    fn datagrams(&self) -> Result<[Arc<tokio::net::UdpSocket>; 2], String> {
+    fn datagrams(&self) -> Result<[Arc<super::udp::Socket>; 2], String> {
         let Self::Tcp { udp4, udp6, .. } = self;
         let socket = |source: &std::net::UdpSocket| {
             let copy = source.try_clone().map_err(|error| error.to_string())?;
             copy.set_nonblocking(true)
                 .map_err(|error| error.to_string())?;
             tokio::net::UdpSocket::from_std(copy)
-                .map(Arc::new)
+                .map(|socket| Arc::new(super::udp::Socket::new(socket)))
                 .map_err(|error| error.to_string())
         };
         Ok([socket(udp4)?, socket(udp6)?])

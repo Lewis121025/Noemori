@@ -163,7 +163,10 @@ fn initialize_tables(conn: Connection) -> Result<Connection, Error> {
         conn.pragma_update(None, "user_version", 0)?;
         // 缺失来源表时旧 rowid 不再可信；短词索引随本次全量重扫重建。
         conn.execute("DELETE FROM search_short", [])?;
-        conn.execute("UPDATE search_state SET epoch = lower(hex(randomblob(16))), revision = 0 WHERE id = 1", [])?;
+        conn.execute(
+            "UPDATE search_state SET epoch = lower(hex(randomblob(16))), revision = 0 WHERE id = 1",
+            [],
+        )?;
     }
     ensure_link_resolution(&conn)?;
     Ok(conn)

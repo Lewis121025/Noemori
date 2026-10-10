@@ -154,7 +154,7 @@ impl StreamState {
             let message = message
                 .as_object()
                 .ok_or_else(|| Error::Protocol("Ollama 消息必须是对象".into()))?;
-            validate_assistant_role(message.get("role"))?;
+            validate_model_role(message.get("role"), "assistant")?;
         }
         if let Some(text) = body["message"]["content"].as_str() {
             self.text.push_str(text);

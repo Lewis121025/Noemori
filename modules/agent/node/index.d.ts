@@ -16,12 +16,16 @@ export declare class NativeAgentSession {
   constructor(configuration: string, changed: () => void)
   /** 快照不消费输出；供应商原生签名和认证配置不包含在结果中。 */
   snapshot(): string
+  /** 用户工具栏导航真实网页；有限动作校验失败或页面失效时拒绝，不发送模型请求。 */
+  browserNavigate(command: string): Promise<void>
+  /** 转发已接管原生画面的人工输入；目标、凭据或输入无效时拒绝，不授予模型权限。 */
+  uiInput(target: string, token: string, input: string): Promise<void>
   /** 读取当前会话浮窗画面；参数必须是固定目标结构，返回画面和输入凭据的 JSON 或错误。 */
   uiPreview(target: string): Promise<string>
   /** 转发用户接管后的有界浏览器输入；无效目标或控制状态使 Promise 拒绝。 */
   browserInput(page: string, token: string, input: string): Promise<void>
   /**
-   * 可信主进程切换 UI 控制权；不会自动启动或恢复模型生成。
+   * 可信主进程切换 UI 控制权；接管暂停节点，交还确认后恢复同一运行。
    * 后端、窗口身份、运行状态或确认回执无效时拒绝 Promise。
    */
   uiControl(backend: string, resume: boolean): Promise<string>
@@ -42,6 +46,11 @@ export declare class NativeAgentSession {
    * 配置、历史或上下文无效，或会话关闭、正在运行时返回错误，不修改已有运行。
    */
   startConfigured(configuration: string, binding: string, text: string, context?: string | undefined | null): string
+  /**
+   * 恢复指定节点，不新增用户消息或文章上下文；暂停态保留原编号，终态恢复创建新编号。
+   * configuration 为有界模型 JSON，binding 为连接归属；失效运行、非法节点或配置会拒绝。
+   */
+  resumeConfigured(runId: string, configuration: string, binding: string): string
   /**
    * 附件使用独立桥接入口，旧二进制缺少该方法会明确拒绝，不会忽略额外参数而伪报成功。
    * configuration、binding、text 与普通发送相同；images 是有界原生图片 JSON。

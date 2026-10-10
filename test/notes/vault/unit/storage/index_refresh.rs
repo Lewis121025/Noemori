@@ -207,7 +207,9 @@ fn large_refresh_resolves_links_across_chunks_and_reopens_without_writes() {
             Some(format!("{:03}.md", (note + 129) % 256))
         );
     }
-    vault.search(&noemori_vault::SearchQuery::default()).unwrap();
+    vault
+        .search(&noemori_vault::SearchQuery::default())
+        .unwrap();
     drop(vault);
     let probe = open_index(&index);
     let before = sqlite_data_version(&probe);

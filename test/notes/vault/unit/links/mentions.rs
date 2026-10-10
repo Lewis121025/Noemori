@@ -246,8 +246,8 @@ fn unlinked_is_case_insensitive_and_uses_heading_title() {
 }
 
 fn skip_fixture() -> String {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../test/notes/vault/fixtures/links/unlinked_skip.md");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../test/notes/vault/fixtures/links/unlinked_skip.md");
     fs::read_to_string(path).expect("夹具")
 }
 

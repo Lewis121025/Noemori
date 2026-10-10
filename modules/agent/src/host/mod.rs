@@ -39,6 +39,15 @@ use tokio::sync::watch;
 pub use turns::HostTurn;
 
 type CloseWait = watch::Receiver<Option<Result<(), String>>>;
+
+/// 新输入与恢复节点是不同状态转换；恢复操作没有用户正文和重新读取的文章上下文。
+enum RunAction {
+    Start {
+        message: crate::Message,
+        context: Option<String>,
+    },
+    Resume(String),
+}
 static APPROVAL_STORES: Mutex<BTreeMap<PathBuf, Weak<TerminalApprovalStore>>> =
     Mutex::new(BTreeMap::new());
 
@@ -188,7 +197,9 @@ impl DesktopSession {
                 .map_err(|e| Error::Config(e.to_string()))?;
             let weak = Arc::downgrade(&state);
             let tool = UiTool::new(config.executable.clone(), browser.clone())?
-                .with_connections(config, gate)?
+                .with_connections(config, gate.clone())?
+                .with_capability_approver(gate.clone())
+                .with_launch_approver(gate)
                 .with_vision(model.capabilities().vision)
                 .with_observer(Arc::new(move || {
                     if let Some(state) = weak.upgrade() {
@@ -277,23 +288,25 @@ impl DesktopSession {
             .content
             .extend(images.into_iter().map(crate::ContentPart::Image));
         let mut history = data.history.clone();
+        history.extend(state::pending_inputs(&data.messages, &data.pending_inputs)?);
         history.push(message.clone());
         active
             .agent
             .validate_request(&history, &self.0.0.generation)?;
         active.control.push(message.clone())?;
-        // 运行报告尚未交付时检查点也必须保留已接受的输入，不能只依赖模型流的局部历史。
-        data.history.push(message.clone());
+        // 检查点记录接收事实；只有运行读取队列后才提交历史，不能插入正在执行的节点之前。
+        let index = data.messages.len();
         data.messages.push(HostMessage {
             role: crate::Role::User,
             content: message.content,
         });
+        data.pending_inputs.push(index);
         drop(data);
         state.notify();
         Ok(run_id.to_owned())
     }
 
-    /// 人工接管会先取消生成并等待正在执行的浏览器动作结算；交还不会自动启动模型。
+    /// 人工接管暂停当前节点并等待结算；交还后同一运行从已闭合历史继续。
     /// resume 为 true 表示交还，为 false 表示接管；返回实际回执，调用方必须检查 outcome。
     /// # 错误
     /// 会话关闭、未启用浏览器、交还时仍有运行或浏览器故障时返回错误。
@@ -308,31 +321,29 @@ impl DesktopSession {
             .browser
             .as_ref()
             .ok_or_else(|| Error::Config("此会话未启用浏览器".into()))?;
-        if resume && inner.state.active_completion().is_some() {
-            return Err(Error::Config("运行尚未结束，不能交还浏览器".into()));
+        if resume
+            && inner
+                .state
+                .data
+                .lock()
+                .expect("桌面会话锁被污染")
+                .active
+                .as_ref()
+                .is_some_and(|active| !active.control.is_paused())
+        {
+            return Err(Error::Config("运行尚未暂停，不能交还浏览器".into()));
         }
         if !resume {
-            inner.state.cancel();
+            self.pause().await?;
         }
         let context =
             ExecutionContext::new(inner.state.closed.child_token(), Duration::from_secs(30))?;
-        if let Some(mut done) = inner.state.active_completion() {
-            context
-                .wait(async {
-                    while !*done.borrow() {
-                        if done.changed().await.is_err() {
-                            break;
-                        }
-                    }
-                })
-                .await?;
-        }
-        browser
+        let result = browser
             .execute(
                 if resume {
                     BrowserInput::Resume
                 } else {
-                    BrowserInput::Handoff
+                    BrowserInput::Takeover
                 },
                 crate::tool::ToolContext {
                     call_id: format!("host-browser-{}", uuid::Uuid::new_v4()),
@@ -341,7 +352,56 @@ impl DesktopSession {
                 },
             )
             .await
-            .map_err(|error| Error::ToolInfrastructure(error.to_string()))
+            .map_err(|error| Error::ToolInfrastructure(error.to_string()))?;
+        if resume
+            && matches!(
+                result.outcome,
+                crate::tool::browser::BrowserOutcome::Executed
+            )
+        {
+            self.resume_active();
+        }
+        Ok(result)
+    }
+
+    /// 暂停本会话当前节点并等待模型及工具结算；无活动运行时幂等完成。
+    /// 等待失败保留接管请求，避免取消已经发出的中断或重放未知动作。
+    pub async fn pause(&self) -> Result<(), Error> {
+        let inner = &self.0.0;
+        inner.state.ensure_open()?;
+        let control = inner
+            .state
+            .data
+            .lock()
+            .expect("桌面会话锁被污染")
+            .active
+            .as_ref()
+            .map(|active| active.control.clone());
+        let Some(control) = control else {
+            return Ok(());
+        };
+        control.pause();
+        inner.state.notify();
+        let context =
+            ExecutionContext::new(inner.state.closed.child_token(), Duration::from_secs(30))?;
+        control.wait_paused(&context).await
+    }
+
+    fn resume_active(&self) {
+        let control = self
+            .0
+            .0
+            .state
+            .data
+            .lock()
+            .expect("桌面会话锁被污染")
+            .active
+            .as_ref()
+            .map(|active| active.control.clone());
+        if let Some(control) = control {
+            control.resume();
+            self.0.0.state.notify();
+        }
     }
 
     /// 中断指定运行并等待历史与终态提交，返回后才能立即继续下一轮。
@@ -375,6 +435,55 @@ impl DesktopSession {
     /// 会话关闭、输入为空或超过 128 KiB、运行忙碌、历史或生成参数不合法时返回错误。
     pub fn start(&self, text: String) -> Result<String, Error> {
         self.0.0.start(text, None, None, Vec::new())
+    }
+
+    /// 暂停时继续同一运行，失败终态恢复为新运行；两者均不新增用户输入。
+    /// 旧运行身份、已完成状态、忙碌会话或损坏的恢复记录会返回错误，原状态保持不变。
+    pub fn resume(&self, run_id: &str) -> Result<String, Error> {
+        if self.resume_paused(run_id)? {
+            return Ok(run_id.to_owned());
+        }
+        self.0.0.begin(RunAction::Resume(run_id.to_owned()), None)
+    }
+
+    fn resume_paused(&self, run_id: &str) -> Result<bool, Error> {
+        self.0.0.state.ensure_open()?;
+        let active = self
+            .0
+            .0
+            .state
+            .data
+            .lock()
+            .expect("桌面会话锁被污染")
+            .active
+            .as_ref()
+            .filter(|active| active.id == run_id && active.control.is_paused())
+            .map(|active| active.control.clone());
+        if let Some(control) = active {
+            control.resume();
+            self.0.0.state.notify();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// 使用宿主最新选择恢复节点；切换模型时只迁移通用历史，不复用旧供应商签名。
+    /// 返回新运行标识；归属、恢复节点或模型能力无效时拒绝，不追加提示词或重放已执行工具。
+    pub fn resume_configured(
+        &self,
+        run_id: &str,
+        model: Arc<dyn Model>,
+        binding: String,
+    ) -> Result<String, Error> {
+        if binding.is_empty() || binding.len() > 16 * 1024 {
+            return Err(Error::Config("模型归属无效".into()));
+        }
+        if self.resume_paused(run_id)? {
+            return Ok(run_id.to_owned());
+        }
+        self.0
+            .0
+            .begin(RunAction::Resume(run_id.to_owned()), Some((model, binding)))
     }
 
     /// 在本轮模型输入中附加宿主读取的上下文，可见历史仍只显示用户实际输入。
@@ -553,6 +662,18 @@ impl Inner {
         if text.trim().is_empty() || text.len() > 128 * 1024 {
             return Err(Error::Config("用户输入必须非空且不超过 128 KiB".into()));
         }
+        let mut message = crate::Message::text(crate::Role::User, text);
+        message
+            .content
+            .extend(images.into_iter().map(crate::ContentPart::Image));
+        self.begin(RunAction::Start { message, context }, configured)
+    }
+
+    fn begin(
+        self: &Arc<Self>,
+        action: RunAction,
+        configured: Option<(Arc<dyn Model>, String)>,
+    ) -> Result<String, Error> {
         let mut data = self.state.data.lock().expect("桌面会话锁被污染");
         self.state.ensure_open()?;
         if data.active.is_some() {
@@ -562,34 +683,105 @@ impl Inner {
         let message_start = data.messages.len();
         let pending_note_before = data.pending_note.clone();
         let mut history = data.history.clone();
+        let mut queued_inputs = state::pending_inputs(&data.messages, &data.pending_inputs)?;
+        let mut legacy_turn = None;
+        let mut pending = match &action {
+            RunAction::Start { .. } => None,
+            RunAction::Resume(expected) => {
+                let run = data
+                    .run
+                    .as_ref()
+                    .filter(|run| &run.id == expected)
+                    .ok_or_else(|| Error::Config("运行已变化，请刷新后重试".into()))?;
+                if !run.status.can_resume() {
+                    return Err(Error::Config("当前运行不能继续".into()));
+                }
+                if data.turns.is_empty() {
+                    if history
+                        .get(1)
+                        .is_none_or(|message| message.role != crate::Role::User)
+                        || data
+                            .messages
+                            .first()
+                            .is_none_or(|message| message.role != crate::Role::User)
+                    {
+                        return Err(Error::Protocol("旧记录缺少可恢复的用户输入边界".into()));
+                    }
+                    legacy_turn = Some(turns::TurnCheckpoint {
+                        view: HostTurn {
+                            run: run.clone(),
+                            message_start: 0,
+                            message_end: data.messages.len(),
+                            resumed_from: None,
+                        },
+                        history_start: 1,
+                        history_end: data.history.len(),
+                        pending_note_before: None,
+                        pending_note_after: data.pending_note.clone(),
+                        pending_turn_after: data.pending_turn.clone(),
+                        pending_inputs_after: data.pending_inputs.clone(),
+                    });
+                }
+                if data.pending_turn.is_none() && data.pending_note.is_some() {
+                    let committed: std::collections::BTreeSet<_> = history
+                        .iter()
+                        .flat_map(|message| message.tool_calls())
+                        .map(|call| &call.id)
+                        .collect();
+                    if data.messages.iter().flat_map(|message| &message.content).any(|part| matches!(part, crate::ContentPart::ToolCall(call) if !committed.contains(&call.id))) {
+                        return Err(Error::Config("旧检查点缺少未完成工具节点，不能自动重放；请发送新的明确指令".into()));
+                    }
+                }
+                data.pending_turn.clone()
+            }
+        };
         let (agent, binding) = if let Some((model, binding)) = configured {
             if data.model_binding.as_ref() != Some(&binding) {
                 run::portable_history(&mut history);
+                if let Some(response) = pending.as_mut().and_then(|node| node.response.as_mut()) {
+                    run::portable_history(std::slice::from_mut(&mut response.message));
+                }
             }
             (self.configured_agent(model)?, Some(binding))
         } else {
             (self.agent.clone(), data.model_binding.clone())
         };
-        if let Some(note) = &data.pending_note {
-            history.push(crate::Message::text(crate::Role::User, note));
+        let (message, resumed_from) = match action {
+            RunAction::Start { message, context } => {
+                history.append(&mut queued_inputs);
+                if let Some(note) = &data.pending_note {
+                    history.push(crate::Message::text(crate::Role::User, note));
+                }
+                if let Some(context) = context {
+                    history.push(crate::Message::text(crate::Role::User, context));
+                }
+                history.push(message.clone());
+                (Some(message), None)
+            }
+            RunAction::Resume(id) => (None, Some(id)),
+        };
+        if pending
+            .as_ref()
+            .and_then(|node| node.response.as_ref())
+            .is_some_and(|response| response.message.tool_calls().next().is_some())
+            && !agent.capabilities().tools
+        {
+            return Err(Error::Unsupported(
+                "恢复节点需要工具能力，请选择支持工具的模型".into(),
+            ));
         }
-        if let Some(context) = context {
-            history.push(crate::Message::text(crate::Role::User, context));
-        }
-        let mut message = crate::Message::text(crate::Role::User, text);
-        message
-            .content
-            .extend(images.into_iter().map(crate::ContentPart::Image));
-        history.push(message.clone());
         let cancellation = self.state.closed.child_token();
+        let mut validation_history = history.clone();
+        validation_history.extend(queued_inputs.iter().cloned());
+        agent.validate_request(&validation_history, &self.generation)?;
         let input = RunInput {
             session: self.session.clone(),
             messages: history.clone(),
             generation: self.generation.clone(),
             cancellation: cancellation.clone(),
         };
-        let control = crate::runtime::RunControl::new();
-        let stream = agent.stream_with_control(input, control.clone())?;
+        let control = crate::runtime::RunControl::with_inputs(queued_inputs)?;
+        let stream = agent.stream_with_control(input, control.clone(), pending.clone())?;
         let id = uuid::Uuid::new_v4().to_string();
         let (done, waiting) = watch::channel(false);
         data.active = Some(state::Active {
@@ -603,10 +795,14 @@ impl Inner {
         data.history = history;
         data.model_binding = binding;
         data.pending_note = None;
-        data.messages.push(HostMessage {
-            role: crate::Role::User,
-            content: message.content,
-        });
+        data.pending_turn = pending;
+        if let Some(message) = message {
+            data.pending_inputs.clear();
+            data.messages.push(HostMessage {
+                role: crate::Role::User,
+                content: message.content,
+            });
+        }
         data.run = Some(HostRunView {
             id: id.clone(),
             status: HostRunStatus::Running,
@@ -618,12 +814,18 @@ impl Inner {
                 run: data.run.clone().expect("已设置运行"),
                 message_start,
                 message_end: data.messages.len(),
+                resumed_from,
             },
             history_start,
             history_end: data.history.len(),
             pending_note_before,
             pending_note_after: None,
+            pending_turn_after: None,
+            pending_inputs_after: data.pending_inputs.clone(),
         };
+        if let Some(legacy) = legacy_turn {
+            data.turns.push(legacy);
+        }
         data.turns.push(turn);
         drop(data);
         self.state.notify();

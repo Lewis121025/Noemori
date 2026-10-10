@@ -64,7 +64,8 @@
     void pump();
   });
   $effect(() => {
-    if (emulator) emulator.options.disableStdin = !terminal.tty || terminal.process.status !== "running";
+    if (emulator)
+      emulator.options.disableStdin = !terminal.tty || terminal.process.status !== "running";
   });
   onMount(() => {
     const current = new Terminal({
@@ -124,7 +125,13 @@
 
 <section class="agent-terminal">
   <header>
-    <span>{terminal.process.status === "running" ? (terminal.tty ? "交互终端" : "命令输出") : "已结束"}</span>
+    <span
+      >{terminal.process.status === "running"
+        ? terminal.tty
+          ? "交互终端"
+          : "命令输出"
+        : "已结束"}</span
+    >
     <div>
       <button
         onclick={() =>

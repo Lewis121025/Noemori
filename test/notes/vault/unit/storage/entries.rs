@@ -14,10 +14,17 @@ fn entries_publish_indexed_modification_time_in_milliseconds() {
     let (root, _state, vault) = setup();
     fs::write(root.path().join("a.md"), "# 时间").unwrap();
     let time = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_700_000_001_234);
-    fs::File::options().write(true).open(root.path().join("a.md")).unwrap()
-        .set_times(fs::FileTimes::new().set_modified(time)).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(root.path().join("a.md"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(time))
+        .unwrap();
     vault.refresh_index().unwrap();
-    assert_eq!(vault.list_entries().unwrap()[0].modified_at, Some(1_700_000_001_234));
+    assert_eq!(
+        vault.list_entries().unwrap()[0].modified_at,
+        Some(1_700_000_001_234)
+    );
 }
 
 #[test]

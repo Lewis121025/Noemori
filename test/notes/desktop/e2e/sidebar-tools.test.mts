@@ -53,12 +53,13 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
   const app = await electron.launch({
     executablePath,
     args: [fileURLToPath(new URL("out/main/index.js", desktop)), `--user-data-dir=${state}`],
-    // focus-visible 属于真实窗口的键盘模态，不能依赖后台窗口的焦点模拟。
-    env: { ...process.env, ELECTRON_RENDERER_URL: "", NOEMORI_TEST_WINDOW: "visible" },
+    env: { ...process.env, ELECTRON_RENDERER_URL: "", NOEMORI_TEST_WINDOW: "hidden" },
   });
   try {
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.focus());
     const page = await app.firstWindow();
+    // 仅在渲染器模拟键盘焦点，不激活系统窗口或抢走用户焦点。
+    const focus = await page.context().newCDPSession(page);
+    await focus.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     page.setDefaultTimeout(6000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const errors: string[] = [];
@@ -87,14 +88,14 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
     const row = (path: string) => sidebar.locator(`.file[data-path="${path}"]`);
     await row(longName).focus();
     await row(longName).press("ArrowDown");
-    expect(
-      await row(longName).evaluate((element) => getComputedStyle(element.parentElement!).boxShadow),
-    ).toContain("inset");
-    expect(
-      await row("04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md").evaluate(
-        (element) => getComputedStyle(element.parentElement!).boxShadow,
-      ),
-    ).toBe("none");
+    const currentBackground = await row(longName)
+      .evaluate(element => getComputedStyle(element.parentElement!).backgroundColor);
+    const focusedBackground = await row("04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md")
+      .evaluate(element => getComputedStyle(element.parentElement!).backgroundColor);
+    expect(currentBackground).not.toBe(focusedBackground);
+    expect(await row(longName).getAttribute("aria-current")).toBe("page");
+    expect(await row("04-A-Visual-Proof-That-Neural-Nets-Can-Compute-Any-Function.md")
+      .getAttribute("aria-current")).toBeNull();
     expect(await sidebar.locator(".file-row.active .file").getAttribute("data-path")).toBe(
       longName,
     );
@@ -122,6 +123,11 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
     await more.focus();
     await more.press("Enter");
     await menu.waitFor();
+    const firstAction = menu.getByRole("button", { name: "新建笔记…", exact: true });
+    await firstAction.focus();
+    await firstAction.press("ArrowDown");
+    expect(await menu.getByRole("button", { name: "新建文件夹…", exact: true })
+      .evaluate(element => element === document.activeElement)).toBe(true);
     await menu.getByRole("button", { name: "展开全部目录", exact: true }).click();
     await row("章节/第一章.md").waitFor();
     await more.click();
@@ -136,6 +142,18 @@ test("精简目录保留文件夹管理，更多菜单在窄侧栏可达，收�
     await page.keyboard.press("Escape");
     expect(await menu.isVisible()).toBe(false);
     expect(await more.evaluate((element) => element === document.activeElement)).toBe(true);
+
+    await row(longName).hover();
+    const fileActions = row(longName).locator("..").getByRole("button", { name: `${longName} 的操作`, exact: true });
+    await fileActions.focus();
+    await fileActions.press("Enter");
+    const fileMenu = page.getByRole("menu", { name: "文件操作", exact: true });
+    await fileMenu.waitFor();
+    const actionBounds = (await fileActions.boundingBox())!;
+    expect((await fileMenu.boundingBox())!.y).toBeGreaterThanOrEqual(actionBounds.y);
+    await page.keyboard.press("Escape");
+    expect(await fileActions.evaluate(element => element === document.activeElement)).toBe(true);
+    expect(await sidebar.locator(".file-row.active .file").getAttribute("data-path")).toBe(longName);
 
     await row("首页.md").click({ button: "right" });
     const context = page.getByRole("menu", { name: "文件操作", exact: true });

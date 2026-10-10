@@ -75,3 +75,11 @@ test("字段各自合法但批量总 JSON 超过预算时拒绝整个动作", ()
     /1 MiB/,
   );
 });
+
+
+test("协助条件拒绝空值、脚本、凭据、未知谓词和多余字段", () => {
+  for (const until of [{ type: "text", text: "" }, { type: "url", url: "javascript:alert(1)" }, { type: "url", url: "https://user:secret@example.com" }, { type: "idle" }, { type: "text", text: "成功", script: "alert(1)" }]) {
+    assert.throws(() => parseAction({ action: "handoff", completion: { page: "page", until } }));
+  }
+  assert.deepEqual(parseAction({ action: "handoff", completion: { page: "page", until: { type: "url", url: "https://example.com" } } }).completion.until, { type: "url", url: "https://example.com/" });
+});

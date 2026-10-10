@@ -44,13 +44,15 @@ impl Vault {
     /// 恢复数据库不可读或写锁不可用。
     pub fn recovery_drafts(&self) -> Result<Vec<(String, crate::Draft)>, Error> {
         let _guard = self.lock_writes()?;
-        self.recovery.paths()?.into_iter().filter_map(|path| {
-            match self.recovery.get(&path) {
+        self.recovery
+            .paths()?
+            .into_iter()
+            .filter_map(|path| match self.recovery.get(&path) {
                 Ok(Some(draft)) => Some(Ok((path, draft))),
                 Ok(None) => None,
                 Err(error) => Some(Err(error)),
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// 将旧库草稿保存在新路径下，保留原字节、编辑基准及编辑器恢复数据。
@@ -59,7 +61,12 @@ impl Vault {
     pub fn restore_draft(&self, rel: &str, draft: &crate::Draft) -> Result<(), Error> {
         let _guard = self.lock_writes()?;
         validate_relative_path(rel)?;
-        self.recovery.put_editor(rel, &draft.bytes, draft.base.as_deref(), draft.editor.as_deref())
+        self.recovery.put_editor(
+            rel,
+            &draft.bytes,
+            draft.base.as_deref(),
+            draft.editor.as_deref(),
+        )
     }
 
     /// 读取磁盘与恢复草稿，已落盘的同内容草稿不再重复恢复。

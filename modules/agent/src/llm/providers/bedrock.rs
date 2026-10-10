@@ -292,6 +292,7 @@ fn block_index(body: &Value) -> Result<usize, Error> {
 }
 
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {
+    validate_model_role(body["output"]["message"].get("role"), "assistant")?;
     let raw = array(&body["output"]["message"], "content")?;
     let mut content = Vec::new();
     for part in raw {

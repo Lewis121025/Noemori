@@ -1,8 +1,7 @@
 /** @vitest-environment jsdom */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import PdfPreview from "@reader/renderer/preview/PdfPreview.svelte";
-import ImagePreview from "@reader/renderer/preview/ImagePreview.svelte";
+import { PdfPreview, ImagePreview } from "@reader/renderer/previews";
 
 const { openPdf, renderPdfPage } = vi.hoisted(() => ({
   openPdf: vi.fn(),

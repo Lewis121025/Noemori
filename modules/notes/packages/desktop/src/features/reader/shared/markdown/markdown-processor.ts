@@ -17,6 +17,8 @@ export type RawMarkdown = Literal & { type: "rawMarkdown"; value: string };
 declare module "mdast" {
   interface RootContentMap {
     rawMarkdown: RawMarkdown;
+    /** remark-frontmatter 已注册的 TOML 属性块；与 YAML 一样保留原始正文。 */
+    toml: Literal & { type: "toml" };
   }
   interface BlockContentMap {
     rawMarkdown: RawMarkdown;

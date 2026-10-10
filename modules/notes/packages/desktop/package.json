@@ -20,6 +20,7 @@
     "@eslint/js": "^9.35.0",
     "@sveltejs/vite-plugin-svelte": "^6.1.4",
     "@types/node": "^24.5.2",
+    "@types/ws": "^8.18.2",
     "electron": "^44.5.1",
     "electron-vite": "^4.0.0",
     "eslint": "^9.35.0",
@@ -90,6 +91,7 @@
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "unicode-case-folding": "1.1.2",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "ws": "^8.22.0"
   }
 }

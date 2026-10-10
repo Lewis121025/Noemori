@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { CreateEntryKind } from "../library/CreateEntryDialog.svelte";
   import { selectionIndicator } from "../selection-indicator";
+  import LibraryIcon from "../library/LibraryIcon.svelte";
+  import { menuNavigation } from "../library/menu-navigation";
   /** 视图切换和新建只发布意图，目录选择、焦点与创建生命周期由工作台负责。 */
   let {
     sidebarId,
@@ -18,6 +20,7 @@
     onConversation?: () => void;
   } = $props();
   let createMenu: HTMLDivElement;
+  let createOpen = $state(false);
   const mac = navigator.userAgent.includes("Mac");
 </script>
 
@@ -47,9 +50,10 @@
     type="button"
     aria-label="新建"
     title="新建"
+    aria-expanded={createOpen}
     popovertarget={`${sidebarId}-create`}
     {disabled}
-    ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
+    ><LibraryIcon name="plus" />
     <span class="create-label">新建</span></button
   >
   <div
@@ -58,6 +62,8 @@
     bind:this={createMenu}
     class="reader-popover create-menu"
     aria-label="新建项目"
+    use:menuNavigation
+    ontoggle={(event) => (createOpen = event.newState === "open")}
   >
     <button
       type="button"
@@ -65,7 +71,9 @@
       onclick={() => {
         createMenu.hidePopover();
         void onCreate("note");
-      }}>笔记<span>{mac ? "⌘N" : "Ctrl+N"}</span></button
+      }}
+      ><span class="menu-icon"><LibraryIcon name="note" /></span><span class="menu-label">笔记</span
+      ><span class="shortcut">{mac ? "⌘N" : "Ctrl+N"}</span></button
     >
     <button
       type="button"
@@ -73,7 +81,10 @@
       onclick={() => {
         createMenu.hidePopover();
         void onCreate("whiteboard");
-      }}>白板</button
+      }}
+      ><span class="menu-icon"><LibraryIcon name="whiteboard" /></span><span class="menu-label"
+        >白板</span
+      ></button
     >
     <button
       type="button"
@@ -81,14 +92,20 @@
       onclick={() => {
         createMenu.hidePopover();
         void onCreate("directory");
-      }}>文件夹<span>{mac ? "⇧⌘N" : "Ctrl+Shift+N"}</span></button
+      }}
+      ><span class="menu-icon"><LibraryIcon name="folder" /></span><span class="menu-label"
+        >文件夹</span
+      ><span class="shortcut">{mac ? "⇧⌘N" : "Ctrl+Shift+N"}</span></button
     >
     {#if onConversation}<button
         type="button"
         onclick={() => {
           createMenu.hidePopover();
           onConversation?.();
-        }}>Agent 对话</button
+        }}
+        ><span class="menu-icon"><LibraryIcon name="conversation" /></span><span class="menu-label"
+          >Agent 对话</span
+        ></button
       >{/if}
   </div>
 </header>
@@ -98,21 +115,26 @@
     container-type: inline-size;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    min-height: 42px;
+    gap: 10px;
+    padding: 3px 12px 0;
+    min-height: 38px;
     box-sizing: border-box;
   }
   .panel-switch {
     display: flex;
-    gap: 3px;
+    gap: 14px;
+  }
+  .panel-switch:global([data-motion-selection]) {
+    --selection-radius: 0;
+    --selection-fill: linear-gradient(to top, var(--fg) 0 1.5px, transparent 1.5px);
   }
   .panel-toggle {
     position: relative;
-    min-height: 28px;
-    padding: 0 10px;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 1px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 0;
     color: var(--muted);
     background: transparent;
     font-size: 12px;
@@ -121,7 +143,7 @@
   .panel-toggle[aria-pressed="true"] {
     color: var(--fg);
     font-weight: 500;
-    background: color-mix(in srgb, var(--fg) 8%, transparent);
+    background: transparent;
   }
   .panel-toggle:focus-visible,
   .create-toggle:focus-visible {
@@ -143,19 +165,14 @@
     color: var(--muted);
     background: transparent;
   }
-  .panel-toggle:hover,
-  .create-toggle:hover:not(:disabled) {
+  .panel-toggle:hover {
+    color: var(--fg);
+    background: transparent;
+  }
+  .create-toggle:hover:not(:disabled),
+  .create-toggle[aria-expanded="true"] {
     color: var(--fg);
     background: var(--selected);
-  }
-  .create-toggle svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
   .create-label {
     font-size: 12px;
@@ -179,10 +196,10 @@
   .create-menu button {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
+    gap: 9px;
     width: 100%;
-    padding: 7px 10px;
+    min-height: 29px;
+    padding: 6px 9px;
     color: var(--fg);
     background: transparent;
     border: 0;
@@ -191,10 +208,19 @@
     font-size: 12px;
     cursor: pointer;
   }
-  .create-menu button:hover {
+  .create-menu button:hover,
+  .create-menu button:focus-visible {
     background: var(--selected);
+    outline: none;
   }
-  .create-menu span {
+  .menu-label {
+    flex: 1;
+  }
+  .menu-icon {
+    display: flex;
+    color: color-mix(in srgb, var(--muted) 85%, transparent);
+  }
+  .create-menu .shortcut {
     color: var(--muted);
     font-size: 10px;
   }

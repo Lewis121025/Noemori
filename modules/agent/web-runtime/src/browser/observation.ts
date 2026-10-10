@@ -3,6 +3,11 @@ import { randomUUID } from "node:crypto";
 import type { ElementHandle, FileChooser, Frame, Locator, Page } from "playwright-core";
 import type { BrowserSettings, Observation } from "./contract.js";
 import { BrowserDialogs } from "./dialogs.js";
+import {
+  observationResult,
+  type ObservationRequest,
+  type ObservationResult,
+} from "./observation-update.js";
 
 /** 元素句柄保持节点身份；语义指纹拒绝虚拟列表复用同一节点后改变操作对象。 */
 type Reference = { handle: ElementHandle; fingerprint: string };
@@ -29,6 +34,9 @@ class NavigatedDuringObservation extends Error {}
 /** 页面状态由浏览器运行时独占；导航、崩溃与人工接管使旧观察失效。 */
 export class BrowserPage {
   readonly id = randomUUID();
+  /** 仅内嵌页面使用的宿主视图身份，不包含调试地址或连接凭据。 */
+  nativeTarget: string | undefined;
+  nativeReady: Promise<void> = Promise.resolve();
   /** 页面标题属于标签元数据，撤销控件观察不能同时清掉窗口标题。 */
   title = "";
   generation = 0;
@@ -39,6 +47,7 @@ export class BrowserPage {
   private imageLayout: string | null = null;
   private references = new Map<string, Reference>();
   private humanObservation: HumanObservation | null = null;
+  private readonly fileChoice: (chooser: FileChooser) => void;
 
   /**
    * 绑定页面事件；网页地址和控件始终使用同一 Page 对象。
@@ -62,9 +71,17 @@ export class BrowserPage {
       this.crashed = true;
       this.observation = null;
     });
-    page.on("filechooser", (chooser) => {
+    this.fileChoice = (chooser) => {
       this.fileChooser = chooser;
-    });
+      changed();
+    };
+    page.on("filechooser", this.fileChoice);
+  }
+
+  /** 用户使用真实网页时交由浏览器原生文件选择器处理，交还后恢复模型文件契约。 */
+  captureFiles(enabled: boolean): void {
+    this.page.off("filechooser", this.fileChoice);
+    if (enabled) this.page.on("filechooser", this.fileChoice);
   }
 
   /** 当前弹窗由协议事件维护，包含用户手动关闭后的状态。 */
@@ -250,6 +267,8 @@ export class BrowserPage {
    * @param settings 宿主冻结的正文和控件预算。
    * @param image 是否同时绑定当前布局并返回视口图像。
    * @param check 当前执行的取消和预算检查，失败时须抛出错误。
+   * @param request 完整或精确基线的增量结果；只改变编码，不跳过真实采集。
+   * @param warnings 当前操作的网络诊断，采集完成后与页面证据共同提交并比较基线。
    * @returns 同一代页面的观察及可选图像；局部框架读取失败记入 warnings。
    * @throws 页面持续导航、布局不稳定、弹窗、中断、超时或资源释放失败。
    */
@@ -257,14 +276,29 @@ export class BrowserPage {
     settings: BrowserSettings,
     image: boolean,
     check: () => void,
-  ): Promise<{ observation: Observation; image?: { format: "jpeg"; data: string } }> {
+    request: ObservationRequest = {},
+    warnings: () => string[] = () => [],
+  ): Promise<ObservationResult & { image?: { format: "jpeg"; data: string } }> {
+    let previous = this.observation;
+    // 释放旧句柄也可能触发导航；基线必须绑定到释放之前的页面代次。
+    const baselineGeneration = this.generation;
     for (let attempt = 0; ; attempt++) {
       check();
       try {
-        return await this.capture(settings, image, check);
+        const captured = await this.capture(settings, image, check);
+        captured.observation.warnings.push(...warnings());
+        return {
+          ...observationResult(
+            this.generation === baselineGeneration ? previous : null,
+            captured.observation,
+            request,
+          ),
+          ...(captured.image ? { image: captured.image } : {}),
+        };
       } catch (error) {
         // 只重采集没有副作用的观察；两次都不稳定时交回模型，不重复任何输入动作。
         if (!(error instanceof NavigatedDuringObservation) || attempt >= 1) throw error;
+        previous = null;
       }
     }
   }

@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use support::{Fixture, Server};
 
+#[path = "../fixtures/protocols.rs"]
+mod fixtures;
+
 fn context() -> ExecutionContext {
     ExecutionContext::new(CancellationToken::new(), Duration::from_secs(10)).unwrap()
 }
@@ -62,7 +65,9 @@ fn bedrock_fixture(events: &[(&str, Value)]) -> Fixture {
 
 mod anthropic;
 mod bedrock;
+mod compatibility;
 mod context;
+mod continuation;
 mod contracts;
 mod gemini;
 mod images;

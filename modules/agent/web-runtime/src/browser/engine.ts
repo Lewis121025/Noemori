@@ -1,8 +1,13 @@
+import { BrowserHandoff, handoffComplete, type HandoffState } from "./handoff.js";
 import type { BrowserContext, Page } from "playwright-core";
+import { isPageExtensionAction } from "./extensions.js";
+import { ManagedPageExtensions } from "./managed-extensions.js";
 import { findText, interact, readText, waitForText, type BrowserExecution } from "./actions.js";
 import { BrowserFiles } from "./files.js";
+import { interactSemantic } from "./semantic-actions.js";
 import { BrowserPage, reason } from "./observation.js";
 import { releaseBrowserResources } from "./lifecycle.js";
+import type { ObservationRequest } from "./observation-update.js";
 import {
   navigationUrl,
   parseAction,
@@ -17,10 +22,12 @@ import {
 export class BrowserEngine {
   readonly files: BrowserFiles;
   private readonly pages = new Map<string, BrowserPage>();
+  private readonly extensions = new Map<string, ManagedPageExtensions>();
   private tabRevision = 0;
   private mode: "agent" | "human" = "agent";
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
+  private handoff: BrowserHandoff | null = null;
   private readonly armedDownloads = new Map<string, Set<string>>();
 
   /**
@@ -29,12 +36,15 @@ export class BrowserEngine {
    * @param settings 已验证的工作区与资源预算。
    * @param grantOrigin 宿主审批完成后的网络授权入口，不得由网页内容触发。
    * @param changed 状态通知，必须快速返回且不得抛出异常。
+   * @param networkErrors 宿主网络出口的累计诊断；仅新增项进入本次观察。
    */
   constructor(
     private readonly context: BrowserContext,
     private readonly settings: BrowserSettings,
     private readonly grantOrigin?: (origin: string) => void,
-    private readonly changed: (tabs: TabState[]) => void = () => {},
+    private readonly changed: (tabs: TabState[], handoff: HandoffState | null) => void = () => {},
+    private readonly embedded = false,
+    private readonly networkErrors?: () => ReadonlySet<string>,
   ) {
     this.files = new BrowserFiles(settings);
     for (const page of context.pages()) this.track(page);
@@ -48,6 +58,7 @@ export class BrowserEngine {
   tabs(): TabState[] {
     return [...this.pages.values()].map((entry) => ({
       id: entry.id,
+      ...(entry.nativeTarget ? { native_target: entry.nativeTarget } : {}),
       url: entry.page.url(),
       title: entry.title,
       crashed: entry.crashed,
@@ -56,27 +67,50 @@ export class BrowserEngine {
     }));
   }
 
+  private publish(): void {
+    this.changed(this.tabs(), this.handoff ? { ...this.handoff.state } : null);
+  }
+
   private track(page: Page): void {
     if ([...this.pages.values()].some((entry) => entry.page === page)) return;
     if (this.closed || this.pages.size >= this.settings.max_pages) {
       void page.close();
       return;
     }
-    const entry = new BrowserPage(page, () => this.changed(this.tabs()));
+    const entry = new BrowserPage(page, () => this.publish());
     this.pages.set(entry.id, entry);
+    if (this.embedded) {
+      entry.nativeReady = (async () => {
+        const session = await this.context.newCDPSession(page);
+        try {
+          const { targetInfo } = await session.send("Target.getTargetInfo");
+          entry.nativeTarget = targetInfo.targetId;
+          this.publish();
+        } finally {
+          await session.detach();
+        }
+      })();
+      // 导航操作会等待同一 Promise 并传播错误；页面事件不能留下未处理的拒绝。
+      void entry.nativeReady.catch((error: unknown) => {
+        entry.crashed = true;
+        this.publish();
+        console.error("内嵌页面身份读取失败", error);
+      });
+      entry.captureFiles(this.mode !== "human");
+    }
     this.tabRevision++;
     page.on("close", () => {
       this.pages.delete(entry.id);
+      this.extensions.delete(entry.id);
       this.tabRevision++;
       void entry.invalidate();
-      this.changed(this.tabs());
+      this.publish();
     });
-    const publish = () => this.changed(this.tabs());
+    const publish = () => this.publish();
     page.on("framenavigated", publish);
     page.on("crash", publish);
-    page.on("filechooser", publish);
     page.on("download", (download) => this.files.receive(download, entry.id));
-    this.changed(this.tabs());
+    this.publish();
   }
 
   /**
@@ -98,7 +132,7 @@ export class BrowserEngine {
   }
 
   private base(outcome: BrowserResult["outcome"]): BrowserResult {
-    return { outcome, tabs: this.tabs(), mode: this.mode };
+    return { outcome, tabs: this.tabs(), mode: this.mode, handoff: this.handoff ? { ...this.handoff.state } : null };
   }
 
   /**
@@ -123,6 +157,7 @@ export class BrowserEngine {
     deadline: number,
   ): Promise<BrowserResult> {
     let dispatched = false;
+    const previousErrors = new Set(this.networkErrors?.());
     const execution: BrowserExecution = {
       signal,
       check: () => {
@@ -135,18 +170,34 @@ export class BrowserEngine {
         execution.check();
         dispatched = true;
       },
+      warnings: () => [...(this.networkErrors?.() ?? [])]
+        .filter((error) => !previousErrors.has(error)).slice(-3),
     };
     try {
       execution.check();
       return await this.route(action, execution);
     } catch (error) {
       if (dispatched && "page" in action) await this.pages.get(action.page)?.invalidate();
-      return { ...this.base(dispatched ? "unknown" : "not_executed"), error: reason(error) };
+      const failure = reason(error);
+      const warnings = execution.warnings();
+      return {
+        ...this.base(dispatched ? "unknown" : "not_executed"),
+        error: warnings.length ? `${failure}；网络出口：${warnings.join("；")}` : failure,
+      };
     }
   }
 
   private async route(action: BrowserAction, execution: BrowserExecution): Promise<BrowserResult> {
+    if (action.action === "human_navigate") {
+      if (this.mode !== "human") throw new Error("用户导航需要先接管浏览器");
+      const command = action.command;
+      if (command.action === "open") return this.open(command.url, execution);
+      const entry = this.pages.get(command.page);
+      if (!entry || entry.page.isClosed()) throw new Error("标签页已关闭或不属于本会话");
+      return this.pageAction(entry, command, execution);
+    }
     if (action.action === "invalidate") {
+      for (const extensions of this.extensions.values()) extensions.invalidate();
       await Promise.all([...this.pages.values()].map((entry) => entry.invalidate()));
       return this.base("executed");
     }
@@ -158,13 +209,26 @@ export class BrowserEngine {
     if (action.action === "tabs") return this.base("observed");
     if (action.action === "downloads")
       return { ...this.base("observed"), downloads: this.files.states() };
-    if (action.action === "handoff" || action.action === "resume") {
-      const mode = action.action === "handoff" ? "human" : "agent";
-      if (this.mode === mode) return this.base("executed");
-      await Promise.all([...this.pages.values()].map((entry) => entry.dialogs.ready()));
-      await Promise.all([...this.pages.values()].map((entry) => entry.invalidate()));
-      for (const entry of this.pages.values()) entry.revokeHumanInput();
-      this.mode = mode;
+    if (action.action === "handoff") {
+      if (!action.completion) throw new Error("后台浏览器协助需要 completion：指定 page 与 until 成功条件，使用 p.handoff({type:'text',text:'成功提示'}) 或成功地址");
+      const entry = this.pages.get(action.completion.page);
+      if (!entry) throw new Error("协助页面已关闭或不属于本会话");
+      const complete = await handoffComplete(entry, action.completion.until);
+      this.handoff?.dispose();
+      this.handoff = new BrowserHandoff(entry, action.completion.until, () => this.publish());
+      if (complete) {
+        this.handoff.state.status = "completed";
+        return this.base("observed");
+      }
+      await this.setMode("human");
+      this.handoff.watch();
+      return this.base("executed");
+    }
+    if (action.action === "takeover" || action.action === "resume") {
+      this.handoff?.dispose();
+      if (this.handoff?.state.status === "waiting") this.handoff.state.status = "cancelled";
+      if (action.action === "takeover") this.handoff = null;
+      await this.setMode(action.action === "takeover" ? "human" : "agent");
       return this.base("executed");
     }
     if (action.action === "preview" || action.action === "human_input") {
@@ -182,10 +246,20 @@ export class BrowserEngine {
         saved_path: await this.files.save(action.id, action.path),
       };
     }
-    if (action.action === "open") return this.open(action.url, execution);
+    if (action.action === "open") return this.open(action.url, execution, action.observation_mode);
     const entry = this.pages.get(action.page);
     if (!entry || entry.page.isClosed()) throw new Error("标签页不属于当前会话或已关闭");
     return this.pageAction(entry, action, execution);
+  }
+
+  private async setMode(mode: "agent" | "human"): Promise<void> {
+    for (const extensions of this.extensions.values()) extensions.invalidate();
+    if (this.mode === mode) return;
+    await Promise.all([...this.pages.values()].map((entry) => entry.dialogs.ready()));
+    await Promise.all([...this.pages.values()].map((entry) => entry.invalidate()));
+    for (const entry of this.pages.values()) entry.revokeHumanInput();
+    this.mode = mode;
+    if (this.embedded) for (const entry of this.pages.values()) entry.captureFiles(mode !== "human");
   }
 
   private async humanInput(
@@ -223,8 +297,20 @@ export class BrowserEngine {
     await entry.guard(async () => {
       entry.requireHumanInput(token);
       execution.dispatch();
-      if (input.type === "pointer") await entry.page.mouse.click(input.x, input.y);
-      else if (input.type === "scroll") await entry.page.mouse.wheel(input.x, input.y);
+      if (input.type === "pointer") {
+        const options = { button: input.button ?? "left", clickCount: input.clicks ?? 1 };
+        await entry.page.mouse.move(input.x, input.y);
+        await entry.page.mouse.down(options);
+        try { execution.check(); }
+        finally { await entry.page.mouse.up(options); }
+      }
+      else if (input.type === "drag") {
+        await entry.page.mouse.move(input.from_x, input.from_y);
+        await entry.page.mouse.down();
+        try { execution.check(); await entry.page.mouse.move(input.to_x, input.to_y, { steps: 20 }); }
+        finally { await entry.page.mouse.up(); }
+      }
+      else if (input.type === "scroll") { if (input.at_x !== undefined && input.at_y !== undefined) await entry.page.mouse.move(input.at_x, input.at_y); await entry.page.mouse.wheel(input.x, input.y); }
       else if (input.type === "key") await entry.page.keyboard.press(input.key);
       else await entry.page.keyboard.insertText(input.text);
     }, { timeout: execution.budget(), signal: execution.signal });
@@ -232,19 +318,20 @@ export class BrowserEngine {
   }
 
 
-  private async open(source: string, execution: BrowserExecution): Promise<BrowserResult> {
+  private async open(source: string, execution: BrowserExecution, policy?: BrowserAction["observation_mode"]): Promise<BrowserResult> {
     const url = navigationUrl(source);
     if (this.pages.size >= this.settings.max_pages) throw new Error("浏览器标签页达到会话上限");
     execution.dispatch();
     const page = await this.context.newPage();
     const entry = [...this.pages.values()].find((entry) => entry.page === page);
     if (!entry) throw new Error("新标签页在导航期间关闭");
+    await entry.nativeReady;
     await entry.guard(
       (signal) =>
         page.goto(url, { waitUntil: "domcontentloaded", timeout: execution.budget(), signal }),
       { timeout: execution.budget(), signal: execution.signal },
     );
-    return this.observed(entry, false, "executed", execution);
+    return { ...(await this.afterObserved(entry, { observation_mode: policy }, "executed", execution)), page: entry.id };
   }
 
   private async pageAction(
@@ -253,6 +340,17 @@ export class BrowserEngine {
     execution: BrowserExecution,
   ): Promise<BrowserResult> {
     const page = entry.page;
+    if (isPageExtensionAction(action)) {
+      let extensions = this.extensions.get(entry.id);
+      if (!extensions) {
+        extensions = new ManagedPageExtensions(this.context, page);
+        this.extensions.set(entry.id, extensions);
+      }
+      const result = await extensions.execute(action, execution);
+      if (action.action !== "webmcp_invoke") return { ...this.base("observed"), extensions: result };
+      await entry.invalidate();
+      return { ...(await this.afterObserved(entry, action, "executed", execution)), extensions: result };
+    }
     if (action.action === "arm_download") {
       this.armedDownloads.set(entry.id, new Set(this.files.states().map((download) => download.id)));
       return this.base("observed");
@@ -274,12 +372,17 @@ export class BrowserEngine {
     if (entry.dialog && action.action !== "dialog" && action.action !== "close")
       throw new Error("先处理页面对话框，再继续操作");
     if (action.action === "observe" || action.action === "screenshot")
-      return this.observed(entry, action.action === "screenshot", "observed", execution);
+      return this.observed(entry, action.action === "screenshot", "observed", execution, action.action === "observe" ? action : {});
     if (action.action === "read")
       return {
         ...this.base("observed"),
         text_page: await readText(entry, action.offset, this.settings.max_chars, execution),
       };
+    if (action.action === "locator") {
+      const locator_result = await interactSemantic(entry, action, execution);
+      if (locator_result) return { ...this.base("observed"), locator_result };
+      return this.afterObserved(entry, action, "executed", execution);
+    }
     switch (action.action) {
       case "batch":
         return this.batch(entry, action, execution);
@@ -326,7 +429,7 @@ export class BrowserEngine {
       case "wait": {
         await waitForText(entry, action.text, action.state, action.exact ?? true, execution);
         execution.check();
-        return this.observed(entry, false, "observed", execution);
+        return this.afterObserved(entry, action, "observed", execution);
       }
       case "navigate": {
         const url = navigationUrl(action.url);
@@ -359,7 +462,7 @@ export class BrowserEngine {
     // 弹窗需要先交给模型或用户处理，此时不能继续调用会被阻塞的页面观察。
     if (entry.dialog || page.isClosed()) return this.base("executed");
     execution.check();
-    return this.observed(entry, false, "executed", execution);
+    return this.afterObserved(entry, action, "executed", execution);
   }
 
   private async observed(
@@ -367,9 +470,25 @@ export class BrowserEngine {
     image: boolean,
     outcome: BrowserResult["outcome"],
     execution: BrowserExecution,
+    request: ObservationRequest = {},
   ): Promise<BrowserResult> {
-    const observation = await entry.observe(this.settings, image, execution.check);
+    const observation = await entry.observe(
+      this.settings, image, execution.check, request, execution.warnings,
+    );
     return { ...this.base(outcome), ...observation, downloads: this.files.states() };
+  }
+
+  private async afterObserved(
+    entry: BrowserPage,
+    action: { observation_mode?: BrowserAction["observation_mode"]; observation?: string },
+    outcome: BrowserResult["outcome"],
+    execution: BrowserExecution,
+  ): Promise<BrowserResult> {
+    if (action.observation_mode === "none") {
+      await entry.invalidate();
+      return this.base(outcome);
+    }
+    return this.observed(entry, false, outcome, execution, { mode: action.observation_mode, baseline: action.observation });
   }
 
   private async batch(
@@ -413,7 +532,7 @@ export class BrowserEngine {
           throw new Error("页面已打开对话框，未执行剩余批量步骤");
       }
       if (entry.dialog || entry.page.isClosed()) return { ...this.base("executed"), steps };
-      return { ...(await this.observed(entry, false, "executed", execution)), steps };
+      return { ...(await this.afterObserved(entry, action, "executed", execution)), steps };
     } catch (error) {
       await entry.invalidate();
       return {
@@ -432,8 +551,10 @@ export class BrowserEngine {
    * @throws AggregateError 汇集清理失败；单个失败仍继续释放后续资源。
    */
   async close(): Promise<void> {
+    this.handoff?.dispose();
     this.closed = true;
     await releaseBrowserResources([
+      async () => { await Promise.all([...this.extensions.values()].map((extensions) => extensions.close())); },
       () => this.context.close(),
       () => this.queue,
       () => this.files.close(),

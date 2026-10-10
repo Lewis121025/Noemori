@@ -337,7 +337,6 @@ test("多笔画停笔：线程联动预览、整组撤销、保存与重启", as
   try {
     let page = await app.firstWindow();
     await page.getByRole("application", { name: "白板", exact: true }).waitFor();
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
     await documentTools(page);
     await page.getByRole("toolbar", { name: "白板编辑工具栏", exact: true }).waitFor();
     await expect

@@ -207,7 +207,13 @@
   let tableOwner: EditorView | null = null;
   function openTable(): void {
     const source = panel.querySelector<HTMLButtonElement>('button[aria-label="插入"]');
-    if (!source || !tablePicker || view.isDestroyed || view.composing || !canInsertTable(view.state))
+    if (
+      !source ||
+      !tablePicker ||
+      view.isDestroyed ||
+      view.composing ||
+      !canInsertTable(view.state)
+    )
       return;
     tableOwner = view;
     view.dispatch(view.state.tr.setMeta(linkSelectionKey, true).setMeta("addToHistory", false));

@@ -152,7 +152,10 @@ fn resource_suffix(raw: &str) -> &str {
         if ch == '&' {
             if let Some(end) = raw[index..].find(';') {
                 let entity = &raw[index..=index + end];
-                if matches!(crate::markdown::wiki::decode_text(entity).as_str(), "#" | "?") {
+                if matches!(
+                    crate::markdown::wiki::decode_text(entity).as_str(),
+                    "#" | "?"
+                ) {
                     return &raw[index..];
                 }
             }

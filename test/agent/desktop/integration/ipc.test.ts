@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { registerAgentIpc } from "../../../../modules/notes/packages/desktop/src/features/agent/main/ipc";
 import { AgentService } from "../../../../modules/notes/packages/desktop/src/features/agent/main/service";
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile, truncate } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newProviderModel } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
@@ -32,6 +32,8 @@ vi.mock("../../../../modules/notes/packages/desktop/src/features/agent/main/serv
     list = vi.fn(async () => ({ items: [], issues: [] }));
     attachVault = vi.fn();
     addAttachments = vi.fn(async () => []);
+    contentPreview = vi.fn();
+    attachmentContent = vi.fn();
     saveDraft = vi.fn();
   },
 }));
@@ -44,7 +46,7 @@ vi.mock("electron", () => ({
     };
   },
   ipcMain: { handle: vi.fn() },
-  dialog: { showOpenDialog: vi.fn() },
+  dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn() },
 }));
 let window: BrowserWindow | null;
 let service: AgentService;
@@ -295,4 +297,49 @@ it("统一目录新建对话接受当前库的真实文件夹，越界目录仍�
     "选择器",
   );
   expect(service.create).toHaveBeenCalledTimes(2);
+});
+
+it("内容预览验证会话和窗口归属，隔离网页不能读取工作区文件", () => {
+  const current = event();
+  call("agent.contentPreview", current, "session", "报告.pdf");
+  expect(service.contentPreview).toHaveBeenCalledWith("session", "报告.pdf");
+  expect(() => call("agent.contentPreview", { ...current, senderFrame: {} }, "session", "报告.pdf")).toThrow("主窗口");
+  expect(() => call("agent.contentPreview", current, "", "报告.pdf")).toThrow("标识");
+  expect(() => call("agent.contentPreview", current, "session", null)).toThrow();
+  expect(service.contentPreview).toHaveBeenCalledOnce();
+});
+
+it("保存写入读取时的完整字节，取消和选择期间窗口改变不会覆盖已有文件", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-content-save-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "保存.pdf"), current = event();
+  const file = { name: "报告.pdf", bytes: new Uint8Array([0, 255, 10, 3]) };
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: path });
+  expect(await call("agent.contentSave", current, file)).toBe(true);
+  expect(await readFile(path)).toEqual(Buffer.from(file.bytes));
+  expect(dialog.showSaveDialog).toHaveBeenCalledWith(window, expect.objectContaining({ defaultPath: file.name, properties: ["showOverwriteConfirmation"] }));
+
+  const changed = { ...file, bytes: new Uint8Array([1]) };
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true, filePath: path });
+  expect(await call("agent.contentSave", current, changed)).toBe(false);
+  expect(await readFile(path)).toEqual(Buffer.from(file.bytes));
+  vi.mocked(dialog.showSaveDialog).mockImplementationOnce(async () => {
+    window = new BrowserWindow();
+    return { canceled: false, filePath: path };
+  });
+  await expect(call("agent.contentSave", current, changed)).rejects.toThrow("主窗口");
+  expect(await readFile(path)).toEqual(Buffer.from(file.bytes));
+});
+
+it("附件保存按所属会话读取原始副本，完整性失败不会弹出保存选择器", async () => {
+  const file = { name: "原图.png", bytes: new Uint8Array([0, 255, 3]) };
+  const attachment = "11111111-1111-4111-8111-111111111111";
+  vi.mocked(service.attachmentContent).mockResolvedValueOnce(file);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true });
+  expect(await call("agent.attachmentSave", event(), "session", attachment)).toBe(false);
+  expect(service.attachmentContent).toHaveBeenCalledWith("session", attachment);
+  vi.mocked(dialog.showSaveDialog).mockClear();
+  vi.mocked(service.attachmentContent).mockRejectedValueOnce(new Error("附件完整性校验失败"));
+  await expect(call("agent.attachmentSave", event(), "session", attachment)).rejects.toThrow("完整性");
+  expect(dialog.showSaveDialog).not.toHaveBeenCalled();
 });

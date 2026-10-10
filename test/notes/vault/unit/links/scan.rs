@@ -16,7 +16,8 @@ fn vault_with(files: &[(&str, &str)]) -> (TempDir, TempDir, Vault) {
 fn copy_fixture_dir() -> (TempDir, TempDir, Vault) {
     let root = TempDir::new().expect("库");
     let index = TempDir::new().expect("索引");
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../test/notes/vault/fixtures/links");
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../test/notes/vault/fixtures/links");
     for entry in fs::read_dir(&fixtures).expect("夹具目录") {
         let entry = entry.expect("夹具项");
         if entry.file_type().expect("类型").is_file() {

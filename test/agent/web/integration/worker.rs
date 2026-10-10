@@ -70,12 +70,10 @@ async fn an_invalid_frame_stops_worker_before_collecting_diagnostics() {
 }
 
 #[tokio::test]
-async fn search_html_uses_a_separate_frame_and_cannot_be_mistaken_for_readable_text() {
+async fn search_html_uses_a_separate_frame_and_preserves_complete_markup() {
     let context = ExecutionContext::new(CancellationToken::new(), Duration::from_secs(5)).unwrap();
     let input = serde_json::json!({"operation":"search","mode":"search_success"});
-    let snapshot = search_page(&runtime(), input.clone(), &context)
-        .await
-        .unwrap();
+    let snapshot = search_page(&runtime(), input, &context).await.unwrap();
     assert_eq!(snapshot.url, "https://www.bing.com/search?q=fixture");
     assert_eq!(snapshot.warnings, ["部分资源未完成"]);
     let results = super::super::search::parse_search_page(
@@ -84,24 +82,33 @@ async fn search_html_uses_a_separate_frame_and_cannot_be_mistaken_for_readable_t
     )
     .unwrap();
     assert_eq!(results[0].title, "验证后的发布说明");
-    assert!(
-        read(&runtime(), input, &context)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("搜索 HTML 帧")
-    );
-    assert!(
-        search_page(
-            &runtime(),
-            serde_json::json!({"operation":"search"}),
-            &context
-        )
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("完整 HTML 帧")
-    );
+}
+
+#[tokio::test]
+async fn readable_operation_rejects_a_search_html_frame() {
+    // 独立协议调用独占执行预算，不能继承其他断言已经消耗的截止时间。
+    let context = ExecutionContext::new(CancellationToken::new(), Duration::from_secs(5)).unwrap();
+    let error = read(
+        &runtime(),
+        serde_json::json!({"operation":"search","mode":"search_success"}),
+        &context,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("搜索 HTML 帧"), "{error}");
+}
+
+#[tokio::test]
+async fn search_operation_rejects_a_readable_frame() {
+    let context = ExecutionContext::new(CancellationToken::new(), Duration::from_secs(5)).unwrap();
+    let error = search_page(
+        &runtime(),
+        serde_json::json!({"operation":"search"}),
+        &context,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("完整 HTML 帧"), "{error}");
 }
 
 #[tokio::test]

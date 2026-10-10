@@ -5,6 +5,10 @@ use crate::{
     validate_history,
 };
 
+#[cfg(test)]
+#[path = "../../../../test/agent/runtime/unit/pause.rs"]
+mod pause_tests;
+
 /// 分开持有已提交历史与当前轮次，仅在响应及工具结果闭合后提交，避免失败污染下一次输入。
 pub(super) struct RunState {
     pub history: Vec<Message>,
@@ -34,11 +38,83 @@ impl RunState {
             .ok_or_else(|| Error::Protocol("缺少正在执行的轮次".into()))
     }
 
+    /// 仅恢复已完成的模型响应；流式片段必须重新请求，已开始但无结果的工具只能记录未确认。
+    pub fn resume(&mut self, pending: Option<PendingTurn>) -> Vec<crate::ToolResult> {
+        let Some(mut pending) = pending else {
+            return Vec::new();
+        };
+        if !pending.model_completed {
+            return Vec::new();
+        }
+        let Some(response) = &pending.response else {
+            return Vec::new();
+        };
+        if !matches!(
+            response.finish_reason,
+            crate::llm::FinishReason::Stop | crate::llm::FinishReason::ToolCalls
+        ) {
+            return Vec::new();
+        }
+        pending.deltas.clear();
+        let mut unknown = Vec::new();
+        for call in response.message.tool_calls() {
+            if pending.attempted_tool_ids.contains(&call.id)
+                && !pending
+                    .tool_results
+                    .iter()
+                    .any(|result| result.call_id == call.id)
+            {
+                let result = crate::ToolResult {
+                    call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    output: serde_json::json!({"outcome":"unknown", "error":"工具调用在中断前已开始，但执行结果未确认。"}),
+                    is_error: true,
+                    media: Vec::new(),
+                };
+                pending.tool_results.push(result.clone());
+                unknown.push(result);
+            }
+        }
+        self.pending = Some(pending);
+        unknown
+    }
+
     pub fn completed_response(&self) -> Result<&ModelResponse, Error> {
         self.pending
             .as_ref()
             .and_then(|pending| pending.response.as_ref())
             .ok_or_else(|| Error::Protocol("缺少完整模型响应".into()))
+    }
+
+    /// 接管关闭当前工具组：已尝试且无结果记为未知，未派发动作记为未执行，不重放旧操作。
+    pub fn pause_turn(&mut self) -> Vec<crate::ToolResult> {
+        let pending = self.pending.take();
+        let mut results = self.resume(pending);
+        let Some(pending) = &mut self.pending else {
+            return results;
+        };
+        let Some(response) = &pending.response else {
+            return results;
+        };
+        for call in response.message.tool_calls() {
+            if pending
+                .tool_results
+                .iter()
+                .any(|result| result.call_id == call.id)
+            {
+                continue;
+            }
+            let result = crate::ToolResult {
+                call_id: call.id.clone(),
+                name: call.name.clone(),
+                output: serde_json::json!({"outcome":"not_executed","error":"用户接管，当前动作未派发；交还后必须重新观察页面。"}),
+                is_error: true,
+                media: Vec::new(),
+            };
+            pending.tool_results.push(result.clone());
+            results.push(result);
+        }
+        results
     }
 
     pub fn delta(&mut self, delta: ModelEvent) -> Result<(), Error> {
@@ -60,7 +136,7 @@ impl RunState {
         Ok(())
     }
 
-    pub fn commit(&mut self) -> Result<(), Error> {
+    pub fn commit(&mut self) -> Result<Vec<Message>, Error> {
         let pending = self
             .pending
             .as_ref()
@@ -70,21 +146,26 @@ impl RunState {
             .as_ref()
             .ok_or_else(|| Error::Protocol("缺少完整模型响应".into()))?;
         let mut next = self.history.clone();
-        next.push(response.message.clone());
+        let mut committed = vec![response.message.clone()];
         if !pending.tool_results.is_empty() {
-            next.push(Message::tool_results(pending.tool_results.clone()));
+            let mut results = pending.tool_results.clone();
+            let ids: Vec<_> = response.message.tool_calls().map(|call| &call.id).collect();
+            results.sort_by_key(|result| ids.iter().position(|id| **id == result.call_id));
+            committed.push(Message::tool_results(results));
         }
+        next.extend(committed.iter().cloned());
         validate_history(&next).map_err(|error| Error::Protocol(error.to_string()))?;
         self.history = next;
         self.pending = None;
-        Ok(())
+        Ok(committed)
     }
 
-    pub fn finish(self, status: RunStatus) -> RunReport {
+    pub fn finish(self, status: RunStatus, pending_inputs: Vec<Message>) -> RunReport {
         RunReport {
             status,
             history: self.history,
             pending_turn: self.pending,
+            pending_inputs,
             model_calls: self.model_calls,
             usage: self.usage,
         }

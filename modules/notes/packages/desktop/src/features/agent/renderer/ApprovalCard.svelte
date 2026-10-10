@@ -14,6 +14,16 @@
       decision: "allow_once" | "allow_for_session" | "deny",
     ) => void;
   } = $props();
+  const capabilityNames = {
+    webmcp: "网页工具",
+    developer_logs: "页面日志",
+    cdp: "页面诊断",
+  };
+  const capabilityDescriptions = {
+    webmcp: "可调用此页面提供的工具，可能提交信息或修改网站数据。",
+    developer_logs: "可读取此页面的控制台日志与错误，日志可能包含页面数据。",
+    cdp: "可读取此页面的结构、样式与性能诊断信息；仅开放只读诊断操作。",
+  };
 </script>
 
 <section class="approval" aria-label="权限审批" aria-busy={approving}>
@@ -24,22 +34,40 @@
     <h3>
       {pending.request.type === "browser"
         ? "允许访问这个网站？"
-        : pending.request.type === "ui"
-          ? "允许在后台操作这个窗口？"
-          : pending.request.type === "network"
-            ? "允许这次网络访问？"
-            : "任务需要额外权限"}
+        : pending.request.type === "browser_capability"
+          ? `允许使用${capabilityNames[pending.request.request.capability]}？`
+          : pending.request.type === "ui_launch"
+            ? "允许启动应用？"
+            : pending.request.type === "ui"
+              ? "允许在后台操作这个窗口？"
+              : pending.request.type === "network"
+                ? "允许这次网络访问？"
+                : "任务需要额外权限"}
     </h3>
     {#if count > 1}<span class="approval-count">还有 {count - 1} 项</span>{/if}
   </div>
   <div class="approval-context">
     {#if pending.request.type === "browser"}<p>{pending.request.request.reason}</p>
       <code>{pending.request.request.origin}</code>
+    {:else if pending.request.type === "browser_capability"}<p>
+        {pending.request.request.title}
+      </p>
+      <code>{pending.request.request.origin}</code>
+      <p>{pending.request.request.reason}</p>
+      <p>{capabilityDescriptions[pending.request.request.capability]}</p>
+      <p>仅用于当前会话的此页面，导航或接管后失效。</p>
+    {:else if pending.request.type === "ui_launch"}<p>
+        {pending.request.request.app_name}
+      </p>
+      <code>{pending.request.request.bundle_id}</code>
+      <p>{pending.request.request.reason}</p>
+      <p>仅批准本次后台启动，不授予窗口控制权。</p>
     {:else if pending.request.type === "ui"}<p>
         {pending.request.request.app_name} · {pending.request.request.window_title}
       </p>
       <p>{pending.request.request.reason}</p>
       <p>你操作键盘、鼠标或切换窗口时，助手会暂停。</p>
+      <p>粘贴操作会临时使用系统剪贴板；若剪贴板未被你或其他应用更改，完成后恢复原内容。</p>
     {:else if pending.request.type === "network"}<p>
         {pending.request.request.target.host}:{pending.request.request.target.port} · {pending
           .request.request.target.protocol}
@@ -64,15 +92,17 @@
       disabled={approving}
       onclick={() => onApprove(pending, "deny")}>拒绝</button
     >
-    <button
-      class="reader-button"
-      class:primary={pending.request.type === "browser" || pending.request.type === "ui"}
-      type="button"
-      disabled={approving}
-      onclick={() => onApprove(pending, "allow_for_session")}
-      >{approving ? "正在提交…" : "此会话允许"}</button
-    >
-    {#if pending.request.type !== "browser" && pending.request.type !== "ui"}<button
+    {#if pending.request.type !== "ui_launch"}<button
+        class="reader-button"
+        class:primary={pending.request.type === "browser" ||
+          pending.request.type === "ui" ||
+          pending.request.type === "browser_capability"}
+        type="button"
+        disabled={approving}
+        onclick={() => onApprove(pending, "allow_for_session")}
+        >{approving ? "正在提交…" : "此会话允许"}</button
+      >{/if}
+    {#if pending.request.type === "terminal" || pending.request.type === "network" || pending.request.type === "ui_launch"}<button
         class="reader-button primary"
         type="button"
         disabled={approving}

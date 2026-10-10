@@ -1,5 +1,5 @@
 import type { ElementHandle, Locator } from "playwright-core";
-import type { BrowserAction, BrowserResult } from "./contract.js";
+import type { BrowserAction, BrowserResult, BrowserStep } from "./contract.js";
 import type { BrowserFiles } from "./files.js";
 import type { BrowserPage } from "./observation.js";
 
@@ -9,13 +9,12 @@ export type BrowserExecution = {
   check(): void;
   budget(): number;
   dispatch(): void;
+  /** 只读取本次操作新增的有界网络诊断，必须在观察编码前采样。 */
+  warnings(): string[];
 };
 
 /** 控件执行阶段已经完成引用消歧；按键动作也必须绑定具体控件。 */
-type ElementAction = Extract<
-  BrowserAction,
-  { action: "click" | "hover" | "fill" | "select" | "check" | "press" }
-> & { ref: string };
+export type ElementAction = BrowserStep | { action: "hover"; ref: string } | { action: "press"; ref: string; key: string };
 
 /**
  * 读取各框架当前可见文字并分页，任何框架缺失均明确失败，不能伪装为完整读取。
@@ -183,7 +182,8 @@ export async function interact(
     );
     return;
   }
-  await elementAction(entry, element, { ...action, ref: action.ref }, execution);
+  const ref = action.ref;
+  await elementAction(entry, element, { ...action, ref }, execution, async () => { await entry.element(action.observation, ref); });
 }
 
 async function pointer(
@@ -255,15 +255,17 @@ async function pointer(
   }
 }
 
-async function elementAction(
+/** 对已经固定的真实对象执行动作；verify 在自动等待后再次核验原始身份，失败不派发。 */
+export async function elementAction(
   entry: BrowserPage,
   element: ElementHandle,
   action: ElementAction,
   execution: BrowserExecution,
+  verify: () => Promise<void>,
 ): Promise<void> {
   await prepareElement(entry, element, action, execution);
   // 自动等待期间节点可以被虚拟列表复用；派发真实输入前必须重验语义身份。
-  await entry.element(action.observation, action.ref);
+  await verify();
   execution.dispatch();
   await entry.guard(
     async (signal) => {

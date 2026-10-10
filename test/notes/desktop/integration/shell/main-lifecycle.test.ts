@@ -213,6 +213,7 @@ describe("主进程与 Rust 内核生命周期", () => {
   });
 
   it("报告内核停机失败，并允许退出已不可用的进程", async () => {
+    vi.stubEnv("NOEMORI_TEST_WINDOW", "");
     const stopped = deferred<void>();
     shutdown.mockReturnValue(stopped.promise);
     const { app, window, dialog } = await start();
@@ -221,5 +222,22 @@ describe("主进程与 Rust 内核生命周期", () => {
     stopped.reject(new Error("线程异常退出"));
     await vi.waitFor(() => expect(app.quit).toHaveBeenCalledTimes(1));
     expect(dialog.showErrorBox).toHaveBeenCalledWith("内核未正常关闭", "线程异常退出");
+  });
+
+  it("后台测试的停机异常写入日志，不弹出系统错误框", async () => {
+    vi.stubEnv("NOEMORI_TEST_WINDOW", "hidden");
+    const stopped = deferred<void>();
+    shutdown.mockReturnValue(stopped.promise);
+    const logging = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { app, window, dialog } = await start();
+      window.emit("closed");
+      app.emit("will-quit", { preventDefault: vi.fn() });
+      const failure = new Error("测试注入的停机异常");
+      stopped.reject(failure);
+      await vi.waitFor(() => expect(app.quit).toHaveBeenCalledTimes(1));
+      expect(dialog.showErrorBox).not.toHaveBeenCalled();
+      expect(logging).toHaveBeenCalledWith("内核未正常关闭", failure);
+    } finally { logging.mockRestore(); }
   });
 });

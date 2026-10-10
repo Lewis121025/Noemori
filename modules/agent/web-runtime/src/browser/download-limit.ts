@@ -14,6 +14,7 @@ export async function limitDownloads(
   context: BrowserContext,
   directory: string,
   maximum: number,
+  embedded = false,
 ): Promise<() => Promise<void>> {
   const probe = await context.newPage();
   const target = await context.newCDPSession(probe);
@@ -22,7 +23,7 @@ export async function limitDownloads(
   await probe.close();
   const control = await browser.newBrowserCDPSession();
   const browserContextId = targetInfo.browserContextId;
-  if (!browserContextId) {
+  if (!browserContextId && !embedded) {
     await control.detach();
     throw new Error("下载预算需要独立浏览器上下文");
   }

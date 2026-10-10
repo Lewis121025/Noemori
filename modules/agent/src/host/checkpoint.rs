@@ -18,6 +18,11 @@ pub struct HostCheckpoint {
     messages: Vec<HostMessage>,
     run: Option<HostRunView>,
     pending_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_turn: Option<crate::runtime::PendingTurn>,
+    /// 未消费用户输入引用原始消息，避免重复保存正文与媒体。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pending_inputs: Vec<usize>,
     /// 旧版记录缺少精确轮次边界，保留整体历史；不根据展示文本猜测供应商上下文。
     #[serde(default)]
     turns: Vec<TurnCheckpoint>,
@@ -38,7 +43,7 @@ impl HostCheckpoint {
         Ok(self)
     }
     fn validate(&self) -> Result<(), Error> {
-        if !matches!(self.version, 1 | 2) {
+        if !matches!(self.version, 1..=3) {
             return Err(Error::Config("对话记录版本不支持".into()));
         }
         if !self
@@ -57,24 +62,38 @@ impl HostCheckpoint {
                 || !self.turns.is_empty()
                 || self.run.is_some()
                 || self.pending_note.is_some()
+                || self.pending_turn.is_some()
+                || !self.pending_inputs.is_empty()
             {
                 return Err(Error::Protocol("未开始的对话不能包含运行或消息记录".into()));
             }
             return Ok(());
         }
         validate_history(&self.history).map_err(|error| Error::Protocol(error.to_string()))?;
+        super::state::pending_inputs(&self.messages, &self.pending_inputs)?;
+        if let Some(pending) = &self.pending_turn {
+            pending.validate()?;
+        }
         let mut prior: Option<&TurnCheckpoint> = None;
         let mut ids = BTreeSet::new();
         for turn in &self.turns {
             let view = &turn.view;
+            let continued = view.resumed_from.as_ref().is_some_and(|id| {
+                prior.is_some_and(|previous| {
+                    &previous.view.run.id == id && previous.view.run.status.can_resume()
+                })
+            });
             if !ids.insert(&view.run.id)
                 || view.run.status == HostRunStatus::Running
-                || turn.history_start >= turn.history_end
+                || turn.history_start > turn.history_end
+                || (!continued && turn.history_start == turn.history_end)
                 || turn.history_end > self.history.len()
-                || view.message_start >= view.message_end
+                || view.message_start > view.message_end
+                || (!continued && view.message_start == view.message_end)
                 || view.message_end > self.messages.len()
-                || self.history[turn.history_start].role != Role::User
-                || self.messages[view.message_start].role != Role::User
+                || (view.resumed_from.is_some() && !continued)
+                || (!continued && self.history[turn.history_start].role != Role::User)
+                || (!continued && self.messages[view.message_start].role != Role::User)
                 || prior.is_some_and(|previous| {
                     previous.history_end != turn.history_start
                         || previous.view.message_end != view.message_start
@@ -82,11 +101,19 @@ impl HostCheckpoint {
             {
                 return Err(Error::Protocol("对话轮次边界无效".into()));
             }
+            if let Some(pending) = &turn.pending_turn_after {
+                pending.validate()?;
+            }
+            super::state::pending_inputs(
+                &self.messages[..view.message_end],
+                &turn.pending_inputs_after,
+            )?;
             prior = Some(turn);
         }
         if let Some(last) = prior
             && (last.history_end != self.history.len()
                 || last.view.message_end != self.messages.len()
+                || last.pending_inputs_after != self.pending_inputs
                 || self
                     .run
                     .as_ref()
@@ -107,7 +134,7 @@ impl HostCheckpoint {
     pub fn branch_after(&self, turn_id: Option<&str>) -> Result<Self, Error> {
         self.validate()?;
         let mut branch = self.clone();
-        branch.version = 2;
+        branch.version = 3;
         if let Some(id) = turn_id {
             let index = self
                 .turns
@@ -120,6 +147,8 @@ impl HostCheckpoint {
             branch.turns.truncate(index + 1);
             branch.run = Some(turn.view.run.clone());
             branch.pending_note = turn.pending_note_after.clone();
+            branch.pending_turn = turn.pending_turn_after.clone();
+            branch.pending_inputs = turn.pending_inputs_after.clone();
         }
         branch.validate()?;
         Ok(branch)
@@ -160,12 +189,7 @@ impl DesktopSession {
         let mut run = data.run.clone();
         let mut pending_note = data.pending_note.clone();
         if data.active.is_some() {
-            // 同一轮可以接受多次用户补充，观察事实必须从整轮起点保留。
-            let from = data.turns.last().map_or(0, |turn| turn.view.message_start);
-            pending_note = Some(super::progress::observed_note(
-                &data.messages[from..],
-                &data.calls.keys().cloned().collect::<Vec<_>>(),
-            ));
+            pending_note = super::progress::active_note(&data);
             if let Some(run) = &mut run {
                 run.status = HostRunStatus::Cancelled;
                 run.error = Some("此轮记录来自中断现场，继续前会先核实实际状态。".into());
@@ -179,15 +203,19 @@ impl DesktopSession {
             turn.view.message_end = data.messages.len();
             turn.history_end = data.history.len();
             turn.pending_note_after = pending_note.clone();
+            turn.pending_turn_after = data.pending_turn.clone();
+            turn.pending_inputs_after = data.pending_inputs.clone();
         }
         let checkpoint = HostCheckpoint {
-            version: 2,
+            version: 3,
             workspace: state.workspace.clone(),
             history: data.history.clone(),
             model_binding: data.model_binding.clone(),
             messages: data.messages.clone(),
             run,
             pending_note,
+            pending_turn: data.pending_turn.clone(),
+            pending_inputs: data.pending_inputs.clone(),
             turns,
         };
         checkpoint.validate()?;
@@ -220,6 +248,8 @@ impl DesktopSession {
         data.messages = checkpoint.messages;
         data.run = checkpoint.run;
         data.pending_note = checkpoint.pending_note;
+        data.pending_turn = checkpoint.pending_turn;
+        data.pending_inputs = checkpoint.pending_inputs;
         data.turns = checkpoint.turns;
         drop(data);
         state.notify();

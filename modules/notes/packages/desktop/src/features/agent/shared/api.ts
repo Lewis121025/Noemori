@@ -11,6 +11,10 @@ import type { ConversationQueue } from "./queue";
 import type { AgentReference } from "./references";
 import type { AgentAttachment, AttachmentPreview, AttachmentUpload } from "./attachments";
 import type { LibraryEntriesDrag } from "../../reader/shared/file-drag";
+import type { ConversationContent } from "./content";
+import type { BrowserNavigation, BrowserViewPlacement, BrowserDownload } from "./browser";
+/** 原生媒体内容独立于文字；具体载荷在媒体渲染边界按格式解码。 */
+export type MessageMedia = { type: "image" | "audio" | "video"; value: unknown };
 /** Agent 的窗口协议只交付可见状态，认证材料由主进程单独持有。 */
 export type Protocol =
   | "openai-chat"
@@ -64,9 +68,15 @@ export type MessagePart =
   | { type: "tool_call"; value: { id: string; name: string; arguments: unknown } }
   | {
       type: "tool_result";
-      value: { call_id: string; name: string; output: unknown; is_error: boolean };
+      value: {
+        call_id: string;
+        name: string;
+        output: unknown;
+        is_error: boolean;
+        media?: MessageMedia[];
+      };
     }
-  | { type: "image" | "audio" | "video"; value: unknown };
+  | MessageMedia;
 /** 已观察到的消息，供应商原生签名不在协议中。 */
 export type AgentMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -121,6 +131,8 @@ export type AgentApproval = {
   request:
     | TerminalApproval
     | NetworkApproval
+    | BrowserCapabilityApproval
+    | UiLaunchApproval
     | {
         type: "ui";
         request: {
@@ -133,11 +145,37 @@ export type AgentApproval = {
       }
     | { type: "browser"; request: { origin: string; reason: string } };
 };
+/** 扩展授权绑定可信后端与页面文档，导航或人工接管后需要重新申请。 */
+export type BrowserCapabilityApproval = {
+  type: "browser_capability";
+  request: {
+    backend: "managed" | "chrome" | "edge";
+    page: string;
+    document: string;
+    origin: string;
+    title: string;
+    capability: "webmcp" | "developer_logs" | "cdp";
+    reason: string;
+  };
+};
+/** 应用身份来自系统查询；批准只允许本次后台启动，不授予窗口控制权。 */
+export type UiLaunchApproval = {
+  type: "ui_launch";
+  request: { bundle_id: string; app_name: string; reason: string };
+};
 /** 浏览器状态来自 Rust 资源所有者；迟到回执不会随模型取消而丢失。 */
 export type AgentBrowser = {
+  /** 协助完成条件由后台观察；渲染器只负责承载当前页面，不推断用户是否完成。 */
+  handoff?: {
+    id: string;
+    page: string;
+    status: "waiting" | "completed" | "failed" | "cancelled";
+    error: string | null;
+  } | null;
   status: "idle" | "starting" | "ready" | "busy" | "human" | "failed" | "closed";
   tabs: {
     id: string;
+    native_target?: string;
     url: string;
     title: string;
     crashed: boolean;
@@ -163,6 +201,7 @@ export type AgentRun = {
   id: string;
   status:
     | "running"
+    | "paused"
     | "completed"
     | "cancelled"
     | "timed_out"
@@ -173,8 +212,13 @@ export type AgentRun = {
   error: string | null;
   model_calls: number;
 };
-/** 可见轮次的消息范围为左闭右开区间，边界由原生历史提交时生成。 */
-export type AgentTurn = { run: AgentRun; message_start: number; message_end: number };
+/** 运行尝试的消息范围为左闭右开区间；resumed_from 关联前次中断，恢复尝试可无新增用户消息。 */
+export type AgentTurn = {
+  run: AgentRun;
+  message_start: number;
+  message_end: number;
+  resumed_from?: string;
+};
 /** 分支保留来源身份与名称；来源被删除也不丢失可读关系。 */
 export type ConversationOrigin = { conversationId: string; title: string; turnId: string | null };
 /** 分叉在确认名称后创建，null 表示复制当前完整历史。 */
@@ -247,8 +291,16 @@ export type UiPreviewFrame = { image: string | null; inputToken: string | null }
 export type BrowserHumanInput =
   | { type: "dialog"; accept: boolean; text?: string }
   | { type: "files"; paths: string[] }
-  | { type: "pointer"; x: number; y: number }
-  | { type: "scroll"; x: number; y: number }
+  | {
+      type: "pointer";
+      x: number;
+      y: number;
+      button?: "left" | "right" | "middle";
+      /** 连续点击编号；每条人工输入只发送一次按下与释放。 */
+      clicks?: number;
+    }
+  | { type: "drag"; from_x: number; from_y: number; to_x: number; to_y: number }
+  | { type: "scroll"; x: number; y: number; at_x?: number; at_y?: number }
   | { type: "key"; key: string }
   | { type: "text"; text: string };
 
@@ -294,15 +346,43 @@ export type TerminalPage = {
   has_more: boolean;
 };
 /** 窗口明确提交已有申请的决定；前缀决定由界面确认完整参数向量。 */
-export type ApprovalReply = {
-  type: "terminal" | "network" | "browser" | "ui";
-  decision:
-    | { decision: "allow_once" | "allow_for_session" }
-    | { decision: "deny"; details: string }
-    | { decision: "allow_prefix" | "allow_persistent_prefix"; details: { prefix: string[] } };
-};
+export type ApprovalReply =
+  | {
+      type: "terminal";
+      decision:
+        | { decision: "allow_once" | "allow_for_session" }
+        | { decision: "deny"; details: string }
+        | { decision: "allow_prefix" | "allow_persistent_prefix"; details: { prefix: string[] } };
+    }
+  | {
+      type: "network";
+      decision: { decision: "allow_once" | "allow_for_session" } | { decision: "deny"; details: string };
+    }
+  | {
+      type: "browser" | "ui" | "browser_capability";
+      decision: { decision: "allow_for_session" } | { decision: "deny"; details: string };
+    }
+  | {
+      type: "ui_launch";
+      decision: { decision: "allow_once" } | { decision: "deny"; details: string };
+    };
 /** preload 暴露的固定动作，不提供任意主进程调用或原生句柄。 */
 export type AgentApi = {
+  /** 原生画面只转发用户操作，不经过模型 SDK。 */
+  uiInput(
+    id: string,
+    target: UiPreviewTarget,
+    token: string,
+    input: BrowserHumanInput,
+  ): Promise<void>;
+  /** 用户在窗口内导航真实网页，不发送新的模型任务。 */
+  browserNavigate(id: string, command: BrowserNavigation): Promise<void>;
+  /** 显示或隐藏网页视图，null 只隐藏，不关闭页面。 */
+  browserView(id: string, placement: BrowserViewPlacement | null): Promise<void>;
+  /** 读取本对话下载进度，不暴露临时路径。 */
+  browserDownloads(id: string): Promise<BrowserDownload[]>;
+  /** 用户明确保存已有下载，取消对话框不写入。 */
+  browserSaveDownload(id: string, download: string): Promise<void>;
   /** 独立预览不改变模型观察，目标关闭或失效时拒绝。 */
   uiPreview(id: string, target: UiPreviewTarget): Promise<UiPreviewFrame>;
   /** 未接管时拒绝人工输入，不触发模型运行。 */
@@ -338,6 +418,12 @@ export type AgentApi = {
   attachmentPreview(id: string, attachmentId: string): Promise<AttachmentPreview>;
   /** 用户明确打开时由系统查看私有副本，失败原样报告。 */
   attachmentOpen(id: string, attachmentId: string): Promise<void>;
+  /** 系统另存为本对话拥有的原始附件；取消不写文件。 */
+  attachmentSave(id: string, attachmentId: string): Promise<boolean>;
+  /** 工作区引用须经过真实路径边界检查；外部 URL 仅由预览按钮明确请求。 */
+  contentPreview(id: string, reference: string): Promise<ConversationContent>;
+  /** 用户选择保存位置后写入已有内容快照；取消不写文件。 */
+  contentSave(file: AttachmentUpload): Promise<boolean>;
   /** 目录关联可选；null 创建独立对话，运行目录由主进程管理。 */
   create(workspace: string | null, title: string): Promise<AgentConversation>;
   /** 加载已打开笔记库中的文章对话；无记录时不创建目录。 */
@@ -352,19 +438,41 @@ export type AgentApi = {
   archive(id: string, archived: boolean): Promise<void>;
   remove(id: string): Promise<void>;
   /** 只更新文字时缺省附件列表以保留异步导入结果；显式空列表才移除全部草稿附件。 */
-  saveDraft(id: string, draft: string, references?: AgentReference[], attachments?: string[]): Promise<void>;
+  saveDraft(
+    id: string,
+    draft: string,
+    references?: AgentReference[],
+    attachments?: string[],
+  ): Promise<void>;
   flush(): Promise<void>;
-  start(id: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<string>;
+  start(
+    id: string,
+    text: string,
+    references?: AgentReference[],
+    attachments?: string[],
+  ): Promise<string>;
   /** 中断指定运行，只有终态结算后兑现；迟到的旧运行编号会被拒绝。 */
   cancel(id: string, runId: string): Promise<void>;
   /** 明确继续最近未完成的任务，保留草稿；返回新运行编号。 */
   resume(id: string, runId: string): Promise<string>;
   /** 补充指定的当前任务，下一次模型请求使用该文字；返回原任务编号。 */
-  steer(id: string, runId: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<string>;
+  steer(
+    id: string,
+    runId: string,
+    text: string,
+    references?: AgentReference[],
+    attachments?: string[],
+  ): Promise<string>;
   /** 读取对话持有的追问队列，不恢复或启动任务。 */
   queueGet(id: string): Promise<ConversationQueue>;
   /** 保存下一轮追问；匹配已保存草稿时才清空草稿。 */
-  queueAdd(id: string, runId: string, text: string, references?: AgentReference[], attachments?: string[]): Promise<ConversationQueue>;
+  queueAdd(
+    id: string,
+    runId: string,
+    text: string,
+    references?: AgentReference[],
+    attachments?: string[],
+  ): Promise<ConversationQueue>;
   /** 用户明确移除未发送追问，不停止已经开始的任务。 */
   queueRemove(id: string, messageId: string): Promise<ConversationQueue>;
   /** 暂停队列，或明确继续发送；发送结果未确认的条目不能自动重发。 */

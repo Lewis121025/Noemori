@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { copyFile, mkdir, open, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, realpath, rm } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -15,13 +15,16 @@ import {
   type AttachmentUpload,
 } from "../shared/attachments";
 import { attachmentImage } from "./attachment-images";
+import { previewContentBytes } from "./content-files";
+import { rethrowAfterCleanup } from "./cleanup";
 import type { LibraryEntriesDrag } from "../../reader/shared/file-drag";
 
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-/** 按文件句柄读取有界快照，文件增长或非普通文件不会绕过选择时的大小限制。 */
-async function boundedFile(path: string, limit = MAX_ATTACHMENT_BYTES): Promise<Buffer> {
+/** @param path 已核对归属的真实路径；@param limit 字节预算；@returns 文件句柄上的完整快照；@throws 非普通文件、超限、变化或读取失败时拒绝。 */
+export async function boundedFile(path: string, limit = MAX_ATTACHMENT_BYTES): Promise<Buffer> {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let snapshot: Buffer;
   try {
     const before = await handle.stat();
     if (!before.isFile() || before.size > limit)
@@ -36,10 +39,12 @@ async function boundedFile(path: string, limit = MAX_ATTACHMENT_BYTES): Promise<
     const after = await handle.stat();
     if (length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs)
       throw new Error("读取时附件内容发生变化，请重新选择");
-    return bytes.subarray(0, length);
-  } finally {
-    await handle.close();
+    snapshot = bytes.subarray(0, length);
+  } catch (cause) {
+    return rethrowAfterCleanup(cause, () => handle.close(), "附件读取失败且句柄未能完整关闭");
   }
+  await handle.close();
+  return snapshot;
 }
 
 /**
@@ -100,7 +105,7 @@ export class AttachmentStore {
 
   /**
    * @param id 用户选择时捕获的会话。
-   * @param paths 系统选择器确认的文件路径，不接受渲染器提供任意读取路径。
+   * @param sources 系统选择器确认的路径或已验证的上传快照，不接受渲染器提供任意读取路径。
    * @returns 原始内容和规范图片均落盘后的描述；中途失败回滚整批。
    * @throws 数量、文件、图片、读写无效时拒绝，不修改原文件。
    */
@@ -129,22 +134,16 @@ export class AttachmentStore {
         };
         parseAttachments([file]);
         const original = this.path(id, file);
-        created.push(original);
-        await writeFile(original, bytes, { flag: "wx", mode: 0o400 });
+        await this.writeCopy(original, bytes, created);
         if (image) {
           const normalized = this.imagePath(id, file);
-          created.push(normalized);
-          await writeFile(normalized, image.bytes, { flag: "wx", mode: 0o400 });
+          await this.writeCopy(normalized, image.bytes, created);
         }
         result.push(file);
       }
       return result;
     } catch (cause) {
-      const removed = await Promise.allSettled(created.map((path) => rm(path, { force: true })));
-      const failures = removed.flatMap((item) => (item.status === "rejected" ? [item.reason] : []));
-      if (failures.length)
-        throw new AggregateError([cause, ...failures], "附件导入失败且未能完整清理");
-      throw cause;
+      return this.rollback(created, cause, "附件导入失败且未能完整清理");
     }
   }
 
@@ -174,20 +173,13 @@ export class AttachmentStore {
         } catch (cause) {
           if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT")) throw cause;
         }
-        created.push(target);
-        await copyFile(this.path(id, file), target, constants.COPYFILE_EXCL);
+        await this.copyOwned(this.path(id, file), target, created);
       }
       return files.filter((file) =>
         created.includes(join(this.directory(id), attachmentFilename(file))),
       );
     } catch (cause) {
-      const cleanup = await Promise.allSettled(created.map((path) => rm(path, { force: true })));
-      const failures = cleanup.flatMap((result) =>
-        result.status === "rejected" ? [result.reason] : [],
-      );
-      if (failures.length)
-        throw new AggregateError([cause, ...failures], "附件发布失败且未能完整回滚");
-      throw cause;
+      return this.rollback(created, cause, "附件发布失败且未能完整回滚");
     }
   }
 
@@ -228,35 +220,26 @@ export class AttachmentStore {
       return { type: "image", url: `data:image/${image.format};base64,${image.data}` };
     }
     const bytes = await this.checked(this.path(id, file), file.size, file.sha256);
-    if (bytes.subarray(0, 5).toString() === "%PDF-" || bytes.subarray(0, 128 * 1024).includes(0))
-      return { type: "file" };
-    try {
-      const limit = 128 * 1024;
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, limit), {
-        stream: bytes.length > limit,
-      });
-      return { type: "text", text, truncated: bytes.length > limit };
-    } catch {
-      // 二进制文档仍是完整附件，不把乱码伪装成已提取的正文。
-      return { type: "file" };
-    }
+    return previewContentBytes(file.name, bytes);
   }
 
-  /** @param source 来源会话；@param target 分叉会话；@param files 独立保留的文件；@returns 完整复制后兑现；@throws 失败回滚目标目录。 */
+  /** @param id 所属会话；@param file 已核对的附件；@returns 完整性校验后的原始字节；@throws 副本被修改、超限或读取失败时拒绝。 */
+  async bytes(id: string, file: AgentAttachment): Promise<Uint8Array> {
+    return new Uint8Array(await this.checked(this.path(id, file), file.size, file.sha256));
+  }
+
+  /** @param source 来源会话；@param target 分叉会话；@param files 独立保留的文件；@returns 完整复制后兑现；@throws 失败时只回滚本次创建的副本，保留既有文件。 */
   async copy(source: string, target: string, files: AgentAttachment[]): Promise<void> {
     if (!files.length) return;
     await this.prepare(target);
+    const created: string[] = [];
     try {
       for (const file of files) {
         await this.checked(this.path(source, file), file.size, file.sha256);
-        await copyFile(this.path(source, file), this.path(target, file), constants.COPYFILE_EXCL);
+        await this.copyOwned(this.path(source, file), this.path(target, file), created);
         if (file.image) {
           await this.checked(this.imagePath(source, file), file.image.size, file.image.sha256);
-          await copyFile(
-            this.imagePath(source, file),
-            this.imagePath(target, file),
-            constants.COPYFILE_EXCL,
-          );
+          await this.copyOwned(this.imagePath(source, file), this.imagePath(target, file), created);
         }
         const published = join(this.directory(source), attachmentFilename(file));
         try {
@@ -265,12 +248,39 @@ export class AttachmentStore {
           if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") continue;
           throw cause;
         }
-        await this.publish(target, [file]);
+        for (const published of await this.publish(target, [file]))
+          created.push(join(this.directory(target), attachmentFilename(published)));
       }
     } catch (cause) {
-      await this.remove(target);
-      throw cause;
+      return this.rollback(created, cause, "附件分叉失败且未能完整回滚");
     }
+  }
+
+  private async writeCopy(path: string, bytes: Buffer, created: string[]): Promise<void> {
+    const handle = await open(path, "wx", 0o400);
+    // 独占打开成功才取得所有权；后续写入失败留下的部分内容也必须回滚。
+    created.push(path);
+    try {
+      await handle.writeFile(bytes);
+    } catch (cause) {
+      return rethrowAfterCleanup(cause, () => handle.close(), "附件写入失败且句柄未能完整关闭");
+    }
+    await handle.close();
+  }
+
+  private async copyOwned(source: string, target: string, created: string[]): Promise<void> {
+    // copyFile 负责失败时清理部分副本；EEXIST 不授予删除既有目标的权限。
+    await copyFile(source, target, constants.COPYFILE_EXCL);
+    created.push(target);
+  }
+
+  private async rollback(created: string[], cause: unknown, message: string): Promise<never> {
+    const cleanup = await Promise.allSettled(created.map((path) => rm(path, { force: true })));
+    const failures = cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length) throw new AggregateError([cause, ...failures], message);
+    throw cause;
   }
 
   /** @param id 被删除或导入失败的会话；@returns 所有副本移除后兑现；@throws 删除失败时拒绝。 */

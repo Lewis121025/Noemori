@@ -1,4 +1,5 @@
 import { integer, record, text } from "./parse";
+import type { ContentPreview } from "./content";
 
 /** 与原生媒体预算一致；大文件通过工具读取，不把二进制塞进模型文字。 */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -13,11 +14,8 @@ export type AgentAttachment = {
   sha256: string;
   image: { format: "png" | "jpeg"; size: number; sha256: string } | null;
 };
-/** 图片使用原生内容块；文本预览有明确截断标志，其他文件可由用户在系统中打开。 */
-export type AttachmentPreview =
-  | { type: "image"; url: string }
-  | { type: "text"; text: string; truncated: boolean }
-  | { type: "file" };
+/** 附件预览与对话产物共用渲染契约；原文件始终保留在本对话的私有目录中。 */
+export type AttachmentPreview = ContentPreview;
 /** 主进程交给原生桥接的冻结图片，Base64 在原生边界再次校验。 */
 export type AttachmentImage = { format: "png" | "jpeg"; data: string };
 /** 拖入或粘贴的浏览器文件只传字节，不允许渲染器提交任意本地路径。 */

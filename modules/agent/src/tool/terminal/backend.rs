@@ -272,41 +272,9 @@ fn send_signal(pid: Pid, signal: Signal) -> Result<(), String> {
     match killpg(pid, signal) {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
         #[cfg(target_os = "macos")]
-        Err(Errno::EPERM) if group_has_no_live_members(pid)? => Ok(()),
+        Err(Errno::EPERM) if crate::process::group_has_no_live_members(pid)? => Ok(()),
         Err(error) => Err(format!("终端进程组信号 {signal} 发送失败：{error}")),
     }
-}
-
-#[cfg(target_os = "macos")]
-fn group_has_no_live_members(group: Pid) -> Result<bool, String> {
-    use libproc::{
-        libproc::{bsd_info::BSDInfo, proc_pid::pidinfo},
-        processes::{ProcFilter, pids_by_type},
-    };
-    // sys/proc_info.h 的 PROC_FLAG_INEXIT：进程已进入 exit()，即便状态还未变为 SZOMB 也不再接收信号。
-    const PROC_FLAG_INEXIT: u32 = 4;
-    let pgrpid = u32::try_from(group.as_raw()).map_err(|_| "终端进程组标识无效")?;
-    let members = pids_by_type(ProcFilter::ByProgramGroup { pgrpid })
-        .map_err(|e| format!("终端进程组成员查询失败：{e}"))?;
-    for pid in members {
-        let raw = i32::try_from(pid).map_err(|_| "终端子进程标识无效")?;
-        // XNU 的 PROC_PIDTBSDINFO 用 arg=1 才查询僵尸；覆盖正在退出到僵尸之间的内核过渡态。
-        match pidinfo::<BSDInfo>(raw, 1) {
-            Ok(info)
-                if info.pbi_pgid != pgrpid
-                    || info.pbi_status == nix::libc::SZOMB
-                    || info.pbi_flags & PROC_FLAG_INEXIT != 0 => {}
-            Ok(_) => return Ok(false),
-            Err(error) => {
-                let remaining = pids_by_type(ProcFilter::ByProgramGroup { pgrpid })
-                    .map_err(|e| format!("终端进程组复查失败：{e}"))?;
-                if remaining.contains(&pid) {
-                    return Err(format!("终端子进程状态无法确认：{error}"));
-                }
-            }
-        }
-    }
-    Ok(true)
 }
 
 impl Drop for OwnedChild {

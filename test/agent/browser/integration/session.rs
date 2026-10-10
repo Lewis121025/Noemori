@@ -16,6 +16,7 @@ fn tool(workspace: &std::path::Path, origin: String) -> BrowserTool {
         browser: std::env::var_os("NOEMORI_TEST_BROWSER").map(PathBuf::from),
         workspace: workspace.into(),
         headless: true,
+        embedded_host: None,
         private_origins: vec![origin],
     })
     .unwrap()
@@ -74,6 +75,31 @@ fn target(result: &noemori_agent::ToolResult, label: &str) -> (String, String, S
         observation["id"].as_str().unwrap().into(),
         element["ref"].as_str().unwrap().into(),
     )
+}
+
+#[tokio::test]
+async fn repeated_observation_call_does_not_replay_operable_delta_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, server) = site().await;
+    let mut tools = ToolRegistry::new();
+    tools.register(tool(root.path(), url.clone())).unwrap();
+    let session = AgentSession::new();
+    let opened = call(&tools, &session, "open", json!({"action":"open","url":url})).await;
+    let (page, observation, _) = target(&opened, "姓名");
+    let command = json!({"action":"observe","page":page,"mode":"delta","baseline":observation});
+    let first = call(&tools, &session, "delta", command.clone()).await;
+    let repeated = call(&tools, &session, "delta", command).await;
+    let cleanup = session.close().await;
+    server.abort();
+    cleanup.unwrap();
+    assert!(!first.is_error, "{}", first.output);
+    assert_eq!(
+        first.output["observation_update"]["kind"], "unchanged",
+        "初始观察：{}；增量结果：{}",
+        opened.output, first.output
+    );
+    assert!(repeated.output.get("observation_update").is_none());
+    assert!(repeated.output.get("observation").is_none());
 }
 
 #[tokio::test]

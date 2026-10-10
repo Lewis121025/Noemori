@@ -129,7 +129,12 @@ impl State {
         self.user_data.join("vaults").join(&hash[..16])
     }
 
-    pub(crate) fn open_restoring(&mut self, root: &str, control: &OperationControl, restoration: Option<Restoration>) -> Result<Value> {
+    pub(crate) fn open_restoring(
+        &mut self,
+        root: &str,
+        control: &OperationControl,
+        restoration: Option<Restoration>,
+    ) -> Result<Value> {
         let index = self.index_directory(root);
         let report = |item: noemori_vault::OpenProgress, verifying: bool| {
             let phase = if verifying {
@@ -212,7 +217,11 @@ impl State {
         if control.cancelled() {
             return Ok(Value::Null);
         }
-        if self.active.as_ref().is_some_and(|active| active.vault.root() == std::path::Path::new(root)) {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.vault.root() == std::path::Path::new(root))
+        {
             return self.open(root, true, control);
         }
         std::fs::create_dir_all(root)?;

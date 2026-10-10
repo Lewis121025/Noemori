@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { resolveChallenge } from "../../../../modules/agent/web-runtime/dist/challenge.js";
+import {
+  observeDocument,
+  resolveChallenge,
+} from "../../../../modules/agent/web-runtime/dist/challenge.js";
 
 const require = createRequire(
   new URL("../../../../modules/agent/web-runtime/package.json", import.meta.url),
@@ -23,6 +26,76 @@ async function withPage(run) {
 }
 
 const content = "<html><main><h1>公开文档</h1><p>这是验证完成后真实出现的正文。</p></main></html>";
+
+test("验证观察刚开始执行时发生导航，旧执行上下文销毁后仍检查新文档", async () => {
+  await withPage(async (page) => {
+    await page.route("**/*", (route) =>
+      route.fulfill({ contentType: "text/html; charset=utf-8", body: content }),
+    );
+    await page.goto("https://example.com/first");
+    const session = await page.context().newCDPSession(page);
+    await session.send("Debugger.enable");
+    const { breakpointId } = await session.send("Debugger.setInstrumentationBreakpoint", {
+      instrumentation: "beforeScriptExecution",
+    });
+    const paused = new Promise((resolve) => session.once("Debugger.paused", resolve));
+    // 暂停真实浏览器执行，确保导航破坏正在进行的观察，而非依赖定时器碰巧相遇。
+    const checking = resolveChallenge(page, 3000).then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    );
+    await paused;
+    await session.send("Debugger.removeBreakpoint", { breakpointId });
+    await page.goto("https://example.com/cleared");
+    const result = await checking;
+    if (result.error) throw result.error;
+    assert.equal(result.value, false);
+    assert.equal(new URL(page.url()).pathname, "/cleared");
+    await session.detach();
+  });
+});
+
+test("只读观察的原始 JSON 在取回前再次导航也保持同一文档内容", async (t) => {
+  await withPage(async (page) => {
+    await page.route("**/*", (route) =>
+      route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body: `<main>${route.request().url()}</main>`,
+      }),
+    );
+    await page.goto("https://example.com/first");
+    const wait = page.waitForFunction.bind(page);
+    t.mock.method(page, "waitForFunction", async (...args) => {
+      const handle = await wait(...args);
+      await page.goto("https://example.com/second");
+      return handle;
+    });
+    const observation = JSON.parse(
+      await observeDocument(
+        page,
+        "() => JSON.stringify({ url: location.href, text: document.querySelector('main').textContent })",
+        2000,
+      ),
+    );
+    assert.equal(observation.url, "https://example.com/first");
+    assert.equal(observation.text, observation.url);
+    assert.equal(page.url(), "https://example.com/second");
+  });
+});
+
+test("普通 DOM 判据错误不会被当作导航重试", async () => {
+  await withPage(async (page) => {
+    await page.setContent("<main>正文</main>");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "scripts", {
+        get() {
+          throw new Error("判据读取异常");
+        },
+      });
+    });
+    await assert.rejects(resolveChallenge(page, 1000), /判据读取异常/);
+  });
+});
 
 test("自动检查导航后读取真正正文，沿用当前会话的 Cookie", async () => {
   await withPage(async (page) => {

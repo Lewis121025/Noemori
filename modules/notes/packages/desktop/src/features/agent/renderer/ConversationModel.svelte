@@ -2,7 +2,7 @@
   import { onDestroy, tick } from "svelte";
   import type { AgentApi } from "../shared/api";
   import type { ModelSelection, ProviderCatalog } from "../shared/providers";
-  import { modelReasoningEfforts } from "../shared/reasoning";
+  import { modelReasoningEfforts, resolveReasoningEffort } from "../shared/reasoning";
   import ReasoningPicker from "./ReasoningPicker.svelte";
   let {
     api,
@@ -32,7 +32,6 @@
   let catalogError = $state("");
   let selectionError = $state("");
   const saving = $derived(pendingSelection !== null);
-  const displayedEffort = $derived((pendingSelection ?? selection)?.reasoningEffort);
   const error = $derived([catalogError, selectionError].filter(Boolean).join("；"));
   let query = $state("");
   let element: HTMLDivElement;
@@ -45,7 +44,13 @@
   let live = true;
   const provider = $derived(catalog.providers.find((item) => item.id === selection?.providerId));
   const model = $derived(provider?.models.find((item) => item.id === selection?.modelId));
-  const efforts = $derived(modelReasoningEfforts(model?.reasoning));
+  const efforts = $derived(modelReasoningEfforts(model?.reasoning, model?.id, provider?.protocol));
+  const displayedEffort = $derived(
+    (pendingSelection ?? selection)?.reasoningEffort ??
+      (model && provider
+        ? resolveReasoningEffort(model.id, provider.protocol, undefined, model.reasoning)
+        : undefined),
+  );
   const valid = $derived(Boolean(model));
   const searchQuery = $derived(query.trim().toLocaleLowerCase());
   const groups = $derived(
@@ -184,7 +189,7 @@
     <span>{selection?.modelId ?? "选择模型"}</span>
     <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
   </button>
-  {#if model}<ReasoningPicker
+  {#if model && efforts.length}<ReasoningPicker
       {efforts}
       value={displayedEffort}
       {saving}
@@ -198,7 +203,7 @@
               {
                 providerId: selection.providerId,
                 modelId: selection.modelId,
-                ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+                reasoningEffort,
               },
               false,
             )

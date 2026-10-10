@@ -1,6 +1,7 @@
 import { record, text, boolean, integer, nullableText, array } from "./values";
 export { record, text, boolean, integer } from "./values";
 import { parseUi } from "./ui";
+import { canResumeRun } from "./run-actions";
 import type {
   AgentApproval,
   AgentRun,
@@ -10,6 +11,7 @@ import type {
   AgentTerminal,
   ApprovalReply,
   Authentication,
+  MessageMedia,
   MessagePart,
   ModelSettingsUpdate,
   Protocol,
@@ -51,12 +53,27 @@ function process(value: unknown): TerminalInfo {
     error: optionalText(item, "error"),
   };
 }
+/**
+ * 普通内容与工具附件共用原生媒体封装，返回类型在解码入口收窄。
+ * @param value 含 type 与 value 的原生 JSON；载荷格式由展示边界单独解码。
+ * @returns 已确认媒体类型且保留原始载荷的内容块，不复制或解码媒体字节。
+ * @throws 对象、类型或必需载荷字段缺失时拒绝，不把损坏封装交给下游。
+ */
+function messageMedia(value: unknown): MessageMedia {
+  const item = record(value);
+  const type = text(item, "type");
+  if (type !== "image" && type !== "audio" && type !== "video")
+    throw new Error("Agent 媒体类型无效");
+  if (!Object.hasOwn(item, "value")) throw new Error("Agent 媒体缺少载荷字段 value");
+  return { type, value: item["value"] };
+}
+
 function part(value: unknown): MessagePart {
   const item = record(value);
   const type = text(item, "type");
   if (type === "text" || type === "reasoning") return { type, value: text(item, "value") };
   const payload = item["value"];
-  if (type === "image" || type === "audio" || type === "video") return { type, value: payload };
+  if (type === "image" || type === "audio" || type === "video") return messageMedia(item);
   const details = record(payload);
   if (type === "tool_call")
     return {
@@ -67,7 +84,24 @@ function part(value: unknown): MessagePart {
         arguments: details["arguments"],
       },
     };
-  if (type === "tool_result")
+  if (type === "tool_result") {
+    if (details["media"] !== undefined && details["images"] !== undefined)
+      throw new Error("工具媒体字段重复");
+    const legacy = details["images"] !== undefined;
+    const rawMedia = details["media"] !== undefined ? details["media"] : details["images"];
+    const media =
+      rawMedia === undefined
+        ? []
+        : array(rawMedia).map((raw) => {
+            const item = record(raw);
+            if (
+              legacy &&
+              item["type"] === undefined &&
+              (item["format"] === "png" || item["format"] === "jpeg")
+            )
+              return messageMedia({ type: "image", value: item });
+            return messageMedia(item);
+          });
     return {
       type,
       value: {
@@ -75,8 +109,10 @@ function part(value: unknown): MessagePart {
         name: text(details, "name"),
         output: details["output"],
         is_error: boolean(details, "is_error"),
+        ...(media.length ? { media } : {}),
       },
     };
+  }
   throw new Error("Agent 消息内容类型无效");
 }
 function message(value: unknown): AgentMessage {
@@ -101,6 +137,41 @@ function approval(value: unknown): AgentApproval {
   const request = record(item["request"]);
   const details = record(request["request"]);
   const type = text(request, "type");
+  if (type === "browser_capability") {
+    const backend = text(details, "backend");
+    const capability = text(details, "capability");
+    if (backend !== "managed" && backend !== "chrome" && backend !== "edge")
+      throw new Error("扩展能力审批后端无效");
+    if (capability !== "webmcp" && capability !== "developer_logs" && capability !== "cdp")
+      throw new Error("扩展能力审批范围无效");
+    return {
+      id: text(item, "id"),
+      request: {
+        type,
+        request: {
+          backend,
+          capability,
+          page: text(details, "page"),
+          document: text(details, "document"),
+          origin: text(details, "origin"),
+          title: text(details, "title"),
+          reason: text(details, "reason"),
+        },
+      },
+    };
+  }
+  if (type === "ui_launch")
+    return {
+      id: text(item, "id"),
+      request: {
+        type,
+        request: {
+          bundle_id: text(details, "bundle_id"),
+          app_name: text(details, "app_name"),
+          reason: text(details, "reason"),
+        },
+      },
+    };
   if (type === "ui")
     return {
       id: text(item, "id"),
@@ -172,6 +243,7 @@ function parseRun(value: unknown): AgentRun {
   const status = text(item, "status");
   if (
     status !== "running" &&
+    status !== "paused" &&
     status !== "completed" &&
     status !== "cancelled" &&
     status !== "timed_out" &&
@@ -195,6 +267,7 @@ export function parseSnapshot(serialized: string): AgentSnapshot {
   const run = item["run"] === null ? null : parseRun(item["run"]);
   const messages = array(item["messages"]).map(message);
   let end: number | null = null;
+  let previous: AgentRun | null = null;
   const identities = new Set<string>();
   const turns = array(item["turns"]).map((value): AgentTurn => {
     const turn = record(value);
@@ -202,17 +275,25 @@ export function parseSnapshot(serialized: string): AgentSnapshot {
       run: parseRun(turn["run"]),
       message_start: integer(turn, "message_start"),
       message_end: integer(turn, "message_end"),
+      ...(turn["resumed_from"] === undefined ? {} : { resumed_from: text(turn, "resumed_from") }),
     };
+    const continued =
+      result.resumed_from !== undefined &&
+      result.resumed_from === previous?.id &&
+      canResumeRun(previous);
     if (
       identities.has(result.run.id) ||
-      result.message_start >= result.message_end ||
+      result.message_start > result.message_end ||
+      (!continued && result.message_start === result.message_end) ||
       result.message_end > messages.length ||
-      messages[result.message_start]?.role !== "user" ||
+      (result.resumed_from !== undefined && !continued) ||
+      (!continued && messages[result.message_start]?.role !== "user") ||
       (end !== null && end !== result.message_start)
     )
       throw new Error("Agent 轮次边界无效");
     identities.add(result.run.id);
     end = result.message_end;
+    previous = result.run;
     return result;
   });
   const last = turns.at(-1);
@@ -255,11 +336,15 @@ function parseBrowser(value: unknown): AgentSnapshot["browser"] {
   return {
     status,
     error: nullableText(item, "error"),
+    ...(item["handoff"] === undefined ? {} : { handoff: parseBrowserHandoff(item["handoff"]) }),
     tabs: array(item["tabs"]).map((value) => {
       const tab = record(value);
       const dialog = tab["dialog"] === null ? null : record(tab["dialog"]);
       return {
         id: text(tab, "id"),
+        ...(tab["native_target"] === undefined
+          ? {}
+          : { native_target: text(tab, "native_target") }),
         url: text(tab, "url"),
         title: text(tab, "title"),
         crashed: boolean(tab, "crashed"),
@@ -290,6 +375,27 @@ function parseBrowser(value: unknown): AgentSnapshot["browser"] {
   };
 }
 
+function parseBrowserHandoff(
+  value: unknown,
+): NonNullable<AgentSnapshot["browser"]["handoff"]> | null {
+  if (value === undefined || value === null) return null;
+  const item = record(value);
+  const status = text(item, "status");
+  if (
+    status !== "waiting" &&
+    status !== "completed" &&
+    status !== "failed" &&
+    status !== "cancelled"
+  )
+    throw new Error("浏览器协助状态无效");
+  return {
+    id: text(item, "id"),
+    page: text(item, "page"),
+    status,
+    error: nullableText(item, "error"),
+  };
+}
+
 function browserOutcome(
   value: Record<string, unknown>,
 ): AgentSnapshot["browser"]["receipts"][number]["outcome"] {
@@ -304,16 +410,35 @@ function browserOutcome(
   return outcome;
 }
 
-/** 原生日志页的进程状态是扁平字段；投影为窗口对象并校验独立游标，Base64 正文保留给终端解码。 */
+// 整页核验后才交给窗口写入，防止后续分片解码失败时重试重放已显示的前缀。
+function terminalByteLength(encoded: string): number {
+  let decoded: string;
+  try {
+    decoded = atob(encoded);
+  } catch (cause) {
+    throw new Error("终端日志正文不是标准 Base64", { cause });
+  }
+  if (btoa(decoded) !== encoded) throw new Error("终端日志 Base64 编码不是规范字节表示");
+  return decoded.length;
+}
+
+/**
+ * 将原生扁平进程字段投影为窗口对象，分片必须完整覆盖本页的原始字节区间。
+ * @param serialized 原生原始日志页的完整 JSON。
+ * @returns 字节跨度、连续游标和后续标志一致的页面；Base64 正文保留给终端解码。
+ * @throws JSON、字段、标准编码、分片数量或游标关系无效时拒绝整页。
+ */
 export function parseTerminalPage(serialized: string): TerminalPage {
   const item = record(JSON.parse(serialized));
-  return {
+  const chunks = array(item["chunks"]);
+  if (chunks.length > 256) throw new Error("终端日志分片超过原生分页上限");
+  const page: TerminalPage = {
     process: process(item),
     offset: integer(item, "offset"),
     next_offset: integer(item, "next_offset"),
     total_bytes: integer(item, "total_bytes"),
     has_more: boolean(item, "has_more"),
-    chunks: array(item["chunks"]).map((value) => {
+    chunks: chunks.map((value) => {
       const chunk = record(value);
       const stream = text(chunk, "stream");
       if (stream !== "stdout" && stream !== "stderr" && stream !== "terminal")
@@ -326,6 +451,24 @@ export function parseTerminalPage(serialized: string): TerminalPage {
       };
     }),
   };
+  const expectedMore = page.next_offset < page.total_bytes;
+  if (
+    page.offset > page.next_offset ||
+    page.next_offset > page.total_bytes ||
+    page.has_more !== expectedMore
+  )
+    throw new Error("终端日志分页游标或后续标志无效");
+  let cursor = page.offset;
+  for (const chunk of page.chunks) {
+    if (
+      chunk.offset !== cursor ||
+      chunk.next_offset - chunk.offset !== terminalByteLength(chunk.data_base64)
+    )
+      throw new Error("终端日志分片字节跨度或游标无效");
+    cursor = chunk.next_offset;
+  }
+  if (cursor !== page.next_offset) throw new Error("终端日志分片未完整覆盖本页区间");
+  return page;
 }
 
 /**
@@ -437,14 +580,23 @@ export function parseModelSettings(value: unknown): ModelSettingsUpdate {
 export function parseApprovalReply(value: unknown): ApprovalReply {
   const item = record(value);
   const type = text(item, "type");
-  if (type !== "terminal" && type !== "network" && type !== "browser" && type !== "ui")
+  if (
+    type !== "terminal" &&
+    type !== "network" &&
+    type !== "browser" &&
+    type !== "ui" &&
+    type !== "browser_capability" &&
+    type !== "ui_launch"
+  )
     throw new Error("审批回复类型无效");
   const reply = record(item["decision"]);
   const decision = text(reply, "decision");
   if (
-    (decision === "allow_once" && type !== "browser" && type !== "ui") ||
-    decision === "allow_for_session"
+    decision === "allow_once" &&
+    (type === "terminal" || type === "network" || type === "ui_launch")
   )
+    return { type, decision: { decision } };
+  if (decision === "allow_for_session" && type !== "ui_launch")
     return { type, decision: { decision } };
   if (decision === "deny") return { type, decision: { decision, details: text(reply, "details") } };
   if (

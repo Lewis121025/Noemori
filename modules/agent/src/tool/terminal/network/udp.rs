@@ -7,16 +7,73 @@ use super::{
 use crate::{CancellationToken, ExecutionContext};
 use std::{
     collections::HashMap,
+    future::poll_fn,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex, Weak},
+    task::{Context, Poll},
     time::Duration,
 };
+use tokio::io::ReadBuf;
 #[cfg(target_os = "linux")]
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UdpSocket;
 #[cfg(target_os = "linux")]
 use tokio::sync::mpsc;
 use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
+
+/// 返回路径不拥有入口描述符；每次轮询只在短锁内借用 socket，关闭完成后不能继续占用端口。
+pub(super) struct Socket {
+    inner: Mutex<Option<UdpSocket>>,
+    closed: CancellationToken,
+}
+
+impl Socket {
+    /// 接管已注册到运行时的 socket，返回可撤销描述符的入口；调用方仍负责关闭时机。
+    pub(super) fn new(socket: UdpSocket) -> Self {
+        Self {
+            inner: Mutex::new(Some(socket)),
+            closed: CancellationToken::new(),
+        }
+    }
+
+    /// 同步释放入口并唤醒等待中的收发；重复关闭不会重新发布或保留描述符。
+    pub(super) fn close(&self) {
+        self.inner.lock().expect("UDP 入口句柄锁被污染").take();
+        self.closed.cancel();
+    }
+
+    /// 将数据报写入调用方缓冲区并返回长度与来源；关闭后返回 NotConnected。
+    pub(super) async fn recv_from(&self, bytes: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+        let receive = poll_fn(|context| {
+            let socket = self.inner.lock().expect("UDP 入口句柄锁被污染");
+            let Some(socket) = socket.as_ref() else {
+                return Poll::Ready(Err(std::io::ErrorKind::NotConnected.into()));
+            };
+            let mut buffer = ReadBuf::new(bytes);
+            socket
+                .poll_recv_from(context, &mut buffer)
+                .map(|result| result.map(|peer| (buffer.filled().len(), peer)))
+        });
+        tokio::select! {
+            biased;
+            _ = self.closed.cancelled() => Err(std::io::ErrorKind::NotConnected.into()),
+            result = receive => result,
+        }
+    }
+
+    fn poll_send_to(
+        &self,
+        context: &mut Context<'_>,
+        bytes: &[u8],
+        peer: SocketAddr,
+    ) -> Poll<std::io::Result<usize>> {
+        let socket = self.inner.lock().expect("UDP 入口句柄锁被污染");
+        match socket.as_ref() {
+            Some(socket) => socket.poll_send_to(context, bytes, peer),
+            None => Poll::Ready(Err(std::io::ErrorKind::NotConnected.into())),
+        }
+    }
+}
 
 /// 数据报必须归属于仍存活的已认证 SOCKS 控制连接；来源端口确认后不再迁移。
 pub(super) struct Hub {
@@ -47,7 +104,7 @@ struct Flow {
 #[derive(Clone)]
 enum Reply {
     Direct {
-        socket: Arc<UdpSocket>,
+        socket: Weak<Socket>,
         peer: SocketAddr,
     },
     #[cfg(target_os = "linux")]
@@ -57,10 +114,23 @@ impl Reply {
     async fn send(&self, bytes: Vec<u8>) -> Result<(), String> {
         match self {
             Self::Direct { socket, peer } => {
-                socket
-                    .send_to(&bytes, *peer)
-                    .await
-                    .map_err(|error| error.to_string())?;
+                let closed = socket
+                    .upgrade()
+                    .ok_or_else(|| {
+                        std::io::Error::from(std::io::ErrorKind::NotConnected).to_string()
+                    })?
+                    .closed
+                    .clone();
+                let send = poll_fn(|context| match socket.upgrade() {
+                    Some(socket) => socket.poll_send_to(context, &bytes, *peer),
+                    None => Poll::Ready(Err(std::io::ErrorKind::NotConnected.into())),
+                });
+                tokio::select! {
+                    biased;
+                    _ = closed.cancelled() => Err(std::io::Error::from(std::io::ErrorKind::NotConnected)),
+                    result = send => result,
+                }
+                .map_err(|error| error.to_string())?;
                 Ok(())
             }
             #[cfg(target_os = "linux")]
@@ -256,7 +326,7 @@ impl Hub {
     #[cfg(target_os = "macos")]
     pub(super) async fn listen(
         self: Arc<Self>,
-        socket: Arc<UdpSocket>,
+        socket: Arc<Socket>,
         stop: CancellationToken,
         fallback: Option<Arc<Connection>>,
     ) -> Result<(), String> {
@@ -276,12 +346,15 @@ impl Hub {
     /// 接收入口只提供返回路径；每个数据报仍由已认证控制连接决定进程、策略和并发预算。
     pub(super) fn dispatch(
         self: &Arc<Self>,
-        socket: Arc<UdpSocket>,
+        socket: Arc<Socket>,
         packet: Vec<u8>,
         peer: SocketAddr,
         fallback: Option<&Arc<Connection>>,
     ) {
-        let reply = Reply::Direct { socket, peer };
+        let reply = Reply::Direct {
+            socket: Arc::downgrade(&socket),
+            peer,
+        };
         let state = match self.find(peer, reply.clone()).and_then(|association| {
             association
                 .connection

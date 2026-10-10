@@ -10,12 +10,7 @@ import type {
   ExportPlan,
 } from "../../shared/export";
 import { parseReadingBookmark } from "../../shared/reading-position";
-import type {
-  NoteKeys,
-  ReaderApi,
-  VaultEntry,
-  RenameOutcome,
-} from "../../shared/api";
+import type { NoteKeys, ReaderApi, VaultEntry, RenameOutcome } from "../../shared/api";
 import type { DeadLinkOffer } from "../links/dead-link";
 import type { AttachmentImporter } from "../../shared/attachments";
 import { deadLinkSeed } from "../links/dead-link";

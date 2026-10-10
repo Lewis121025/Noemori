@@ -23,7 +23,7 @@ it("视觉能力未知时由服务商判断图片请求，明确不支持时保�
 });
 
 it.each(["gpt-6-sol", "openai/gpt-6.1-sol", "claude-opus-4-6", "google/gemini-3-flash-preview"])(
-  "%s 的档位必须以当前接口为准，缺失能力时不按模型名补齐",
+  "%s 未传入协议与模型身份时仅解析原始能力元数据",
   (modelId) => {
     const model = newProviderModel(modelId);
     expect(modelReasoningEfforts(model.reasoning)).toEqual([]);

@@ -5,14 +5,13 @@ use crate::{
 };
 use futures::{Stream, StreamExt, stream::FuturesUnordered};
 
-/// 仅重叠相邻的并发安全调用，顺序调用是屏障；回填历史按模型顺序，事件按实际完成顺序。
+/// 相邻的并发安全调用全部进入调度，顺序调用是屏障；回填历史按模型顺序，事件按实际完成顺序。
 pub(super) fn batch<'a>(
     state: &'a mut RunState,
     tools: &'a ToolRegistry,
     calls: &'a [ToolCall],
     context: ExecutionContext,
     session: &'a AgentSession,
-    limit: usize,
 ) -> impl Stream<Item = Result<AgentEvent, Error>> + Send + 'a {
     async_stream::try_stream! {
         let mut remaining = calls.iter();
@@ -25,7 +24,7 @@ pub(super) fn batch<'a>(
             let mut running = FuturesUnordered::new();
             let mut next = 0;
             loop {
-                while running.len() < limit {
+                loop {
                     context.check()?;
                     let invocation = if let Some(first) = first.take() { first }
                         else if concurrent {

@@ -193,7 +193,7 @@ it("轮廓接住斜向移动并在停顿后安静落定，文字与焦点保持�
   clock += 40;
   for (let index = 0; index < 72; index += 1) flush();
   expect(Number(wake.style.opacity)).toBe(0);
-  expect(body.style.transform).toBe("matrix(0.9,0,0,0.9,0,0)");
+  expect(body.style.transform).toBe("matrix(0.84,0,0,0.84,0,0)");
   expect(frame).toBeUndefined();
   expect(document.activeElement).toBe(buttons[0]);
   action?.destroy?.();

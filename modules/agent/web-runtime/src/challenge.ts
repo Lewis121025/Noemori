@@ -158,6 +158,41 @@ async function beforeDeadline<T>(
 }
 
 /**
+ * 在同一阶段预算内观察当前文档；导航只重建只读判据，不重放任何页面操作。
+ * @param page 当前页面，观察过程中允许主框架导航。
+ * @param expression 自包含的同步只读函数表达式，完成时返回 JSON 字符串，否则返回假值。
+ * @param timeout 本阶段剩余毫秒预算，必须为正值。
+ * @returns 当前文档的原始 JSON 字符串；原始值不依赖可被导航销毁的远程对象句柄。
+ * @throws 预算耗尽、表达式返回非字符串、页面关闭或判据异常时抛出明确错误。
+ */
+export async function observeDocument(
+  page: Page,
+  expression: string,
+  timeout: number,
+): Promise<string> {
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error("文档观察时间预算必须为正数");
+  const deadline = performance.now() + timeout;
+  const observation = async () => {
+    const handle = await page.waitForFunction(`(${expression})()`, undefined, {
+      timeout,
+      polling: 100,
+    });
+    try {
+      const value: unknown = await handle.jsonValue();
+      if (typeof value !== "string") throw new Error("文档观察必须返回 JSON 字符串");
+      return value;
+    } finally {
+      await handle.dispose();
+    }
+  };
+  return beforeDeadline(
+    observation(),
+    deadline,
+    () => new errors.TimeoutError("文档观察超过时间预算"),
+  );
+}
+
+/**
  * 在同一浏览器会话内等待自动检查或操作 Turnstile，最多三次控件操作。
  * @param page 当前匿名页面，网络与进程仍由原宿主拥有。
  * @param timeout 本阶段剩余毫秒预算，必须为正值。
@@ -178,7 +213,19 @@ export async function resolveChallenge(page: Page, timeout: number): Promise<boo
     );
   };
   while (performance.now() < deadline) {
-    const signals = await beforeDeadline(page.evaluate(challengeSignals), deadline, expired);
+    let signals: ChallengeSignals;
+    try {
+      signals = JSON.parse(
+        await observeDocument(
+          page,
+          `() => JSON.stringify((${challengeSignals.toString()})())`,
+          Math.max(1, deadline - performance.now()),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof errors.TimeoutError) throw expired();
+      throw error;
+    }
     const challenge = classifyChallenge(signals);
     if (challenge.kind === "unsupported") throw new Error(challengeReason(challenge));
     if (challenge.kind === "none") {

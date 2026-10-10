@@ -1,10 +1,12 @@
 //! AX 的受审计边界；Copy 结果按拥有规则回收，CF 类型转换先核验动态类型。
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFArray, CFBoolean, CFNumber, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
+    CFArray, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
 };
 use serde_json::{Value, json};
 use std::{ptr::NonNull, time::Instant};
+#[path = "window-id.rs"]
+mod window_id;
 
 /// 保留真实 AX 对象，编号和相似名称不能替代对象身份。
 #[derive(Clone)]
@@ -62,6 +64,87 @@ fn typed_array(value: &CFType) -> Result<CFRetained<CFArray<CFType>>, String> {
     Ok(unsafe { CFRetained::cast_unchecked::<CFArray<CFType>>(array.retain()) })
 }
 impl Element {
+    /// 文本交互拒绝安全控件和超预算内容，避免选区或粘贴间接读取受保护输入。
+    pub(crate) fn editable_text(&self) -> Result<String, String> {
+        if self.text("AXRole")? == "AXSecureTextField"
+            || self.optional_text("AXSubrole")?.as_deref() == Some("AXSecureTextField")
+        {
+            return Err("安全输入控件不支持文本选择或粘贴".into());
+        }
+        let value = self.attribute("AXValue")?;
+        let value = value
+            .downcast_ref::<CFString>()
+            .ok_or("AXValue 不是字符串")?;
+        // 观察摘要可以截断；选区与粘贴回执必须绑定完整文本，超预算则明确拒绝。
+        if value.length() > 1024 * 1024 {
+            return Err("控件文字超过 1 MiB 文本交互预算".into());
+        }
+        let value = value.to_string();
+        if value.len() > 1024 * 1024 {
+            return Err("控件文字超过 1 MiB 文本交互预算".into());
+        }
+        self.validate_attribute("AXSelectedTextRange")?;
+        Ok(value)
+    }
+    /// 读取 AX 明确声明的 UTF-16 范围；类型不符、负数或应用拒绝均返回错误。
+    pub(crate) fn selected_range(&self) -> Result<super::text_selection::TextRange, String> {
+        let value = self
+            .attribute("AXSelectedTextRange")
+            .map_err(String::from)?;
+        let value = value
+            .downcast_ref::<AXValue>()
+            .ok_or("AXSelectedTextRange 不是 AXValue")?;
+        let mut range = CFRange {
+            location: 0,
+            length: 0,
+        };
+        // SAFETY: 动态类型已验证；输出存储为完整 CFRange，错误类型不会写入。
+        if unsafe { value.r#type() } != AXValueType::CFRange
+            || !unsafe { value.value(AXValueType::CFRange, NonNull::from(&mut range).cast()) }
+        {
+            return Err("AXSelectedTextRange 不是有效 CFRange".into());
+        }
+        Ok(super::text_selection::TextRange {
+            location: usize::try_from(range.location).map_err(|_| "AX 选区起点无效")?,
+            length: usize::try_from(range.length).map_err(|_| "AX 选区长度无效")?,
+        })
+    }
+    /// 设置已校验的 UTF-16 范围；派发后再次读取，由调用者核验目标是否生效。
+    pub(crate) fn set_selected_range(
+        &self,
+        range: super::text_selection::TextRange,
+    ) -> Result<(), String> {
+        self.validate_attribute("AXSelectedTextRange")?;
+        let mut range = CFRange {
+            location: isize::try_from(range.location).map_err(|_| "选区起点溢出")?,
+            length: isize::try_from(range.length).map_err(|_| "选区长度溢出")?,
+        };
+        // SAFETY: AXValue 同步复制完整 CFRange，输出由 CFRetained 持有。
+        let value = unsafe { AXValue::new(AXValueType::CFRange, NonNull::from(&mut range).cast()) }
+            .ok_or("无法构造 AX 选区")?;
+        // SAFETY: AX 元素与拥有的 AXValue 在同步调用期间有效。
+        check(unsafe {
+            self.0
+                .set_attribute_value(&CFString::from_static_str("AXSelectedTextRange"), &value)
+        })
+    }
+    fn validate_attribute(&self, name: &str) -> Result<(), String> {
+        let mut writable = 0u8;
+        // SAFETY: 输出布尔地址有效，属性名由内部固定契约提供。
+        check(unsafe {
+            self.0
+                .is_attribute_settable(&CFString::from_str(name), NonNull::from(&mut writable))
+        })?;
+        if writable == 0 {
+            Err(format!("{name} 不可写"))
+        } else {
+            Ok(())
+        }
+    }
+    /// 将实际 AX 对象关联到截图与输入共用的 WindowServer 编号；不支持或窗口失效时返回诊断。
+    pub(crate) fn window_number(&self) -> Result<u32, String> {
+        window_id::get(&self.0)
+    }
     /// 比较实际 AX 对象身份，不用标题或节点位置替代身份。
     pub(crate) fn same(&self, other: &Self) -> bool {
         self.0 == other.0
@@ -155,13 +238,29 @@ impl Element {
     }
     /// 按 limit 限制复制的元素数量，逐一核验 CF 类型；失败返回原始 AX 诊断。
     pub(crate) fn elements(&self, name: &str, limit: usize) -> Result<Vec<Element>, String> {
+        let limit = isize::try_from(limit).map_err(|_| "AX 元素数量限制溢出")?;
+        let attribute = CFString::from_str(name);
+        let mut count = 0isize;
+        // SAFETY: 输出数量地址有效；先核验真实数组范围，空数组不存在可读取的 index 0。
+        check(unsafe {
+            self.0
+                .attribute_value_count(&attribute, NonNull::from(&mut count))
+        })?;
+        if count < 0 {
+            return Err("AX 数组数量为负数".into());
+        }
+        let count = count.min(limit);
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let returned_limit = usize::try_from(count).map_err(|_| "AX 数组数量溢出")?;
         let mut pointer = std::ptr::null();
         // SAFETY: 输出地址有效且数量有界；成功 Copy 返回拥有的数组。
         check(unsafe {
             self.0.copy_attribute_values(
-                &CFString::from_str(name),
+                &attribute,
                 0,
-                limit as isize,
+                count,
                 NonNull::from(&mut pointer),
             )
         })?;
@@ -171,7 +270,7 @@ impl Element {
         let array = typed_array(&value)?;
         array
             .iter()
-            .take(limit)
+            .take(returned_limit)
             .map(|value| {
                 value
                     .downcast_ref::<AXUIElement>()

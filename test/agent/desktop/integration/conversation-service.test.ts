@@ -9,7 +9,7 @@ import {
   record,
 } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/parse";
 import { newProviderModel } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/providers";
-import { readConversationInput } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/input";
+import { conversationInput, readConversationInput } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/input";
 
 const runtime = vi.hoisted(() => ({
   created: 0,
@@ -22,6 +22,8 @@ const runtime = vi.hoisted(() => ({
   rejectNextStart: false,
   bridgeUpdated: true,
   notify: () => {},
+  change: (_update: (view: AgentSnapshot) => void) => {},
+  browserResumes: 0,
 }));
 vi.mock("../../../../modules/agent/node/index.js", () => ({
   branchCheckpoint: async (checkpoint: string) => {
@@ -71,6 +73,7 @@ vi.mock(
         },
         browser: { status: "idle", tabs: [], receipts: [], error: null },
       };
+      runtime.change = (update) => { update(view); changed(); };
       const startConfigured = (
           configuration: string,
           _binding: string,
@@ -95,6 +98,16 @@ vi.mock(
       };
       return {
         snapshot: () => JSON.stringify(view),
+        browserNavigate: async () => { view.browser.status = "human"; changed(); },
+        browserControl: async (resume: boolean) => {
+          if (resume) {
+            runtime.browserResumes += 1;
+            if (view.run?.status === "paused") view.run.status = "running";
+          }
+          view.browser.status = resume ? "ready" : "human";
+          changed();
+          return JSON.stringify({ outcome: "executed" });
+        },
         checkpoint: () => JSON.stringify({ version: 1, workspace, snapshot: view }),
         restore: (value: string) => {
           runtime.restored += 1;
@@ -104,6 +117,15 @@ vi.mock(
           };
         },
         startConfigured,
+        resumeConfigured: (id: string, configuration: string) => {
+          if (view.run?.id !== id || view.run.status === "running") throw new Error("运行已变化");
+          runtime.configurations.push(configuration);
+          runtime.starts += 1;
+          view.run = { id: `run-${runtime.starts}`, status: "running", error: null, model_calls: 1 };
+          view.revision += 1;
+          changed();
+          return view.run.id;
+        },
         startConfiguredWithAttachments: runtime.bridgeUpdated ? (configuration: string, binding: string, text: string, context?: string, images?: string) => {
           const run = startConfigured(configuration, binding, text, context);
           if (images) {
@@ -115,7 +137,7 @@ vi.mock(
         } : undefined,
         interrupt: async (id: string) => {
           if (view.run?.id !== id) throw new Error("运行已变化");
-          if (view.run.status === "running") view.run.status = "cancelled";
+          if (view.run.status === "running" || view.run.status === "paused") view.run.status = "cancelled";
           changed();
         },
         cancel: () => {
@@ -126,6 +148,23 @@ vi.mock(
           runtime.terminalActions += 1;
           return JSON.stringify({ outcome: "fixture" });
         },
+        uiPermissions: async () =>
+          JSON.stringify({
+            outcome: "observed",
+            accessibility: false,
+            screen_recording: false,
+            input_monitoring: false,
+          }),
+        readTerminal: async (id: string, offset: string) =>
+          JSON.stringify({
+            session_id: id,
+            status: "running",
+            offset: Number(offset),
+            next_offset: Number(offset),
+            total_bytes: Number(offset),
+            has_more: false,
+            chunks: [],
+          }),
         close: async () => {
           runtime.closed += 1;
           view.closed = true;
@@ -162,6 +201,91 @@ async function createSelected(service: AgentService, workspace: string, title: s
   return service.snapshot(item.id);
 }
 
+it.each(["lease", "construction", "restore"])("浏览器激活在 %s 失败后完整释放资源，重试取得新租约", async (stage) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-browser-activation-"));
+  const original = await configured(directory);
+  const item = await original.create(null, "激活验收");
+  await selectFixture(original, item.id);
+  if (stage === "restore") {
+    const run = await original.start(item.id, "已有任务");
+    await original.cancel(item.id, run);
+  }
+  await original.shutdown();
+  const failure = new Error(`激活失败：${stage}`);
+  const resources: { close: ReturnType<typeof vi.fn> }[] = [];
+  const service = new AgentService(directory, "/launcher", () => {}, () => {
+    const resource = {
+      ready: stage === "lease" && resources.length === 0 ? Promise.reject(failure) : Promise.resolve("http://127.0.0.1/lease"),
+      close: vi.fn().mockResolvedValue(undefined),
+      setHuman: vi.fn(), show: vi.fn(), hide: vi.fn(),
+      listDownloads: () => [], saveDownload: async () => {},
+    };
+    resources.push(resource);
+    return resource;
+  });
+  const native = await import("../../../../modules/notes/packages/desktop/src/features/agent/main/native-session");
+  const create = native.createNativeSession;
+  const factory = vi.spyOn(native, "createNativeSession");
+  if (stage === "construction") factory.mockImplementationOnce(() => { throw failure; });
+  if (stage === "restore") factory.mockImplementationOnce((...args) => {
+    const session = create(...args);
+    vi.spyOn(session, "restore").mockImplementationOnce(() => { throw failure; });
+    return session;
+  });
+  onTestFinished(async () => { factory.mockRestore(); await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+
+  await expect(service.start(item.id, "启动任务")).rejects.toThrow(failure);
+  expect(resources[0]!.close).toHaveBeenCalledOnce();
+  await service.start(item.id, "重试任务");
+  expect(resources).toHaveLength(2);
+  await service.shutdown();
+  expect(resources[1]!.close).toHaveBeenCalledOnce();
+});
+
+it("用户浏览之后发送新任务即交给助手操作，不需要额外交还按钮", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-browser-start-"));
+  const service = await configured(directory);
+  onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "共享页面");
+  await selectFixture(service, item.id);
+  await service.browserNavigate(item.id, { action: "open", url: "https://example.com" });
+  expect((await service.snapshot(item.id)).browser.status).toBe("human");
+  await service.start(item.id, "读取当前页面");
+  expect((await service.snapshot(item.id)).browser.status).toBe("ready");
+});
+
+it.each(["snapshot", "settings", "queue", "attachment"])(
+  "会话目录不可读时 %s 查询交付读取原因，不把未知历史误报为已删除",
+  async (query) => {
+    const { ConversationStore } =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+    const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-load-error-"));
+    const failure = new Error("会话目录暂时无法读取");
+    const loading = vi.spyOn(ConversationStore.prototype, "load").mockRejectedValueOnce(failure);
+    const service = new AgentService(directory, "/launcher", () => {});
+    onTestFinished(async () => {
+      loading.mockRestore();
+      await service.shutdown();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const id = "11111111-1111-4111-8111-111111111111";
+    const reading =
+      query === "snapshot"
+        ? service.snapshot(id)
+        : query === "settings"
+          ? service.settingsGet(id)
+          : query === "queue"
+            ? service.queueGet(id)
+            : service.attachmentPreview(id, "22222222-2222-4222-8222-222222222222");
+
+    await expect(reading).rejects.toBe(failure);
+    const listed = await service.list();
+    expect(listed.items).toEqual([]);
+    expect(listed.issues).toContain(`对话目录读取失败：${failure.message}`);
+    await expect(service.create(null, "不能覆盖未知历史")).rejects.toBe(failure);
+  },
+);
+
 it("附件与草稿按对话保存，重启、排队和分叉保留副本，跨会话身份被拒绝", async () => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-service-"));
   const services: AgentService[] = [];
@@ -187,7 +311,9 @@ it("附件与草稿按对话保存，重启、排队和分叉保留副本，跨�
   const run = await restored.start(first.id, "读取资料", [], [files[0]!.id]);
   const sent = await restored.snapshot(first.id);
   expect(sent.draftAttachments ?? []).toEqual([]);
-  const input = readConversationInput(sent.messages[0]!.content.find((part) => part.type === "text")!.value.toString());
+  const sentText = sent.messages[0]?.content.find((part) => part.type === "text");
+  if (!sentText || sentText.type !== "text") throw new Error("已发送消息缺少文本信封");
+  const input = readConversationInput(sentText.value);
   expect(input.attachments).toEqual(files);
   await restored.saveDraft(first.id, "后续读取", [], [files[0]!.id]);
   const queue = await restored.queueAdd(first.id, run, "后续读取", [], [files[0]!.id]);
@@ -196,6 +322,39 @@ it("附件与草稿按对话保存，重启、排队和分叉保留副本，跨�
   const fork = await restored.fork(first.id, { title: "附件分叉", afterTurnId: null });
   await restored.remove(first.id);
   expect(await restored.attachmentPreview(fork.id, files[0]!.id)).toMatchObject({ text: "真实附件原文" });
+});
+
+it("内容读取使用独立对话的真实运行目录，附件保存仅返回所属对话的原始副本", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-service-content-"));
+  const service = await configured(directory);
+  test.onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const first = await service.create(null, "内容预览"), second = await service.create(null, "其他对话");
+  const { ConversationStore } = await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const stored = await new ConversationStore(directory).load();
+  const workspace = stored.records.find((item) => item.id === first.id)!.snapshot.workspace;
+  for (const item of stored.records) await mkdir(item.snapshot.workspace, { recursive: true });
+  await writeFile(join(workspace, "页面.html"), "<h1>当前工作区</h1>");
+  expect(await service.contentPreview(first.id, "页面.html")).toMatchObject({ name: "页面.html", preview: { type: "html", text: "<h1>当前工作区</h1>" } });
+  await expect(service.contentPreview(second.id, join(workspace, "页面.html"))).rejects.toThrow("工作区");
+  const bytes = new TextEncoder().encode("不可变附件\n");
+  const [file] = await service.addAttachments(first.id, [{ name: "资料.txt", bytes }]);
+  expect(await service.attachmentContent(first.id, file!.id)).toEqual({ name: "资料.txt", bytes });
+  await expect(service.attachmentContent(second.id, file!.id)).rejects.toThrow("不属于");
+});
+
+it("内容读取期间对话被删除时拒绝迟到快照，不把旧内容交给新页面", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-service-content-late-"));
+  const service = await configured(directory);
+  const reader = await import("../../../../modules/notes/packages/desktop/src/features/agent/main/content-reader");
+  const pending = Promise.withResolvers<{ name: string; bytes: Uint8Array; preview: { type: "text"; text: string; truncated: boolean } }>();
+  const reading = vi.spyOn(reader, "readConversationContent").mockReturnValueOnce(pending.promise);
+  test.onTestFinished(async () => { reading.mockRestore(); await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const current = await service.create(null, "正在读取");
+  const request = service.contentPreview(current.id, "资料.txt");
+  await vi.waitFor(() => expect(reading).toHaveBeenCalled());
+  await service.remove(current.id);
+  pending.resolve({ name: "资料.txt", bytes: new Uint8Array(), preview: { type: "text", text: "旧快照", truncated: false } });
+  await expect(request).rejects.toThrow("不存在");
 });
 
 it("文件导入与输入草稿并发时保留新附件，只有显式空列表才移除附件", async (test) => {
@@ -284,6 +443,85 @@ it("导入后保存失败整批回滚副本，原草稿与附件目录保持完�
   expect(await readdir(join(directory, "agent-attachments/owned", item.id))).toEqual([]);
 });
 
+it.each(["import", "fork"] as const)(
+  "%s 的保存与附件回滚同时失败时交付两处原因",
+  async (operation) => {
+    const { ConversationStore } =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+    const { AttachmentStore } =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/attachments");
+    const directory = await mkdtemp(join(tmpdir(), "noemori-attachment-rollback-failure-"));
+    const service = await configured(directory);
+    onTestFinished(async () => {
+      await service.shutdown();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const item = await service.create(null, "原会话");
+    const failure = new Error("会话写入失败");
+    const cleanup = new Error("附件回滚失败");
+    const save = vi.spyOn(ConversationStore.prototype, "save").mockRejectedValueOnce(failure);
+    const rollback =
+      operation === "import"
+        ? vi.spyOn(AttachmentStore.prototype, "discard").mockRejectedValueOnce(cleanup)
+        : vi.spyOn(AttachmentStore.prototype, "remove").mockRejectedValueOnce(cleanup);
+    onTestFinished(() => {
+      save.mockRestore();
+      rollback.mockRestore();
+    });
+
+    const pending =
+      operation === "import"
+        ? service.addAttachments(item.id, [{ name: "资料.txt", bytes: Buffer.from("原文") }])
+        : service.fork(item.id, { title: "失败分叉", afterTurnId: null });
+    await expect(pending).rejects.toMatchObject({ errors: [failure, cleanup] });
+    expect((await service.list()).items.map((entry) => entry.id)).toEqual([item.id]);
+    expect((await service.snapshot(item.id)).draftAttachments ?? []).toEqual([]);
+  },
+);
+
+it("原生检查点恢复和资源关闭同时失败时保留两处原因，不发布半初始化会话", async () => {
+  const native =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/native-session");
+  const directory = await mkdtemp(join(tmpdir(), "noemori-activation-cleanup-failure-"));
+  const original = await configured(directory);
+  const services = [original];
+  onTestFinished(async () => {
+    await Promise.all(services.map((service) => service.shutdown()));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const item = await original.create(null, "已有历史");
+  await selectFixture(original, item.id);
+  const run = await original.start(item.id, "首次发送");
+  await original.cancel(item.id, run);
+  await original.shutdown();
+  const restored = new AgentService(directory, "/launcher", () => {});
+  services.push(restored);
+  const failure = new Error("检查点恢复失败");
+  const cleanup = new Error("原生资源关闭失败");
+  const create = native.createNativeSession;
+  const factory = vi.spyOn(native, "createNativeSession").mockImplementationOnce((...args) => {
+    const session = create(...args);
+    const restore = vi.spyOn(session, "restore").mockImplementationOnce(() => {
+      throw failure;
+    });
+    const close = vi.spyOn(session, "close").mockRejectedValueOnce(cleanup);
+    onTestFinished(() => {
+      restore.mockRestore();
+      close.mockRestore();
+    });
+    return session;
+  });
+  onTestFinished(() => factory.mockRestore());
+  const starts = runtime.starts;
+
+  await expect(restored.start(item.id, "再次发送")).rejects.toMatchObject({
+    errors: [failure, cleanup],
+  });
+  expect(runtime.starts).toBe(starts);
+  await restored.start(item.id, "重试发送");
+  expect(runtime.starts).toBe(starts + 1);
+});
+
 it("目录副本保留文章对话身份与分支，新仓库中的路径重绑且原历史不改写", async (test) => {
   const base = await realpath(await mkdtemp(join(tmpdir(), "noemori-import-history-")));
   const services: AgentService[] = [];
@@ -325,6 +563,223 @@ it("目录副本保留文章对话身份与分支，新仓库中的路径重绑�
   expect((await restored.snapshot(fork.id)).workspace).toBe(root);
 });
 
+it.each(["运行中", "空闲资源"] as const)(
+  "文章历史接入拒绝%s的原目录资源，保留任务、源历史与副本，释放后可重试",
+  async (state) => {
+    const { ConversationStore } =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+    const base = await realpath(await mkdtemp(join(tmpdir(), "noemori-import-resource-owner-")));
+    const source = join(base, "资料");
+    const root = join(base, "Noemori");
+    const data = join(base, "state");
+    await mkdir(source, { recursive: true });
+    await mkdir(join(root, "资料"), { recursive: true });
+    await writeFile(join(source, "文章.md"), "# 原文\n");
+    await writeFile(join(root, "资料/文章.md"), "# 原文\n");
+    const service = await configured(data);
+    onTestFinished(async () => {
+      await service.shutdown();
+      await rm(base, { recursive: true, force: true });
+    });
+    const article = await service.createArticle({
+      root: source,
+      path: "文章.md",
+      title: "原目录任务",
+    });
+    await selectFixture(service, article.id);
+    if (state === "运行中") await service.start(article.id, "继续在原目录工作");
+    else await service.uiPermissions(article.id);
+    await service.flush();
+    const history = join(source, ".noemori/agent/conversations", `${article.id}.json`);
+    const before = await readFile(history);
+    await cp(join(source, ".noemori"), join(root, "资料/.noemori"), { recursive: true });
+    await writeFile(
+      join(root, "资料/.noemori-library-source.json"),
+      JSON.stringify({ version: 1, source }),
+    );
+    const copiedHistory = join(root, "资料/.noemori/agent/conversations", `${article.id}.json`);
+    const copied = await readFile(copiedHistory);
+    const createdBefore = runtime.created;
+    const closedBefore = runtime.closed;
+    const startsBefore = runtime.starts;
+
+    await expect(service.importArticleLibrary(source, root, "资料")).rejects.toThrow("运行资源");
+    await service.flush();
+    const current = await service.snapshot(article.id);
+    expect(current.workspace).toBe(source);
+    expect(current.article?.path).toBe("文章.md");
+    expect(current.run?.status ?? null).toBe(state === "运行中" ? "running" : null);
+    expect(runtime.created).toBe(createdBefore);
+    expect(runtime.closed).toBe(closedBefore);
+    expect(runtime.starts).toBe(startsBefore);
+    expect(await readFile(history)).toEqual(before);
+    expect(await readFile(copiedHistory)).toEqual(copied);
+    const original = await new ConversationStore(join(source, ".noemori/agent")).load();
+    expect(original.issues).toEqual([]);
+    expect(original.records[0]?.linkedWorkspace).toBe(source);
+    expect(original.records[0]?.snapshot.workspace).toBe(source);
+    expect((await new ConversationStore(join(root, ".noemori/agent")).load()).records).toEqual([]);
+
+    await service.archive(article.id, true);
+    const released = await readFile(history);
+    await service.importArticleLibrary(source, root, "资料");
+    expect((await service.snapshot(article.id)).article?.path).toBe("资料/文章.md");
+    // 目标库已经持有此身份时，重新接入旧副本仍是幂等操作，可保留目标库的资源。
+    await service.uiPermissions(article.id);
+    await service.importArticleLibrary(source, root, "资料");
+    await service.flush();
+    const imported = await new ConversationStore(join(root, ".noemori/agent")).load();
+    expect(imported.issues).toEqual([]);
+    expect(imported.records[0]?.linkedWorkspace).toBe(root);
+    expect(imported.records[0]?.snapshot.workspace).toBe(root);
+    expect(await readFile(history)).toEqual(released);
+    expect(await readFile(copiedHistory)).toEqual(copied);
+    expect(runtime.created).toBe(createdBefore + 1);
+    expect(runtime.closed).toBe(closedBefore + 1);
+    expect(runtime.starts).toBe(startsBefore);
+  },
+);
+
+it("文章历史接入与模型选择共用会话顺序，接入期间的选择写入最终归属", async () => {
+  const { ConversationStore } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const base = await realpath(await mkdtemp(join(tmpdir(), "noemori-import-selection-order-")));
+  const source = join(base, "资料");
+  const root = join(base, "Noemori");
+  const data = join(base, "state");
+  await mkdir(source, { recursive: true });
+  await mkdir(join(root, "资料"), { recursive: true });
+  await writeFile(join(source, "文章.md"), "# 原文\n");
+  await writeFile(join(root, "资料/文章.md"), "# 原文\n");
+  const service = await configured(data);
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(async () => {
+    release.resolve();
+    await service.shutdown();
+    await rm(base, { recursive: true, force: true });
+  });
+  const provider = (await service.providersGet()).providers[0];
+  if (!provider) throw new Error("测试供应商缺失");
+  await service.providersSave({
+    ...provider,
+    authentication: { type: "none" },
+    models: [...provider.models, newProviderModel("second")],
+  });
+  const article = await service.createArticle({ root: source, path: "文章.md", title: "顺序接入" });
+  await selectFixture(service, article.id);
+  await cp(join(source, ".noemori"), join(root, "资料/.noemori"), { recursive: true });
+  await writeFile(
+    join(root, "资料/.noemori-library-source.json"),
+    JSON.stringify({ version: 1, source }),
+  );
+  const original = ConversationStore.prototype.save;
+  const save = vi.spyOn(ConversationStore.prototype, "save").mockImplementation(async function (
+    this: InstanceType<typeof ConversationStore>,
+    item,
+  ) {
+    if (item.id === article.id && item.snapshot.workspace === root) {
+      entered.resolve();
+      await release.promise;
+    }
+    return original.call(this, item);
+  });
+  onTestFinished(() => save.mockRestore());
+  const createdBefore = runtime.created;
+  const importing = service.importArticleLibrary(source, root, "资料");
+  await entered.promise;
+  const selection = { providerId: provider.id, modelId: "second" };
+  const selecting = service.modelSelect(article.id, selection);
+  // 让已接收的选择进入调用队列，再释放导入的持久化边界。
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  release.resolve();
+  await Promise.all([importing, selecting]);
+
+  expect((await service.snapshot(article.id)).modelSelection).toEqual(selection);
+  const loaded = await new ConversationStore(join(root, ".noemori/agent")).load();
+  expect(loaded.issues).toEqual([]);
+  expect(loaded.records.find((item) => item.id === article.id)?.modelSelection).toEqual(selection);
+  expect(runtime.created).toBe(createdBefore);
+});
+
+it("并发加载同身份的两个库副本时，后来加载的副本报告冲突，不发布第二份归属", async () => {
+  const agent = await import("../../../../modules/agent/node/index.js");
+  const { ConversationStore } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const base = await realpath(await mkdtemp(join(tmpdir(), "noemori-vault-identity-order-")));
+  const source = join(base, "原库");
+  const firstRoot = join(base, "副本一");
+  const secondRoot = join(base, "副本二");
+  const data = join(base, "state");
+  for (const root of [source, firstRoot, secondRoot]) {
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "文章.md"), "# 原文\n");
+  }
+  const original = await configured(data);
+  const services = [original];
+  const release = Promise.withResolvers<void>();
+  onTestFinished(async () => {
+    release.resolve();
+    await Promise.all(services.map((service) => service.shutdown()));
+    await rm(base, { recursive: true, force: true });
+  });
+  const article = await original.createArticle({
+    root: source,
+    path: "文章.md",
+    title: "库副本身份",
+  });
+  await selectFixture(original, article.id);
+  const run = await original.start(article.id, "完成后再复制");
+  await original.cancel(article.id, run);
+  await original.shutdown();
+  await cp(join(source, ".noemori"), join(firstRoot, ".noemori"), { recursive: true });
+  await cp(join(source, ".noemori"), join(secondRoot, ".noemori"), { recursive: true });
+  const restored = new AgentService(data, "/launcher", () => {});
+  services.push(restored);
+  await restored.list();
+  const entered = Promise.withResolvers<void>();
+  const secondLoaded = Promise.withResolvers<void>();
+  const relocate = agent.relocateCheckpoint;
+  const relocating = vi.spyOn(agent, "relocateCheckpoint").mockImplementation(async (...args) => {
+    if (args[1] === firstRoot) {
+      entered.resolve();
+      await release.promise;
+    }
+    return relocate(...args);
+  });
+  const load = ConversationStore.prototype.load;
+  let loads = 0;
+  const loading = vi.spyOn(ConversationStore.prototype, "load").mockImplementation(async function (
+    this: InstanceType<typeof ConversationStore>,
+  ) {
+    const loaded = await load.call(this);
+    if (loaded.records.some((item) => item.id === article.id) && ++loads === 2)
+      secondLoaded.resolve();
+    return loaded;
+  });
+  onTestFinished(() => {
+    relocating.mockRestore();
+    loading.mockRestore();
+  });
+  const createdBefore = runtime.created;
+  const first = restored.attachVault(firstRoot);
+  await entered.promise;
+  const second = restored.attachVault(secondRoot);
+  await secondLoaded.promise;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  release.resolve();
+  await Promise.all([first, second]);
+
+  const listed = await restored.list();
+  expect(listed.items).toHaveLength(1);
+  expect(listed.items[0]?.workspace).toBe(firstRoot);
+  expect(listed.issues.some((issue) => issue.includes("另一个已打开的库副本含有相同对话"))).toBe(
+    true,
+  );
+  expect(relocating.mock.calls.map((call) => call[1])).toEqual([firstRoot]);
+  expect(runtime.created).toBe(createdBefore);
+});
+
 it("引用草稿跨重启保留，发送仅消费匹配的文字与引用，模型收到来源和选中原文", async (test) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-reference-service-"));
   const services: AgentService[] = [];
@@ -335,7 +790,11 @@ it("引用草稿跨重启保留，发送仅消费匹配的文字与引用，模�
   const service = await configured(directory);
   services.push(service);
   const item = await createSelected(service, directory, "引用任务");
-  const quote = { id: "quoted", text: "原文😀", source: { root: "/another-vault", path: "资料/原文.md", offset: 0, sourceText: "原文😀" } };
+  const quote = {
+    id: "quoted",
+    text: "原文😀",
+    source: { root: "/another-vault", path: "资料/原文.md", offset: 0, sourceText: "原文😀" },
+  };
   await service.saveDraft(item.id, "解释引用", [quote]);
   await service.shutdown();
   const restored = new AgentService(directory, "/launcher", () => {});
@@ -349,6 +808,99 @@ it("引用草稿跨重启保留，发送仅消费匹配的文字与引用，模�
   expect(JSON.stringify(sent.messages)).toContain("资料/原文.md");
   expect(JSON.stringify(sent.messages)).toContain("原文😀");
 });
+
+it("用户原文包含其他会话的文件信封时按文字发送，不授予文件归属且正常消费草稿", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-literal-input-"));
+  const service = await configured(directory);
+  onTestFinished(async () => {
+    await service.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const item = await createSelected(service, directory, "解释原文");
+  const literal = conversationInput(
+    "解释这份协议",
+    [],
+    [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "不属于此会话.txt",
+        size: 12,
+        sha256: "a".repeat(64),
+        image: null,
+      },
+    ],
+    "/another-conversation",
+  );
+  await service.saveDraft(item.id, literal);
+  await service.start(item.id, literal);
+  const saved = await service.snapshot(item.id);
+  const part = saved.messages[0]?.content.find((part) => part.type === "text");
+  if (!part || part.type !== "text") throw new Error("已发送消息缺少正文");
+  expect(readConversationInput(part.value)).toEqual({
+    text: literal,
+    references: [],
+    attachments: [],
+    directory: null,
+  });
+  expect(saved.draft).toBe("");
+});
+
+it.each(["identity", "offset", "progress", "budget", "full", "empty"])(
+  "终端回复 %s 按请求关联、字节预算和分页进展交付，不执行命令",
+  async (fault) => {
+    const native =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/native-session");
+    const directory = await mkdtemp(join(tmpdir(), "noemori-terminal-page-contract-"));
+    const service = await configured(directory);
+    const item = await createSelected(service, directory, "读取日志");
+    const create = native.createNativeSession;
+    const offset = fault === "offset" ? 6 : 7;
+    const noProgress = fault === "progress";
+    const length = fault === "budget" ? 8193 : fault === "full" ? 8192 : fault === "empty" ? 0 : 3;
+    const response = {
+      session_id: fault === "identity" ? "another-terminal" : "terminal",
+      status: "running",
+      offset,
+      next_offset: noProgress ? offset : offset + length,
+      total_bytes: offset + length,
+      has_more: noProgress,
+      chunks:
+        noProgress || !length
+          ? []
+          : [
+              {
+                stream: "stdout",
+                data_base64: Buffer.alloc(length, 97).toString("base64"),
+                offset,
+                next_offset: offset + length,
+              },
+            ],
+    };
+    const factory = vi.spyOn(native, "createNativeSession").mockImplementationOnce((...args) => {
+      const session = create(...args);
+      const reading = vi
+        .spyOn(session, "readTerminal")
+        .mockResolvedValueOnce(JSON.stringify(response));
+      onTestFinished(() => reading.mockRestore());
+      return session;
+    });
+    onTestFinished(async () => {
+      factory.mockRestore();
+      await service.shutdown();
+      await rm(directory, { recursive: true, force: true });
+    });
+    await service.start(item.id, "开始对话");
+    const starts = runtime.starts;
+    const actions = runtime.terminalActions;
+
+    const reading = service.terminalRead(item.id, "terminal", "7");
+    if (fault === "full" || fault === "empty") {
+      expect(await reading).toMatchObject({ offset: 7, next_offset: 7 + length, has_more: false });
+    } else await expect(reading).rejects.toThrow("终端");
+    expect(runtime.starts).toBe(starts);
+    expect(runtime.terminalActions).toBe(actions);
+  },
+);
 
 /** 挂起步骤也属于夹具；测试失败时先放行并结算服务，避免清理后的目录被迟到写入重建。 */
 async function closingFixture() {
@@ -370,7 +922,46 @@ async function closingFixture() {
   return { directory, service, item, release, services };
 }
 
-it.each(["模型请求", "终端动作"])("关闭发生在%s的资源激活期间时，不创建迟到资源", async (kind) => {
+it.each(["模型请求", "终端动作", "权限检查"])(
+  "关闭发生在%s的资源激活期间时，不创建迟到资源",
+  async (kind) => {
+    const { AgentProviderStore } =
+      await import("../../../../modules/notes/packages/desktop/src/features/agent/main/providers");
+    const { service, item, release } = await closingFixture();
+    const entered = Promise.withResolvers<void>();
+    const original = AgentProviderStore.prototype.selected;
+    const selected = vi
+      .spyOn(AgentProviderStore.prototype, "selected")
+      .mockImplementationOnce(async function (
+        this: InstanceType<typeof AgentProviderStore>,
+        value,
+      ) {
+        entered.resolve();
+        await release.promise;
+        return original.call(this, value);
+      });
+    onTestFinished(() => selected.mockRestore());
+    const before = runtime.created;
+    const actionsBefore = runtime.terminalActions;
+    const pending =
+      kind === "模型请求"
+        ? service.start(item.id, "准备发送")
+        : kind === "终端动作"
+          ? service.terminalAction(item.id, { action: "exec", cmd: "printf fixture" })
+          : service.uiPermissions(item.id);
+    const settled = Promise.allSettled([pending]);
+    await entered.promise;
+    const closing = service.shutdown();
+    release.resolve();
+    const [result] = await settled;
+    await closing;
+    expect(result).toMatchObject({ status: "rejected", reason: new Error("Agent 服务正在关闭") });
+    expect(runtime.created).toBe(before);
+    expect(runtime.terminalActions).toBe(actionsBefore);
+  },
+);
+
+it.each(["权限检查", "模型请求"])("权限检查与%s并发时只有一个原生资源所有者", async (kind) => {
   const { AgentProviderStore } =
     await import("../../../../modules/notes/packages/desktop/src/features/agent/main/providers");
   const { service, item, release } = await closingFixture();
@@ -385,20 +976,55 @@ it.each(["模型请求", "终端动作"])("关闭发生在%s的资源激活期�
     });
   onTestFinished(() => selected.mockRestore());
   const before = runtime.created;
-  const actionsBefore = runtime.terminalActions;
-  const pending =
-    kind === "模型请求"
-      ? service.start(item.id, "准备发送")
-      : service.terminalAction(item.id, { action: "exec", cmd: "printf fixture" });
-  const settled = Promise.allSettled([pending]);
+  const closedBefore = runtime.closed;
+  const permissions = service.uiPermissions(item.id);
+  await entered.promise;
+  const concurrent =
+    kind === "权限检查" ? service.uiPermissions(item.id) : service.start(item.id, "并发发送");
+  release.resolve();
+  await Promise.all([permissions, concurrent]);
+
+  expect(runtime.created - before).toBe(1);
+  await service.shutdown();
+  expect(runtime.closed - closedBefore).toBe(1);
+});
+
+it("关闭服务先等待已进入的权限检查，再释放其原生资源", async () => {
+  const native =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/native-session");
+  const { service, item, release } = await closingFixture();
+  const entered = Promise.withResolvers<void>();
+  const create = native.createNativeSession;
+  const factory = vi.spyOn(native, "createNativeSession").mockImplementationOnce((...args) => {
+    const session = create(...args);
+    const permissions = vi.spyOn(session, "uiPermissions").mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return JSON.stringify({ outcome: "observed", accessibility: true });
+    });
+    onTestFinished(() => permissions.mockRestore());
+    return session;
+  });
+  onTestFinished(() => factory.mockRestore());
+  const before = runtime.closed;
+  const permissions = service.uiPermissions(item.id);
   await entered.promise;
   const closing = service.shutdown();
+  let settled = false;
+  void closing.then(() => {
+    settled = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(settled).toBe(false);
+  expect(runtime.closed).toBe(before);
   release.resolve();
-  const [result] = await settled;
+  expect(await permissions).toEqual({
+    accessibility: true,
+    screen_recording: false,
+    input_monitoring: false,
+  });
   await closing;
-  expect(result).toMatchObject({ status: "rejected", reason: new Error("Agent 服务正在关闭") });
-  expect(runtime.created).toBe(before);
-  expect(runtime.terminalActions).toBe(actionsBefore);
+  expect(runtime.closed - before).toBe(1);
 });
 
 it("关闭发生在发送前保存期间时，不再派发模型且保留未发送草稿", async () => {
@@ -625,6 +1251,7 @@ it("中断结算后可继续，重复或过期的继续请求不重复执行，�
   await service.cancel(item.id, run);
   expect((await service.snapshot(item.id)).run?.status).toBe("cancelled");
   await service.saveDraft(item.id, "还没决定发送的想法");
+  const messages = (await service.snapshot(item.id)).messages;
   const before = runtime.starts;
   const resumed = await Promise.allSettled([
     service.resume(item.id, run),
@@ -636,6 +1263,7 @@ it("中断结算后可继续，重复或过期的继续请求不重复执行，�
   const snapshot = await service.snapshot(item.id);
   expect(snapshot.draft).toBe("还没决定发送的想法");
   expect(snapshot.run?.status).toBe("running");
+  expect(snapshot.messages).toEqual(messages);
   await service.shutdown();
 });
 
@@ -683,6 +1311,51 @@ it("窗口重载与退出清理不改变会话的活动时间及下次打开的�
     before,
   );
   await restored.shutdown();
+});
+
+it("文章改名排队期间会话已删除时，不再读取或发布失效的归属", async () => {
+  const { ConversationStore } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/conversations");
+  const { ArticleLibrary } =
+    await import("../../../../modules/notes/packages/desktop/src/features/agent/main/articles");
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "noemori-article-remap-order-")));
+  await writeFile(join(directory, "原文.md"), "# 原文\n");
+  const changed = vi.fn();
+  const service = new AgentService(join(directory, "state"), "/launcher", changed);
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(async () => {
+    release.resolve();
+    await service.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const item = await service.createArticle({ root: directory, path: "原文.md", title: "文章归属" });
+  const remove = ConversationStore.prototype.remove;
+  const removing = vi
+    .spyOn(ConversationStore.prototype, "remove")
+    .mockImplementation(async function (this: InstanceType<typeof ConversationStore>, id) {
+      if (id === item.id) {
+        entered.resolve();
+        await release.promise;
+      }
+      return remove.call(this, id);
+    });
+  const location = vi.spyOn(ArticleLibrary.prototype, "location");
+  onTestFinished(() => {
+    removing.mockRestore();
+    location.mockRestore();
+  });
+  changed.mockClear();
+  const deleting = service.remove(item.id);
+  await entered.promise;
+  const remapping = service.remapArticles(directory, [{ from: "原文.md", to: "新名称.md" }]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  release.resolve();
+  await Promise.all([deleting, remapping]);
+
+  expect((await service.list()).items).toEqual([]);
+  expect(location).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenCalledExactlyOnceWith(item.id);
 });
 
 it("文章会话归属随改名迁移，每轮更新段落，删除文章不删除对话", async (test) => {
@@ -870,4 +1543,49 @@ it("旧版历史从已确认的全局选择迁入，保存后不再受旧默认�
   const next = new AgentService(directory, "/launcher", () => {});
   expect((await next.snapshot(item.id)).modelSelection?.modelId).toBe("fixture");
   await next.shutdown();
+});
+
+
+it.each(["completed", "failed"] as const)("协助 %s 在运行暂停后自动交还，同一任务不增加用户消息或重复恢复", async (status) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-auto-handoff-"));
+  const service = await configured(directory);
+  onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "自动协助");
+  await selectFixture(service, item.id);
+  const run = await service.start(item.id, "完成验证后继续");
+  const before = runtime.browserResumes;
+  runtime.change((view) => {
+    view.browser.status = "human";
+    view.browser.handoff = { id: "assistance", page: "page", status, error: status === "failed" ? "页面已关闭" : null };
+  });
+  await new Promise((done) => setTimeout(done, 300));
+  expect(runtime.browserResumes).toBe(before);
+  runtime.change((view) => { if (view.run) view.run.status = "paused"; });
+  await vi.waitFor(() => expect(runtime.browserResumes).toBe(before + 1), { timeout: 1500 });
+  runtime.notify();
+  await new Promise((done) => setTimeout(done, 300));
+  const snapshot = await service.snapshot(item.id);
+  expect(snapshot.run).toMatchObject({ id: run, status: "running" });
+  expect(snapshot.messages.filter((message) => message.role === "user")).toHaveLength(1);
+  expect(runtime.browserResumes).toBe(before + 1);
+});
+
+
+it("停止任务时撤销仍在等待的协助，迟到完成信号不复活已取消运行", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-cancel-handoff-"));
+  const service = await configured(directory);
+  onTestFinished(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  const item = await service.create(null, "撤销协助");
+  await selectFixture(service, item.id);
+  const run = await service.start(item.id, "等待用户验证");
+  runtime.change((view) => {
+    if (view.run) view.run.status = "paused";
+    view.browser.status = "human";
+    view.browser.handoff = { id: "cancelled-assistance", page: "page", status: "waiting", error: null };
+  });
+  await service.cancel(item.id, run);
+  await vi.waitFor(async () => expect((await service.snapshot(item.id)).browser.status).toBe("ready"));
+  runtime.change((view) => { if (view.browser.handoff) view.browser.handoff.status = "completed"; });
+  await new Promise((done) => setTimeout(done, 300));
+  expect((await service.snapshot(item.id)).run).toMatchObject({ id: run, status: "cancelled" });
 });

@@ -7,6 +7,7 @@ import type {
 } from "../shared/providers";
 import { parseModelSelection, parseProviderUpdate, providerEndpoint } from "../shared/providers";
 import { parseAuthenticationDescription, record, text } from "../shared/parse";
+import { resolveReasoningEffort } from "../shared/reasoning";
 import { authenticationDescription, decryptAuthentication, parseProtectedModel } from "./settings";
 
 /** 公开连接与系统密文成对保存；模型归属根据实际连接计算，不依赖人为修订号。 */
@@ -73,11 +74,17 @@ export function requireModelSelection(
  * 私有模型构造与公开配置共用同一映射，保持模型、路径和能力一致。
  * @param selected 已解析的选择。
  * @returns 不含认证的原生模型参数。
- * @throws 地址不能解析为协议请求路径时拒绝。
+ * @throws 地址不能解析为协议请求路径或档位违反已知官方型号契约时拒绝。
  */
 export function modelParameters(selected: SelectedProvider): Omit<ModelSettings, "authentication"> {
   const { provider } = selected.record,
     model = selected.model;
+  const reasoningEffort = resolveReasoningEffort(
+    model.id,
+    provider.protocol,
+    selected.selection.reasoningEffort,
+    model.reasoning,
+  );
   return {
     protocol: provider.protocol,
     model: model.id,
@@ -88,9 +95,7 @@ export function modelParameters(selected: SelectedProvider): Omit<ModelSettings,
     vision: model.vision !== false,
     audio: model.audio,
     video: model.video,
-    ...(selected.selection.reasoningEffort === undefined
-      ? {}
-      : { reasoningEffort: selected.selection.reasoningEffort }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
   };
 }
 

@@ -178,14 +178,17 @@ fn assistant_payload(mut payload: Value) -> Result<Value, Error> {
     let object = payload
         .as_object_mut()
         .ok_or_else(|| Error::Protocol("模型消息必须是对象".into()))?;
-    validate_assistant_role(object.get("role"))?;
+    validate_model_role(object.get("role"), "assistant")?;
     object.insert("role".into(), json!("assistant"));
     Ok(payload)
 }
 
-fn validate_assistant_role(role: Option<&Value>) -> Result<(), Error> {
-    if role.is_some_and(|role| !role.is_null() && role != "assistant") {
-        return Err(Error::Protocol("模型原生消息角色必须为 assistant".into()));
+/// 兼容省略角色的网关，但显式角色必须符合当前协议，不能通过覆盖字段掩盖错误。
+fn validate_model_role(role: Option<&Value>, expected: &str) -> Result<(), Error> {
+    if role.is_some_and(|role| !role.is_null() && role != expected) {
+        return Err(Error::Protocol(format!(
+            "模型原生消息角色必须为 {expected}"
+        )));
     }
     Ok(())
 }

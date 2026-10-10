@@ -259,26 +259,32 @@ describe("轨迹结构的几何拟合与拒绝条件", () => {
     expect(fit([...retraced].reverse(), "triangle")).toHaveLength(4);
   });
 
-  it.each([0, 0.37, 1.1])("有界强抖动不应把三角形和箭头边上的波纹当成额外角点 %s", (rotation) => {
-    const shapes: [ShapeLabel, InkPoint[], number][] = [
-      ["triangle", [p(0, 0), p(200, 0), p(130, 160), p(0, 0)], 4],
-      ["arrow", [p(0, 0), p(200, 0), p(145, 40), p(200, 0), p(145, -40)], 5],
-    ];
-    for (const [label, vertices, count] of shapes)
-      for (const phase of [0, 0.7, 2.1]) {
-        const points = noisyPolygon(vertices, phase, rotation);
-        const result = fit(points, label)!;
-        expect(result, `${label}/${phase}`).toHaveLength(count);
-        expect(fit([...points].reverse(), label), `${label}/${phase}/反向`).toHaveLength(count);
-        for (const vertex of vertices) {
-          const x = vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation),
-            y = vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation);
-          expect(
-            Math.min(...result.map((point) => Math.hypot(point.x - x, point.y - y))),
-          ).toBeLessThan(12);
-        }
+  const noisyShapes: [ShapeLabel, InkPoint[], number][] = [
+    ["triangle", [p(0, 0), p(200, 0), p(130, 160), p(0, 0)], 4],
+    ["arrow", [p(0, 0), p(200, 0), p(145, 40), p(200, 0), p(145, -40)], 5],
+  ];
+  // 每种形状、旋转和相位独立断言，避免把十二次昂贵拟合捆进一个测试时限。
+  const noisyCases = [0, 0.37, 1.1].flatMap((rotation) =>
+    noisyShapes.flatMap(([label, vertices, count]) =>
+      [0, 0.7, 2.1].map((phase) => ({ rotation, label, vertices, count, phase })),
+    ),
+  );
+  it.each(noisyCases)(
+    "有界强抖动不应把边上波纹当成额外角点：$label / 旋转 $rotation / 相位 $phase",
+    ({ rotation, label, vertices, count, phase }) => {
+      const points = noisyPolygon(vertices, phase, rotation);
+      const result = fit(points, label)!;
+      expect(result, `${label}/${phase}`).toHaveLength(count);
+      expect(fit([...points].reverse(), label), `${label}/${phase}/反向`).toHaveLength(count);
+      for (const vertex of vertices) {
+        const x = vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation),
+          y = vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation);
+        expect(
+          Math.min(...result.map((point) => Math.hypot(point.x - x, point.y - y))),
+        ).toBeLessThan(12);
       }
-  });
+    },
+  );
 
   it("固定角点数只生成候选，额外折线、非三角闭合轮廓和内部涂划仍须拒绝", () => {
     for (const points of [

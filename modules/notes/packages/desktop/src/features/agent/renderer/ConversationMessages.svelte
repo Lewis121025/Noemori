@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isActiveRun } from "../shared/run-actions";
   import { onMount, tick } from "svelte";
   import type { AgentConversation, AgentApproval, AgentMessage, AgentTurn } from "../shared/api";
   import ReferenceCards from "./ReferenceCards.svelte";
@@ -10,6 +11,7 @@
   import CopyButton from "./CopyButton.svelte";
   import ApprovalCard from "./ApprovalCard.svelte";
   import ToolMessage from "./ToolMessage.svelte";
+  import MediaContent from "./MediaContent.svelte";
   import { pairToolResults, toolAction, type ToolCall } from "../shared/tool-presentation";
   let {
     current,
@@ -60,18 +62,43 @@
   }
   const pending = $derived(current.approvals[0] ?? null);
   const toolResults = $derived(pairToolResults(current.messages));
-  const activeStart = $derived(current.turns.find((turn) => turn.run.id === current.run?.id)?.message_start
-    ?? current.messages.findLastIndex((message) => message.role === "user" || message.role === "assistant"));
-  const toolTargets = $derived(new Map([
-    ...current.browser.tabs.map((tab) => [`managed:${tab.id}`, tab.title || tab.url] as const),
-    ...current.ui.connections.flatMap((connection) => connection.tabs.map((tab) => [`${connection.backend}:${tab.id}`, tab.title || tab.url] as const)),
-    ...(current.ui.control ? [[`computer:${current.ui.control.app}:${current.ui.control.window}`, `${current.ui.control.app_name} · ${current.ui.control.window_title}`] as const] : []),
-  ]));
+  const activeStart = $derived(
+    current.turns.find((turn) => turn.run.id === current.run?.id)?.message_start ??
+      current.messages.findLastIndex(
+        (message) => message.role === "user" || message.role === "assistant",
+      ),
+  );
+  const toolTargets = $derived(
+    new Map([
+      ...current.browser.tabs.map((tab) => [`managed:${tab.id}`, tab.title || tab.url] as const),
+      ...current.ui.connections.flatMap((connection) =>
+        connection.tabs.map(
+          (tab) => [`${connection.backend}:${tab.id}`, tab.title || tab.url] as const,
+        ),
+      ),
+      ...(current.ui.control
+        ? [
+            [
+              `computer:${current.ui.control.app}:${current.ui.control.window}`,
+              `${current.ui.control.app_name} · ${current.ui.control.window_title}`,
+            ] as const,
+          ]
+        : []),
+    ]),
+  );
   function terminalFor(call: ToolCall) {
     if (call.name !== "terminal") return undefined;
     const args = call.arguments;
-    const session = args !== null && typeof args === "object" && "session_id" in args && typeof args.session_id === "string" ? args.session_id : null;
-    return current.terminals.find((terminal) => terminal.call_id === call.id || terminal.process.session_id === session);
+    const session =
+      args !== null &&
+      typeof args === "object" &&
+      "session_id" in args &&
+      typeof args.session_id === "string"
+        ? args.session_id
+        : null;
+    return current.terminals.find(
+      (terminal) => terminal.call_id === call.id || terminal.process.session_id === session,
+    );
   }
   const lastPart = $derived(current.messages.at(-1)?.content.at(-1));
   const activityLabel = $derived(
@@ -108,8 +135,15 @@
       .join("\n\n");
     if (message.role !== "user") return raw;
     const input = readConversationInput(raw);
-    return [input.text, ...input.references.map((reference) =>
-      `引用：${reference.source?.path ?? "选中文字"}\n${reference.text}`), ...input.attachments.map((file) => `附件：${file.name}`)].filter(Boolean).join("\n\n");
+    return [
+      input.text,
+      ...input.references.map(
+        (reference) => `引用：${reference.source?.path ?? "选中文字"}\n${reference.text}`,
+      ),
+      ...input.attachments.map((file) => `附件：${file.name}`),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   }
   function followLatest(): void {
     void tick().then(() => {
@@ -140,7 +174,7 @@
 
 {#snippet branchAction(ended: { turn: AgentTurn; index: number })}
   <span class="turn-number">第 {ended.index + 1} 轮</span>
-  {#if onFork && ended.turn.run.status !== "running"}<button
+  {#if onFork && !isActiveRun(ended.turn.run)}<button
       class="reader-button"
       type="button"
       aria-label="从此轮分叉"
@@ -196,30 +230,101 @@
               </div>{/if}
           </div>{/if}
         {#each current.messages as message, index (index)}
-          {@const content = message.content.filter((part) => part.type !== "tool_result" || toolResults.get(part.value.call_id) !== part.value)}
+          {@const content = message.content.filter(
+            (part) =>
+              part.type !== "tool_result" || toolResults.get(part.value.call_id) !== part.value,
+          )}
           {@const copyText =
             message.role === "user" || message.role === "assistant" ? messageText(message) : ""}
           {@const ended = endingTurns.get(index)}
+          {@const attachedImages =
+            api && message.role === "user"
+              ? message.content.flatMap((part) =>
+                  part.type === "text"
+                    ? readConversationInput(part.value).attachments.filter((file) => file.image)
+                    : [],
+                ).length
+              : 0}
           {#if content.length > 0}<article
               class:user={message.role === "user"}
               class:tool={message.role === "tool"}
+              class:has-tools={content.some(
+                (part) => part.type === "tool_call" || part.type === "tool_result",
+              )}
               aria-label={roleLabels[message.role]}
             >
               {#each content as part, partIndex (partIndex)}
-                {#if part.type === "text"}{#if message.role === "user"}{@const input = readConversationInput(part.value)}<div class="user-text">
-                      {#if input.references.length}<ReferenceCards references={input.references} {...onOpenReference ? { onOpen: onOpenReference } : {}} />{/if}
-                      {#if input.attachments.length && api}<AttachmentCards {api} session={current.id} files={input.attachments} />{/if}
+                {#if part.type === "text"}{#if message.role === "user"}{@const input =
+                      readConversationInput(part.value)}
+                    <div class="user-text">
+                      {#if input.references.length}<ReferenceCards
+                          references={input.references}
+                          {...onOpenReference ? { onOpen: onOpenReference } : {}}
+                        />{/if}
+                      {#if input.attachments.length && api}<AttachmentCards
+                          {api}
+                          session={current.id}
+                          files={input.attachments}
+                          onInspect={() => (follow = false)}
+                        />{/if}
                       {input.text}
-                    </div>{:else}<MessageText text={part.value} {openLink} />{/if}
+                    </div>{:else}<MessageText
+                      text={part.value}
+                      {openLink}
+                      {api}
+                      session={current.id}
+                      onInspect={() => (follow = false)}
+                    />{/if}
                 {:else if part.type === "reasoning"}<details class="reasoning-block">
-                    <summary><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 5 5-5 5" /></svg>思考过程</summary>
+                    <summary
+                      ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 5 5-5 5" /></svg
+                      >思考过程</summary
+                    >
                     <div class="reasoning">
-                      <div class="reasoning-actions"><CopyButton text={part.value} label="复制思考过程" iconOnly /></div>
-                      <MessageText text={part.value} {openLink} />
+                      <div class="reasoning-actions">
+                        <CopyButton text={part.value} label="复制思考过程" iconOnly />
+                      </div>
+                      <MessageText
+                        text={part.value}
+                        {openLink}
+                        {api}
+                        session={current.id}
+                        onInspect={() => (follow = false)}
+                      />
                     </div>
                   </details>
-                {:else if part.type === "tool_call"}<ToolMessage call={part.value} result={toolResults.get(part.value.id)} running={current.run?.status === "running" && index >= activeStart} {api} session={current.id} terminal={terminalFor(part.value)} targets={toolTargets} />
-                {:else if part.type === "tool_result"}<ToolMessage call={undefined} result={part.value} running={false} />{/if}
+                {:else if part.type === "tool_call"}<ToolMessage
+                    call={part.value}
+                    result={toolResults.get(part.value.id)}
+                    running={current.run?.status === "running" && index >= activeStart}
+                    {api}
+                    session={current.id}
+                    terminal={terminalFor(part.value)}
+                    targets={toolTargets}
+                    onInspect={() => (follow = false)}
+                  />
+                {:else if part.type === "tool_result"}<ToolMessage
+                    call={undefined}
+                    result={part.value}
+                    running={false}
+                    {api}
+                    session={current.id}
+                    onInspect={() => (follow = false)}
+                  />
+                {:else if part.type === "image"}{#if content
+                    .slice(0, partIndex)
+                    .filter((value) => value.type === "image").length >= attachedImages}<MediaContent
+                      media={part}
+                      {api}
+                      session={current.id}
+                      onInspect={() => (follow = false)}
+                    />{/if}
+                {:else if part.type === "audio" || part.type === "video"}<MediaContent
+                    media={part}
+                    {api}
+                    session={current.id}
+                    onInspect={() => (follow = false)}
+                  />{/if}
               {/each}
               {#if copyText || ended}
                 <div
@@ -243,14 +348,23 @@
               {@render branchAction(ended)}
             </div>{/if}
         {/each}
-        {#if current.run?.status === "running"}<p class="run-status" role="status">
+        {#if current.run?.status === "paused"}<p class="run-status" role="status">
+            等待你操作，完成后点击“完成并继续”。
+          </p>
+        {:else if current.run?.status === "running"}<p class="run-status" role="status">
             <span class="run-indicator" class:waiting={pending !== null} aria-hidden="true"
             ></span>{activityLabel}
           </p>{/if}
       </div>
     </div>
-    {#if !follow}<button class="reader-button latest" type="button" onclick={showLatest}
-        >↓ 回到最新消息</button
+    {#if !follow}<button
+        class="reader-button latest"
+        type="button"
+        aria-label="↓ 回到最新消息"
+        title="回到最新消息"
+        onclick={showLatest}
+        ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12m-5-5 5 5 5-5" /></svg
+        ></button
       >{/if}
   </div>
   {#if pending}<ApprovalCard
@@ -345,7 +459,8 @@
     box-sizing: border-box;
   }
   article {
-    margin-bottom: 28px;
+    position: relative;
+    margin-bottom: 24px;
     min-width: 0;
   }
   .message-column > article:last-child {
@@ -371,6 +486,15 @@
   .message-actions {
     display: flex;
     margin-top: 4px;
+  }
+  .has-tools .message-actions:not(.turn-actions) {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 0;
+  }
+  .has-tools :global(.message-text) {
+    margin-bottom: 12px;
   }
   .user .message-actions {
     position: absolute;
@@ -478,8 +602,7 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
-    transition:
-      color 150ms ease;
+    transition: color 150ms ease;
   }
   .suggestions button:hover {
     background: transparent;
@@ -538,14 +661,26 @@
   .latest {
     position: absolute;
     bottom: 0.75rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg);
+    right: var(--conversation-inset, 20px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
     box-shadow: 0 3px 12px var(--shadow);
-    white-space: nowrap;
-    border-radius: 20px;
-    padding: 7px 12px;
-    font-size: 11px;
+    border-radius: 50%;
+    padding: 0;
+  }
+  .latest svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   @media (prefers-reduced-motion: reduce) {
     .run-indicator {

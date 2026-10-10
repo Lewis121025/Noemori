@@ -1,16 +1,19 @@
 import { parseReferences, type AgentReference } from "../shared/references";
 import { parseAttachments, parseAttachmentIds, type AgentAttachment } from "../shared/attachments";
-import { mkdir, readdir, readFile, rename, rm, writeFile, lstat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import type { AgentSnapshot, ConversationOrigin } from "../shared/api";
 import { boolean, integer, parseSnapshot, record, text } from "../shared/parse";
-import { parsePrivateJson } from "./private-json";
+import { parsePrivateJson, writePrivateJson } from "./private-json";
 import type { ArticleBinding } from "../shared/article";
 import { articleConversationHref } from "../shared/article";
 import { parseModelSelection, type ModelSelection } from "../shared/providers";
 import { isEntryPath } from "../../reader/shared/file-browser";
-import { newConversationQueue, parseConversationQueue, type ConversationQueue } from "../shared/queue";
+import {
+  newConversationQueue,
+  parseConversationQueue,
+  type ConversationQueue,
+} from "../shared/queue";
 const conversationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 /** 对话独立持有下一轮选择与最后使用的模型；首次运行前没有原生检查点，不保存认证。 */
@@ -64,32 +67,17 @@ function parseOrigin(value: unknown): ConversationOrigin | null {
   return { conversationId: source, title: conversationTitle(origin["title"]), turnId };
 }
 
-function parseConversation(value: unknown): ConversationRecord {
-  const item = record(value);
-  const version = integer(item, "version");
-  if (version < 1 || version > 9)
-    throw new Error("对话记录版本不支持");
-  const id = text(item, "id");
-  if (!conversationId.test(id)) throw new Error("对话标识无效");
-  const storedSnapshot = record(item["snapshot"]);
-  const snapshot = parseSnapshot(
-    JSON.stringify(
-      version === 1
-        ? { ...storedSnapshot, turns: storedSnapshot["turns"] ?? [] }
-        : storedSnapshot,
-    ),
-  );
-  if (snapshot.id !== id) throw new Error("对话快照归属不一致");
-  const draft = text(item, "draft");
-  if (draft.length > 128 * 1024) throw new Error("对话草稿超过限制");
-  const checkpoint =
-    version >= 5 && item["checkpoint"] === null
-      ? null
-      : text(item, "checkpoint");
+// 检查点归属必须与展示快照一致；缺少检查点只允许尚未运行的对话。
+function parseCheckpoint(
+  item: Record<string, unknown>,
+  version: number,
+  snapshot: AgentSnapshot,
+): string | null {
+  const checkpoint = version >= 5 && item["checkpoint"] === null ? null : text(item, "checkpoint");
   if (checkpoint !== null) {
     const saved = record(parsePrivateJson(checkpoint, "对话检查点"));
     if (
-      (saved["version"] !== 1 && saved["version"] !== 2) ||
+      (saved["version"] !== 1 && saved["version"] !== 2 && saved["version"] !== 3) ||
       saved["workspace"] !== snapshot.workspace
     )
       throw new Error("对话历史版本或工作目录不一致");
@@ -101,19 +89,39 @@ function parseConversation(value: unknown): ConversationRecord {
   ) {
     throw new Error("已有运行历史的对话不能缺少检查点");
   }
-  let article: ArticleBinding | null = null;
-  if (
-    version >= 3 &&
-    item["article"] !== null
-  ) {
-    const value = record(item["article"]);
-    const path = text(value, "path");
-    const markerId = text(value, "markerId");
-    articleConversationHref(markerId);
-    if (!isEntryPath(path) || !path.toLowerCase().endsWith(".md")) throw new Error("文章路径无效");
-    article = { path, markerId, title: text(value, "title") };
-    if (value["removed"] !== undefined) article.removed = boolean(value, "removed");
-  }
+  return checkpoint;
+}
+
+// 文章归属只从声明此字段的版本恢复，不能把旧记录的额外字段追认为库内来源。
+function parseArticle(item: Record<string, unknown>, version: number): ArticleBinding | null {
+  if (version < 3 || item["article"] === null) return null;
+  const value = record(item["article"]);
+  const path = text(value, "path");
+  const markerId = text(value, "markerId");
+  articleConversationHref(markerId);
+  if (!isEntryPath(path) || !path.toLowerCase().endsWith(".md")) throw new Error("文章路径无效");
+  const article: ArticleBinding = { path, markerId, title: text(value, "title") };
+  if (value["removed"] !== undefined) article.removed = boolean(value, "removed");
+  return article;
+}
+
+function parseConversation(value: unknown): ConversationRecord {
+  const item = record(value);
+  const version = integer(item, "version");
+  if (version < 1 || version > 9) throw new Error("对话记录版本不支持");
+  const id = text(item, "id");
+  if (!conversationId.test(id)) throw new Error("对话标识无效");
+  const storedSnapshot = record(item["snapshot"]);
+  const snapshot = parseSnapshot(
+    JSON.stringify(
+      version === 1 ? { ...storedSnapshot, turns: storedSnapshot["turns"] ?? [] } : storedSnapshot,
+    ),
+  );
+  if (snapshot.id !== id) throw new Error("对话快照归属不一致");
+  const draft = text(item, "draft");
+  if (draft.length > 128 * 1024) throw new Error("对话草稿超过限制");
+  const checkpoint = parseCheckpoint(item, version, snapshot);
+  const article = parseArticle(item, version);
   // 旧连接和密文已经不参与恢复，只读取展示元数据，避免过期认证阻断历史迁移。
   const linkedWorkspace =
     version >= 6
@@ -148,7 +156,8 @@ function parseConversation(value: unknown): ConversationRecord {
     ...(attachments.length ? { attachments } : {}),
     ...(draftAttachmentIds.length ? { draftAttachmentIds } : {}),
     ...(version >= 8 && item["draftReferences"] !== undefined
-      ? { draftReferences: parseReferences(item["draftReferences"]) } : {}),
+      ? { draftReferences: parseReferences(item["draftReferences"]) }
+      : {}),
     queue: version >= 7 ? parseConversationQueue(item["queue"]) : newConversationQueue(),
     model,
     modelSelection:
@@ -199,7 +208,7 @@ export class ConversationStore {
         const item = parseConversation(value);
         if (name !== `${item.id}.json`) throw new Error("文件名与对话标识不一致");
         records.push(item);
-        if (value["version"] !== 5 && value["version"] !== 6 && value["version"] !== 7 && value["version"] !== 8 && value["version"] !== 9) legacyIds.push(item.id);
+        if (integer(value, "version") < 5) legacyIds.push(item.id);
       } catch (error) {
         issues.push(`${name}：${error instanceof Error ? error.message : String(error)}`);
       }
@@ -220,11 +229,11 @@ export class ConversationStore {
       ...item,
     });
     return this.enqueue(async () => {
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      await this.replace(destination, content);
-      // 新版历史不再持有认证，成功保存后清理旧版本机认证副本。
+      // 旧副本已不参与恢复，清理应先于提交；失败不能让调用方误以为新会话尚未落盘。
       if (this.credentialsDirectory)
         await rm(join(this.credentialsDirectory, `${item.id}.json`), { force: true });
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      await writePrivateJson(destination, content);
     });
   }
 
@@ -246,16 +255,6 @@ export class ConversationStore {
   private path(id: string): string {
     if (!conversationId.test(id)) throw new Error("对话标识无效");
     return join(this.directory, `${id}.json`);
-  }
-
-  private async replace(destination: string, content: string): Promise<void> {
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
-      await rename(temporary, destination);
-    } finally {
-      await rm(temporary, { force: true });
-    }
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {

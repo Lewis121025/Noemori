@@ -1,7 +1,20 @@
 import { parseReferences, type AgentReference } from "../shared/references";
-import { conversationInput, readConversationInput, matchesConversationDraft } from "../shared/input";
-import { parseAttachmentIds, MAX_ATTACHMENTS, type AgentAttachment, type AttachmentPreview, type AttachmentUpload } from "../shared/attachments";
+import {
+  conversationInput,
+  readConversationInput,
+  matchesConversationDraft,
+} from "../shared/input";
+import {
+  parseAttachmentIds,
+  MAX_ATTACHMENTS,
+  type AgentAttachment,
+  type AttachmentPreview,
+  type AttachmentUpload,
+} from "../shared/attachments";
+import { readConversationContent } from "./content-reader";
+import type { ConversationContent } from "../shared/content";
 import { AttachmentStore } from "./attachments";
+import { rethrowAfterCleanup } from "./cleanup";
 import { branchCheckpoint, relocateCheckpoint, type NativeAgentSession } from "@noemori/agent-node";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,13 +30,11 @@ import type {
   TerminalPage,
   UiPreviewTarget,
   UiPreviewFrame,
+  UiPermissions,
   BrowserHumanInput,
 } from "../shared/api";
-import { canResumeRun } from "../shared/run-actions";
-import {
-  newConversationQueue,
-  type ConversationQueue,
-} from "../shared/queue";
+import { canResumeRun, isActiveRun } from "../shared/run-actions";
+import { newConversationQueue, type ConversationQueue } from "../shared/queue";
 import { parseModelSelection } from "../shared/providers";
 import type {
   DiscoveredModel,
@@ -37,6 +48,14 @@ import { AgentProviderStore } from "./providers";
 import { parsePrivateJson } from "./private-json";
 import { ConversationStore, conversationTitle, type ConversationRecord } from "./conversations";
 import { createNativeSession } from "./native-session";
+import type { BrowserWorkspace } from "./browser-workspace";
+
+/** 服务只持有窗口浏览器的生命周期与显示契约，不接触其 CDP 内部状态。 */
+type BrowserResource = Pick<
+  BrowserWorkspace,
+  "ready" | "close" | "setHuman" | "show" | "hide" | "listDownloads" | "saveDownload"
+>;
+import type { BrowserNavigation, BrowserViewPlacement, BrowserDownload } from "../shared/browser";
 import { installUiRuntime } from "./ui-runtime";
 import { emptyUi } from "../shared/ui";
 import { parsePreviewFrame } from "../shared/preview";
@@ -66,12 +85,15 @@ export class AgentService {
   private issues: string[] = [];
   private loadError: Error | null = null;
   private stopping: Promise<void> | null = null;
+  private readonly browsers = new Map<string, BrowserResource>();
+  private readonly handoffReturns = new Map<string, { id: string; error: string | null }>();
 
   /** 绑定窗口服务并读取历史；构造时不启动模型或恢复终端。 */
   constructor(
     private readonly userData: string,
     private readonly launcher: string,
     private readonly changed: (id: string) => void,
+    private readonly createBrowser?: (id: string, changed: () => void) => BrowserResource,
   ) {
     this.settings = new AgentProviderStore(userData);
     this.store = new ConversationStore(userData);
@@ -101,7 +123,11 @@ export class AgentService {
     }
   }
 
-  /** 设置读取只返回无密钥投影。 */
+  /**
+   * @param id 持久化会话身份。
+   * @returns 下一轮选择的无密钥投影；未选择模型时返回 null。
+   * @throws 会话目录不可读、会话不存在、服务关闭或模型配置无效时拒绝。
+   */
   async settingsGet(id: string): Promise<PublicModelSettings | null> {
     await this.ready;
     this.ensureOpen();
@@ -173,33 +199,41 @@ export class AgentService {
     return this.createRecord(workspace, title, null);
   }
 
-  /** 加载已打开库中的文章历史；迁移后重绑工作目录，不启动模型，错误保留原因。 */
+  /**
+   * 加载已打开库中的文章历史；同身份的库副本按会话顺序检查归属，不启动模型。
+   * @param root 已打开笔记库的规范绝对路径。
+   * @returns 库内历史与导入副本接入完成后兑现；单条冲突或恢复错误保留在加载问题中。
+   * @throws 服务关闭、目录不规范或库目录读取失败时拒绝。
+   */
   attachVault(root: string): Promise<void> {
     return this.serialize(`vault:${root}`, async () => {
       if (this.loadedVaults.has(root)) return;
       const loaded = await (await this.articles.store(root)).load();
       this.issues.push(...loaded.issues.map((issue) => `${root}：${issue}`));
       for (const item of loaded.records) {
-        if (!item.article) {
-          this.issues.push(`${item.title}：库内对话缺少文章归属`);
-          continue;
-        }
-        const existing = this.records.get(item.id);
-        if (existing && existing.snapshot.workspace !== root) {
-          this.issues.push(
-            `${item.title}：另一个已打开的库副本含有相同对话，请重启后打开需要的副本`,
-          );
-          continue;
-        }
         try {
-          if (item.snapshot.workspace !== root && item.checkpoint !== null)
-            item.checkpoint = await relocateCheckpoint(item.checkpoint, root);
-          if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
-          item.snapshot = { ...resumedSnapshot(item.snapshot), workspace: root };
-          item.queue = restoredQueue(item.queue);
-          item.linkedWorkspace = root;
-          this.records.set(item.id, item);
-          await this.refreshArticle(item);
+          // 不同库可并发读取，但同身份的归属检查与发布必须保持原子顺序。
+          await this.serialize(item.id, async () => {
+            if (!item.article) {
+              this.issues.push(`${item.title}：库内对话缺少文章归属`);
+              return;
+            }
+            const existing = this.records.get(item.id);
+            if (existing && existing.snapshot.workspace !== root) {
+              this.issues.push(
+                `${item.title}：另一个已打开的库副本含有相同对话，请重启后打开需要的副本`,
+              );
+              return;
+            }
+            if (item.snapshot.workspace !== root && item.checkpoint !== null)
+              item.checkpoint = await relocateCheckpoint(item.checkpoint, root);
+            if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
+            item.snapshot = { ...resumedSnapshot(item.snapshot), workspace: root };
+            item.queue = restoredQueue(item.queue);
+            item.linkedWorkspace = root;
+            this.records.set(item.id, item);
+            await this.refreshArticle(item);
+          });
         } catch (error) {
           this.issues.push(`${item.title}：文章对话未能恢复，原记录仍保留：${String(error)}`);
         }
@@ -220,7 +254,8 @@ export class AgentService {
    * @param source 原目录的规范绝对路径。
    * @param root 应用仓库的规范绝对路径。
    * @param prefix 已完成导入的库内目录。
-   * @throws 无法读取或持久化历史、存在另一份不同归属的相同身份时拒绝，不覆盖已有归属。
+   * @returns 文章历史已持久化到仓库并发布归属后兑现；已接入的相同历史不重复覆盖。
+   * @throws 原目录仍有运行资源、无法读取或持久化历史、存在另一份不同归属的相同身份时拒绝，不覆盖已有归属。
    */
   async importArticleLibrary(source: string, root: string, prefix: string): Promise<void> {
     if (!isEntryPath(prefix)) throw new Error("文章历史的导入目录无效");
@@ -236,57 +271,65 @@ export class AgentService {
     }
     const store = await this.articles.store(root);
     for (const item of loaded.records) {
-      if (!item.article) throw new Error(`${item.title}：文章历史缺少来源`);
-      const path = `${prefix}/${item.article.path}`;
-      const existing = this.records.get(item.id);
-      // 仓库中的记录是最新归属，不能被副本内保留的旧路径、归档或草稿反向覆盖。
-      if (existing?.snapshot.workspace === root && existing.article) continue;
-      if (existing && existing.snapshot.workspace !== source)
-        throw new Error(`${item.title}：相同对话已属于另一份资料，保留已有归属`);
-      const previousRoot = item.snapshot.workspace;
-      const relocateReferences = (references: AgentReference[]) =>
-        references.map((reference) =>
-          reference.source &&
-          (reference.source.root === previousRoot || reference.source.root === source)
-            ? {
-                ...reference,
-                source: { ...reference.source, root, path: `${prefix}/${reference.source.path}` },
-              }
-            : reference,
-        );
-      if (item.draftReferences)
-        item.draftReferences = parseReferences(relocateReferences(item.draftReferences));
-      item.queue = {
-        ...item.queue,
-        messages: item.queue.messages.map((message) => {
-          const input = readConversationInput(message.text);
-          return input.references.some(
-            (reference) =>
-              reference.source?.root === previousRoot || reference.source?.root === source,
-          )
-            ? {
-                ...message,
-                text: conversationInput(
-                  input.text,
-                  relocateReferences(input.references),
-                  input.attachments,
-                  input.directory,
-                ),
-              }
-            : message;
-        }),
-      };
-      if (item.checkpoint !== null)
-        item.checkpoint = await relocateCheckpoint(item.checkpoint, root);
-      if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
-      item.snapshot = { ...resumedSnapshot(item.snapshot), workspace: root };
-      item.linkedWorkspace = root;
-      item.article = { ...item.article, path };
-      item.queue = restoredQueue(item.queue);
-      await store.save(item);
-      this.records.set(item.id, item);
-      await this.refreshArticle(item);
-      this.changed(item.id);
+      // 库级队列只管理批次，记录归属必须与选择和草稿共用会话级写入顺序。
+      await this.serialize(item.id, async () => {
+        if (!item.article) throw new Error(`${item.title}：文章历史缺少来源`);
+        const path = `${prefix}/${item.article.path}`;
+        const existing = this.records.get(item.id);
+        // 仓库中的记录是最新归属，不能被副本内保留的旧路径、归档或草稿反向覆盖。
+        if (existing?.snapshot.workspace === root && existing.article) return;
+        if (existing && existing.snapshot.workspace !== source)
+          throw new Error(`${item.title}：相同对话已属于另一份资料，保留已有归属`);
+        // 原生工作目录在创建资源时冻结，历史接入不能转移仍被现有资源持有的归属。
+        if (this.sessions.has(item.id))
+          throw new Error(
+            `${item.title}：原目录的对话仍占用运行资源，历史未接入；请先归档原对话或重启应用后重试`,
+          );
+        const previousRoot = item.snapshot.workspace;
+        const relocateReferences = (references: AgentReference[]) =>
+          references.map((reference) =>
+            reference.source &&
+            (reference.source.root === previousRoot || reference.source.root === source)
+              ? {
+                  ...reference,
+                  source: { ...reference.source, root, path: `${prefix}/${reference.source.path}` },
+                }
+              : reference,
+          );
+        if (item.draftReferences)
+          item.draftReferences = parseReferences(relocateReferences(item.draftReferences));
+        item.queue = {
+          ...item.queue,
+          messages: item.queue.messages.map((message) => {
+            const input = readConversationInput(message.text);
+            return input.references.some(
+              (reference) =>
+                reference.source?.root === previousRoot || reference.source?.root === source,
+            )
+              ? {
+                  ...message,
+                  text: conversationInput(
+                    input.text,
+                    relocateReferences(input.references),
+                    input.attachments,
+                    input.directory,
+                  ),
+                }
+              : message;
+          }),
+        };
+        if (item.checkpoint !== null)
+          item.checkpoint = await relocateCheckpoint(item.checkpoint, root);
+        if (loaded.legacyIds.includes(item.id)) item.modelSelection = this.legacyModelSelection;
+        item.snapshot = { ...resumedSnapshot(item.snapshot), workspace: root };
+        item.linkedWorkspace = root;
+        item.article = { ...item.article, path };
+        item.queue = restoredQueue(item.queue);
+        await store.save(item);
+        this.records.set(item.id, item);
+        await this.refreshArticle(item);
+        this.changed(item.id);
+      });
     }
     if (loaded.issues.length) throw new Error(loaded.issues.join("；"));
   }
@@ -371,8 +414,7 @@ export class AgentService {
       if (request.afterTurnId !== null) {
         const turn = current.turns.find((turn) => turn.run.id === request.afterTurnId);
         if (!turn) throw new Error("分叉轮次不存在或来自早期无边界记录");
-        if (turn.run.status === "running")
-          throw new Error("此轮尚未结束，请选择较早轮次或分叉当前内容");
+        if (isActiveRun(turn.run)) throw new Error("此轮尚未结束，请选择较早轮次或分叉当前内容");
       }
       this.capture(id);
       const derived =
@@ -389,9 +431,8 @@ export class AgentService {
         source.linkedWorkspace ??
         (derived === null ? this.executionDirectory(nextId) : await this.managedWorkspace(nextId));
       const checkpoint = derived === null ? null : readText(derived, "checkpoint");
-      const snapshot = derived === null
-        ? source.snapshot
-        : parseSnapshot(JSON.stringify(derived["snapshot"]));
+      const snapshot =
+        derived === null ? source.snapshot : parseSnapshot(JSON.stringify(derived["snapshot"]));
       const referenced = historyAttachmentIds(snapshot);
       const attachments = (source.attachments ?? []).filter((file) => referenced.has(file.id));
       const now = Date.now();
@@ -426,8 +467,11 @@ export class AgentService {
         location = await this.articles.location(item);
         await (await this.recordStore(item)).save(item);
       } catch (cause) {
-        await this.attachments.remove(nextId);
-        throw cause;
+        return rethrowAfterCleanup(
+          cause,
+          () => this.attachments.remove(nextId),
+          "对话分叉失败且附件副本未能完整回滚",
+        );
       }
       this.records.set(nextId, item);
       if (location) this.articleLocations.set(nextId, location);
@@ -455,7 +499,9 @@ export class AgentService {
             title: item.title,
             workspace: item.linkedWorkspace,
             model:
-              (status === "running" ? item.model : item.modelSelection?.modelId) ?? "未选择模型",
+              (status === "running" || status === "paused"
+                ? item.model
+                : item.modelSelection?.modelId) ?? "未选择模型",
             modelSelection: item.modelSelection,
             createdAt: item.createdAt,
             updatedAt: item.updatedAt,
@@ -474,7 +520,7 @@ export class AgentService {
    * 读取选中对话；仅查看历史不会启动原生资源。
    * @param id 持久化会话标识。
    * @returns 包含独立草稿与存储错误的当前快照。
-   * @throws 会话不存在或服务正在关闭时拒绝。
+   * @throws 会话目录不可读、会话不存在或服务正在关闭时拒绝。
    */
   async snapshot(id: string): Promise<AgentConversation> {
     await this.ready;
@@ -503,15 +549,21 @@ export class AgentService {
         this.ensureOpen();
         this.capture(id);
         const attachments = [...(item.attachments ?? []), ...files];
-        const draftAttachmentIds = [...(item.draftAttachmentIds ?? []), ...files.map((file) => file.id)];
+        const draftAttachmentIds = [
+          ...(item.draftAttachmentIds ?? []),
+          ...files.map((file) => file.id),
+        ];
         await this.writeRecord({ ...item, attachments, draftAttachmentIds });
         item.attachments = attachments;
         item.draftAttachmentIds = draftAttachmentIds;
         this.changed(id);
         return structuredClone(files);
       } catch (cause) {
-        await this.attachments.discard(id, files);
-        throw cause;
+        return rethrowAfterCleanup(
+          cause,
+          () => this.attachments.discard(id, files),
+          "附件记录未保存且副本未能完整回滚",
+        );
       }
     });
   }
@@ -525,7 +577,31 @@ export class AgentService {
     return this.attachments.preview(id, file);
   }
 
-  /** @param id 所属对话；@param fileId 已拥有的附件；@returns 已验证内容的私有路径；@throws 归属或完整性错误时拒绝。 */
+  /** @param id 所属会话；@param fileId 附件身份；@returns 同一私有副本的原始快照；@throws 归属、完整性或关闭失败时拒绝。 */
+  async attachmentContent(id: string, fileId: string): Promise<AttachmentUpload> {
+    await this.ready;
+    this.ensureOpen();
+    const [file] = this.ownedAttachments(this.record(id), [fileId]);
+    if (!file) throw new Error("附件不存在");
+    const bytes = await this.attachments.bytes(id, file);
+    this.ensureOpen();
+    return { name: file.name, bytes };
+  }
+
+  /** @param id 所属会话；@param reference 用户查看的文件引用；@returns 目录边界内的快照或明确请求的外部内容；@throws 会话、地址、读取或关闭失败时拒绝。 */
+  async contentPreview(id: string, reference: string): Promise<ConversationContent> {
+    await this.ready;
+    this.ensureOpen();
+    const item = this.record(id),
+      workspace = item.snapshot.workspace;
+    const content = await readConversationContent(workspace, reference);
+    this.ensureOpen();
+    if (this.record(id) !== item || item.snapshot.workspace !== workspace)
+      throw new Error("对话工作区已改变，请重新预览");
+    return content;
+  }
+
+  /** @param id 所属对话；@param fileId 已拥有的附件；@returns 已验证内容的私有路径；@throws 会话读取、归属或完整性错误时拒绝。 */
   async attachmentPath(id: string, fileId: string): Promise<string> {
     await this.ready;
     this.ensureOpen();
@@ -544,9 +620,19 @@ export class AgentService {
     });
   }
 
-  private messageInput(item: ConversationRecord, text: string, references: AgentReference[], ids: string[]): string {
+  private messageInput(
+    item: ConversationRecord,
+    text: string,
+    references: AgentReference[],
+    ids: string[],
+  ): string {
     const files = this.ownedAttachments(item, ids);
-    return conversationInput(text, references, files, item.attachments?.length ? this.attachments.directory(item.id) : null);
+    return conversationInput(
+      text,
+      references,
+      files,
+      item.attachments?.length ? this.attachments.directory(item.id) : null,
+    );
   }
 
   private async publishInput<T>(id: string, files: AgentAttachment[], accept: () => T): Promise<T> {
@@ -555,12 +641,11 @@ export class AgentService {
       this.ensureOpen();
       return accept();
     } catch (cause) {
-      try {
-        await this.attachments.unpublish(id, published);
-      } catch (cleanup) {
-        throw new AggregateError([cause, cleanup], "输入未接受且附件发布未能完整撤销");
-      }
-      throw cause;
+      return rethrowAfterCleanup(
+        cause,
+        () => this.attachments.unpublish(id, published),
+        "输入未接受且附件发布未能完整撤销",
+      );
     }
   }
 
@@ -571,7 +656,12 @@ export class AgentService {
    * @returns 原生任务标识；运行开始后的保存错误通过 storageError 呈现。
    * @throws 已归档、输入无效、恢复失败或发送前无法保存时拒绝。
    */
-  start(id: string, text: string, references: AgentReference[] = [], attachments: string[] = []): Promise<string> {
+  start(
+    id: string,
+    text: string,
+    references: AgentReference[] = [],
+    attachments: string[] = [],
+  ): Promise<string> {
     return this.serialize(id, async () => {
       const input = this.messageInput(this.record(id), text, references, attachments);
       const run = await this.beginRun(this.record(id), input, true);
@@ -588,23 +678,37 @@ export class AgentService {
    * @returns 接受指令的原运行编号，不创建新轮。
    * @throws 运行已变化、输入无效或接受前无法保存时拒绝，接受后的存储错误通过快照呈现。
    */
-  steer(id: string, runId: string, text: string, references: AgentReference[] = [], attachments: string[] = []): Promise<string> {
+  steer(
+    id: string,
+    runId: string,
+    text: string,
+    references: AgentReference[] = [],
+    attachments: string[] = [],
+  ): Promise<string> {
     return this.serialize(id, async () => {
       const item = this.record(id);
       const input = this.messageInput(item, text, references, attachments);
       const run = this.project(item).run;
-      if (run?.id !== runId || run.status !== "running")
-        throw new Error("运行已变化，补充指令未接收");
+      if (run?.id !== runId || !isActiveRun(run)) throw new Error("运行已变化，补充指令未接收");
       await this.persist(id);
       const files = this.ownedAttachments(item, attachments);
       const images = await this.attachments.images(id, files);
       this.ensureOpen();
       if (files.length && typeof this.get(id).steerWithAttachments !== "function")
         throw new Error("原生附件模块尚未更新，请重新构建并重启应用");
-      const accepted = await this.publishInput(id, files, () => files.length
-        ? this.get(id).steerWithAttachments(runId, input, images.length ? JSON.stringify(images) : undefined, files.some((file) => !file.image))
-        : this.get(id).steer(runId, input));
-      if (matchesConversationDraft(input, item.draft, item.draftReferences, item.draftAttachmentIds)) {
+      const accepted = await this.publishInput(id, files, () =>
+        files.length
+          ? this.get(id).steerWithAttachments(
+              runId,
+              input,
+              images.length ? JSON.stringify(images) : undefined,
+              files.some((file) => !file.image),
+            )
+          : this.get(id).steer(runId, input),
+      );
+      if (
+        matchesConversationDraft(input, item.draft, item.draftReferences, item.draftAttachmentIds)
+      ) {
         item.draft = "";
         delete item.draftReferences;
         delete item.draftAttachmentIds;
@@ -618,7 +722,7 @@ export class AgentService {
   /**
    * @param id 目标对话。
    * @returns 独立队列副本，不激活模型或终端。
-   * @throws 会话不存在或服务已关闭时拒绝。
+   * @throws 会话目录不可读、会话不存在或服务已关闭时拒绝。
    */
   async queueGet(id: string): Promise<ConversationQueue> {
     await this.ready;
@@ -634,7 +738,13 @@ export class AgentService {
    * @returns 保存后的队列副本；派发失败会暂停队列并保留内容。
    * @throws 会话归档、运行已变化、输入或队列超限、加入前写盘失败时拒绝。
    */
-  queueAdd(id: string, runId: string, text: string, references: AgentReference[] = [], attachments: string[] = []): Promise<ConversationQueue> {
+  queueAdd(
+    id: string,
+    runId: string,
+    text: string,
+    references: AgentReference[] = [],
+    attachments: string[] = [],
+  ): Promise<ConversationQueue> {
     return this.serialize(id, async () => {
       const item = this.record(id);
       const input = this.messageInput(item, text, references, attachments);
@@ -643,7 +753,12 @@ export class AgentService {
       if (run?.id !== runId || !["running", "completed"].includes(run.status))
         throw new Error("运行已变化，追问未加入队列");
       if (item.queue.messages.length >= 16) throw new Error("最多排队 16 条追问");
-      const consumeDraft = matchesConversationDraft(input, item.draft, item.draftReferences, item.draftAttachmentIds);
+      const consumeDraft = matchesConversationDraft(
+        input,
+        item.draft,
+        item.draftReferences,
+        item.draftAttachmentIds,
+      );
       await this.commitQueue(
         item,
         {
@@ -736,17 +851,14 @@ export class AgentService {
     const item = this.record(id);
     while (!this.stopping && !item.archived && !item.queue.paused && item.queue.messages.length) {
       const run = this.project(item).run;
-      if (run?.status === "running") return;
+      if (isActiveRun(run)) return;
       if (!explicit && run?.status !== "completed") {
         await this.pauseQueue(item, null);
         return;
       }
       const first = item.queue.messages[0]!;
       if (first.state === "sending") {
-        await this.pauseQueue(
-          item,
-          "上次追问发送状态未确认，请先查看对话记录；此条不会自动重发",
-        );
+        await this.pauseQueue(item, "上次追问发送状态未确认，请先查看对话记录；此条不会自动重发");
         return;
       }
       try {
@@ -791,7 +903,7 @@ export class AgentService {
   }
 
   /**
-   * 继续用户指定的未完成运行，创建新一轮；继续动作不消费输入框中的未发送草稿。
+   * 恢复用户指定的中断节点，不追加用户消息或重新读取文章上下文，不消费未发送草稿。
    * @param id 目标会话。
    * @param runId 当前中断或失败的运行编号，用于拒绝重复提交和迟到点击。
    * @returns 新运行编号。
@@ -803,7 +915,24 @@ export class AgentService {
       const run = this.project(item).run;
       if (run?.id !== runId) throw new Error("运行已变化，请刷新后重试");
       if (!canResumeRun(run)) throw new Error("当前运行尚未停止或已经完成，不能继续");
-      const started = await this.beginRun(item, "继续上次未完成的任务。", false);
+      if (item.archived) throw new Error("请先恢复已归档的对话");
+      const session = await this.activate(item);
+      await this.persist(item.id);
+      const selected = await this.settings.selected(item.modelSelection);
+      if (!selected) throw new Error("请为此对话选择模型");
+      this.ensureOpen();
+      if (typeof session.resumeConfigured !== "function")
+        throw new Error("原生恢复模块尚未更新，请重新构建并重启应用");
+      await this.claimResources(item.id, session);
+      const started = session.resumeConfigured(
+        runId,
+        JSON.stringify(selected.settings),
+        selected.binding,
+      );
+      item.model = selected.settings.model;
+      item.updatedAt = Date.now();
+      await this.saveProgress(item.id);
+      this.changed(item.id);
       await this.dispatchQueued(id);
       return started;
     });
@@ -825,25 +954,44 @@ export class AgentService {
     const selected = await this.settings.selected(item.modelSelection);
     if (!selected) throw new Error("请为此对话选择模型");
     const submitted = readConversationInput(text);
-    const files = this.ownedAttachments(item, submitted.attachments.map((file) => file.id));
+    const files = this.ownedAttachments(
+      item,
+      submitted.attachments.map((file) => file.id),
+    );
     if (files.some((file) => file.image) && !selected.settings.vision)
       throw new Error("当前模型不支持图片，请选择支持视觉的模型或移除图片附件");
     if (files.some((file) => !file.image) && !selected.settings.tools)
       throw new Error("当前模型没有工具读取能力，请更换模型或移除文件附件");
     const images = await this.attachments.images(item.id, files);
-    const input = this.messageInput(item, submitted.text, submitted.references, files.map((file) => file.id));
+    const input = this.messageInput(
+      item,
+      submitted.text,
+      submitted.references,
+      files.map((file) => file.id),
+    );
     // 关闭可能发生在保存、上下文读取或认证读取期间；派发前必须重新核对生命周期。
     this.ensureOpen();
     if (files.length && typeof session.startConfiguredWithAttachments !== "function")
       throw new Error("原生附件模块尚未更新，请重新构建并重启应用");
-    if (this.project(item).run?.status === "running") throw new Error("当前对话已有运行，请排队或补充当前任务");
-    const parameters = [JSON.stringify(selected.settings), selected.binding, input,
-      article ? articlePrompt(item.snapshot.workspace, article) : undefined] as const;
-    const run = await this.publishInput(item.id, files, () => images.length
-      ? session.startConfiguredWithAttachments(...parameters, JSON.stringify(images))
-      : session.startConfigured(...parameters));
+    if (isActiveRun(this.project(item).run))
+      throw new Error("当前对话已有运行，请排队或补充当前任务");
+    await this.claimResources(item.id, session);
+    const parameters = [
+      JSON.stringify(selected.settings),
+      selected.binding,
+      input,
+      article ? articlePrompt(item.snapshot.workspace, article) : undefined,
+    ] as const;
+    const run = await this.publishInput(item.id, files, () =>
+      images.length
+        ? session.startConfiguredWithAttachments(...parameters, JSON.stringify(images))
+        : session.startConfigured(...parameters),
+    );
     item.model = selected.settings.model;
-    if (consumeDraft && matchesConversationDraft(input, item.draft, item.draftReferences, item.draftAttachmentIds)) {
+    if (
+      consumeDraft &&
+      matchesConversationDraft(input, item.draft, item.draftReferences, item.draftAttachmentIds)
+    ) {
       item.draft = "";
       delete item.draftReferences;
       delete item.draftAttachmentIds;
@@ -918,7 +1066,12 @@ export class AgentService {
    * @returns 草稿保存后兑现。
    * @throws 会话不存在、草稿超过限制或保存失败时拒绝。
    */
-  saveDraft(id: string, draft: string, references: AgentReference[] = [], attachments?: string[]): Promise<void> {
+  saveDraft(
+    id: string,
+    draft: string,
+    references: AgentReference[] = [],
+    attachments?: string[],
+  ): Promise<void> {
     const checked = parseReferences(references);
     return this.serialize(id, async () => {
       if (draft.length > 128 * 1024) throw new Error("消息超过 128 KiB");
@@ -949,18 +1102,81 @@ export class AgentService {
   }
 
   /**
-   * 接管会取消当前运行；交还仅释放控制权，不自动恢复模型执行。
+   * 接管暂停当前运行；交还确认后继续同一运行，不增加用户消息。
    * @param id 当前窗口持有的会话标识。
    * @param resume true 表示交还，false 表示接管。
    * @returns 原生回执确认为 executed 后完成。
    * @throws 会话不存在、原生控制失败或回执未确认执行。
    */
-  async browserControl(id: string, resume: boolean): Promise<void> {
+  browserControl(id: string, resume: boolean): Promise<void> {
+    return this.serialize(id, () => this.changeBrowserControl(id, resume));
+  }
+
+  private async changeBrowserControl(id: string, resume: boolean): Promise<void> {
     const result = record(JSON.parse(await this.get(id).browserControl(resume)));
     if (result["outcome"] !== "executed")
-      throw new Error(
-        typeof result["error"] === "string" ? result["error"] : "浏览器控制权未能切换",
-      );
+      throw new Error(typeof result["error"] === "string" ? result["error"] : "浏览器控制权未能切换");
+    this.browsers.get(id)?.setHuman(!resume);
+  }
+
+  /** 后台结算不依赖面板挂载；等待运行真正暂停后交还，每个协助身份只尝试一次。 */
+  private async settleBrowserHandoff(id: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session || this.stopping !== null) return;
+    const snapshot = parseSnapshot(session.snapshot());
+    const handoff = snapshot.browser.handoff;
+    if (snapshot.browser.status !== "human" || !handoff || snapshot.run?.status === "running") return;
+    if (handoff.status === "waiting" && snapshot.run?.status === "paused") return;
+    if (this.handoffReturns.get(id)?.id === handoff.id) return;
+    const result: { id: string; error: string | null } = { id: handoff.id, error: null };
+    this.handoffReturns.set(id, result);
+    try {
+      await this.changeBrowserControl(id, true);
+    } catch (error) {
+      result.error = error instanceof Error ? error.message : String(error);
+      this.changed(id);
+    }
+  }
+
+  /** 用户导航与资源激活共享会话顺序，不依赖模型生成或网页截图。 */
+  browserNavigate(id: string, command: BrowserNavigation): Promise<void> {
+    return this.serialize(id, async () => {
+      const native = await this.activate(this.record(id));
+      await native.browserNavigate(JSON.stringify(command));
+      this.browsers.get(id)?.setHuman(true);
+      this.changed(id);
+    });
+  }
+
+  /** 只显示当前会话快照登记的真实网页，不接受调试地址或其他窗口身份。 */
+  browserView(id: string, placement: BrowserViewPlacement | null): void {
+    const browser = this.browsers.get(id);
+    if (placement === null) {
+      browser?.hide();
+      return;
+    }
+    if (!browser) throw new Error("浏览器尚未启动");
+    const snapshot = this.project(this.record(id));
+    if (snapshot.browser.status !== "human") {
+      browser.hide();
+      return;
+    }
+    const page = snapshot.browser.tabs.find((page) => page.id === placement.page);
+    if (!page?.native_target) throw new Error("真实网页视图尚未连接");
+    browser.show(page.native_target, { ...placement, human: snapshot.browser.status === "human" });
+  }
+
+  /** 返回本对话已登记下载的公开状态。 */
+  browserDownloads(id: string): BrowserDownload[] {
+    this.record(id);
+    return this.browsers.get(id)?.listDownloads() ?? [];
+  }
+
+  /** 在应用窗口中保存已有下载，未知身份与写入失败原样返回。 */
+  async browserSaveDownload(id: string, download: string): Promise<void> {
+    const browser = this.browsers.get(id);
+    if (!browser) throw new Error("浏览器尚未启动");
+    await browser.saveDownload(download);
   }
   /** 只读取已启动会话的独立画面；不持久化图片，原生失败原样传播。 */
   async uiPreview(id: string, target: UiPreviewTarget): Promise<UiPreviewFrame> {
@@ -970,40 +1186,96 @@ export class AgentService {
   browserInput(id: string, page: string, token: string, input: BrowserHumanInput): Promise<void> {
     return this.get(id).browserInput(page, token, JSON.stringify(input));
   }
+
+  /** 人工画面入口只转发到原生校验过的窗口，损坏回执和后端错误原样交付。 */
+  uiInput(
+    id: string,
+    target: UiPreviewTarget,
+    token: string,
+    input: BrowserHumanInput,
+  ): Promise<void> {
+    return this.get(id).uiInput(JSON.stringify(target), token, JSON.stringify(input));
+  }
   /** 用户切换真实连接控制权；只有后端确认执行才完成。 */
   async uiControl(id: string, backend: string, resume: boolean): Promise<void> {
-    const result = record(JSON.parse(await this.get(id).uiControl(backend, resume)));
-    if (result["outcome"] !== "executed")
-      throw new Error(typeof result["error"] === "string" ? result["error"] : "界面控制权未能切换");
+    return this.serialize(id, async () => {
+      const result = record(JSON.parse(await this.get(id).uiControl(backend, resume)));
+      if (result["outcome"] !== "executed")
+        throw new Error(
+          typeof result["error"] === "string" ? result["error"] : "界面控制权未能切换",
+        );
+    });
+  }
+
+  /** 明确发送任务时交给助手当前页面；交还失败拒绝启动，不能先让模型撞上人工控制状态。 */
+  private async claimResources(id: string, session: NativeAgentSession): Promise<void> {
+    const snapshot = parseSnapshot(session.snapshot());
+    if (snapshot.browser.status === "human") {
+      const result = record(JSON.parse(await session.browserControl(true)));
+      if (result["outcome"] !== "executed")
+        throw new Error(
+          typeof result["error"] === "string" ? result["error"] : "当前浏览器未能交给助手",
+        );
+      this.browsers.get(id)?.setHuman(false);
+    }
+    for (const connection of snapshot.ui.connections) {
+      if (!connection.connected || !connection.human) continue;
+      const result = record(JSON.parse(await session.uiControl(connection.backend, true)));
+      if (result["outcome"] !== "executed")
+        throw new Error(
+          typeof result["error"] === "string" ? result["error"] : "当前窗口未能交给助手",
+        );
+    }
+    this.ensureOpen();
   }
   /** 用户明确启用浏览器连接时安装本人 Native Messaging 清单，不修改系统权限。 */
   async uiSetup() {
     this.ensureOpen();
     return installUiRuntime(this.userData, this.launcher);
   }
-  /** 用户检查原生权限时激活会话并读取真实状态；不自动授权。 */
-  async uiPermissions(id: string) {
-    await this.ready;
-    const session = await this.activate(this.record(id));
-    const result = record(JSON.parse(await session.uiPermissions()));
-    if (result["outcome"] !== "observed")
-      throw new Error(
-        typeof result["error"] === "string" ? result["error"] : "原生权限状态未能读取",
-      );
-    return {
-      accessibility: result["accessibility"] === true,
-      screen_recording: result["screen_recording"] === true,
-      input_monitoring: result["input_monitoring"] === true,
-    };
+  /**
+   * 权限检查会创建资源，必须与发送、删除及停机共享会话的串行顺序。
+   * @param id 需要检查原生权限的会话身份。
+   * @returns 后端确认观察到的权限状态；不自动授权。
+   * @throws 会话不存在、服务关闭、资源激活或原生权限读取失败时拒绝。
+   */
+  uiPermissions(id: string): Promise<UiPermissions> {
+    return this.serialize(id, async () => {
+      const session = await this.activate(this.record(id));
+      const result = record(JSON.parse(await session.uiPermissions()));
+      if (result["outcome"] !== "observed")
+        throw new Error(
+          typeof result["error"] === "string" ? result["error"] : "原生权限状态未能读取",
+        );
+      return {
+        accessibility: result["accessibility"] === true,
+        screen_recording: result["screen_recording"] === true,
+        input_monitoring: result["input_monitoring"] === true,
+      };
+    });
   }
 
   /** 决定只能作用于仍有效的申请。 */
   approve(id: string, approval: string, reply: ApprovalReply): void {
     this.get(id).approve(approval, JSON.stringify(reply));
   }
-  /** 读取不消费模型输出的原始日志页。 */
+  /**
+   * 按原始字节游标读取日志，回复必须属于本次请求且能供窗口安全续读。
+   * @param id 已启动资源所属的会话。
+   * @param terminal 本次读取的原生终端身份。
+   * @param offset 独立原始字节游标的十进制文本。
+   * @returns 一页最多 8192 字节的原始日志，不消费模型的增量输出。
+   * @throws 资源或读取失败、回复归属不符、字节预算超限或分页没有进展时拒绝。
+   */
   async terminalRead(id: string, terminal: string, offset: string): Promise<TerminalPage> {
-    return parseTerminalPage(await this.get(id).readTerminal(terminal, offset, 8192));
+    const limit = 8192;
+    const page = parseTerminalPage(await this.get(id).readTerminal(terminal, offset, limit));
+    if (page.process.session_id !== terminal || page.offset !== Number(offset))
+      throw new Error("终端日志归属或起点与请求不一致");
+    const pageBytes = page.next_offset - page.offset;
+    if (pageBytes > limit || (page.has_more && pageBytes === 0))
+      throw new Error("终端日志回复超出读取预算或分页游标未推进");
+    return page;
   }
   /** 用户终端输入保留二进制字节，不改写为 shell 命令。 */
   terminalInput(id: string, terminal: string, data: Uint8Array): Promise<void> {
@@ -1040,7 +1312,9 @@ export class AgentService {
       await this.settings.flush();
       for (const id of this.timers.keys()) this.clearTimer(id);
       const results = await Promise.allSettled(
-        [...this.sessions.keys()].map((id) => this.release(id)),
+        [...new Set([...this.sessions.keys(), ...this.browsers.keys()])].map((id) =>
+          this.release(id),
+        ),
       );
       const saved = await Promise.allSettled(
         [...this.records.keys()].map((id) => this.persist(id)),
@@ -1068,46 +1342,79 @@ export class AgentService {
     // 激活依赖异步配置和目录读取；关闭开始后不得再创建新的资源所有者。
     const attachmentDirectory = await this.attachments.prepare(item.id);
     this.ensureOpen();
-    const session = createNativeSession(
-      this.userData,
-      this.launcher,
-      workspace,
-      configured,
-      () => this.nativeChanged(item.id),
-      item.title,
-      attachmentDirectory,
-    );
+    const embedded = this.createBrowser?.(item.id, () => this.changed(item.id));
+    let session: NativeAgentSession | undefined;
     try {
+      const embeddedHost = embedded ? await embedded.ready : undefined;
+      this.ensureOpen();
+      session = createNativeSession(
+        this.userData,
+        this.launcher,
+        workspace,
+        configured,
+        () => this.nativeChanged(item.id),
+        item.title,
+        attachmentDirectory,
+        embeddedHost,
+      );
       if (item.checkpoint !== null) session.restore(item.checkpoint);
     } catch (error) {
-      await session.close();
-      throw error;
+      return rethrowAfterCleanup(
+        error,
+        async () => {
+          const failures: unknown[] = [];
+          try {
+            await session?.close();
+          } catch (reason) {
+            failures.push(reason);
+          }
+          try {
+            await embedded?.close();
+          } catch (reason) {
+            failures.push(reason);
+          }
+          if (failures.length === 1) throw failures[0];
+          if (failures.length > 1) throw new AggregateError(failures, "会话资源未能完整关闭");
+        },
+        "会话激活失败且资源未能完整关闭",
+      );
     }
+    // 只有租约、原生构造与历史恢复全部成功后，资源才归入可见会话。
+    if (embedded) this.browsers.set(item.id, embedded);
     this.sessions.set(item.id, session);
     return session;
   }
 
   private async release(id: string): Promise<void> {
     const session = this.sessions.get(id);
-    if (!session) return;
-    await session.close();
-    this.capture(id);
-    this.sessions.delete(id);
-    const item = this.records.get(id);
-    if (item) item.snapshot = resumedSnapshot(item.snapshot);
+    if (session) {
+      await session.close();
+      this.capture(id);
+      this.sessions.delete(id);
+      const item = this.records.get(id);
+      if (item) item.snapshot = resumedSnapshot(item.snapshot);
+    }
+    const browser = this.browsers.get(id);
+    if (browser) {
+      await browser.close();
+      this.browsers.delete(id);
+    }
+    this.handoffReturns.delete(id);
   }
 
   private project(item: ConversationRecord): AgentConversation {
     const session = this.sessions.get(item.id);
     const snapshot = session ? parseSnapshot(session.snapshot()) : item.snapshot;
+    const handoff = this.handoffReturns.get(item.id);
+    const handoffError = handoff?.id === snapshot.browser.handoff?.id ? handoff?.error : null;
     return {
       ...snapshot,
+      browser: { ...snapshot.browser, error: handoffError ?? snapshot.browser.error },
       id: item.id,
       workspace: item.linkedWorkspace,
       title: item.title,
       model:
-        (snapshot.run?.status === "running" ? item.model : item.modelSelection?.modelId) ??
-        "未选择模型",
+        (isActiveRun(snapshot.run) ? item.model : item.modelSelection?.modelId) ?? "未选择模型",
       modelSelection: item.modelSelection,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
@@ -1116,7 +1423,11 @@ export class AgentService {
       article: this.articleLocations.get(item.id) ?? null,
       draft: item.draft,
       ...(item.draftReferences ? { draftReferences: structuredClone(item.draftReferences) } : {}),
-      ...(item.draftAttachmentIds?.length ? { draftAttachments: structuredClone(this.ownedAttachments(item, item.draftAttachmentIds)) } : {}),
+      ...(item.draftAttachmentIds?.length
+        ? {
+            draftAttachments: structuredClone(this.ownedAttachments(item, item.draftAttachmentIds)),
+          }
+        : {}),
       storageError: this.storageErrors.get(item.id) ?? null,
     };
   }
@@ -1133,6 +1444,7 @@ export class AgentService {
       setTimeout(() => {
         this.timers.delete(id);
         void this.serialize(id, async () => {
+          await this.settleBrowserHandoff(id);
           await this.saveProgress(id);
           await this.dispatchQueued(id);
         }).catch((error: unknown) => {
@@ -1241,14 +1553,22 @@ export class AgentService {
     }
   }
 
-  /** 已提交移动同步文章归属；删除保留原路径和历史，不级联删除对话。 */
+  /**
+   * 已提交移动同步文章归属；删除文章保留原路径和历史，不级联删除对话。
+   * @param root 已完成文件操作的笔记库规范绝对路径。
+   * @param changes 库内旧路径与新路径的映射；null 表示文章已删除。
+   * @returns 当前仍归属该库的会话更新并保存后兑现；排队期间已删除或迁出的会话跳过。
+   * @throws 库加载、服务关闭或归属保存失败时拒绝。
+   */
   async remapArticles(root: string, changes: { from: string; to: string | null }[]): Promise<void> {
     await this.attachVault(root);
-    for (const item of this.records.values()) {
-      if (!item.article || item.snapshot.workspace !== root) continue;
-      await this.serialize(item.id, async () => {
+    for (const id of [...this.records.keys()]) {
+      await this.serialize(id, async () => {
+        // 排队期间会话可能已删除或迁入其他库，执行时重新确认当前归属。
+        const item = this.records.get(id);
+        if (!item?.article || item.snapshot.workspace !== root) return;
         for (const change of changes) {
-          const binding = item.article;
+          const binding: ConversationRecord["article"] = item.article;
           if (
             binding &&
             !binding.removed &&
@@ -1258,7 +1578,7 @@ export class AgentService {
               item.article = { ...binding, removed: true };
               continue;
             }
-            const path = change.to + binding.path.slice(change.from.length);
+            const path: string = change.to + binding.path.slice(change.from.length);
             item.article = {
               ...binding,
               path,
@@ -1293,6 +1613,8 @@ export class AgentService {
   }
 
   private record(id: string): ConversationRecord {
+    // 读取失败时历史归属尚未确定，不能把未加载的记录解释为已经删除。
+    if (this.loadError) throw this.loadError;
     const item = this.records.get(id);
     if (!item) throw new Error("对话不存在或已删除");
     return item;
@@ -1310,9 +1632,17 @@ export class AgentService {
 
 /** 只扫描用户的输入信封，模型回复不能伪造文件所有权或延长副本生命周期。 */
 function historyAttachmentIds(snapshot: AgentSnapshot): Set<string> {
-  return new Set(snapshot.messages.flatMap((message) => message.role !== "user" ? [] :
-    message.content.flatMap((part) => part.type !== "text" ? [] :
-      readConversationInput(part.value).attachments.map((file) => file.id))));
+  return new Set(
+    snapshot.messages.flatMap((message) =>
+      message.role !== "user"
+        ? []
+        : message.content.flatMap((part) =>
+            part.type !== "text"
+              ? []
+              : readConversationInput(part.value).attachments.map((file) => file.id),
+          ),
+    ),
+  );
 }
 
 /** 重启只恢复待办内容；派发意图不能证明执行结果，必须交由用户核对。 */
@@ -1331,7 +1661,7 @@ function restoredQueue(queue: ConversationQueue): ConversationQueue {
 /** 重启与归档释放只保留阅读和继续对话所需状态，旧审批与进程不可恢复。 */
 function resumedSnapshot(snapshot: AgentSnapshot): AgentSnapshot {
   const interrupted = (run: AgentSnapshot["run"]): AgentSnapshot["run"] =>
-    run?.status === "running"
+    isActiveRun(run)
       ? { ...run, status: "cancelled", error: "上次运行已中断，可继续任务或发送新消息。" }
       : run;
   return {

@@ -1,21 +1,12 @@
-import { access, copyFile, chmod, mkdir, rename, writeFile, readFile, rm } from "node:fs/promises";
+import { access, copyFile, chmod, mkdir, rename, readFile, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import type { UiInstallation } from "../shared/api";
 import { record, text } from "../shared/values";
-
-/** 完整写入后替换本应用拥有的安装文件，失败清理由同一所有者负责。 */
-async function atomic(path: string, bytes: string): Promise<void> {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, bytes, { mode: 0o600 });
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
+import { writePrivateJson } from "./private-json";
+import { rethrowAfterCleanup } from "./cleanup";
 
 /**
  * 为当前用户登记固定扩展的 Native Messaging 入口，返回用户加载扩展所需目录。
@@ -51,12 +42,16 @@ export async function installUiRuntime(
   await chmod(directory, 0o700);
   const bridge = join(directory, "noemori-browser-host");
   const temporary = `${bridge}.${randomUUID()}.tmp`;
+  await copyFile(source, temporary, constants.COPYFILE_EXCL);
   try {
-    await copyFile(source, temporary);
     await chmod(temporary, 0o755);
     await rename(temporary, bridge);
-  } finally {
-    await rm(temporary, { force: true });
+  } catch (cause) {
+    return rethrowAfterCleanup(
+      cause,
+      () => rm(temporary, { force: true }),
+      "浏览器桥接未安装且临时副本未能完整清理",
+    );
   }
   const homes =
     process.platform === "darwin"
@@ -77,7 +72,7 @@ export async function installUiRuntime(
   });
   for (const home of homes) {
     await mkdir(home, { recursive: true });
-    await atomic(join(home, "app.noemori.browser.json"), body);
+    await writePrivateJson(join(home, "app.noemori.browser.json"), body);
   }
   return {
     extensionDirectory,

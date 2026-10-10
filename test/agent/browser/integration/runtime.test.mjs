@@ -53,12 +53,25 @@ function ref(observation, name) {
   return { page: observation.page, observation: observation.id, ref: element.ref };
 }
 
+test("用户连续两次点击只触发两次事件，第二次保留双击编号", async (t) => {
+  const f = await fixture(t, '<button onclick="window.clicks=(window.clicks||0)+1;window.lastDetail=event.detail">点击</button>');
+  await f.run({ action: "takeover" });
+  const bounds = await f.page.locator("button").boundingBox();
+  for (const clicks of [1, 2]) {
+    const preview = await f.run({ action: "preview", page: f.id });
+    const result = await f.run({ action: "human_input", page: f.id, token: preview.input_token, input: { type: "pointer", x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, clicks } });
+    assert.equal(result.outcome, "executed", result.error);
+  }
+  assert.equal(await f.page.evaluate(() => window.clicks), 2);
+  assert.equal(await f.page.evaluate(() => window.lastDetail), 2);
+});
+
 test("人工输入绑定本次接管和页面，旧输入不能穿过交还或导航", async (t) => {
   const f = await fixture(t, '<input autofocus aria-label="姓名">');
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   const prior = await f.run({ action: "preview", page: f.id });
   await f.run({ action: "resume" });
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   await f.page.locator("input").focus();
   const stale = await f.run({ action: "human_input", page: f.id, token: prior.input_token ?? "old-control", input: { type: "text", text: "不应输入" } });
   assert.equal(stale.outcome, "not_executed");
@@ -74,7 +87,7 @@ test("人工输入绑定本次接管和页面，旧输入不能穿过交还或�
 
 test("文件选择器更换后，迟到的选择不能上传到另一个控件", async (t) => {
   const f = await fixture(t, '<input type="file" id="first"><input type="file" id="second">');
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   let chooser = f.page.waitForEvent("filechooser");
   await f.page.locator("#first").click();
   await chooser;
@@ -99,7 +112,7 @@ test("后台预览不改变模型观察，接管不激活系统浏览器窗口",
   assert.equal(preview.observation, undefined);
   const filled = await f.run({ action: "fill", ...ref(first.observation, "姓名"), text: "后台输入" });
   assert.equal(filled.outcome, "executed");
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   assert.equal(activated, false);
   assert.equal(f.engine.tabs()[0].title, "测试页面");
   const humanPreview = await f.run({ action: "preview", page: f.id });
@@ -114,7 +127,7 @@ test("后台预览不改变模型观察，接管不激活系统浏览器窗口",
 
 test("人工在后台浏览器处理网页弹窗和文件选择，不需要系统浏览器窗口", async (t) => {
   const f = await fixture(t, '<input type="file"><button onclick="window.answer=prompt(\'姓名\')">询问</button>');
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   const bounds = await f.page.locator("button").boundingBox();
   const clicked = await f.run({ action: "human_input", page: f.id, token: (await f.run({ action: "preview", page: f.id })).input_token, input: { type: "pointer", x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 } });
   assert.equal(clicked.outcome, "unknown");
@@ -286,7 +299,7 @@ test("同名跨框架与 Shadow DOM 控件通过真实节点引用区分", async
 test("人工接管暂停操作，交还后旧观察不能继续执行", async (t) => {
   const f = await fixture(t, "<button>保存</button>");
   const first = await f.observe();
-  assert.equal((await f.run({ action: "handoff" })).mode, "human");
+  assert.equal((await f.run({ action: "takeover" })).mode, "human");
   assert.equal(
     (await f.run({ action: "click", ...ref(first.observation, "保存") })).outcome,
     "not_executed",
@@ -728,8 +741,8 @@ test("人工接管与重复接管均不改变系统焦点", async (t) => {
       await bring();
     };
   }
-  await f.run({ action: "handoff" });
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
+  await f.run({ action: "takeover" });
   assert.deepEqual(activated, []);
 });
 
@@ -798,7 +811,7 @@ test("用户在接管期间手动关闭弹窗后，交还可以继续观察页�
   const first = await f.observe();
   const manualDialog = f.page.waitForEvent("dialog");
   await f.run({ action: "click", ...ref(first.observation, "提交") });
-  await f.run({ action: "handoff" });
+  await f.run({ action: "takeover" });
   await (await manualDialog).dismiss();
   await f.run({ action: "resume" });
   const result = await f.observe();
@@ -878,4 +891,67 @@ test("上传保留文件 MIME 类型，图片控件不会把 PNG 误认为通用
     await f.page.locator("input").evaluate((element) => element.files[0].type),
     "image/png",
   );
+});
+
+
+test("自动协助只在成功提示出现后结算；输入和失败提示不会完成", async (t) => {
+  const f = await fixture(t, '<label>验证码<input></label><button onclick="document.querySelector(\'output\').textContent=document.querySelector(\'input\').value===\'1234\'?\'验证通过\':\'验证失败\'">验证</button><output></output>');
+  const started = await f.run({ action: "handoff", completion: { page: f.id, until: { type: "text", text: "验证通过" } } });
+  assert.equal(started.handoff?.status, "waiting");
+  assert.equal(started.handoff.page, f.id);
+  await f.page.getByLabel("验证码").fill("错误");
+  await f.page.getByRole("button").click();
+  await new Promise((done) => setTimeout(done, 500));
+  assert.equal((await f.run({ action: "tabs" })).handoff.status, "waiting");
+  await f.page.getByLabel("验证码").fill("1234");
+  await f.page.getByRole("button").click();
+  for (let count = 0; count < 30; count++) {
+    const state = await f.run({ action: "tabs" });
+    if (state.handoff.status === "completed") break;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  const result = await f.run({ action: "tabs" });
+  assert.equal(result.handoff.status, "completed");
+  assert.equal(result.mode, "human", "条件满足只发信号，宿主确认运行已暂停后交还");
+});
+
+test("已满足条件无需弹窗，关闭网页交付失败而不是完成", async (t) => {
+  const f = await fixture(t, "<p>已登录</p>");
+  const complete = await f.run({ action: "handoff", completion: { page: f.id, until: { type: "text", text: "已登录" } } });
+  assert.equal(complete.handoff?.status, "completed");
+  assert.equal(complete.mode, "agent");
+  await f.run({ action: "handoff", completion: { page: f.id, until: { type: "text", text: "已保存" } } });
+  await f.page.close();
+  await new Promise((done) => setTimeout(done, 500));
+  const result = await f.run({ action: "tabs" });
+  assert.equal(result.handoff.status, "failed");
+  assert.match(result.handoff.error, /关闭/);
+});
+
+
+test("成功地址精确匹配，旧协助观察不能完成后来的请求", async (t) => {
+  const f = await fixture(t, "<p>登录中</p>");
+  await f.page.route("https://example.com/**", (route) => route.fulfill({ body: "<p>页面</p>", contentType: "text/html" }));
+  const first = await f.run({ action: "handoff", completion: { page: f.id, until: { type: "url", url: "https://example.com/success" } } });
+  await f.page.goto("https://example.com/loading");
+  await new Promise((done) => setTimeout(done, 350));
+  assert.equal((await f.run({ action: "tabs" })).handoff.status, "waiting");
+  await f.page.goto("https://example.com/success");
+  await new Promise((done) => setTimeout(done, 1000));
+  assert.equal((await f.run({ action: "tabs" })).handoff.status, "completed");
+  await f.run({ action: "resume" });
+  const next = await f.run({ action: "handoff", completion: { page: f.id, until: { type: "text", text: "保存成功" } } });
+  assert.notEqual(first.handoff.id, next.handoff.id);
+  await new Promise((done) => setTimeout(done, 1000));
+  assert.equal((await f.run({ action: "tabs" })).handoff.status, "waiting");
+  await f.run({ action: "resume" });
+  assert.equal((await f.run({ action: "tabs" })).handoff.status, "cancelled");
+});
+
+test("缺少完成条件拒绝协助，不留无法自动结束的人工状态", async (t) => {
+  const f = await fixture(t, "<p>登录</p>");
+  const result = await f.run({ action: "handoff" });
+  assert.equal(result.outcome, "not_executed");
+  assert.equal(result.mode, "agent");
+  assert.match(result.error, /completion/);
 });

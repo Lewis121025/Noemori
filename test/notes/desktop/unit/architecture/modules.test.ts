@@ -131,6 +131,7 @@ describe("功能模块依赖边界", () => {
       "main/ipc",
       "preload/api",
       "renderer/ReaderWorkspace.svelte",
+      "renderer/previews",
     ]);
     for (const file of sources(sourceRoot).filter((file) => !file.startsWith(readerRoot))) {
       for (const specifier of imports(file)) {

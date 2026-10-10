@@ -8,6 +8,7 @@ import { installApplicationMenu, updateHistoryMenu } from "./menu";
 import { VAULT_MEDIA_SCHEME, createVaultMediaHandler } from "./vault-media";
 import { AgentService } from "../features/agent/main/service";
 import { registerAgentIpc } from "../features/agent/main/ipc";
+import { BrowserWorkspace } from "../features/agent/main/browser-workspace";
 
 // 特权协议必须在 ready 之前注册；stream 让 <audio>/<video> 可以按区间拖动进度。
 protocol.registerSchemesAsPrivileged([
@@ -124,6 +125,7 @@ function createWindow(client: CoreClient): void {
       if (mainWindow === owner && !owner.webContents.isDestroyed())
         owner.webContents.send("agent.changed", id);
     },
+    (id, changed) => new BrowserWorkspace(owner, id, changed),
   );
   agent = service;
   // 统一工作台会在渲染启动时恢复会话；等主框架完成加载，才允许 preload 派发 Agent 请求。
@@ -178,10 +180,15 @@ app.whenReady().then(async () => {
     }
   });
   core = client;
-  registerIpc(() => mainWindow, closeGate, client, async (source, root, path) => {
-    if (agent === null) throw new Error("Agent 尚未准备好，请重新打开应用以接入文章历史");
-    await agent.importArticleLibrary(source, root, path);
-  });
+  registerIpc(
+    () => mainWindow,
+    closeGate,
+    client,
+    async (source, root, path) => {
+      if (agent === null) throw new Error("Agent 尚未准备好，请重新打开应用以接入文章历史");
+      await agent.importArticleLibrary(source, root, path);
+    },
+  );
   registerAgentIpc(
     () => mainWindow,
     () => agent,
@@ -238,7 +245,12 @@ app.on("will-quit", (event) => {
   quitState = "stopping";
   void Promise.all([core.shutdown(), agent?.shutdown(), ...closingAgents])
     .catch((error: unknown) => {
-      dialog.showErrorBox("内核未正常关闭", error instanceof Error ? error.message : String(error));
+      if (hiddenTestWindow) console.error("内核未正常关闭", error);
+      else
+        dialog.showErrorBox(
+          "内核未正常关闭",
+          error instanceof Error ? error.message : String(error),
+        );
     })
     .finally(() => {
       quitState = "stopped";

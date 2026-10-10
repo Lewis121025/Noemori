@@ -150,9 +150,9 @@ async fn responses_replay_omits_optional_ids_and_keeps_reasoning_and_phase() {
         assert_eq!(input[2], reasoning);
         assert_eq!(
             input[3],
-            json!({"role":"assistant", "phase":"commentary", "content":[
-                {"type":"input_text", "text":"计算"},
-                {"type":"input_text", "text":"无法执行部分操作"}
+            json!({"type":"message", "role":"assistant", "phase":"commentary", "content":[
+                {"type":"output_text", "text":"计算", "annotations":[], "logprobs":[{"token":"noise"}]},
+                {"type":"refusal", "refusal":"无法执行部分操作"}
             ]})
         );
         assert_eq!(
@@ -161,6 +161,60 @@ async fn responses_replay_omits_optional_ids_and_keeps_reasoning_and_phase() {
             "name":"lookup", "arguments":"{\"id\":\"business-1\"}"})
         );
         assert_eq!(input[5]["call_id"], "call-1");
+    }
+}
+
+#[tokio::test]
+async fn responses_saved_assistant_messages_keep_output_types_on_user_followup() {
+    for streaming in [false, true] {
+        let content = json!([
+            {"type":"output_text", "text":"", "annotations":[]},
+            {"type":"output_text", "text":"第一段", "annotations":[]},
+            {"type":"output_text", "text":"\n第二段", "annotations":[]}
+        ]);
+        let first_body = json!({"status":"completed", "output":[
+            {"type":"message", "id":"message-internal", "status":"completed",
+                "role":"assistant", "content":content}
+        ]});
+        let final_body = json!({"status":"completed", "output":[
+            {"type":"message", "role":"assistant", "content":[
+                {"type":"output_text", "text":"后续回复"}
+            ]}
+        ]});
+        let fixture = |body| {
+            if streaming {
+                Fixture::sse(
+                    vec![json!({"type":"response.completed", "response":body})],
+                    false,
+                )
+            } else {
+                Fixture::json(body)
+            }
+        };
+        let mut server = Server::start(vec![fixture(first_body), fixture(final_body)]).await;
+        let model =
+            HttpModel::new(config(Protocol::OpenAiResponses, &server.url, streaming)).unwrap();
+        let first = generate(&model, request(), context()).await.unwrap();
+        let saved = serde_json::to_vec(&first.message).unwrap();
+        let restored: Message = serde_json::from_slice(&saved).unwrap();
+        let mut next = request();
+        next.messages.push(restored);
+        next.messages.push(Message::text(Role::User, "继续"));
+        let response = generate(&model, next, context()).await.unwrap();
+        assert_eq!(response.message.text_content(), "后续回复");
+        server.finish().await;
+        let requests = server.requests.lock().unwrap();
+        let input = &requests[1].body["input"];
+        assert_eq!(input[1], json!({"role":"user", "content":"你好"}));
+        assert_eq!(
+            input[2],
+            json!({"type":"message", "role":"assistant", "content":[
+                {"type":"output_text", "text":"", "annotations":[]},
+                {"type":"output_text", "text":"第一段", "annotations":[]},
+                {"type":"output_text", "text":"\n第二段", "annotations":[]}
+            ]})
+        );
+        assert_eq!(input[3], json!({"role":"user", "content":"继续"}));
     }
 }
 

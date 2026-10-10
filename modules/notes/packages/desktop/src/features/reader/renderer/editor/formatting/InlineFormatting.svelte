@@ -101,9 +101,7 @@
   <FormattingMenu
     id="{id}-highlight"
     label="高亮"
-    indicator={isHighlightColor(colors.highlight)
-      ? textPalette.highlight[colors.highlight]
-      : null}
+    indicator={isHighlightColor(colors.highlight) ? textPalette.highlight[colors.highlight] : null}
     icon="m9 11 7-7 4 4-7 7M9 11l4 4-3 3-4-4 3-3M4 20h7"
     items={highlightItems}
     onCommand={onFormat}

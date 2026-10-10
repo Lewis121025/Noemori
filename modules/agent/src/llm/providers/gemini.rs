@@ -106,6 +106,7 @@ pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelRespons
         return Err(Error::Protocol("Gemini 必须返回一个候选".into()));
     }
     let candidate = &candidates[0];
+    validate_model_role(candidate["content"].get("role"), "model")?;
     let raw = candidate["content"]["parts"]
         .as_array()
         .cloned()
@@ -210,6 +211,7 @@ impl StreamState {
                 return Err(Error::Protocol("Gemini 流包含多个候选".into()));
             }
             if let Some(candidate) = candidates.first() {
+                validate_model_role(candidate["content"].get("role"), "model")?;
                 if let Some(parts) = optional_array(&candidate["content"], "parts")? {
                     if !parts.is_empty() && (self.finish.is_some() || self.blocked.is_some()) {
                         return Err(Error::Protocol("Gemini 候选结束后仍有生成内容".into()));

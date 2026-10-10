@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isActiveRun } from "../shared/run-actions";
   import { tick } from "svelte";
   import type { AgentApi, AgentConversation } from "../shared/api";
   import { createCompositionGuard } from "../../reader/shared/composition";
@@ -92,10 +93,10 @@
         {@const message = source?.messages[turn.message_start]?.content.find(
           (part) => part.type === "text",
         )}
-        <option value={turn.run.id} disabled={turn.run.status === "running"}
+        <option value={turn.run.id} disabled={isActiveRun(turn.run)}
           >第 {index + 1} 轮之后 · {message?.type === "text"
             ? message.value.slice(0, 60)
-            : "用户任务"}{turn.run.status === "running" ? "（进行中）" : ""}</option
+            : "用户任务"}{isActiveRun(turn.run) ? "（进行中）" : ""}</option
         >
       {/each}
     </select>
@@ -105,10 +106,8 @@
         <span>工作目录</span><code title={source?.workspace}>{source?.workspace}</code>
       </div>
     </div>
-    <p class="hint">
-      对话独立；目录共享，文件修改互相可见。
-    </p>
-    {#if source?.run?.status === "running" && afterTurnId === ""}<p class="hint">
+    <p class="hint">对话独立；目录共享，文件修改互相可见。</p>
+    {#if isActiveRun(source?.run) && afterTurnId === ""}<p class="hint">
         原任务继续运行，分支等待新任务。
       </p>{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}

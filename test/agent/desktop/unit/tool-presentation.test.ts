@@ -86,20 +86,25 @@ it("结果只能与同标识且同工具名称的调用合并，孤立结果留�
 
 it("执行条目显示实际动作和对象，完整命令仍保留", () => {
   const action = (cmd: string) => toolAction({ id: "one", name: "terminal", arguments: { action: "exec", cmd } });
-  expect(action('cat "资料摘要.md"')).toMatchObject({ label: "读取文件", target: "资料摘要.md", source: 'cat "资料摘要.md"' });
-  expect(action("sed -n '1,120p' README.md")).toMatchObject({ label: "读取文件", target: "README.md" });
-  expect(action('rg -n "关键词" notes')).toMatchObject({ label: "搜索内容", target: "关键词 · notes" });
-  expect(action("pnpm check")).toMatchObject({ label: "运行命令", target: "pnpm check" });
+  expect(action('cat "资料摘要.md"')).toMatchObject({ kind: "file", label: "读取文件", target: "资料摘要.md", source: 'cat "资料摘要.md"' });
+  expect(action("sed -n '1,120p' README.md")).toMatchObject({ kind: "file", label: "读取文件", target: "README.md" });
+  expect(action('rg -n "关键词" notes')).toMatchObject({ kind: "search", label: "搜索内容", target: "关键词 · notes" });
+  expect(action("ls -la notes")).toMatchObject({ kind: "folder", label: "列出目录", target: "notes" });
+  expect(action("pnpm check")).toMatchObject({ kind: "command", label: "运行命令", target: "pnpm check" });
   for (const cmd of ['cat README.md; rm file', 'cat "$path"', 'cat $(get_path)', 'cat README.md\nprintf done'])
-    expect(action(cmd)).toMatchObject({ label: "运行命令", source: cmd });
+    expect(action(cmd)).toMatchObject({ kind: "command", label: "运行命令", source: cmd });
 });
 
 it("浏览器和应用条目采用实际参数与回执，未知脚本不猜测动作", () => {
   expect(toolAction({ id: "web", name: "browser", arguments: { action: "navigate", url: "https://example.com/guide" } }))
-    .toMatchObject({ label: "打开网页", target: "https://example.com/guide" });
+    .toMatchObject({ kind: "browser", label: "打开网页", target: "https://example.com/guide" });
   const call = { id: "ui", name: "ui_repl", arguments: { type: "run", code: 'print("browser.open is documentation");' } };
-  expect(toolAction(call)).toMatchObject({ label: "运行脚本", source: call.arguments.code });
+  expect(toolAction(call)).toMatchObject({ kind: "script", label: "运行脚本", source: call.arguments.code });
   expect(toolAction(call, { call_id: "ui", name: "ui_repl", is_error: false, output: { operations: [
     { request: { domain: "browser", action: { action: "read", page: "page-one" } }, outcome: "executed" },
-  ] } })).toMatchObject({ label: "读取网页", target: "page-one" });
+  ] } })).toMatchObject({ kind: "browser", label: "读取网页", target: "page-one" });
+  expect(toolAction(call, { call_id: "ui", name: "ui_repl", is_error: false, output: { operations: [
+    { request: { domain: "computer", action: { action: "observe", app: "notes", window: "one" } }, outcome: "executed" },
+  ] } })).toMatchObject({ kind: "app", label: "查看窗口内容", target: "one" });
+  expect(toolAction({ id: "custom", name: "custom", arguments: {} })).toMatchObject({ kind: "tool", label: "custom" });
 });

@@ -29,7 +29,15 @@ export class ArticleLibrary {
           const info = await lstat(manifest);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("导入元数据不是普通文件");
           const value: unknown = JSON.parse(await readFile(manifest, "utf8"));
-          if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1 || !("source" in value) || typeof value.source !== "string" || !isAbsolute(value.source))
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            !("version" in value) ||
+            value.version !== 1 ||
+            !("source" in value) ||
+            typeof value.source !== "string" ||
+            !isAbsolute(value.source)
+          )
             throw new Error("导入元数据归属无效");
           const path = relative(root, directory).split(sep).join("/");
           if (!isEntryPath(path)) throw new Error("导入目录路径无效");
@@ -40,7 +48,8 @@ export class ArticleLibrary {
         }
       }
       for (const entry of await readdir(directory, { withFileTypes: true }))
-        if (entry.isDirectory() && !entry.name.startsWith(".")) pending.push(join(directory, entry.name));
+        if (entry.isDirectory() && !entry.name.startsWith("."))
+          pending.push(join(directory, entry.name));
     }
     return result;
   }

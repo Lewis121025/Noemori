@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { tick } from "svelte";
+  import { isActiveRun } from "../shared/run-actions";
   import type { AgentApi, AgentConversation } from "../shared/api";
   import { createCompositionGuard } from "../../reader/shared/composition";
   let { api, onDone }: { api: AgentApi; onDone: (action: ConversationAction, id: string) => void } =
@@ -79,11 +80,9 @@
       />
     {:else}<p>「{item?.title}」</p>
       <p class="hint">
-        {action === "archive"
-          ? "归档后可恢复。"
-          : "删除后无法恢复，工作目录文件保留。"}
+        {action === "archive" ? "归档后可恢复。" : "删除后无法恢复，工作目录文件保留。"}
       </p>
-      {#if item?.run?.status === "running" || item?.terminals.some((entry) => entry.process.status === "running")}<p
+      {#if isActiveRun(item?.run) || item?.terminals.some((entry) => entry.process.status === "running")}<p
           class="hint"
         >
           正在执行的任务和终端将停止。

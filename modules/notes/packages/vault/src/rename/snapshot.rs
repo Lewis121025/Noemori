@@ -145,14 +145,24 @@ impl Vault {
                 (fact.keys.clone(), fact.links.clone())
             } else if let Ok(text) = std::str::from_utf8(&read) {
                 let scanned = crate::markdown::scan::scan_markdown(path, text);
-                (crate::links::identity::keys_from_scan(&scanned), scanned.links)
+                (
+                    crate::links::identity::keys_from_scan(&scanned),
+                    scanned.links,
+                )
             } else {
                 (Vec::new(), Vec::new())
             };
             if !keys.is_empty() {
                 extras.insert(path.clone(), keys);
             }
-            documents.insert(path.clone(), RenameDocument { bytes: read, links, hash: hash.into() });
+            documents.insert(
+                path.clone(),
+                RenameDocument {
+                    bytes: read,
+                    links,
+                    hash: hash.into(),
+                },
+            );
         }
         Ok(RenameSnapshot {
             files: Vec::new(),

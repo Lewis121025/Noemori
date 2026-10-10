@@ -96,3 +96,33 @@ it("渲染模型内容不会执行 HTML、链接脚本或自动加载远程图�
   expect(target.querySelector("img")).toBeNull();
   expect(target.textContent).toContain("危险");
 });
+
+it("HTML 默认预览保留样式，脚本、事件、外部资源和链接不能进入宿主，源码复制保留原文", async () => {
+  const html = '<style>body { background: pink }</style><h1 onclick="alert(1)">计划</h1><script>alert(2)</script><img src="https://example.com/track.png"><a href="file:///private">打开</a>';
+  render(`\`\`\`html\n${html}\n\`\`\``);
+  const frame = target.querySelector<HTMLIFrameElement>("iframe")!;
+  expect(frame.getAttribute("sandbox")).toBe("");
+  const document = new DOMParser().parseFromString(frame.srcdoc, "text/html");
+  expect(document.querySelector("style")?.textContent).toContain("background: pink");
+  expect(document.querySelector("script")).toBeNull();
+  expect(document.querySelector("[onclick]")).toBeNull();
+  expect(document.querySelector("a[href]")).toBeNull();
+  expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute("content")).toContain("default-src 'none'");
+  const source = target.querySelector<HTMLButtonElement>('[aria-label="源码"]')!;
+  source.click();
+  flushSync();
+  expect(target.querySelector("iframe")).toBeNull();
+  expect(target.querySelector("pre code")?.textContent).toBe(html);
+  copy();
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(html));
+});
+
+it("远程图片只在明确选择查看后加载，本地文件引用生成内容卡片而不是失效文字", async () => {
+  render("![示意图](https://example.com/image.png)\n\n[报告](report.pdf)");
+  expect(target.querySelector("img")).toBeNull();
+  expect(target.querySelector('[aria-label="内容：report.pdf"]')).not.toBeNull();
+  const load = [...target.querySelectorAll("button")].find((button) => button.textContent === "查看内容")!;
+  load.click();
+  await vi.waitFor(() => { flushSync(); expect(target.querySelector('img[src="https://example.com/image.png"]')).not.toBeNull(); });
+  expect(target.querySelector("img")?.getAttribute("referrerpolicy")).toBe("no-referrer");
+});

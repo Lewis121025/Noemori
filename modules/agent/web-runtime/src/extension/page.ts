@@ -1,4 +1,5 @@
 import { describeElement, layoutSignature } from "../browser/dom.js";
+import { PageExtensions, isPageExtensionAction } from "../browser/extensions.js";
 import {
   record,
   navigationUrl,
@@ -16,6 +17,10 @@ import {
   uploadDom,
 } from "./dom.js";
 import { Operation, runtimeValue, type CdpSession, type CdpTransport } from "./transport.js";
+import { semanticSelector, type SemanticAction } from "../browser/semantic.js";
+import { bindSemanticDom, inspectSemanticDom, semanticTargetDom } from "../browser/semantic-dom.js";
+import { semanticEngineExpression } from "./semantic.js";
+import { observationResult, type ObservationPolicy, type ObservationRequest, type ObservationResult } from "../browser/observation-update.js";
 
 /** frame 的实际 debugger 会话；子目标通过 flat session 独立寻址。 */
 export type Frame = {
@@ -48,6 +53,7 @@ function numeric(value: unknown, name: string): number {
 
 /** 一个明确共享的真实标签页；观察、远程引用与像素布局只属于此租约。 */
 export class ExtensionPage {
+  private readonly extensions: PageExtensions;
   readonly frames = new Map<string, Frame>();
   private readonly targets = new Map<string, CdpSession>();
   private readonly attaching = new Set<Promise<void>>();
@@ -66,7 +72,9 @@ export class ExtensionPage {
     readonly tab: number,
     readonly transport: CdpTransport,
     private readonly downloads: PageDownloads,
-  ) {}
+  ) {
+    this.extensions = new PageExtensions({ send: (method, values) => this.transport.send({ tabId: this.tab }, method, values) });
+  }
   /** 获取不含调试权限的标签页状态，读取失败不伪造页面标题。 */
   async state(): Promise<TabState> {
     const tab = await chrome.tabs.get(this.tab);
@@ -140,6 +148,7 @@ export class ExtensionPage {
   }
   /** 处理本标签页协议事件；导航与子目标变动使旧观察失效。 */
   async event(source: CdpSession, method: string, values: Record<string, unknown>): Promise<void> {
+    if (!source.sessionId) this.extensions.event(method, values);
     if (method === "Target.attachedToTarget") {
       const info = record(values.targetInfo);
       if (info.type !== "iframe") return;
@@ -189,6 +198,7 @@ export class ExtensionPage {
   }
   /** 释放调试连接和远程引用，保留用户的真实标签页。 */
   async detach(): Promise<void> {
+    this.extensions.invalidate();
     this.leaseGeneration++;
     this.invalidate();
     // 附着失败本身没有要释放的租约；附着成功则必须等到 detach 确认后再结算关闭。
@@ -202,6 +212,7 @@ export class ExtensionPage {
   }
   /** 已经由浏览器断开的连接不能被下一条脚本自动接回。 */
   disconnected(): void {
+    this.extensions.invalidate();
     this.leaseGeneration++;
     this.connected = false;
     this.invalidate();
@@ -215,6 +226,8 @@ export class ExtensionPage {
     this.imageLayout = null;
     this.refs.clear();
   }
+  /** 关联原生浏览器操作也会改变文档事实，不能保留扩展授权和准备身份。 */
+  invalidateCapabilities(): void { this.extensions.invalidate(); }
   private async world(frame: Frame, operation: Operation): Promise<number> {
     operation.check();
     if (frame.world === undefined) {
@@ -328,6 +341,23 @@ export class ExtensionPage {
   }
   private key(): string {
     return `__noemori_${this.id}`;
+  }
+  /** 只有同一有效代次的观察能作为增量基线；导航或重新附着必须回退完整证据。 */
+  async observed(operation: Operation, request: ObservationRequest = {}): Promise<ObservationResult> {
+    const previous = this.observation, epoch = this.epoch;
+    const current = await this.observe(operation);
+    return observationResult(epoch === this.epoch ? previous : null, current, request);
+  }
+  /** 动作后省略采集时撤销全部旧引用；批量内部保持逐步核验，在最终结算时调用。 */
+  async afterObserved(
+    action: { observation_mode?: ObservationPolicy; observation?: string },
+    operation: Operation,
+  ): Promise<ObservationResult> {
+    if (action.observation_mode === "none" || this.dialog) {
+      this.invalidate();
+      return {};
+    }
+    return this.observed(operation, { mode: action.observation_mode, baseline: action.observation });
   }
   private require(action: { observation: string }): Observation {
     if (!this.observation || this.observation.id !== action.observation)
@@ -496,12 +526,18 @@ export class ExtensionPage {
     operation.check();
     await this.attach();
     operation.check();
+    if (isPageExtensionAction(action)) {
+      const extensions = await this.extensions.execute(action, { signal: operation.signal, check: () => operation.check(), budget: () => operation.budget(), dispatch: () => operation.dispatch() });
+      if (action.action !== "webmcp_invoke") return { extensions };
+      this.invalidate();
+      return { extensions, ...await this.afterObserved(action, operation) };
+    }
     if (action.action === "preview") {
       const image = record(await this.transport.send({ tabId: this.tab }, "Page.captureScreenshot", { format: "jpeg", quality: 65, captureBeyondViewport: false }));
       operation.check();
       return { image_data: text(image.data, "preview"), image_format: "jpeg" };
     }
-    if (action.action === "observe") return { observation: await this.observe(operation) };
+    if (action.action === "observe") return this.observed(operation, action);
     if (action.action === "arm_download") {
       await this.downloads.arm(this, operation);
       return {};
@@ -533,6 +569,11 @@ export class ExtensionPage {
         break;
       case "read":
         return this.readText(action, operation);
+      case "locator": {
+        const locator_result = await this.semanticInput(action, operation);
+        if (locator_result) return { locator_result };
+        break;
+      }
       case "find":
       case "wait":
         await this.findText(action, operation);
@@ -562,7 +603,192 @@ export class ExtensionPage {
         throw new Error(`页面动作尚未接入：${action.action}`);
     }
     operation.check();
-    return this.dialog || !refresh ? {} : { observation: await this.observe(operation) };
+    return !refresh ? {} : this.afterObserved(action, operation);
+  }
+  private async semanticInput(
+    action: SemanticAction,
+    operation: Operation,
+  ): Promise<Record<string, unknown> | undefined> {
+    while (this.attaching.size) await Promise.all([...this.attaching]);
+    for (const session of this.targets.values()) await this.refresh(session);
+    const epoch = this.epoch;
+    const key = `${this.key()}_locator`;
+    const id = crypto.randomUUID();
+    const target = () =>
+      `(${semanticTargetDom.toString()})(${JSON.stringify(key)},${JSON.stringify(id)},${describeElement.toString()})`;
+    const contexts = new Map<Frame, number>();
+    const bind = async (
+      frame: Frame,
+      selector: string,
+      count = false,
+    ): Promise<Record<string, unknown>> => {
+      contexts.set(frame, await this.world(frame, operation));
+      return record(
+        await this.expression(
+          frame,
+          `(${bindSemanticDom.toString()})(${semanticEngineExpression(`${this.key()}_engine`)},${JSON.stringify(selector)},${JSON.stringify(key)},${JSON.stringify(id)},${describeElement.toString()},${count})`,
+          operation,
+        ),
+      );
+    };
+    try {
+      const frame = await this.semanticFrame(action, operation, bind, target);
+      const result = await bind(
+        frame,
+        semanticSelector(action.locator.chain),
+        action.operation === "count",
+      );
+      if (action.operation === "count") return result;
+      const verify = async (): Promise<void> => {
+        operation.check();
+        if (this.epoch !== epoch) throw new Error("定位期间 frame 发生变化");
+        await this.expression(frame, `Boolean(${target()})`, operation);
+      };
+      const control = async (name: string, values: unknown): Promise<void> => {
+        await verify();
+        operation.dispatch();
+        await this.expression(
+          frame,
+          `(${controlDom.toString()})(${inspectDom.toString()},${describeElement.toString()},${JSON.stringify(key)},${JSON.stringify(id)},'target',${JSON.stringify(name)},${JSON.stringify(values)})`,
+          operation,
+        );
+      };
+      await verify();
+      if (action.operation === "inspect")
+        return record(
+          await this.expression(
+            frame,
+            `(${inspectSemanticDom.toString()})(${target()})`,
+            operation,
+          ),
+        );
+      const prepare = await this.expression(
+        frame,
+        `(()=>{const node=${target()};const box=node.getBoundingClientRect();return box.top>=0&&box.left>=0&&box.bottom<=innerHeight&&box.right<=innerWidth;})()`,
+        operation,
+      );
+      if (!prepare) {
+        operation.dispatch();
+        await this.expression(
+          frame,
+          `(${target()}).scrollIntoView({block:'center',inline:'center'})`,
+          operation,
+        );
+      }
+      if (action.operation === "fill" || action.operation === "select") {
+        await control(
+          action.operation,
+          action.operation === "fill" ? action.text : { values: action.values, by: action.by },
+        );
+      } else if (action.operation === "press") {
+        await this.keyboard(action.key, operation, async () => {
+          await control("focus", null);
+          if (
+            (await this.expression(frame, `(${target()}).matches(':focus-within')`, operation)) !==
+            true
+          )
+            throw new Error("语义目标没有获得输入焦点，未发送按键");
+        });
+      } else {
+        await verify();
+        const point = record(
+          await this.expression(
+            frame,
+            `(${inspectDom.toString()})(${describeElement.toString()},${JSON.stringify(key)},${JSON.stringify(id)},'target')`,
+            operation,
+          ),
+        );
+        if (
+          action.operation === "check" &&
+          !(point.tag === "input" && (point.type === "checkbox" || point.type === "radio"))
+        )
+          throw new Error("语义目标不是原生复选框或单选框");
+        if (action.operation !== "check" || point.checked !== action.checked) {
+          const position = await this.offset(
+            frame,
+            numeric(point.x, "x"),
+            numeric(point.y, "y"),
+            operation,
+          );
+          await verify();
+          if (action.operation === "hover") {
+            operation.dispatch();
+            await this.transport.send({ tabId: this.tab }, "Input.dispatchMouseEvent", {
+              type: "mouseMoved",
+              ...position,
+            });
+          } else {
+            this.downloads.hint(
+              this,
+              typeof point.href === "string" ? point.href : null,
+              typeof point.download === "string" ? point.download : null,
+            );
+            await this.mouse(position.x, position.y, "left", 1, operation);
+            if (action.operation === "check") {
+              const current = record(
+                await this.expression(
+                  frame,
+                  `(${inspectSemanticDom.toString()})(${target()})`,
+                  operation,
+                ),
+              );
+              if (current.checked !== action.checked)
+                throw new Error("复选框未达到请求状态，禁止自动重放");
+            }
+          }
+        }
+      }
+      return undefined;
+    } finally {
+      // 取消后的清理不再次访问目标；仅释放此隔离世界中的临时对象引用。
+      for (const [frame, contextId] of contexts) {
+        await this.transport.send(frame.session, "Runtime.evaluate", {
+          contextId,
+          expression: `Reflect.deleteProperty(window,${JSON.stringify(key)})`,
+          returnByValue: true,
+        });
+      }
+    }
+  }
+  private async semanticFrame(
+    action: SemanticAction,
+    operation: Operation,
+    bind: (frame: Frame, selector: string) => Promise<Record<string, unknown>>,
+    target: () => string,
+  ): Promise<Frame> {
+    let frame = this.root();
+    if (action.locator.frame_url !== undefined) {
+      const matches = [...this.frames.values()].filter(
+        (candidate) => candidate.url === action.locator.frame_url,
+      );
+      if (matches.length !== 1 || !matches[0]) throw new Error("frame URL 需要唯一的当前框架");
+      frame = matches[0];
+    }
+    for (const chain of action.locator.frames ?? []) {
+      const owner = frame;
+      const found = await bind(frame, semanticSelector(chain));
+      if (found.tag !== "iframe") throw new Error("frame 路径目标不是 iframe");
+      const resolved = record(
+        await this.transport.send(frame.session, "Runtime.evaluate", {
+          contextId: await this.world(frame, operation),
+          expression: target(),
+          returnByValue: false,
+        }),
+      );
+      if (resolved.exceptionDetails) throw new Error("iframe 目标已经失效");
+      const objectId = text(record(resolved.result).objectId, "iframe object");
+      try {
+        const node = record(
+          record(await this.transport.send(frame.session, "DOM.describeNode", { objectId })).node,
+        );
+        const nested = this.frames.get(text(node.frameId, "iframe frameId"));
+        if (!nested || nested.parent !== frame.id) throw new Error("iframe 尚未加载或路径已经失效");
+        frame = nested;
+      } finally {
+        await this.transport.send(owner.session, "Runtime.releaseObject", { objectId });
+      }
+    }
+    return frame;
   }
   private async readText(
     action: Extract<BrowserAction, { action: "read" }>,
@@ -829,7 +1055,7 @@ export class ExtensionPage {
 
   /** 将固定字节写入已观察文件输入或真实 chooser 节点，不读取任意本地路径。 */
   async upload(
-    action: { observation?: string; ref?: string },
+    action: { observation?: string; ref?: string; observation_mode?: ObservationPolicy },
     files: { name: string; mime_type: string; data: string }[],
     operation: Operation,
   ): Promise<Record<string, unknown>> {
@@ -871,7 +1097,7 @@ export class ExtensionPage {
       );
       this.chooser = null;
       operation.check();
-      return { observation: await this.observe(operation) };
+      return this.afterObserved(action, operation);
     } finally {
       await this.transport.send(session, "Runtime.releaseObject", { objectId });
     }

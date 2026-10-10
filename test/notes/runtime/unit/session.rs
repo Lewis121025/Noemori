@@ -18,7 +18,6 @@ fn removed_reading_mode_does_not_survive_session_normalization() {
     );
 }
 
-
 #[test]
 fn reading_font_survives_reader_and_appearance_updates() {
     let data = tempfile::tempdir().unwrap();
@@ -58,7 +57,13 @@ fn reading_palette_survives_reader_font_and_appearance_updates() {
             palette
         );
     }
-    for invalid in [Value::Null, json!("blue"), json!({}), json!(12), json!(true)] {
+    for invalid in [
+        Value::Null,
+        json!("blue"),
+        json!({}),
+        json!(12),
+        json!(true),
+    ] {
         assert_eq!(
             normalize(&json!({"readingPalette": invalid}))["readingPalette"],
             "monochrome"
@@ -274,8 +279,14 @@ fn file_system_folder_and_legacy_boards_destination_survive_normalization() {
         }
     }}));
     assert_eq!(normalized["reader"]["destination"], "library");
-    assert_eq!(normalized["reader"]["fileTree"]["browse"]["directory"], "docs");
-    assert_eq!(normalized["reader"]["documents"]["panes"][0]["currentPath"], "docs/note.md");
+    assert_eq!(
+        normalized["reader"]["fileTree"]["browse"]["directory"],
+        "docs"
+    );
+    assert_eq!(
+        normalized["reader"]["documents"]["panes"][0]["currentPath"],
+        "docs/note.md"
+    );
 }
 
 #[test]
@@ -315,11 +326,17 @@ fn unified_workspace_preserves_navigation_and_discussion_identity_after_restart(
     assert_eq!(reader["sidebarView"], "files");
     assert_eq!(reader["rightWidth"].as_f64(), Some(420.0));
     assert_eq!(reader["fileTree"]["selected"], json!(["new/a.md"]));
-    assert_eq!(reader["fileTree"]["discussions"], json!({
-        "expanded": ["new/a.md", "\u{0}conversation:chat"], "archived": true,
-        "scroll": {"key": "\u{0}conversation:chat", "offset": 12.5}
-    }));
+    assert_eq!(
+        reader["fileTree"]["discussions"],
+        json!({
+            "expanded": ["new/a.md", "\u{0}conversation:chat"], "archived": true,
+            "scroll": {"key": "\u{0}conversation:chat", "offset": 12.5}
+        })
+    );
     store.remap("new/a.md", None).unwrap();
     let reader = store.load()["reader"].clone();
-    assert_eq!(reader["fileTree"]["discussions"]["expanded"], json!(["\u{0}conversation:chat"]));
+    assert_eq!(
+        reader["fileTree"]["discussions"]["expanded"],
+        json!(["\u{0}conversation:chat"])
+    );
 }

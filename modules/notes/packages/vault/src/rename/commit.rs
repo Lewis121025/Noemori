@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use super::{check_version, moved_path, version_permissions};
+use crate::rename::journal::{FileChange, RenameJournal};
 use crate::storage::path::resolve_in_root;
 use crate::storage::recovery::RecoveryStore;
-use crate::rename::journal::{FileChange, RenameJournal};
 use crate::storage::save::{sync_parent, write_staged_bytes};
 use crate::Error;
 

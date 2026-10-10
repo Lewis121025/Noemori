@@ -67,7 +67,7 @@ class Transport {
 }
 
 /** 隔离配置目录与本机测试页面；测试退出后清理全部 Chromium、socket 和文件。 */
-export async function fixture(t, html, respond) {
+export async function fixture(t, html, respond, options = {}) {
   const cleanups = [];
   const after = (cleanup) => cleanups.unshift(cleanup);
   t.after(async () => {
@@ -90,7 +90,7 @@ export async function fixture(t, html, respond) {
   const context = await chromium.launchPersistentContext(root, {
     headless: true,
     viewport: { width: 1280, height: 720 },
-    args: ["--remote-debugging-port=0", "--site-per-process"],
+    args: ["--remote-debugging-port=0", "--site-per-process", ...(options.args ?? [])],
     ...(process.env.NOEMORI_TEST_BROWSER
       ? { executablePath: process.env.NOEMORI_TEST_BROWSER }
       : {}),

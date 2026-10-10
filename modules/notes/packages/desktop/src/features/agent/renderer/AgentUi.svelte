@@ -1,5 +1,11 @@
 <script lang="ts">
-  import type { AgentApi, AgentUi, UiInstallation, UiPermissions, UiPreviewTarget } from "../shared/api";
+  import type {
+    AgentApi,
+    AgentUi,
+    UiInstallation,
+    UiPermissions,
+    UiPreviewTarget,
+  } from "../shared/api";
   import AgentPreview from "./AgentPreview.svelte";
   let {
     api,
@@ -31,6 +37,22 @@
     unknown: "结果未确认",
   };
   const latest = $derived(ui.receipts.at(-1));
+  let lastWindow: string | null = null;
+  let lastHuman = false;
+  $effect(() => {
+    const control = ui.control;
+    const human = ui.connections.some(
+      (connection) => connection.backend === "computer" && connection.connected && connection.human,
+    );
+    const window = control ? JSON.stringify([control.app, control.window]) : null;
+    if (control && (window !== lastWindow || (human && !lastHuman)))
+      preview = {
+        target: { backend: "computer", app: control.app, window: control.window },
+        title: `${control.app_name} · ${control.window_title}`,
+      };
+    lastWindow = window;
+    lastHuman = human;
+  });
 
   async function perform(work: () => Promise<void>): Promise<void> {
     changing = true;
@@ -68,17 +90,33 @@
               onclick={() =>
                 void perform(() => api.uiControl(session, connection.backend, connection.human))}
             >
-              {connection.human ? "交还助手" : "停止并接管"}
+              {connection.human ? "完成并继续" : "接管"}
             </button>
           {/if}
         </header>
         {#if connection.backend === "computer" && ui.control}
           <p>{ui.control.app_name} · {ui.control.window_title}</p>
-          <button onclick={() => { if (ui.control) preview = { target: { backend: "computer", app: ui.control.app, window: ui.control.window }, title: `${ui.control.app_name} · ${ui.control.window_title}` }; }}>查看画面</button>
+          <button
+            onclick={() => {
+              if (ui.control)
+                preview = {
+                  target: { backend: "computer", app: ui.control.app, window: ui.control.window },
+                  title: `${ui.control.app_name} · ${ui.control.window_title}`,
+                };
+            }}>查看画面</button
+          >
         {/if}
         {#each connection.tabs as tab (tab.id)}<p title={tab.url}>{tab.title || tab.url}</p>
           {#if connection.backend !== "computer" && !connection.human}
-            <button onclick={() => { if (connection.backend !== "computer") preview = { target: { backend: connection.backend, page: tab.id }, title: tab.title || tab.url }; }}>查看画面</button>
+            <button
+              onclick={() => {
+                if (connection.backend !== "computer")
+                  preview = {
+                    target: { backend: connection.backend, page: tab.id },
+                    title: tab.title || tab.url,
+                  };
+              }}>查看画面</button
+            >
           {/if}
         {/each}
         {#if !connection.connected}<p>重新连接后，请在可信界面交还控制并重新观察。</p>{/if}
@@ -118,11 +156,12 @@
         <p>
           辅助功能：{permissions.accessibility
             ? "已授权"
-            : "未授权"}；屏幕录制：{permissions.screen_recording
-            ? "已授权"
-            : "未授权"}
+            : "未授权"}；屏幕录制：{permissions.screen_recording ? "已授权" : "未授权"}
         </p>
-        <p>请在系统设置的“隐私与安全性”中授权 Noemori Computer Helper。助手在后台操作；你切换到目标应用时会暂停。</p>
+        <p>
+          请在系统设置的“隐私与安全性”中授权 Noemori Computer
+          Helper。助手在后台操作；你切换到目标应用时会暂停。
+        </p>
       {/if}
     </details>
     {#if ui.error || error}<p class="error" role="alert">{error || ui.error}</p>{/if}
@@ -130,7 +169,21 @@
 </section>
 
 {#if preview}
-  <AgentPreview {api} {session} target={preview.target} title={preview.title} human={ui.connections.some((connection) => connection.backend === preview?.target.backend && connection.human)} close={() => { preview = null; }} />
+  <AgentPreview
+    {api}
+    {session}
+    target={preview.target}
+    title={preview.title}
+    human={ui.connections.some(
+      (connection) => connection.backend === preview?.target.backend && connection.human,
+    )}
+    control={preview.target.backend === "computer"
+      ? (resume) => api.uiControl(session, "computer", resume)
+      : null}
+    close={() => {
+      preview = null;
+    }}
+  />
 {/if}
 
 <style>

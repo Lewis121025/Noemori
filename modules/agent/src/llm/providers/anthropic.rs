@@ -72,6 +72,7 @@ fn tool_result(result: &crate::ToolResult) -> Result<Value, Error> {
 }
 
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {
+    validate_model_role(body.get("role"), "assistant")?;
     let raw = array(&body, "content")?;
     let mut content = Vec::new();
     for part in raw {
@@ -141,6 +142,7 @@ impl StreamState {
         if !message.is_object() {
             return Err(Error::Protocol("message_start 缺少消息对象".into()));
         }
+        validate_model_role(message.get("role"), "assistant")?;
         if message["usage"].is_null() {
             message["usage"] = json!({});
         }

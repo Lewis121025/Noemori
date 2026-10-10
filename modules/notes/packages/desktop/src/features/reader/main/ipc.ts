@@ -54,7 +54,11 @@ export type DirectoryImported = (source: string, root: string, path: string) => 
  * @param core 注入的阅读器命令客户端。
  * @throws IPC 重复注册或单次命令失败时由 Electron 传播错误。
  */
-export function registerReaderIpc(getWindow: () => BrowserWindow | null, core: ReaderClient, onDirectoryImported?: DirectoryImported): void {
+export function registerReaderIpc(
+  getWindow: () => BrowserWindow | null,
+  core: ReaderClient,
+  onDirectoryImported?: DirectoryImported,
+): void {
   registerWhiteboardIpc(getWindow);
   registerWebPageIpc(getWindow);
   registerExportIpc(getWindow, {

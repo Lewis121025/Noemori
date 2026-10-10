@@ -1,4 +1,6 @@
 <script lang="ts">
+  import LibraryIcon from "./LibraryIcon.svelte";
+  import { menuNavigation } from "./menu-navigation";
   /** 目录的批量展开和归档对话入口集中在更多菜单，库名保留完整的横向空间。 */
   let {
     expanded,
@@ -17,6 +19,7 @@
   } = $props();
   const id = $props.id();
   let menu: HTMLDivElement;
+  let menuOpen = $state(false);
 </script>
 
 <button
@@ -24,24 +27,30 @@
   type="button"
   aria-label="目录操作"
   title="更多目录操作"
+  aria-expanded={menuOpen}
   popovertarget={id}
 >
-  <svg viewBox="0 0 20 20" aria-hidden="true"
-    ><circle cx="4" cy="10" r="1" /><circle cx="10" cy="10" r="1" /><circle
-      cx="16"
-      cy="10"
-      r="1"
-    /></svg
-  >
+  <LibraryIcon name="more" />
 </button>
-<div {id} bind:this={menu} popover="auto" class="reader-popover options-menu" aria-label="目录操作">
+<div
+  {id}
+  bind:this={menu}
+  popover="auto"
+  class="reader-popover options-menu"
+  aria-label="目录操作"
+  use:menuNavigation
+  ontoggle={(event) => (menuOpen = event.newState === "open")}
+>
   <button
     type="button"
     {disabled}
     onclick={() => {
       menu.hidePopover();
       onAction("file");
-    }}>新建笔记…</button
+    }}
+    ><span class="menu-icon"><LibraryIcon name="note" /></span><span class="menu-label"
+      >新建笔记…</span
+    ></button
   >
   <button
     type="button"
@@ -49,7 +58,10 @@
     onclick={() => {
       menu.hidePopover();
       onAction("directory");
-    }}>新建文件夹…</button
+    }}
+    ><span class="menu-icon"><LibraryIcon name="folder" /></span><span class="menu-label"
+      >新建文件夹…</span
+    ></button
   >
   <button
     type="button"
@@ -57,7 +69,10 @@
     onclick={() => {
       menu.hidePopover();
       onAction("import");
-    }}>导入文件夹…</button
+    }}
+    ><span class="menu-icon"><LibraryIcon name="import" /></span><span class="menu-label"
+      >导入文件夹…</span
+    ></button
   >
   <div class="separator" role="separator"></div>
   <button
@@ -66,10 +81,15 @@
     onclick={() => {
       onExpand();
       menu.hidePopover();
-    }}>{expanded ? "折叠全部目录" : "展开全部目录"}</button
+    }}
+    ><span class="menu-icon"><LibraryIcon name={expanded ? "collapse" : "expand"} /></span><span
+      class="menu-label">{expanded ? "折叠全部目录" : "展开全部目录"}</span
+    ></button
   >
   {#if onArchive}<button type="button" aria-pressed={archived} onclick={() => onArchive?.()}
-      >显示归档对话<span aria-hidden="true">{archived ? "✓" : ""}</span></button
+      ><span class="menu-icon"><LibraryIcon name="archive" /></span><span class="menu-label"
+        >显示归档对话</span
+      >{#if archived}<LibraryIcon name="check" size={14} />{/if}</button
     >{/if}
   <div class="separator" role="separator"></div>
   <button
@@ -78,7 +98,10 @@
     onclick={() => {
       menu.hidePopover();
       onAction("reveal");
-    }}>在系统文件夹中显示仓库</button
+    }}
+    ><span class="menu-icon"><LibraryIcon name="reveal" /></span><span class="menu-label"
+      >在系统文件夹中显示仓库</span
+    ></button
   >
 </div>
 
@@ -97,37 +120,43 @@
     color: inherit;
     cursor: pointer;
   }
-  svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-  }
   .options-menu {
-    min-width: 170px;
+    min-width: 205px;
     font-size: 12px;
   }
   .options-menu button {
     display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 9px;
     align-items: center;
     width: 100%;
-    padding: 7px 8px;
+    min-height: 29px;
+    padding: 5px 8px;
     text-align: left;
     font: inherit;
     color: var(--fg);
     border: 0;
-    border-radius: 6px;
+    border-radius: 5px;
     background: transparent;
     cursor: pointer;
   }
-  button:hover {
+  button:hover:not(:disabled),
+  button:focus-visible,
+  .options-toggle[aria-expanded="true"] {
     background: var(--selected);
   }
-  .options-menu span {
-    width: 12px;
+  button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .options-menu button:focus-visible {
+    outline: none;
+  }
+  .menu-icon {
+    display: flex;
+    color: color-mix(in srgb, var(--muted) 85%, transparent);
+  }
+  .menu-label {
+    flex: 1;
   }
   .separator {
     height: 1px;

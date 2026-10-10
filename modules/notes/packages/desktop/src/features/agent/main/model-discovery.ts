@@ -255,6 +255,14 @@ async function ollamaCapabilities(
               typeof value === "boolean" ? String(value) : parseReasoningEffort(value),
             ),
           };
+          const initial = record(result["thinking"])["default"];
+          if (initial !== undefined) {
+            const defaultEffort =
+              typeof initial === "boolean" ? String(initial) : parseReasoningEffort(initial);
+            if (!model.reasoning.efforts?.includes(defaultEffort))
+              throw new Error("模型列表格式无效");
+            model.reasoning.defaultEffort = defaultEffort;
+          }
         }
       }),
     );

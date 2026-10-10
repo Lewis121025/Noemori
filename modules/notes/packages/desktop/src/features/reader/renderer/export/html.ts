@@ -55,7 +55,8 @@ export function parseExportHtml(source: string): PmNode {
     if (!supported.has(element.localName))
       throw new Error(`HTML 元素不能可靠转换：${element.localName}`);
     if (
-      (element.hasAttribute("style") && !cssTextStyle(element.localName, element.getAttribute("style") ?? "")) ||
+      (element.hasAttribute("style") &&
+        !cssTextStyle(element.localName, element.getAttribute("style") ?? "")) ||
       element.hasAttribute("hidden") ||
       element.hasAttribute("srcset")
     )

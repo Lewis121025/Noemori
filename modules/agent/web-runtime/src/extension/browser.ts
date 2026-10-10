@@ -64,7 +64,7 @@ export class ExtensionBrowser {
   }
   /** 原生关联操作使引用失效，但不会重新授予或撤销人工前台控制。 */
   invalidate(): void {
-    for (const page of this.pages.values()) page.invalidate();
+    for (const page of this.pages.values()) { page.invalidate(); page.invalidateCapabilities(); }
   }
   /** 取消此会话捕获；正在执行的输入由对应操作信号停止。 */
   cancel(): void {
@@ -126,9 +126,11 @@ export class ExtensionBrowser {
       if (action.action === "tabs") return this.base("observed");
       if (action.action === "downloads") return this.base("observed");
       if (action.action === "invalidate") {
-        for (const page of this.pages.values()) page.invalidate();
+        this.invalidate();
         return this.base("executed");
       }
+      if (action.action === "takeover") throw new Error("宿主接管原语仅用于专用浏览器");
+      if (action.action === "handoff" && action.completion) throw new Error("自动协助仅用于 managed 浏览器，外接浏览器请使用 b.handoff()");
       if (action.action === "handoff" || action.action === "resume") {
         if (action.action === "handoff") {
           this.human = true;
@@ -141,6 +143,7 @@ export class ExtensionBrowser {
         return this.base("executed");
       }
       if (this.human) throw new Error("用户持有控制权，必须从可信界面交还");
+      if (action.action === "human_navigate") throw new Error("用户工具栏导航仅用于窗口内浏览器");
       if (action.action === "allow_origin" || action.action === "save_download")
         throw new Error("扩展不拥有匿名网关或工作区文件权限");
       if (action.action === "open") {
@@ -166,7 +169,7 @@ export class ExtensionBrowser {
         operation.check();
         const page = this.pages.get(`${this.connection}:${tab.id}`);
         if (!page) throw new Error("任务页面没有登记");
-        return { ...(await this.base("executed")), observation: await page.observe(operation) };
+        return { ...(await this.base("executed")), ...(await page.afterObserved(action, operation)), page: page.id };
       }
       const page = this.pages.get(action.page);
       if (!page) throw new Error("标签页不属于当前会话或连接代次");
@@ -217,11 +220,14 @@ export class ExtensionBrowser {
       if (size > 32 * 1024 * 1024) throw new Error("上传超过 32 MiB");
       return { name: file.name, mime_type: file.mime_type, data: file.data };
     });
-    let target: { observation?: string; ref?: string } = {};
+    const observationMode = value.observation_mode;
+    if (observationMode !== undefined && observationMode !== "full" && observationMode !== "delta" && observationMode !== "none")
+      throw new Error("动作后观察模式必须是 full、delta 或 none");
+    let target: { observation?: string; ref?: string; observation_mode?: "full" | "delta" | "none" } = { ...(observationMode === undefined ? {} : { observation_mode: observationMode }) };
     if (value.action === "upload_bytes") {
       if (typeof value.observation !== "string" || typeof value.ref !== "string")
         throw new Error("上传缺少观察和控件引用");
-      target = { observation: value.observation, ref: value.ref };
+      target = { ...target, observation: value.observation, ref: value.ref };
     }
     return { ...(await this.base("executed")), ...(await page.upload(target, files, operation)) };
   }
@@ -258,7 +264,7 @@ export class ExtensionBrowser {
       return {
         ...(await this.base("executed")),
         steps,
-        observation: await page.observe(operation),
+        ...(await page.afterObserved(action, operation)),
       };
     } catch (error) {
       return {

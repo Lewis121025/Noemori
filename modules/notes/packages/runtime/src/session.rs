@@ -326,14 +326,20 @@ fn tree_position(value: &Value) -> Value {
 fn tree_key(key: &str) -> bool {
     key.encode_utf16().count() <= 16_384
         && (entry_path(key)
-            || ["\0conversation:", "\0source:", "\0workspace:"].iter().any(|prefix| {
-                key.strip_prefix(prefix).is_some_and(|id| !id.is_empty() && !id.contains('\0'))
-            }))
+            || ["\0conversation:", "\0source:", "\0workspace:"]
+                .iter()
+                .any(|prefix| {
+                    key.strip_prefix(prefix)
+                        .is_some_and(|id| !id.is_empty() && !id.contains('\0'))
+                }))
 }
 
 fn discussions(value: &Value) -> Option<Value> {
     let expanded = value["expanded"].as_array()?;
-    if !expanded.iter().all(|key| key.as_str().is_some_and(tree_key)) {
+    if !expanded
+        .iter()
+        .all(|key| key.as_str().is_some_and(tree_key))
+    {
         return None;
     }
     let archived = value["archived"].as_bool()?;
@@ -346,7 +352,10 @@ fn discussions(value: &Value) -> Option<Value> {
         json!({"key": key, "offset": offset.clamp(0.0, 500.0)})
     };
     let mut seen = HashSet::new();
-    let expanded: Vec<_> = expanded.iter().filter(|key| seen.insert(key.to_string())).collect();
+    let expanded: Vec<_> = expanded
+        .iter()
+        .filter(|key| seen.insert(key.to_string()))
+        .collect();
     Some(json!({"expanded": expanded, "archived": archived, "scroll": scroll}))
 }
 
@@ -365,7 +374,10 @@ fn file_tree(value: &Value) -> Value {
         "selected": paths(&value["selected"], usize::MAX, true), "focused": focused, "scroll": scroll});
     let presentation = &value["presentation"];
     if matches!(presentation["layout"].as_str(), Some("list" | "grid"))
-        && matches!(presentation["sort"].as_str(), Some("name" | "name-desc" | "type" | "modified"))
+        && matches!(
+            presentation["sort"].as_str(),
+            Some("name" | "name-desc" | "type" | "modified")
+        )
         && presentation["preview"].is_boolean()
     {
         result["presentation"] = json!({
@@ -387,7 +399,10 @@ fn file_tree(value: &Value) -> Value {
         )
     {
         result["browse"] = json!({"query": browse["query"], "section": browse["section"]});
-        if browse["directory"].as_str().is_some_and(|path| path.is_empty() || entry_path(path)) {
+        if browse["directory"]
+            .as_str()
+            .is_some_and(|path| path.is_empty() || entry_path(path))
+        {
             result["browse"]["directory"] = browse["directory"].clone();
         }
     }

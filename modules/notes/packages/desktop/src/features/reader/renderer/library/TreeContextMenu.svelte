@@ -1,11 +1,19 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import LibraryIcon, { type LibraryIconName } from "./LibraryIcon.svelte";
+  import { menuNavigation } from "./menu-navigation";
   let {
     items,
     label,
     onAction,
   }: {
-    items: { id: string; label: string; danger?: boolean; separator?: boolean }[];
+    items: {
+      id: string;
+      label: string;
+      icon?: LibraryIconName;
+      danger?: boolean;
+      separator?: boolean;
+    }[];
     label: string;
     onAction: (id: string) => void;
   } = $props();
@@ -57,17 +65,6 @@
       }
       return;
     }
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const buttons = Array.from(element.querySelectorAll<HTMLButtonElement>("button"));
-    const index = buttons.findIndex((button) => button === document.activeElement);
-    buttons[
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? buttons.length - 1
-          : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length
-    ]?.focus();
   }
 </script>
 
@@ -82,6 +79,7 @@
   role="menu"
   aria-label={label}
   bind:this={element}
+  use:menuNavigation
   style:left="{left}px"
   style:top="{top}px"
   onkeydown={keydown}
@@ -90,7 +88,8 @@
   {#each items as item (item.id)}
     {#if item.separator}<div class="separator" role="separator"></div>{/if}
     <button type="button" role="menuitem" class:danger={item.danger} onclick={() => choose(item.id)}
-      >{item.label}</button
+      >{#if item.icon}<span class="menu-icon"><LibraryIcon name={item.icon} /></span
+        >{/if}{item.label}</button
     >
   {/each}
 </div>
@@ -104,27 +103,30 @@
     max-width: calc(100vw - 1rem);
     max-height: calc(100dvh - 1rem);
     overflow-y: auto;
-    padding: 0.35rem;
+    padding: 4px;
     background: color-mix(in srgb, var(--bg) 94%, transparent);
     backdrop-filter: blur(20px);
     color: var(--fg);
     border: 1px solid var(--border);
-    border-radius: 0.7rem;
+    border-radius: 8px;
     box-shadow:
       0 4px 10px var(--shadow),
       0 16px 40px var(--shadow);
-    font-size: 0.85rem;
+    font-size: 12px;
   }
   button {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 9px;
     width: 100%;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: 5px;
     background: transparent;
     font: inherit;
     color: inherit;
     text-align: left;
-    padding: 0.4rem 0.65rem;
+    min-height: 29px;
+    padding: 5px 8px;
     cursor: pointer;
   }
   button:hover,
@@ -134,9 +136,16 @@
   }
   .separator {
     border-top: 1px solid var(--border);
-    margin: 0.3rem;
+    margin: 4px 6px;
   }
   .danger {
     color: var(--danger);
+  }
+  .menu-icon {
+    display: flex;
+    color: color-mix(in srgb, var(--muted) 85%, transparent);
+  }
+  .danger .menu-icon {
+    color: inherit;
   }
 </style>

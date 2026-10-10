@@ -44,7 +44,7 @@ export type DiscoveredModel = ProviderModel & { name: string; reasoning: Reasoni
 export type PublicProvider = Omit<ProviderSettings, "authentication"> & {
   authentication: PublicModelSettings["authentication"];
 };
-/** 对话选择绑定连接身份；省略推理强度表示使用服务商默认。 */
+/** 对话选择绑定连接身份；旧记录缺少强度时按官方型号或能力接口解析具体初始档位。 */
 export type ModelSelection = {
   providerId: string;
   modelId: string;

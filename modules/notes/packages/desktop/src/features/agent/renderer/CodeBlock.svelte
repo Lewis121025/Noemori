@@ -3,7 +3,16 @@
   import { languages } from "@codemirror/language-data";
   import { classHighlighter, highlightTree } from "@lezer/highlight";
   import CopyButton from "./CopyButton.svelte";
-  let { text, language = "" }: { text: string; language?: string | undefined } = $props();
+  let {
+    text,
+    language = "",
+    showHeader = true,
+  }: {
+    text: string;
+    language?: string | undefined;
+    /** 预览容器已经提供操作栏时，源码不重复显示语言与复制入口。 */
+    showHeader?: boolean;
+  } = $props();
   type Token = { text: string; classes: string };
   let tokens = $state<Token[]>([]);
   let version = 0;
@@ -12,7 +21,9 @@
     const request = ++version;
     tokens = [{ text, classes: "" }];
     void highlight(text, language, request);
-    return () => { version += 1; };
+    return () => {
+      version += 1;
+    };
   });
 
   // 高亮是渐进增强；长输出保留原文，过期语言加载不能覆盖新代码或已卸载视图。
@@ -38,9 +49,19 @@
   }
 </script>
 
-<div class="code-block">
-  <div class="code-header"><span class="code-language">{language || "代码"}</span><CopyButton {text} label="复制代码" iconOnly /></div>
-  <pre><code>{#each tokens as token, index (index)}{#if token.classes}<span class={token.classes}>{token.text}</span>{:else}{token.text}{/if}{/each}</code></pre>
+<div class="code-block" class:headerless={!showHeader}>
+  {#if showHeader}<div class="code-header">
+      <span class="code-language">{language || "代码"}</span><CopyButton
+        {text}
+        label="复制代码"
+        iconOnly
+      />
+    </div>{/if}
+  <pre><code
+      >{#each tokens as token, index (index)}{#if token.classes}<span class={token.classes}
+            >{token.text}</span
+          >{:else}{token.text}{/if}{/each}</code
+    ></pre>
 </div>
 
 <style>
@@ -83,6 +104,9 @@
     padding: 0;
     border-radius: 0;
     background: transparent;
+  }
+  .headerless pre {
+    padding: 42px 18px 18px;
   }
   code :global(.tok-keyword),
   code :global(.tok-modifier) {

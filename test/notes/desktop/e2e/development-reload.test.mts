@@ -53,11 +53,12 @@ test("开发进程更新 preload 与主进程后，页面加载完整几何修�
   const mainSource = (offset: number) => `
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
+if (process.platform === "darwin") app.setActivationPolicy("accessory");
 app.whenReady().then(() => {
   ipcMain.handle("reader.whiteboard.repair", (_event, request) => ({ label: "line", points: request.points.map(point => ({...point, x: point.x + ${offset}})) }));
-  const window = new BrowserWindow({ webPreferences: {
+  const window = new BrowserWindow({ show: false, webPreferences: {
     preload: join(__dirname, "../preload/index.cjs"),
-    sandbox: true, contextIsolation: true, nodeIntegration: false
+    sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false
   } });
   void window.loadURL(process.env.ELECTRON_RENDERER_URL!);
 });

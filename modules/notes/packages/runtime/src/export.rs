@@ -206,7 +206,12 @@ impl State {
 
 impl ExportJob {
     // 所属窗口和库代次已由 State 验证；本层只执行任务状态允许的文件动作。
-    fn apply(&mut self, action: Action, bytes: &[u8], vault: &noemori_vault::Vault) -> Result<Value> {
+    fn apply(
+        &mut self,
+        action: Action,
+        bytes: &[u8],
+        vault: &noemori_vault::Vault,
+    ) -> Result<Value> {
         self.check()?;
         if self.committing && !matches!(action, Action::Info {}) {
             return Err(Error::State(

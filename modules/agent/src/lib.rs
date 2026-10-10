@@ -12,6 +12,8 @@ mod image;
 pub mod llm;
 mod media;
 mod message;
+#[cfg(target_os = "macos")]
+mod process;
 pub mod runtime;
 mod session;
 pub mod tool;

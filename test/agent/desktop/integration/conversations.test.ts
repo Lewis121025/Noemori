@@ -1,5 +1,7 @@
-import { expect, it, vi } from "vitest";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { expect, it, onTestFinished, vi } from "vitest";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import * as files from "node:fs/promises";
+import * as crypto from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,6 +10,13 @@ import {
   type ConversationRecord,
 } from "../../../../modules/notes/packages/desktop/src/features/agent/main/conversations";
 import { encryptAuthentication } from "../../../../modules/notes/packages/desktop/src/features/agent/main/settings";
+
+vi.mock("node:fs/promises", async (original) => ({
+  ...(await original<typeof import("node:fs/promises")>()),
+}));
+vi.mock("node:crypto", async (original) => ({
+  ...(await original<typeof import("node:crypto")>()),
+}));
 
 vi.mock("electron", () => ({
   safeStorage: {
@@ -59,6 +68,194 @@ function conversation(): ConversationRecord {
     },
   };
 }
+
+it("原生第三版检查点可恢复历史，未知版本和工作区不一致仍被拒绝", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-checkpoint-version-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory), item = conversation();
+  item.checkpoint = JSON.stringify({ version: 3, workspace: item.snapshot.workspace, history: [], pending_turn: null });
+  await store.save(item);
+  expect((await store.load()).records).toEqual([item]);
+  for (const checkpoint of [{ version: 4, workspace: item.snapshot.workspace }, { version: 3, workspace: "/other" }]) {
+    await store.save({ ...item, checkpoint: JSON.stringify(checkpoint) });
+    expect((await store.load()).records).toEqual([]);
+    expect((await store.load()).issues[0]).toContain("版本或工作目录不一致");
+  }
+});
+
+it("会话临时文件被占用时保留占用者内容和旧记录，不删除未取得所有权的路径", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-temp-collision-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory);
+  const item = conversation();
+  await store.save(item);
+  const identity = "11111111-1111-4111-8111-111111111111";
+  const temporary = join(directory, "conversations", `${item.id}.json.${identity}.tmp`);
+  await writeFile(temporary, "另一个操作持有的内容");
+  const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(identity);
+  test.onTestFinished(() => uuid.mockRestore());
+
+  await expect(store.save({ ...item, title: "未提交标题" })).rejects.toMatchObject({
+    code: "EEXIST",
+  });
+  expect(await readFile(temporary, "utf8")).toBe("另一个操作持有的内容");
+  expect((await store.load()).records).toEqual([item]);
+});
+
+it.each([false, true])(
+  "会话替换失败保留旧记录，回滚也失败=%s 时交付两处原因",
+  async (cleanupFails) => {
+    const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-rollback-"));
+    const store = new ConversationStore(directory);
+    const item = conversation();
+    await store.save(item);
+    const failure = new Error("会话替换失败");
+    const cleanup = new Error("会话临时文件清理失败");
+    const rename = vi.spyOn(files, "rename").mockRejectedValueOnce(failure);
+    const remove = cleanupFails ? vi.spyOn(files, "rm").mockRejectedValueOnce(cleanup) : null;
+    onTestFinished(async () => {
+      rename.mockRestore();
+      remove?.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const saving = store.save({ ...item, title: "未提交标题" });
+    if (cleanupFails) await expect(saving).rejects.toMatchObject({ errors: [failure, cleanup] });
+    else await expect(saving).rejects.toBe(failure);
+    expect((await store.load()).records).toEqual([item]);
+    expect(await readdir(join(directory, "conversations"))).toHaveLength(cleanupFails ? 2 : 1);
+    await store.save({ ...item, title: "下一次正常保存" });
+    expect((await store.load()).records[0]?.title).toBe("下一次正常保存");
+  },
+);
+
+it("原子替换完成后没有临时路径所有权，不因多余清理伪报保存失败", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-commit-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const store = new ConversationStore(directory);
+  const item = conversation();
+  const remove = vi.spyOn(files, "rm").mockRejectedValueOnce(new Error("不应执行清理"));
+  test.onTestFinished(() => remove.mockRestore());
+
+  await store.save(item);
+  expect(remove).not.toHaveBeenCalled();
+  expect((await store.load()).records).toEqual([item]);
+  expect(await readdir(join(directory, "conversations"))).toEqual([`${item.id}.json`]);
+});
+
+it("旧凭据清理失败发生在会话提交之前，保存拒绝时仍保留上一份记录", async (test) => {
+  const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-credentials-"));
+  test.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const credentials = join(directory, "credentials");
+  const store = new ConversationStore(directory, credentials);
+  const item = conversation();
+  await store.save(item);
+  // 无法按凭据文件删除的占用目录代表清理失败，不让测试依赖宿主权限差异。
+  await mkdir(join(credentials, `${item.id}.json`), { recursive: true });
+
+  await expect(store.save({ ...item, title: "不应提交的标题" })).rejects.toThrow();
+  expect((await store.load()).records).toEqual([item]);
+});
+
+it.each(["write", "close", "both"])(
+  "JSON %s 失败时关闭句柄、清理部分副本并保留旧会话",
+  async (phase) => {
+    const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-write-failure-"));
+    const store = new ConversationStore(directory);
+    const item = conversation();
+    await store.save(item);
+    const open = files.open;
+    const writing = new Error("JSON 内容写入失败");
+    const closing = new Error("JSON 句柄关闭失败");
+    let closes = 0;
+    const opening = vi.spyOn(files, "open").mockImplementationOnce(async (...args) => {
+      const handle = await open(...args);
+      const write = handle.writeFile.bind(handle);
+      const close = handle.close.bind(handle);
+      vi.spyOn(handle, "writeFile").mockImplementationOnce(async (content) => {
+        await write(content);
+        if (phase !== "close") throw writing;
+      });
+      vi.spyOn(handle, "close").mockImplementationOnce(async () => {
+        closes += 1;
+        await close();
+        if (phase !== "write") throw closing;
+      });
+      return handle;
+    });
+    onTestFinished(async () => {
+      opening.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    });
+
+    const saving = store.save({ ...item, title: "写入途中失败" });
+    if (phase === "both")
+      await expect(saving).rejects.toMatchObject({ errors: [writing, closing] });
+    else await expect(saving).rejects.toBe(phase === "write" ? writing : closing);
+    expect(closes).toBe(1);
+    expect((await store.load()).records).toEqual([item]);
+    expect(await readdir(join(directory, "conversations"))).toEqual([`${item.id}.json`]);
+  },
+);
+
+it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])(
+  "版本 %s 的会话只恢复该版本声明的字段和模型选择",
+  async (version) => {
+    const directory = await mkdtemp(join(tmpdir(), "noemori-conversation-versions-"));
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    const store = new ConversationStore(directory);
+    const item = conversation();
+    item.origin = { conversationId: randomUUID(), title: "来源会话", turnId: null };
+    item.article = { path: "文章.md", markerId: item.id, title: "文章" };
+    item.queue.messages = [{ id: "pending", text: "待发送追问", state: "queued" }];
+    item.draftReferences = [{ id: "quoted", text: "原文引用", source: null }];
+    item.attachments = [
+      { id: randomUUID(), name: "资料.txt", size: 12, sha256: "a".repeat(64), image: null },
+    ];
+    item.draftAttachmentIds = item.attachments.map((file) => file.id);
+    await store.save(item);
+    const expected: ConversationRecord = {
+      ...item,
+      origin: version >= 2 ? item.origin : null,
+      article: version >= 3 ? item.article : null,
+      modelSelection: version >= 5 ? item.modelSelection : null,
+      queue: version >= 7 ? item.queue : { messages: [], paused: false, error: null },
+    };
+    if (version < 8) delete expected.draftReferences;
+    if (version < 9) {
+      delete expected.attachments;
+      delete expected.draftAttachmentIds;
+    }
+    const stored = structuredClone(item);
+    if (version === 1) {
+      Reflect.deleteProperty(stored.snapshot, "turns");
+      Reflect.deleteProperty(stored, "origin");
+    }
+    if (version < 3) Reflect.deleteProperty(stored, "article");
+    if (version < 5) Reflect.deleteProperty(stored, "modelSelection");
+    if (version < 6) Reflect.deleteProperty(stored, "linkedWorkspace");
+    if (version < 7) Reflect.deleteProperty(stored, "queue");
+    if (version < 8) Reflect.deleteProperty(stored, "draftReferences");
+    if (version < 9) {
+      Reflect.deleteProperty(stored, "attachments");
+      Reflect.deleteProperty(stored, "draftAttachmentIds");
+    }
+    await writeFile(
+      join(directory, "conversations", `${item.id}.json`),
+      JSON.stringify({
+        ...stored,
+        version,
+        model:
+          version >= 4 ? item.model : { settings: { model: item.model }, authentication: "旧密文" },
+      }),
+    );
+
+    expect(await store.load()).toEqual({
+      records: [expected],
+      issues: [],
+      legacyIds: version < 5 ? [item.id] : [],
+    });
+  },
+);
 
 it("引用与草稿共同恢复，损坏引用保留记录并报告，不把来源变成目录关联", async (test) => {
   const directory = await mkdtemp(join(tmpdir(), "noemori-reference-storage-"));

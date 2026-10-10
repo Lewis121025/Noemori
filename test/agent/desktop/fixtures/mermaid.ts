@@ -1,0 +1,70 @@
+/** 覆盖 Mermaid 12 内置图表族；同一清单用于真实对话页面的生产构建验收。 */
+export const mermaidExamples = [
+  ["flowchart-v2", "flowchart TD\nA[开始] --> B[完成]"],
+  ["sequence", "sequenceDiagram\nAlice->>Bob: 你好\nBob-->>Alice: 收到"],
+  ["classDiagram", "classDiagram\nAnimal <|-- Duck\nAnimal : +int age"],
+  ["stateDiagram", "stateDiagram-v2\n[*] --> Ready\nReady --> Done\nDone --> [*]"],
+  ["er", "erDiagram\nCUSTOMER ||--o{ ORDER : places"],
+  ["gantt", "gantt\ntitle 项目计划\ndateFormat YYYY-MM-DD\nsection 开发\n实现 :a, 2026-01-01, 3d"],
+  ["pie", 'pie title 任务分布\n"完成" : 60\n"待办" : 40'],
+  ["journey", "journey\ntitle 阅读旅程\nsection 阅读\n打开文章: 5: 用户\n整理笔记: 4: 用户"],
+  [
+    "gitGraph",
+    "gitGraph\ncommit\nbranch develop\ncheckout develop\ncommit\ncheckout main\nmerge develop",
+  ],
+  [
+    "requirement",
+    "requirementDiagram\nrequirement rendering {\nid: 1\ntext: render all content\nrisk: low\nverifymethod: test\n}",
+  ],
+  ["c4", 'C4Context\nPerson(user, "用户")\nSystem(app, "阅读器")\nRel(user, app, "阅读")'],
+  ["mindmap", "mindmap\nroot((主题))\n  阅读\n  笔记"],
+  ["timeline", "timeline\ntitle 时间线\n2025 : 规划\n2026 : 实现"],
+  [
+    "quadrantChart",
+    "quadrantChart\ntitle 优先级\nx-axis Low --> High\ny-axis Low --> High\nTask: [0.3, 0.6]",
+  ],
+  [
+    "xychart",
+    "xychart-beta\nx-axis [Jan, Feb, Mar]\ny-axis 0 --> 100\nbar [20, 40, 60]\nline [30, 50, 70]",
+  ],
+  ["sankey", "sankey-beta\nSource,Target,10\nTarget,Result,8"],
+  ["block", 'block-beta\ncolumns 2\na["输入"] b["输出"]\na --> b'],
+  ["packet", 'packet-beta\n0-15: "Header"\n16-31: "Data"'],
+  [
+    "architecture",
+    "architecture-beta\nservice api(server)[API]\nservice db(database)[Database]\napi:R -- L:db",
+  ],
+  ["kanban", "kanban\n  todo[待办]\n    task[绘制图表]\n  done[完成]\n    test[测试]"],
+  ["radar", "radar-beta\naxis A, B, C\ncurve first{1,2,3}\ncurve second{3,2,1}"],
+  ["treemap", 'treemap-beta\n"工程"\n  "代码": 60\n  "测试": 40'],
+  ["treeView", "treeView-beta\nproject/\n    src/\n        index.ts\n    package.json"],
+  [
+    "agentflow",
+    'agentflow-beta TB\nflow reviewer["Review"]\na["Input"]@{ shape: input }\nb["Check"]@{ shape: task }\na --> b\nend',
+  ],
+  [
+    "swimlane",
+    "swimlane-beta LR\nsubgraph User\nA[Read]\nend\nsubgraph App\nB[Render]\nend\nA --> B",
+  ],
+  ["eventmodeling", "eventmodeling\ntf 01 ui CartUI\ntf 02 cmd AddItem\ntf 03 evt ItemAdded"],
+  [
+    "ishikawa",
+    "ishikawa-beta\nRendering Failure\nInput\n    Invalid syntax\nEnvironment\n    Missing font",
+  ],
+  ["venn", 'venn-beta\nset A\nset B\nunion A,B["Shared"]'],
+  [
+    "usecase",
+    'usecase-beta\ndirection LR\nactor User("User")\nsystemBoundary App\nRead("Read notes")\nend\nUser --> Read',
+  ],
+  [
+    "wardley",
+    "wardley-beta\ntitle Reading\nanchor User [0.9, 0.6]\ncomponent Reader [0.6, 0.7]\nUser -> Reader",
+  ],
+  ["cynefin", 'cynefin-beta\ntitle Decisions\ncomplex\n"Explore"\nclear\n"Execute"'],
+  ["railroad", 'railroad-beta\nword = terminal("hello") ;'],
+  ["railroadEbnf", 'railroad-ebnf-beta\nword = "hello" ;'],
+  ["railroadAbnf", 'railroad-abnf-beta\nword = "hello" ;'],
+  ["railroadPeg", 'railroad-peg-beta\nword <- "hello" ;'],
+  ["flowchart-elk", "flowchart-elk TD\nA[Start] --> B[End]"],
+  ["info", "info"],
+] as const;

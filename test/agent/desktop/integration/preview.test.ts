@@ -1,12 +1,123 @@
 /** @vitest-environment jsdom */
 import { flushSync, mount, unmount } from "svelte";
+import { fromStore, writable } from "svelte/store";
 import { afterEach, expect, it, vi } from "vitest";
 import AgentPreview from "../../../../modules/notes/packages/desktop/src/features/agent/renderer/AgentPreview.svelte";
+import AgentUi from "../../../../modules/notes/packages/desktop/src/features/agent/renderer/AgentUi.svelte";
 import { parsePreviewTarget, parseBrowserHumanInput, previewPosition } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/preview";
-import type { UiPreviewFrame } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/api";
+import type { UiPreviewFrame, UiPreviewTarget } from "../../../../modules/notes/packages/desktop/src/features/agent/shared/api";
 import { createAgentApiMock } from "../../../notes/desktop/fixtures/agent-api-mock";
 
 const mounted: ReturnType<typeof mount>[] = [];
+
+it("组合输入期间同一窗口的画面凭据换代，旧文字不能沿用新凭据发送", async () => {
+  vi.useFakeTimers();
+  const api = createAgentApiMock();
+  api.uiInput = vi.fn().mockResolvedValue(undefined);
+  api.uiPreview = vi.fn()
+    .mockResolvedValueOnce({ image: "data:image/jpeg;base64,/9j/", inputToken: "before-move" })
+    .mockResolvedValue({ image: "data:image/jpeg;base64,/9j/", inputToken: "after-move" });
+  const target = document.createElement("div");
+  document.body.append(target);
+  mounted.push(mount(AgentPreview, { target, props: { api, session: "session", target: { backend: "computer", app: "app", window: "window" }, title: "窗口", human: true, close: () => {} } }));
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  const keyboard = document.querySelector<HTMLTextAreaElement>('[aria-label="向画面输入"]')!;
+  keyboard.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  await vi.advanceTimersByTimeAsync(1000);
+  flushSync();
+  keyboard.dispatchEvent(new CompositionEvent("compositionend", { data: "旧画面的文字", bubbles: true }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiInput).not.toHaveBeenCalled();
+});
+
+it("中文组合输入尚未完成时切换窗口，迟到文字不能进入新窗口", async () => {
+  vi.useFakeTimers();
+  const api = createAgentApiMock();
+  api.uiInput = vi.fn().mockResolvedValue(undefined);
+  api.uiPreview = vi.fn().mockResolvedValue({ image: "data:image/jpeg;base64,/9j/", inputToken: "frame" });
+  const targets = writable<UiPreviewTarget>({ backend: "computer", app: "app", window: "first" });
+  const state = fromStore(targets);
+  const target = document.createElement("div");
+  document.body.append(target);
+  mounted.push(mount(AgentPreview, { target, props: { api, session: "session", get target() { return state.current; }, title: "窗口", human: true, close: () => {} } }));
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  const keyboard = document.querySelector<HTMLTextAreaElement>('[aria-label="向画面输入"]')!;
+  keyboard.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  targets.set({ backend: "computer", app: "app", window: "second" });
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  keyboard.dispatchEvent(new CompositionEvent("compositionend", { data: "旧窗口的文字", bubbles: true }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiInput).not.toHaveBeenCalled();
+});
+
+it("接管原生应用自动打开窗口内画面，并在画面内一次点击完成并继续", async () => {
+  vi.useFakeTimers();
+  const api = createAgentApiMock();
+  api.uiPreview = vi.fn().mockResolvedValue({ image: "data:image/jpeg;base64,/9j/", inputToken: "frame" });
+  api.uiControl = vi.fn().mockResolvedValue(undefined);
+  const target = document.createElement("div");
+  document.body.append(target);
+  mounted.push(mount(AgentUi, { target, props: { api, session: "session", ui: {
+    status: "ready", generation: 0, call: null, error: null, receipts: [],
+    control: { app: "approved-app", window: "approved-window", app_name: "应用", window_title: "窗口", reason: "编辑" },
+    connections: [{ id: "computer", backend: "computer", name: "应用", connected: true, human: true, tabs: [] }],
+  } } }));
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  const panel = document.querySelector(".agent-preview");
+  expect(panel).not.toBeNull();
+  const finish = [...panel!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "完成并继续");
+  expect(finish).toBeDefined();
+  finish!.click();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiControl).toHaveBeenCalledWith("session", "computer", true);
+});
+
+it("原生应用画面在窗口内转发点击、中文输入法与粘贴，保持同一控制凭据", async () => {
+  vi.useFakeTimers();
+  const api = Object.assign(createAgentApiMock(), { uiInput: vi.fn().mockResolvedValue(undefined) });
+  api.uiPreview = vi.fn().mockResolvedValue({ image: "data:image/jpeg;base64,/9j/", inputToken: "native-control" });
+  const target = document.createElement("div");
+  document.body.append(target);
+  const window = { backend: "computer" as const, app: "approved-app", window: "approved-window" };
+  mounted.push(mount(AgentPreview, { target, props: { api, session: "session", target: window, title: "原生应用", human: true, close: () => {} } }));
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  const image = document.querySelector<HTMLImageElement>(".agent-preview img")!;
+  Object.defineProperties(image, { naturalWidth: { value: 1000 }, naturalHeight: { value: 500 } });
+  image.getBoundingClientRect = () => ({ x: 10, y: 20, left: 10, top: 20, right: 510, bottom: 270, width: 500, height: 250, toJSON() {} });
+  const screen = document.querySelector<HTMLButtonElement>('[aria-label="浏览器画面"]')!;
+  for (const type of ["pointerdown", "pointerup"])
+    screen.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, pointerId: 1, clientX: 110, clientY: 70 }));
+  screen.dispatchEvent(new MouseEvent("click", { clientX: 110, clientY: 70, detail: 1, bubbles: true }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiInput).toHaveBeenCalledWith("session", window, "native-control", { type: "pointer", x: 200, y: 100, button: "left", clicks: 1 });
+  const keyboard = document.querySelector<HTMLTextAreaElement>('[aria-label="向画面输入"]');
+  expect(keyboard).not.toBeNull();
+  keyboard!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  keyboard!.dispatchEvent(new CompositionEvent("compositionend", { data: "中文输入", bubbles: true }));
+  keyboard!.dispatchEvent(Object.assign(new Event("paste", { bubbles: true, cancelable: true }), { clipboardData: { getData: () => "粘贴内容" } }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiInput).toHaveBeenCalledWith("session", window, "native-control", { type: "text", text: "中文输入" });
+  expect(api.uiInput).toHaveBeenCalledWith("session", window, "native-control", { type: "text", text: "粘贴内容" });
+  screen.dispatchEvent(new MouseEvent("click", { clientX: 110, clientY: 70, detail: 2, bubbles: true }));
+  const key = new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true });
+  keyboard!.dispatchEvent(key);
+  expect(key.defaultPrevented).toBe(false);
+  keyboard!.value = "a";
+  keyboard!.dispatchEvent(new InputEvent("input", { data: "a", bubbles: true }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(api.uiInput).toHaveBeenCalledWith("session", window, "native-control", { type: "pointer", x: 200, y: 100, button: "left", clicks: 2 });
+  expect(api.uiInput).toHaveBeenCalledWith("session", window, "native-control", { type: "text", text: "a" });
+});
 
 it("浮窗拖动只响应主按钮和起始指针，Escape 恢复位置并释放捕获", () => {
   vi.useFakeTimers();

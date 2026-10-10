@@ -178,6 +178,13 @@
     background: var(--selected);
     color: var(--accent);
   }
+  /* 拖动区域由顶栏统一声明；阻断继承，避免内容或装饰按布局树顺序重新覆盖按钮排除区。
+     initial 不提交区域，保留顶栏的空白拖动能力；交互区域在下方显式排除。 */
+  .window-toolbar > :global(*),
+  .window-toolbar::before,
+  .window-toolbar::after {
+    -webkit-app-region: initial;
+  }
   .window-toolbar :global(button),
   .window-toolbar :global([popover]),
   .window-document-tools {

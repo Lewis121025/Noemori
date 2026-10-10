@@ -1,7 +1,11 @@
 //! 输入直接投递给已验证的目标进程，不进入系统全局事件队列或移动用户光标。
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
 use objc2_core_foundation::{CFRetained, CFRunLoop, CGPoint, kCFRunLoopDefaultMode};
 use objc2_core_graphics::*;
+use objc2_foundation::NSProcessInfo;
 use std::time::Duration;
+#[path = "window-location.rs"]
+pub(crate) mod window_location;
 
 /// 后台输入只需要事件发送权限；用户在其他应用的输入不撤销目标窗口授权。
 pub(crate) fn permitted() -> bool {
@@ -18,7 +22,7 @@ pub(crate) fn pump() {
         CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.001, true);
     }
 }
-/// 键盘与滚动按进程投递；应用内部的输入窗口由 Service 每次发送前核验。
+/// 键盘按进程投递；应用内部的输入窗口由 Service 每次发送前核验。
 #[derive(Clone, Copy)]
 pub(crate) struct ProcessTarget {
     pid: i32,
@@ -45,19 +49,21 @@ impl ProcessTarget {
 pub(crate) struct WindowTarget {
     process: ProcessTarget,
     window: u32,
+    origin: CGPoint,
 }
 impl WindowTarget {
-    /// 目标必须同时具有有效进程和非零截图窗口编号。
-    pub(crate) fn new(pid: i32, window: u32) -> Result<Self, String> {
-        if window == 0 {
+    /// 目标必须同时具有有效进程、非零截图窗口编号和已核验的窗口左上角。
+    pub(crate) fn new(pid: i32, window: u32, origin: CGPoint) -> Result<Self, String> {
+        if window == 0 || !origin.x.is_finite() || !origin.y.is_finite() {
             return Err("后台输入窗口无效".into());
         }
         Ok(Self {
             process: ProcessTarget::new(pid)?,
             window,
+            origin,
         })
     }
-    /// 只供本模块生成的鼠标事件绑定窗口，不用于键盘或滚轮事件。
+    /// 本模块的定位事件共用窗口元数据；键盘事件由进程内已核验的输入窗口接收。
     pub(crate) fn route(self, event: &CGEvent) {
         self.process.route(event);
         for field in [
@@ -76,6 +82,58 @@ fn post(target: ProcessTarget, event: &CGEvent, dispatched: &mut bool) {
     target.route(event);
     CGEvent::post_to_pid(target.pid, Some(event));
 }
+/// AppKit 的窗口编号与 CG 的“鼠标下方窗口”不是同一字段，必须经公开的原生事件桥接建立。
+/// 屏幕点与窗口局部点分别绑定；Helper 没有目标 NSWindow，不能让 AppKit 猜测其局部坐标。
+fn window_event(
+    target: WindowTarget,
+    source: &CGEventSource,
+    kind: CGEventType,
+    point: CGPoint,
+    button: CGMouseButton,
+    clicks: i64,
+) -> Result<CFRetained<CGEvent>, String> {
+    let native_kind = match kind {
+        CGEventType::LeftMouseDown => NSEventType::LeftMouseDown,
+        CGEventType::LeftMouseUp => NSEventType::LeftMouseUp,
+        CGEventType::LeftMouseDragged => NSEventType::LeftMouseDragged,
+        CGEventType::RightMouseDown => NSEventType::RightMouseDown,
+        CGEventType::RightMouseUp => NSEventType::RightMouseUp,
+        CGEventType::OtherMouseDown => NSEventType::OtherMouseDown,
+        CGEventType::OtherMouseUp => NSEventType::OtherMouseUp,
+        CGEventType::ScrollWheel => NSEventType::MouseMoved,
+        _ => return Err("原生鼠标事件类型无效".into()),
+    };
+    let native = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+        native_kind,
+        CGPoint::ZERO,
+        NSEventModifierFlags::empty(),
+        NSProcessInfo::processInfo().systemUptime(),
+        target.window as isize,
+        None,
+        0,
+        clicks as isize,
+        if matches!(kind, CGEventType::LeftMouseUp | CGEventType::RightMouseUp | CGEventType::OtherMouseUp) { 0.0 } else { 1.0 },
+    ).ok_or("不能创建原生鼠标事件")?;
+    let bridged = native.CGEvent().ok_or("不能桥接原生鼠标事件")?;
+    let event = CGEvent::new_copy(Some(&bridged)).ok_or("不能复制原生鼠标事件")?;
+    CGEvent::set_type(Some(&event), kind);
+    CGEvent::set_source(Some(&event), Some(source));
+    CGEvent::set_location(Some(&event), point);
+    CGEvent::set_integer_value_field(
+        Some(&event),
+        CGEventField::MouseEventButtonNumber,
+        button.0.into(),
+    );
+    target.route(&event);
+    window_location::set(
+        &event,
+        CGPoint {
+            x: point.x - target.origin.x,
+            y: point.y - target.origin.y,
+        },
+    )?;
+    Ok(event)
+}
 fn mouse(
     target: WindowTarget,
     source: &CGEventSource,
@@ -85,10 +143,7 @@ fn mouse(
     clicks: i64,
     dispatched: &mut bool,
 ) -> Result<(), String> {
-    let event =
-        CGEvent::new_mouse_event(Some(source), kind, point, button).ok_or("不能创建鼠标事件")?;
-    CGEvent::set_integer_value_field(Some(&event), CGEventField::MouseEventClickState, clicks);
-    target.route(&event);
+    let event = window_event(target, source, kind, point, button, clicks)?;
     post(target.process, &event, dispatched);
     Ok(())
 }
@@ -101,6 +156,40 @@ pub(crate) fn pointer(
     check: impl Fn() -> Result<(), String>,
     dispatched: &mut bool,
 ) -> Result<(), String> {
+    if !(1..=3).contains(&clicks) {
+        return Err("点击次数无效".into());
+    }
+    for index in 1..=clicks {
+        pointer_event(target, point, button, index, &check, dispatched)?;
+    }
+    Ok(())
+}
+
+/// 人工 click 已是一次完整手势；click_state 是连续点击编号，不能再重复派发。
+/// target 与 point 已由宿主核验；参数、授权或系统分配失败返回错误，派发事实保留在 dispatched。
+pub(crate) fn pointer_event(
+    target: WindowTarget,
+    point: CGPoint,
+    button: &str,
+    click_state: u32,
+    check: impl Fn() -> Result<(), String>,
+    dispatched: &mut bool,
+) -> Result<(), String> {
+    let [down, up] = pointer_events(target, point, button, click_state)?;
+    check()?;
+    post(target.process, &down, dispatched);
+    post(target.process, &up, dispatched);
+    check()
+}
+
+/// 先建立完整鼠标事件对，再派发；分配失败不能留下没有释放事件的按下状态。
+/// target 与 point 已由宿主核验；非法按钮、次数或系统分配失败返回错误，不发送事件。
+pub(crate) fn pointer_events(
+    target: WindowTarget,
+    point: CGPoint,
+    button: &str,
+    click_state: u32,
+) -> Result<[CFRetained<CGEvent>; 2], String> {
     let (button, down, up) = match button {
         "left" => (
             CGMouseButton::Left,
@@ -119,26 +208,15 @@ pub(crate) fn pointer(
         ),
         _ => return Err("鼠标按钮无效".into()),
     };
-    if !(1..=3).contains(&clicks) {
-        return Err("点击次数无效".into());
+    if !(1..=3).contains(&click_state) {
+        return Err("点击序列编号无效".into());
     }
     let source = source()?;
-    for index in 1..=clicks {
-        check()?;
-        mouse(
-            target,
-            &source,
-            down,
-            point,
-            button,
-            index.into(),
-            dispatched,
-        )?;
-        let released = mouse(target, &source, up, point, button, index.into(), dispatched);
-        released?;
-        check()?;
-    }
-    Ok(())
+    let pair = [down, up]
+        .map(|kind| window_event(target, &source, kind, point, button, click_state.into()));
+    let [down, up] = pair;
+    let pair = [down?, up?];
+    Ok(pair)
 }
 /// 拖动期间反复核验租约与取消状态，结束或失败都释放助手按下的鼠标。
 pub(crate) fn drag(
@@ -303,30 +381,67 @@ pub(crate) fn key(
     post(target, &up, dispatched);
     check()
 }
-/// 只在已核验后台窗口点滚动；非有限或过量滚动拒绝，派发事实通过 dispatched 返回。
+/// 按网页滚轮方向在已核验窗口滚动，正值向右或下；无效滚动拒绝，派发事实通过 dispatched 返回。
 pub(crate) fn scroll(
-    target: ProcessTarget,
+    target: WindowTarget,
     point: CGPoint,
     x: f64,
     y: f64,
     check: impl Fn() -> Result<(), String>,
     dispatched: &mut bool,
 ) -> Result<(), String> {
+    check()?;
+    let event = scroll_event(target, point, x, y)?;
+    post(target.process, &event, dispatched);
+    check()
+}
+
+/// 将网页滚轮方向转换为 macOS 原生轴方向；无效滚动量或系统分配失败直接返回错误。
+pub(crate) fn scroll_event(
+    target: WindowTarget,
+    point: CGPoint,
+    x: f64,
+    y: f64,
+) -> Result<CFRetained<CGEvent>, String> {
     if !x.is_finite() || !y.is_finite() || x.abs() > 100000.0 || y.abs() > 100000.0 {
         return Err("滚动量无效".into());
     }
-    check()?;
     let source = source()?;
-    let event = CGEvent::new_scroll_wheel_event2(
+    let deltas = CGEvent::new_scroll_wheel_event2(
         Some(&source),
         CGScrollEventUnit::Pixel,
         2,
-        y.round() as i32,
-        x.round() as i32,
+        (-y).round() as i32,
+        (-x).round() as i32,
         0,
     )
     .ok_or("不能创建滚动事件")?;
-    CGEvent::set_location(Some(&event), point);
-    post(target, &event, dispatched);
-    check()
+    let event = window_event(
+        target,
+        &source,
+        CGEventType::ScrollWheel,
+        point,
+        CGMouseButton::Left,
+        0,
+    )?;
+    // 像素、行和固定点增量由系统的滚轮构造器统一生成，避免自行推断滚动单位转换。
+    for field in [
+        CGEventField::ScrollWheelEventDeltaAxis1,
+        CGEventField::ScrollWheelEventDeltaAxis2,
+        CGEventField::ScrollWheelEventDeltaAxis3,
+        CGEventField::ScrollWheelEventFixedPtDeltaAxis1,
+        CGEventField::ScrollWheelEventFixedPtDeltaAxis2,
+        CGEventField::ScrollWheelEventFixedPtDeltaAxis3,
+        CGEventField::ScrollWheelEventPointDeltaAxis1,
+        CGEventField::ScrollWheelEventPointDeltaAxis2,
+        CGEventField::ScrollWheelEventPointDeltaAxis3,
+        CGEventField::ScrollWheelEventIsContinuous,
+    ] {
+        CGEvent::set_integer_value_field(
+            Some(&event),
+            field,
+            CGEvent::integer_value_field(Some(&deltas), field),
+        );
+    }
+    Ok(event)
 }

@@ -17,10 +17,7 @@ import { resolveMediaUrl, type MediaIo } from "../../preview/media";
 import { parseMarkdown } from "../../../shared/markdown/parse";
 import { sliceEmbed } from "../../../shared/markdown/block-anchor";
 import { documentAccess } from "../../editor/read-only";
-import {
-  frontmatterPresentation,
-  frontmatterSourceView,
-} from "../../editor/frontmatter";
+import { frontmatterPresentation, frontmatterSourceView } from "../../editor/frontmatter";
 import { linkInteraction, type OpenContentLink } from "../../editor/links/link-interaction";
 import { mathNodeViews } from "./math-view";
 import { createHtmlNodeViews } from "./html-view";

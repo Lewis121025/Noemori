@@ -1,4 +1,11 @@
-import { chromium, type BrowserContext, type Page, type Response } from "playwright-core";
+import {
+  chromium,
+  errors,
+  type BrowserContext,
+  type CDPSession,
+  type Frame,
+  type Page,
+} from "playwright-core";
 import { createGateway, assertPublicUrl } from "./network.js";
 import type { BrowserLease } from "./channel.js";
 import { extractHtml } from "./html.js";
@@ -9,6 +16,8 @@ import {
   classifyChallenge,
   challengeReason,
   isCloudflareResource,
+  observeDocument,
+  type ChallengeSignals,
 } from "./challenge.js";
 
 /**
@@ -16,36 +25,57 @@ import {
  * @param page 独占浏览器页面。
  * @param maximumWait 当前阶段允许等待的毫秒数，受工具剩余预算约束。
  * @returns 是否在截止前稳定。
+ * @throws 时间预算非法、页面关闭或 DOM 观察异常时抛出明确错误。
  */
 export async function waitForReadablePage(page: Page, maximumWait = 8000): Promise<boolean> {
-  return page.evaluate(
-    (maximumWait) =>
-      new Promise<boolean>((resolve) => {
-        let previous = "";
-        let stableAt = Date.now();
-        const started = Date.now();
-        const timer = setInterval(() => {
-          const root =
-            document.querySelector<HTMLElement>("main, article, [role=main]") || document.body;
-          const text = root?.innerText.trim() || "";
-          const loading =
-            /^(loading|加载中|正在加载|please wait)[.\s…]*$/i.test(text) ||
-            Boolean(document.querySelector('[aria-busy="true"]'));
-          if (text !== previous || !text || loading) {
-            previous = text;
-            stableAt = Date.now();
-          }
-          if (
-            (text && !loading && Date.now() - stableAt >= 800 && Date.now() - started >= 2000) ||
-            Date.now() - started >= maximumWait
-          ) {
-            clearInterval(timer);
-            resolve(Boolean(text && !loading && Date.now() - stableAt >= 800));
-          }
-        }, 100);
-      }),
-    maximumWait,
-  );
+  if (!Number.isFinite(maximumWait) || maximumWait <= 0)
+    throw new Error("正文等待时间预算必须为正数");
+  const started = performance.now();
+  const deadline = started + maximumWait;
+  let previous = "";
+  let stableAt = started;
+  let stable = false;
+  const navigated = (frame: Frame) => {
+    if (frame !== page.mainFrame()) return;
+    // 同一 URL 的刷新也创建新文档，不能继承旧正文的稳定时间。
+    previous = "";
+    stableAt = performance.now();
+    stable = false;
+  };
+  page.on("framenavigated", navigated);
+  try {
+    while (performance.now() < deadline) {
+      const observation: { text: string; loading: boolean } = JSON.parse(
+        await observeDocument(
+          page,
+          `() => {
+            const root = document.querySelector("main, article, [role=main]") || document.body;
+            const text = root?.innerText.trim() || "";
+            const loading = /^(loading|加载中|正在加载|please wait)[.\\s…]*$/i.test(text) ||
+              Boolean(document.querySelector('[aria-busy="true"]'));
+            return JSON.stringify({ text, loading });
+          }`,
+          Math.max(1, deadline - performance.now()),
+        ),
+      );
+      const now = performance.now();
+      if (observation.text !== previous || !observation.text || observation.loading) {
+        previous = observation.text;
+        stableAt = now;
+      }
+      stable = Boolean(observation.text && !observation.loading && now - stableAt >= 800);
+      if (stable && now - started >= 2000) return true;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(1, Math.min(100, deadline - now))),
+      );
+    }
+    return stable;
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) return false;
+    throw error;
+  } finally {
+    page.off("framenavigated", navigated);
+  }
 }
 
 /**
@@ -122,6 +152,7 @@ async function readDocument(
   const page = await context.newPage();
   const session = await context.newCDPSession(page);
   await session.send("Network.enable");
+  await session.send("Page.enable");
   let transferred = 0;
   const overBudget = new Promise<never>((_, reject) => {
     session.on("Network.dataReceived", (event: { dataLength: number }) => {
@@ -138,7 +169,11 @@ async function readDocument(
     );
   });
   try {
-    return await Promise.race([captureDocument(page, input, deadline), overBudget, expired]);
+    return await Promise.race([
+      captureDocument(page, session, input, deadline),
+      overBudget,
+      expired,
+    ]);
   } finally {
     clearTimeout(timer);
   }
@@ -146,13 +181,15 @@ async function readDocument(
 
 async function captureDocument(
   page: Page,
+  session: CDPSession,
   input: WorkerInput,
   deadline: number,
 ): Promise<HtmlSnapshot> {
-  let response: Response | undefined;
-  page.on("response", (received) => {
-    if (received.request().isNavigationRequest() && received.frame() === page.mainFrame())
-      response = received;
+  const { frameTree } = await session.send("Page.getFrameTree");
+  const responses = new Map<string, number>();
+  session.on("Network.responseReceived", (received) => {
+    if (received.type === "Document" && received.frameId === frameTree.frame.id)
+      responses.set(received.loaderId, received.response.status);
   });
   const initial = await page.goto(input.url, {
     waitUntil: "domcontentloaded",
@@ -175,16 +212,38 @@ async function captureDocument(
       page,
       Math.max(1, Math.min(8000, deadline - performance.now())),
     );
-  if (!response?.ok()) throw new Error(`动态页面返回 HTTP ${response?.status() ?? "未知"}`);
-  await assertPublicUrl(page.url());
-  const html = await page.content();
-  if (Buffer.byteLength(html) > input.limits.max_download_bytes)
-    throw new Error("动态网页 DOM 超过配置的字节上限");
-  const challenge = classifyChallenge(await page.evaluate(challengeSignals));
-  if (challenge.kind !== "none") throw new Error(challengeReason(challenge));
-  return {
-    url: page.url(),
-    html,
-    warnings: stable ? [] : ["页面正文在等待期限内未稳定，返回的是当前可读内容"],
-  };
+  while (performance.now() < deadline) {
+    const before = await session.send("Page.getFrameTree");
+    const observedDocument = before.frameTree.frame.loaderId;
+    // HTML、来源和验证判据必须属于同一文档；原始 JSON 不依赖旧文档的对象句柄。
+    const snapshot: { url: string; html: string; signals: ChallengeSignals } = JSON.parse(
+      await observeDocument(
+        page,
+        `() => JSON.stringify({
+          url: location.href,
+          html: (document.doctype ? new XMLSerializer().serializeToString(document.doctype) : "") +
+            document.documentElement.outerHTML,
+          signals: (${challengeSignals.toString()})()
+        })`,
+        Math.max(1, deadline - performance.now()),
+      ),
+    );
+    // 后置 CDP 往返同时确认文档身份并接齐响应事件，不能假设另一会话的事件先交付。
+    const after = await session.send("Page.getFrameTree");
+    if (observedDocument !== after.frameTree.frame.loaderId) continue;
+    const status = responses.get(observedDocument);
+    if (status === undefined || status < 200 || status >= 300)
+      throw new Error(`动态页面返回 HTTP ${status ?? "未知"}`);
+    await assertPublicUrl(snapshot.url);
+    if (Buffer.byteLength(snapshot.html) > input.limits.max_download_bytes)
+      throw new Error("动态网页 DOM 超过配置的字节上限");
+    const challenge = classifyChallenge(snapshot.signals);
+    if (challenge.kind !== "none") throw new Error(challengeReason(challenge));
+    return {
+      url: snapshot.url,
+      html: snapshot.html,
+      warnings: stable ? [] : ["页面正文在等待期限内未稳定，返回的是当前可读内容"],
+    };
+  }
+  throw new Error("网页读取超过宿主剩余时间预算");
 }

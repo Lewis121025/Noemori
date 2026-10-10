@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import LibraryOptions from "./LibraryOptions.svelte";
+  import LibraryIcon, { type LibraryIconName } from "./LibraryIcon.svelte";
   import FileTreeViewport from "./FileTreeViewport.svelte";
   import { libraryTitle } from "./library-tree";
   import {
@@ -77,14 +78,17 @@
   const showArchived = $derived(browser.state.discussions?.archived ?? false);
   let conversationMenu: TreeContextMenu;
   let menuConversation = $state<WorkspaceConversation | null>(null);
-  const conversationActions = $derived([
-    { id: "fork", label: "分叉对话…" },
-    { id: "rename", label: "重命名…" },
+  const conversationActions = $derived<
+    { id: string; label: string; icon: LibraryIconName; danger?: boolean; separator?: boolean }[]
+  >([
+    { id: "fork", label: "分叉对话…", icon: "branch" },
+    { id: "rename", label: "重命名…", icon: "rename" },
     {
       id: menuConversation?.archived ? "restore" : "archive",
       label: menuConversation?.archived ? "恢复对话" : "归档对话…",
+      icon: menuConversation?.archived ? "restore" : "archive",
     },
-    { id: "remove", label: "删除对话…", danger: true, separator: true },
+    { id: "remove", label: "删除对话…", icon: "trash", danger: true, separator: true },
   ]);
   const browse = $derived(browser.state.browse);
   const query = $derived(browse?.query ?? "");
@@ -500,7 +504,19 @@
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
     if (!selected.has(entry.path)) selectOnly(entry.path);
     browser.update({ focused: entry.path });
-    void menu.open(entry, event.clientX, event.clientY);
+    const position = menuPosition(event);
+    void menu.open(entry, position.x, position.y);
+  }
+  // 行内操作使用按钮下方作锚点，键盘合成的 click 坐标为零，不能当成右键位置。
+  function menuPosition(event: MouseEvent): { x: number; y: number } {
+    if (
+      event.currentTarget instanceof HTMLElement &&
+      event.currentTarget.classList.contains("row-actions")
+    ) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      return { x: bounds.left, y: bounds.bottom + 4 };
+    }
+    return { x: event.clientX, y: event.clientY };
   }
   function keydown(event: KeyboardEvent, row: FileTreeRow): void {
     if (event.defaultPrevented || busy || isCompositionKey(event) || workspace.isComposing) return;
@@ -689,7 +705,8 @@
     event.preventDefault();
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
     menuConversation = item;
-    await conversationMenu.open(event.clientX, event.clientY);
+    const position = menuPosition(event);
+    await conversationMenu.open(position.x, position.y);
   }
   function conversationKeydown(event: KeyboardEvent, row: WorkspaceTreeRow): void {
     if (event.defaultPrevented || isCompositionKey(event)) return;
@@ -793,11 +810,18 @@
 </script>
 
 {#snippet entryIcon(row: FileTreeRow)}
-  <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
-    {#if row.node.kind === "directory"}<path d="M2 5h6l2 2h8v10H2z" />
-    {:else if row.node.path.endsWith(".noemoriboard")}<path d="M3 4h14v12H3zM7 4v12M7 9h10" />
-    {:else}<path d="M5 2.5h6l4 4v11H5zM11 2.5v4h4M8 10h4M8 13h4" />{/if}
-  </svg>
+  <span class="entry-icon"
+    ><LibraryIcon
+      name={row.node.kind === "directory"
+        ? expandedRows.has(row.node.path)
+          ? "folder-open"
+          : "folder"
+        : row.node.path.endsWith(".noemoriboard")
+          ? "whiteboard"
+          : "note"}
+      size={14}
+    /></span
+  >
 {/snippet}
 
 {#snippet disclosure(item: WorkspaceTreeRow)}
@@ -814,14 +838,14 @@
         toggleNode(item);
         void focusPath(item.key, false);
       }}
-      ><svg viewBox="0 0 20 20" aria-hidden="true"
-        ><path d={expandedRows.has(item.key) ? "m5 7 5 5 5-5" : "m7 5 5 5-5 5"} /></svg
+      ><span class="tree-chevron" class:expanded={expandedRows.has(item.key)}
+        ><LibraryIcon name="chevron" size={12} /></span
       ></button
     >
   {:else}<span class="tree-spacer" aria-hidden="true"></span>{/if}
 {/snippet}
 
-<nav class="list" aria-label="文件列表" {hidden}>
+<nav class="list" class:multiple-selection={selected.size > 1} aria-label="文件列表" {hidden}>
   <div class="view-options">
     <div
       class="root-label"
@@ -831,7 +855,6 @@
       ondragover={(event) => allowDrop(event, "")}
       ondrop={(event) => void drop(event, "")}
     >
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3zM3 8h14M7 8v8" /></svg>
       <h2>Noemori</h2>
     </div>
     <LibraryOptions
@@ -859,9 +882,7 @@
   </div>
   <div class="search-wrap">
     <div class="search">
-      <svg viewBox="0 0 20 20" aria-hidden="true"
-        ><circle cx="8.5" cy="8.5" r="5" /><path d="m12.5 12.5 4 4" /></svg
-      >
+      <LibraryIcon name="search" size={14} />
       <input
         type="text"
         role="searchbox"
@@ -880,8 +901,7 @@
           aria-label="清除搜索"
           title="清除搜索（Esc）"
           disabled={busy}
-          onclick={clearSearch}
-          ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8m0-8-8 8" /></svg></button
+          onclick={clearSearch}><LibraryIcon name="close" size={13} /></button
         >{/if}
     </div>
   </div>
@@ -1010,10 +1030,14 @@
                   draggedEntries.map((entry) => entry.path).join("\n"),
                 );
                 const root = workspace.vaultRoot;
-                if (root && event.dataTransfer) event.dataTransfer.setData(
-                  LIBRARY_ENTRIES_MIME,
-                  JSON.stringify({ root, entries: draggedEntries.map(({ path, kind }) => ({ path, kind })) }),
-                );
+                if (root && event.dataTransfer)
+                  event.dataTransfer.setData(
+                    LIBRARY_ENTRIES_MIME,
+                    JSON.stringify({
+                      root,
+                      entries: draggedEntries.map(({ path, kind }) => ({ path, kind })),
+                    }),
+                  );
                 if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
               }}
               ondragend={() => {
@@ -1046,18 +1070,22 @@
               >
             {/if}
           {/if}
-          {#if row.node.kind === "directory" && renaming?.path !== row.node.path}
+          {#if renaming?.path !== row.node.path}
             <button
               type="button"
               class="row-actions"
-              tabindex="-1"
+              tabindex={treeFocus === row.node.path ? 0 : -1}
               aria-label={`${row.node.name} 的操作`}
-              title="文件夹操作"
+              title={row.node.kind === "directory" ? "文件夹操作" : "文件操作"}
+              aria-haspopup="menu"
+              disabled={busy}
+              onfocus={() => {
+                conversationFocus = null;
+                browser.update({ focused: row.node.path });
+              }}
               onclick={(event) => context(event, row.node)}
             >
-              <svg viewBox="0 0 20 20" aria-hidden="true"
-                ><path d="M4 10h.01M10 10h.01M16 10h.01" /></svg
-              >
+              <LibraryIcon name="more" size={14} />
             </button>
           {/if}
         </div>
@@ -1076,7 +1104,9 @@
             data-path={item.key}
             tabindex={treeFocus === item.key ? 0 : -1}
             title={item.conversation
-              ? (item.conversation.workspace ? `${item.title} · ${item.conversation.workspace}` : item.title)
+              ? item.conversation.workspace
+                ? `${item.title} · ${item.conversation.workspace}`
+                : item.title
               : item.title}
             aria-label={item.kind === "source" ? `${item.title}（来源历史）` : item.title}
             aria-pressed={item.conversation
@@ -1093,16 +1123,20 @@
             onkeydown={(event) => conversationKeydown(event, item)}
           >
             <span class="conversation-icon">
-              <svg class="entry-icon" viewBox="0 0 20 20" aria-hidden="true">
-                {#if item.conversation?.origin}<path
-                    d="M6 3v10a3 3 0 0 0 6 0V7M4 3h4M10 7h4M4 17h4"
-                  />
-                {:else if item.kind === "conversation"}<path
-                    d="M3 3.5h14v10H8l-5 3zM6 7h8M6 10h5"
-                  />
-                {:else if item.kind === "source"}<path d="M5 3h7l3 3v11H5zM8 10h4M8 13h4" />
-                {:else}<path d="M2 5h6l2 2h8v10H2z" />{/if}
-              </svg>
+              <span class="entry-icon"
+                ><LibraryIcon
+                  name={item.conversation?.origin
+                    ? "branch"
+                    : item.kind === "conversation"
+                      ? "conversation"
+                      : item.kind === "source"
+                        ? "note"
+                        : expandedRows.has(item.key)
+                          ? "folder-open"
+                          : "folder"}
+                  size={14}
+                /></span
+              >
               {#if item.conversation?.id === conversations?.selected}<span
                   class="conversation-active"
                   aria-hidden="true"
@@ -1124,6 +1158,23 @@
               >{/if}
             {#if item.conversation?.archived}<span class="row-meta">已归档</span>{/if}
           </button>
+          {#if item.conversation}
+            <button
+              type="button"
+              class="row-actions"
+              tabindex={treeFocus === item.key ? 0 : -1}
+              aria-label={`${item.title} 的操作`}
+              aria-haspopup="menu"
+              title="对话操作"
+              disabled={busy}
+              onfocus={() => (conversationFocus = item.key)}
+              onclick={(event) => {
+                if (item.conversation) void openConversationMenu(event, item.conversation);
+              }}
+            >
+              <LibraryIcon name="more" size={14} />
+            </button>
+          {/if}
         </div>
       {/if}
     {/snippet}
@@ -1331,20 +1382,20 @@
     display: flex;
     align-items: center;
     padding: 0 12px 10px;
-    min-height: 41px;
+    min-height: 38px;
     box-sizing: border-box;
   }
   .search {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     width: 100%;
-    min-height: 31px;
-    padding: 0 8px;
+    min-height: 28px;
+    padding: 0 3px;
     box-sizing: border-box;
-    background: color-mix(in srgb, var(--fg) 5%, transparent);
-    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
-    border-radius: 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
     color: var(--muted);
   }
   input {
@@ -1359,12 +1410,11 @@
   }
   input::placeholder {
     color: var(--muted);
-    opacity: 0.75;
+    opacity: 0.8;
   }
   .search:focus-within {
-    border-color: color-mix(in srgb, var(--accent) 65%, transparent);
-    outline: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    outline-offset: 0;
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+    border-color: color-mix(in srgb, var(--fg) 12%, transparent);
   }
   .search input:focus-visible {
     outline: none;
@@ -1381,19 +1431,12 @@
   button:hover:not(:disabled) {
     background: var(--selected);
   }
+  .file:hover:not(:disabled) {
+    background: transparent;
+  }
   button:disabled {
     opacity: 0.45;
     cursor: default;
-  }
-  svg {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
   .clear-search {
     display: flex;
@@ -1406,8 +1449,8 @@
   .view-options {
     display: flex;
     align-items: center;
-    min-height: 36px;
-    padding: 2px 10px 7px;
+    min-height: 32px;
+    padding: 2px 12px 3px;
     box-sizing: border-box;
     gap: 6px;
     color: var(--muted);
@@ -1415,14 +1458,13 @@
   .root-label {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     flex: 1;
     min-width: 0;
-    padding: 5px 6px;
+    padding: 4px 2px;
     text-align: left;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--muted);
-    border-radius: 6px;
   }
   .root-label h2 {
     margin: 0;
@@ -1437,31 +1479,39 @@
     display: flex;
     height: 100%;
     align-items: center;
-    border-radius: 6px;
-    margin-left: min(calc(var(--tree-depth) * 16px), 32%);
+    border-radius: 4px;
+    padding-left: min(calc(var(--tree-depth) * 14px), 28%);
+    box-sizing: border-box;
     position: relative;
+    transition: background var(--motion-fast) var(--motion-ease);
+  }
+  .file-row:hover {
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
   }
   .file-row.nested::before {
     content: "";
     position: absolute;
-    left: -8px;
+    left: min(calc(var(--tree-depth) * 14px - 7px), calc(28% - 7px));
     top: 0;
     bottom: 0;
     border-left: 1px solid var(--border);
-    opacity: 0.4;
+    opacity: 0.18;
   }
   .file-row.active {
-    background: color-mix(in srgb, var(--fg) 9%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
   }
   .file-row.active .name {
     font-weight: 500;
   }
-  .file-row.selected:not(.active) {
-    background: color-mix(in srgb, var(--selected) 55%, transparent);
+  .file-row.selected:focus-within:not(.active),
+  .multiple-selection .file-row.selected:not(.active) {
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+  }
+  .current-conversation .name {
+    color: var(--fg);
   }
   .file-row:has(.file:focus-visible) {
-    outline: 1px solid var(--accent);
+    outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: -1px;
   }
   .file:focus-visible {
@@ -1471,20 +1521,28 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 24px;
+    flex: 0 0 0;
+    width: 0;
     height: 24px;
-    margin-right: 3px;
+    margin-right: 0;
     padding: 0;
+    overflow: hidden;
     color: var(--muted);
     opacity: 0;
+    pointer-events: none;
     transition: opacity var(--motion-fast) var(--motion-ease);
-  }
-  .row-actions svg {
-    stroke-width: 3;
   }
   .file-row:hover .row-actions,
   .file-row:focus-within .row-actions {
+    flex-basis: 24px;
+    width: 24px;
+    margin-right: 3px;
     opacity: 1;
+    pointer-events: auto;
+  }
+  .row-actions:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
   .file-row.dragging {
     opacity: 0.5;
@@ -1506,9 +1564,26 @@
     line-height: 18px;
   }
   .file .entry-icon {
-    color: color-mix(in srgb, var(--muted) 78%, transparent);
-    width: 13px;
-    height: 13px;
+    display: flex;
+    flex-shrink: 0;
+    color: color-mix(in srgb, var(--muted) 80%, transparent);
+    width: 14px;
+    height: 14px;
+  }
+  .folder .entry-icon {
+    color: color-mix(in srgb, var(--muted) 90%, transparent);
+  }
+  .file-row.active .entry-icon {
+    color: var(--accent);
+  }
+  .file-row:hover .entry-icon {
+    color: var(--fg);
+  }
+  .file-row.active:hover .entry-icon {
+    color: var(--accent);
+  }
+  .file-row.current-conversation:hover .entry-icon {
+    color: var(--accent);
   }
   .folder .file {
     color: color-mix(in srgb, var(--fg) 82%, transparent);
@@ -1542,9 +1617,12 @@
     color: var(--muted);
     padding: 0;
   }
-  .tree-toggle svg {
-    width: 11px;
-    height: 11px;
+  .tree-chevron {
+    display: flex;
+    transition: rotate 160ms var(--motion-ease);
+  }
+  .tree-chevron.expanded {
+    rotate: 90deg;
   }
   .selection-status {
     padding: 6px 13px;
@@ -1587,10 +1665,15 @@
     overflow-wrap: anywhere;
   }
   @media (pointer: coarse) {
-    .row-actions {
-      opacity: 1;
+    .row-actions,
+    .file-row:hover .row-actions,
+    .file-row:focus-within .row-actions {
       flex-basis: 44px;
+      opacity: 1;
+      pointer-events: auto;
+      width: 44px;
       height: 44px;
+      margin-right: 3px;
     }
     .tree-toggle,
     .clear-search {
@@ -1606,6 +1689,13 @@
     }
     input {
       font-size: 16px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tree-chevron,
+    .file-row,
+    .row-actions {
+      transition: none;
     }
   }
 </style>

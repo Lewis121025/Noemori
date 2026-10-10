@@ -26,6 +26,8 @@ export class Operation {
     this.check();
     this.dispatched = true;
   }
+  /** 将扩展协议等待限制在同一 RPC 的剩余预算内，不创建跨调用后台任务。 */
+  budget(): number { this.check(); return Math.max(1, this.deadline - performance.now()); }
   /** 有界等待观察轮询；取消不能触发后续动作。 */
   async pause(): Promise<void> {
     this.check();

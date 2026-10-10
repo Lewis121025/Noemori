@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { packageExtension } from "./extension-package.mjs";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const release = process.argv.includes("--release");
@@ -21,11 +22,7 @@ for (const binary of ["noemori-ui-runtime", "noemori-browser-host"]) copyFileSyn
 const web = resolve(directory, "../web-runtime");
 run("pnpm", ["--filter", "@noemori/agent-web-runtime", "build"]);
 const extension = join(runtime, "browser-extension");
-mkdirSync(join(extension, "browser"), { recursive: true });
-cpSync(join(web, "dist/extension"), join(extension, "extension"), { recursive: true });
-for (const file of ["contract.js", "dom.js"]) copyFileSync(join(web, "dist/browser", file), join(extension, "browser", file));
-copyFileSync(join(web, "src/extension/popup.html"), join(extension, "extension/popup.html"));
-copyFileSync(join(web, "src/extension/manifest.json"), join(extension, "manifest.json"));
+packageExtension(web, extension);
 const manifest = JSON.parse(readFileSync(join(extension, "manifest.json"), "utf8"));
 const digest = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32);
 const identity = [...digest].map((value) => String.fromCharCode(97 + Number.parseInt(value, 16))).join("");

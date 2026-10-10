@@ -109,7 +109,7 @@ fn run() -> Result<(), String> {
             flag.store(true, Ordering::Release);
         }
     });
-    loop {
+    let result = loop {
         let ended = objc2::rc::autoreleasepool(|_| -> Result<bool, String> {
             for session in service.poll() {
                 wire::write_message(
@@ -182,9 +182,17 @@ fn run() -> Result<(), String> {
                 }
             }
             Ok(false)
-        })?;
-        if ended {
-            return Ok(());
+        });
+        match ended {
+            Ok(false) => {}
+            Ok(true) => break Ok(()),
+            Err(error) => break Err(error),
         }
+    };
+    service.release("*");
+    // 断连后不再接收或派发输入；已投递的 V 尚未消费时必须继续保留原剪贴板材料。
+    while objc2::rc::autoreleasepool(|_| service.poll_clipboard()) {
+        std::thread::sleep(Duration::from_millis(20));
     }
+    result
 }

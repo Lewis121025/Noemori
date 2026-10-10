@@ -1,12 +1,193 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn log_limit() -> u32 {
+    50
+}
+#[path = "semantic.rs"]
+mod semantic;
+pub use semantic::*;
+
+/// 显式观察的结果编码；增量仍以真实完整采集为依据。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationMode {
+    /// 返回完整观察，保持既有调用行为。
+    Full,
+    /// 返回相对明确基线的变化，基线不足时返回完整观察。
+    Delta,
+}
+
+/// 动作后观察策略；none 省掉采集并同时撤销旧引用和截图。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationPolicy {
+    /// 采集并返回完整观察。
+    Full,
+    /// 采集后返回相对动作前观察的变化。
+    Delta,
+    /// 省略采集；后续引用动作必须显式重新观察。
+    None,
+}
+
 /// 浏览器操作只携带会话内的页面与观察引用，不能选择浏览器进程、目录或调试端口。
 /// 单次动作（含全部批量步骤）的 JSON 总量限 1 MiB；超限在派发前作为可纠正的输入错误拒绝。
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(extend("type" = "object"))]
 pub enum BrowserInput {
+    /// 发现当前页面的真实后端能力，不支持的能力不列为可用。
+    CapabilitiesList {
+        /// 当前会话真实页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+    },
+    /// 按需读取实际支持能力的使用契约和预算。
+    CapabilityGet {
+        /// 当前会话真实页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// 能力名称。
+        name: crate::tool::ui::BrowserCapability,
+    },
+    /// 请求当前文档内的独立能力授权，网页元数据不能代替用户决定。
+    RequestCapability {
+        /// 当前会话真实页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// 明确的能力范围。
+        capability: crate::tool::ui::BrowserCapability,
+        /// 用户需要判断的使用用途。
+        #[schemars(length(min = 1, max = 2000))]
+        reason: String,
+    },
+    /// 宿主读取审批准备状态，模型 Schema 不开放。
+    #[schemars(skip)]
+    ExtensionState {
+        /// 当前会话真实页面身份。
+        page: String,
+    },
+    /// 宿主审批后提交原始文档与目录身份，变化时后端拒绝授权。
+    #[schemars(skip)]
+    GrantCapability {
+        /// 当前会话真实页面身份。
+        page: String,
+        /// 已审批的文档代次。
+        document: String,
+        /// 已审批的真实网站来源。
+        origin: String,
+        /// 审批准备时的工具目录版本。
+        revision: String,
+        /// 已审批的独立能力。
+        capability: crate::tool::ui::BrowserCapability,
+    },
+    /// 增量读取当前文档的有界开发日志，需独立能力批准。
+    DeveloperLogs {
+        /// 当前页面。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// 上次返回的日志序号。
+        #[serde(default)]
+        after: u32,
+        /// 单次最多一百项，输出另受字节预算限制。
+        #[serde(default = "log_limit")]
+        #[schemars(range(min = 1, max = 100))]
+        limit: u32,
+    },
+    /// 发现浏览器登记的当前主文档 WebMCP 工具及输入 Schema。
+    WebmcpList {
+        /// 当前页面。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+    },
+    /// 在已批准能力内调用一次工具，旧目录与 Schema 错误不会派发。
+    WebmcpCall {
+        /// 当前页面。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// 最近发现返回的目录代次。
+        #[schemars(length(min = 1, max = 128))]
+        directory: String,
+        /// 同一目录内的不透明工具身份。
+        #[schemars(length(min = 1, max = 128))]
+        tool: String,
+        /// 与工具 Schema 一致的有界 JSON 对象。
+        input: serde_json::Map<String, serde_json::Value>,
+        /// 工具动作后的观察策略，省略返回完整观察。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
+    },
+    /// 读取当前页面的固定 CDP 诊断方法，不授予脚本、网络、文件或其他目标权限。
+    CdpSend {
+        /// 当前页面。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// capability_get(cdp) 返回的精确只读方法。
+        #[schemars(length(min = 1, max = 100))]
+        method: String,
+        /// 精确方法参数，额外目标字段会被拒绝。
+        params: serde_json::Map<String, serde_json::Value>,
+    },
+    /// 可信宿主准备一次性 WebMCP 调用，模型不能跳过输入 Schema 验证。
+    #[schemars(skip)]
+    WebmcpPrepare {
+        /// 当前页面。
+        page: String,
+        /// 已发现目录。
+        directory: String,
+        /// 同目录工具身份。
+        tool: String,
+        /// 后端将冻结的实际输入。
+        input: serde_json::Map<String, serde_json::Value>,
+    },
+    /// 宿主验证输入后消费一次性准备身份，不允许自动重放。
+    #[schemars(skip)]
+    WebmcpInvoke {
+        /// 当前页面。
+        page: String,
+        /// 当前目录内仅可消费一次的准备身份。
+        prepared: String,
+        /// 宿主沿用调用者选择的动作后观察策略。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
+    },
+    /// 当前语义查询只解析一次，唯一目标绑定真实节点后执行，禁止自动重放未知副作用。
+    Locator {
+        /// 当前会话内的真实页面身份。
+        #[schemars(length(min = 1, max = 128))]
+        page: String,
+        /// 有界作用域与 iframe 语义查询。
+        locator: BrowserLocator,
+        /// 固定读取或交互原语。
+        operation: BrowserLocatorOperation,
+        /// fill 的替换文字。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(max = 65536))]
+        text: Option<String>,
+        /// press 的键盘组合。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(min = 1, max = 100))]
+        key: Option<String>,
+        /// select 的目标选项。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(max = 50))]
+        values: Option<Vec<String>>,
+        /// select 的匹配依据，省略时按标签。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<SelectionBy>,
+        /// check 的明确目标状态。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checked: Option<bool>,
+        /// 动作后返回完整、增量或省略观察。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
+    },
+    /// 用户地址栏和标签页操作；不向模型开放，不依赖失效的控件观察。
+    #[schemars(skip)]
+    HumanNavigate {
+        /// 已校验的用户导航动作。
+        command: BrowserNavigation,
+    },
     /// 可信预览界面只读取画面，不改变模型观察或控制权。
     #[schemars(skip)]
     Preview {
@@ -25,6 +206,9 @@ pub enum BrowserInput {
     },
     /// 对同一稳定观察中的表单控件顺序执行；任一步失败或页面改变时停止，不回滚或重放。
     Batch {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 当前页面。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -54,12 +238,18 @@ pub enum BrowserInput {
     Tabs,
     /// 新建标签页并打开公开 HTTP(S) 页面。
     Open {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 目标绝对 URL。
         #[schemars(length(min = 1, max = 8192))]
         url: String,
     },
     /// 导航已有标签页，导航使旧观察失效。
     Navigate {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 宿主返回的页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -69,18 +259,27 @@ pub enum BrowserInput {
     },
     /// 后退到上一历史记录。
     Back {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
     },
     /// 前进到下一历史记录。
     Forward {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
     },
     /// 刷新页面，不能用于盲目重试提交。
     Reload {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -93,6 +292,13 @@ pub enum BrowserInput {
     },
     /// 获取当前页面结构及本次有效的控件引用。
     Observe {
+        /// 默认完整观察；增量模式仅相对调用者明确保留的基线。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<ObservationMode>,
+        /// 增量基线；缺失、失效或不匹配时明确回退完整观察。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(min = 1, max = 128))]
+        baseline: Option<String>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -109,6 +315,9 @@ pub enum BrowserInput {
     },
     /// 查找唯一文字并滚动到对应位置，再生成可操作观察。
     Find {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -121,6 +330,9 @@ pub enum BrowserInput {
     },
     /// 填写由页面按钮打开的文件选择器；文件必须在授权工作区内。
     ChooseFiles {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -136,6 +348,9 @@ pub enum BrowserInput {
     },
     /// 点击观察中的真实控件，失效引用不会重新定位其他节点。
     Click {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -148,6 +363,9 @@ pub enum BrowserInput {
     },
     /// 悬停并观察展开内容。
     Hover {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -160,6 +378,9 @@ pub enum BrowserInput {
     },
     /// 替换输入框内容。
     Fill {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -175,6 +396,9 @@ pub enum BrowserInput {
     },
     /// 默认按可见标签选择原生下拉框，选择属性值时必须明确指定模式。
     Select {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -193,6 +417,9 @@ pub enum BrowserInput {
     },
     /// 将复选框设置为明确状态，避免重试切换产生相反效果。
     Check {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -207,6 +434,9 @@ pub enum BrowserInput {
     },
     /// 按键盘语义逐字符输入，不替换已有内容；用于需要按键事件的编辑器或当前焦点。
     Type {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -222,6 +452,9 @@ pub enum BrowserInput {
     },
     /// 向控件或当前焦点发送按键组合。
     Press {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -237,6 +470,9 @@ pub enum BrowserInput {
     },
     /// 滚动视口并重新观察。
     Scroll {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -252,6 +488,9 @@ pub enum BrowserInput {
     },
     /// 根据未改变的截图执行坐标点击。
     Pointer {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         #[schemars(length(min = 1, max = 128))]
         page: String,
@@ -272,6 +511,9 @@ pub enum BrowserInput {
     },
     /// 根据当前截图执行拖拽，取消时仍释放鼠标按键。
     Drag {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         page: String,
         /// screenshot 返回的观察标识。
@@ -291,6 +533,9 @@ pub enum BrowserInput {
     },
     /// 等待页面文字满足条件，不依赖固定睡眠或无限 networkidle。
     Wait {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         page: String,
         /// 目标文字。
@@ -304,6 +549,9 @@ pub enum BrowserInput {
     },
     /// 明确接受或取消 JavaScript 对话框。
     Dialog {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         page: String,
         /// 是否接受。
@@ -314,6 +562,9 @@ pub enum BrowserInput {
     },
     /// 将授权工作区内的普通文件上传到已观察的文件输入框。
     Upload {
+        /// 动作后的观察策略；省略时采集完整证据，none 撤销旧引用。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_mode: Option<ObservationPolicy>,
         /// 页面标识。
         page: String,
         /// 最新观察标识。
@@ -348,11 +599,56 @@ pub enum BrowserInput {
         /// 相对工作区的目标路径。
         path: String,
     },
-    /// 交给用户操作，后续 Agent 动作暂停。
-    Handoff,
+    /// 请求用户协助；专用浏览器必须给出完成条件，系统观察成功证据后自动继续。
+    Handoff {
+        /// 专用浏览器使用；外接浏览器仍由其可信界面交还控制。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        completion: Option<BrowserHandoffRequest>,
+    },
+    /// 可信宿主主动接管；模型不能用无条件接管制造无法自动结束的协助。
+    #[schemars(skip)]
+    Takeover,
     /// 用户交还后使旧观察失效，后续必须重新观察。
     #[schemars(skip)]
     Resume,
+}
+
+/// 可信浏览器工具栏的有限导航契约，禁止传入脚本、权限或模型工具动作。
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserNavigation {
+    /// 新建用户标签页。
+    Open {
+        /// 用户选定的目标网页地址，由导航入口校验。
+        url: String,
+    },
+    /// 导航用户选中的标签页。
+    Navigate {
+        /// 当前会话拥有且由用户选中的标签页标识。
+        page: String,
+        /// 用户选定的目标网页地址，由导航入口校验。
+        url: String,
+    },
+    /// 后退到上一条浏览历史。
+    Back {
+        /// 当前会话拥有且由用户选中的标签页标识。
+        page: String,
+    },
+    /// 前进到下一条浏览历史。
+    Forward {
+        /// 当前会话拥有且由用户选中的标签页标识。
+        page: String,
+    },
+    /// 刷新当前网页。
+    Reload {
+        /// 当前会话拥有且由用户选中的标签页标识。
+        page: String,
+    },
+    /// 关闭选中的标签页。
+    Close {
+        /// 当前会话拥有且由用户选中的标签页标识。
+        page: String,
+    },
 }
 
 /// 预览窗口的人工输入；运行时再次核验控制者和页面尺寸，拒绝未知字段。
@@ -378,6 +674,23 @@ pub enum BrowserHumanInput {
         x: f64,
         /// 截图纵坐标。
         y: f64,
+        /// 人工鼠标按钮；省略时使用主按钮。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        button: Option<String>,
+        /// 当前 click 的连续点击编号，限制为一至三；每条输入只派发一次按下和释放。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clicks: Option<u32>,
+    },
+    /// 在同一截图映射内拖动，控件或窗口失效时停止。
+    Drag {
+        /// 起始横坐标。
+        from_x: f64,
+        /// 起始纵坐标。
+        from_y: f64,
+        /// 结束横坐标。
+        to_x: f64,
+        /// 结束纵坐标。
+        to_y: f64,
     },
     /// 在当前页面滚动。
     Scroll {
@@ -385,6 +698,12 @@ pub enum BrowserHumanInput {
         x: f64,
         /// 垂直滚动量。
         y: f64,
+        /// 人工滚动所在的截图横坐标。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at_x: Option<f64>,
+        /// 人工滚动所在的截图纵坐标。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at_y: Option<f64>,
     },
     /// 发送受浏览器支持的按键组合。
     Key {
@@ -538,6 +857,9 @@ pub struct BrowserReceipt {
 /// 界面可见标签页，不包含调试端口或认证材料。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserTab {
+    /// 桌面内嵌网页视图身份；独立 Chromium 不提供此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_target: Option<String>,
     /// 页面是否正在等待文件选择。
     pub file_chooser: bool,
     /// 不透明页面标识。
@@ -566,6 +888,8 @@ pub struct BrowserDialog {
 pub struct BrowserSnapshot {
     /// 资源状态。
     pub status: BrowserStatus,
+    /// 独立于界面可见性的协助进展；旧存档和未协助状态为空。
+    pub handoff: Option<BrowserHandoffState>,
     /// 当前标签页。
     pub tabs: Vec<BrowserTab>,
     /// 最近操作回执，最多保留 32 条。
@@ -574,7 +898,7 @@ pub struct BrowserSnapshot {
     pub error: Option<String>,
 }
 
-/// 浏览器会话生命周期；关闭是永久终态，人工控制必须显式交还。
+/// 浏览器会话生命周期；协助条件结算后由可信宿主交还，模型不能自行恢复。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserStatus {
@@ -593,4 +917,60 @@ pub enum BrowserStatus {
     Failed,
     /// 资源已经关闭。
     Closed,
+}
+
+/// 自动协助绑定真实页面与不可变的正向成功条件。
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserHandoffRequest {
+    /// 当前会话页面身份。
+    #[schemars(length(min = 1, max = 128))]
+    pub page: String,
+    /// 具体业务的成功证据，不允许用空闲、任意跳转或控件消失代替。
+    pub until: BrowserHandoffCondition,
+}
+
+/// 系统只做只读判断，不在用户操作期间执行模型输入。
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserHandoffCondition {
+    /// 完成后的精确 HTTP(S) 地址，必须等待文档加载结束。
+    Url {
+        /// 不包含凭据的绝对地址。
+        #[schemars(length(min = 1, max = 8192))]
+        url: String,
+    },
+    /// 当前页面或子框架可见的精确成功文字。
+    Text {
+        /// 明确表示业务成功的提示。
+        #[schemars(length(min = 1, max = 4096))]
+        text: String,
+    },
+}
+
+/// 协助身份与结算结果由浏览器运行时产生，不接受网页写入。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BrowserHandoffState {
+    /// 本次协助的唯一身份。
+    pub id: String,
+    /// 原始协助目标，登录弹窗关闭后仍可回到此页。
+    pub page: String,
+    /// 完成、失败和取消分别保留，不把异常当成业务成功。
+    pub status: BrowserHandoffStatus,
+    /// 失败时可用于重新规划的真实原因。
+    pub error: Option<String>,
+}
+
+/// 协助状态只沿等待到终态流转，新请求使用新身份。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserHandoffStatus {
+    /// 用户仍在处理网页。
+    Waiting,
+    /// 预先声明的成功证据稳定满足。
+    Completed,
+    /// 页面关闭、崩溃或观察失败。
+    Failed,
+    /// 任务取消或用户通过其他可信入口交还。
+    Cancelled,
 }

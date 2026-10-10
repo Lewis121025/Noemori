@@ -225,7 +225,9 @@ fn acquire(listener: &TerminalProxyListener) -> Result<Arc<Ownership>, String> {
     let udp = sockets.udp.try_clone().map_err(|error| error.to_string())?;
     udp.set_nonblocking(true)
         .map_err(|error| error.to_string())?;
-    let udp = Arc::new(UdpSocket::from_std(udp).map_err(|error| error.to_string())?);
+    let udp = Arc::new(super::udp::Socket::new(
+        UdpSocket::from_std(udp).map_err(|error| error.to_string())?,
+    ));
     let server = Arc::new(Server {
         configured: listener.address,
         bound,
@@ -377,7 +379,7 @@ impl Server {
 struct RunGuard {
     server: Arc<Server>,
     tcp: Option<TcpListener>,
-    udp: Option<Arc<UdpSocket>>,
+    udp: Option<Arc<super::udp::Socket>>,
 }
 impl RunGuard {
     fn close(&mut self, error: Option<&str>, force: bool) -> bool {
@@ -388,7 +390,9 @@ impl RunGuard {
                 return false;
             }
             self.tcp.take();
-            self.udp.take();
+            if let Some(udp) = self.udp.take() {
+                udp.close();
+            }
             self.server.shutdown(&mut registry)
         };
         if let Some(error) = error {

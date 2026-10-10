@@ -16,14 +16,16 @@ mod storage;
 mod vault;
 
 pub use error::Error;
-pub use opening::{OpenObserver, OpenPhase, OpenProgress};
 pub use index::{HeadingRecord, TagCount};
 pub use links::identity::NoteKeys;
 pub use links::link::{LinkKind, LinkRecord, LinkResolution, LinkTarget};
 pub use links::mention::{MentionKind, MentionRecord, Mentions};
+pub use opening::{OpenObserver, OpenPhase, OpenProgress};
 pub use rename::{RenameBatchIssue, RenameBatchOutcome, RenameOutcome};
-pub use search::hybrid::{HybridQuery, HybridHit, HybridEvidence, HybridPage, SemanticStatus, SemanticState, EvidenceKind};
 pub use search::cancellation::SearchCancellation;
+pub use search::hybrid::{
+    EvidenceKind, HybridEvidence, HybridHit, HybridPage, HybridQuery, SemanticState, SemanticStatus,
+};
 pub use search::{
     SearchExpr, SearchHit, SearchLocation, SearchMatch, SearchMatchesPage, SearchPage, SearchQuery,
     SNIPPET_END, SNIPPET_START,

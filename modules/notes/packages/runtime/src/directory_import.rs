@@ -136,6 +136,33 @@ pub(crate) fn prepare(
     let staged = tempfile::Builder::new()
         .prefix(".noemori-import-")
         .tempdir_in(&actual_parent)?;
+    let Some(files) = copy_entries(&source, staged.path(), &entries, control)? else {
+        return Ok(None);
+    };
+    control.update("verifying", 0, Some(entries.len()));
+    let Some(after) = inventory(&source, control)? else {
+        return Ok(None);
+    };
+    if entries != after {
+        return Err(invalid("复制期间源目录发生变化，请重新导入"));
+    }
+    control.update("verifying", entries.len(), Some(entries.len()));
+    write_source_manifest(staged.path(), &source)?;
+    Ok(Some(PreparedImport {
+        path,
+        target,
+        files,
+        staged,
+    }))
+}
+
+// 暂存副本持有全部写入；取消只返回未完成状态，由调用方的 TempDir 回收。
+fn copy_entries(
+    source: &Path,
+    staged: &Path,
+    entries: &[Entry],
+    control: &OperationControl,
+) -> Result<Option<usize>> {
     let mut files = 0;
     let mut buffer = vec![0u8; 128 * 1024];
     for (index, entry) in entries.iter().enumerate() {
@@ -143,7 +170,7 @@ pub(crate) fn prepare(
             return Ok(None);
         }
         control.update("copying", index, Some(entries.len()));
-        let destination = staged.path().join(&entry.path);
+        let destination = staged.join(&entry.path);
         if entry.directory {
             fs::create_dir(&destination)?;
         } else {
@@ -174,19 +201,16 @@ pub(crate) fn prepare(
     }
     for entry in entries.iter().rev().filter(|entry| entry.directory) {
         fs::set_permissions(
-            staged.path().join(&entry.path),
+            staged.join(&entry.path),
             fs::metadata(source.join(&entry.path))?.permissions(),
         )?;
     }
-    control.update("verifying", 0, Some(entries.len()));
-    let Some(after) = inventory(&source, control)? else {
-        return Ok(None);
-    };
-    if entries != after {
-        return Err(invalid("复制期间源目录发生变化，请重新导入"));
-    }
-    control.update("verifying", entries.len(), Some(entries.len()));
-    let manifest = staged.path().join(".noemori-library-source.json");
+    Ok(Some(files))
+}
+
+// 来源元数据只能写入已复核的暂存目录；冲突文件不能被当作旧导入记录覆盖。
+fn write_source_manifest(staged: &Path, source: &Path) -> Result<()> {
+    let manifest = staged.join(".noemori-library-source.json");
     if manifest.try_exists()? {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest)?).map_err(std::io::Error::other)?;
@@ -197,18 +221,13 @@ pub(crate) fn prepare(
     fs::write(
         &manifest,
         serde_json::to_vec(
-            &serde_json::json!({"version": 1, "source": noemori_vault::path_to_slashes(&source)?}),
+            &serde_json::json!({"version": 1, "source": noemori_vault::path_to_slashes(source)?}),
         )
         .map_err(std::io::Error::other)?,
     )?;
     fs::File::open(&manifest)?.sync_all()?;
-    fs::File::open(staged.path())?.sync_all()?;
-    Ok(Some(PreparedImport {
-        path,
-        target,
-        files,
-        staged,
-    }))
+    fs::File::open(staged)?.sync_all()?;
+    Ok(())
 }
 
 impl PreparedImport {

@@ -1,7 +1,8 @@
 use super::{ScriptedModel, answer, calls, input};
 use async_trait::async_trait;
+use futures::StreamExt;
 use noemori_agent::{
-    runtime::{Agent, RunOptions, RunStatus},
+    runtime::{Agent, AgentEvent, RunOptions, RunStatus},
     tool::{Tool, ToolConcurrency, ToolContext, ToolError, ToolRegistry},
 };
 use schemars::JsonSchema;
@@ -135,7 +136,106 @@ async fn concurrent_calls_overlap_but_history_keeps_model_order_and_writes_are_b
 }
 
 #[tokio::test(start_paused = true)]
-async fn concurrency_is_bounded_and_cancellation_retains_completed_results() {
+async fn all_concurrent_calls_start_without_a_count_limit_and_keep_model_order() {
+    let activity = Arc::new(Activity::default());
+    let ids: Vec<_> = (0..128).map(|index| format!("call-{index}")).collect();
+    let requests: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            (
+                id.as_str(),
+                "read",
+                json!({"value":index,"delay_ms":ids.len() - index}),
+            )
+        })
+        .collect();
+    let model = Arc::new(ScriptedModel::new(vec![
+        vec![calls(&requests)],
+        vec![answer("done")],
+    ]));
+    let agent = Agent::new(model.clone(), registry(&activity), RunOptions::default()).unwrap();
+    let report = agent.run(input()).await.unwrap();
+    assert!(matches!(report.status, RunStatus::Completed));
+    assert_eq!(activity.peak.load(Ordering::SeqCst), ids.len());
+    assert_eq!(activity.active.load(Ordering::SeqCst), 0);
+    let events = activity.events.lock().unwrap();
+    assert!(events[..ids.len()].iter().all(|(_, finished)| !finished));
+    assert_eq!(
+        events[ids.len()..]
+            .iter()
+            .map(|(value, _)| *value)
+            .collect::<Vec<_>>(),
+        (0..128).rev().collect::<Vec<_>>()
+    );
+    let requests = model.requests.lock().unwrap();
+    let results: Vec<_> = requests[1]
+        .messages
+        .last()
+        .unwrap()
+        .content
+        .iter()
+        .filter_map(|part| match part {
+            noemori_agent::ContentPart::ToolResult(result) => Some(result.call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results, ids.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelling_a_large_group_keeps_results_and_does_not_cross_the_sequential_barrier() {
+    let activity = Arc::new(Activity::default());
+    let ids: Vec<_> = (0..128).map(|index| format!("call-{index}")).collect();
+    let mut requests: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            (
+                id.as_str(),
+                "read",
+                json!({"value":index,"delay_ms":ids.len() - index}),
+            )
+        })
+        .collect();
+    requests.extend([
+        ("barrier", "write", json!({"value":128,"delay_ms":1})),
+        ("after", "read", json!({"value":129,"delay_ms":1})),
+    ]);
+    let model = Arc::new(ScriptedModel::new(vec![vec![calls(&requests)]]));
+    let agent = Agent::new(model.clone(), registry(&activity), RunOptions::default()).unwrap();
+    let input = input();
+    let cancellation = input.cancellation.clone();
+    let mut stream = agent.stream(input).unwrap();
+    let mut started = Vec::new();
+    let mut report = None;
+    while let Some(event) = stream.next().await {
+        match event {
+            AgentEvent::ToolStarted(call) => started.push(call.id),
+            AgentEvent::ToolFinished(result) => {
+                assert_eq!(result.call_id, "call-127");
+                cancellation.cancel();
+            }
+            AgentEvent::Finished(result) => report = Some(result),
+            _ => {}
+        }
+    }
+    let report = report.unwrap();
+    assert!(matches!(report.status, RunStatus::Cancelled));
+    assert_eq!(started, ids);
+    assert_eq!(activity.peak.load(Ordering::SeqCst), ids.len());
+    assert_eq!(activity.active.load(Ordering::SeqCst), 0);
+    assert_eq!(report.history.len(), 1);
+    let pending = report.pending_turn.unwrap();
+    assert_eq!(pending.attempted_tool_ids, ids);
+    assert_eq!(pending.tool_results.len(), 1);
+    assert_eq!(pending.tool_results[0].call_id, "call-127");
+    assert_eq!(activity.events.lock().unwrap().last(), Some(&(127, true)));
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn timeout_cancels_all_concurrent_calls_and_retains_completed_results() {
     let activity = Arc::new(Activity::default());
     let model = Arc::new(ScriptedModel::new(vec![vec![calls(&[
         ("a", "read", json!({"value":1,"delay_ms":1000})),
@@ -146,7 +246,6 @@ async fn concurrency_is_bounded_and_cancellation_retains_completed_results() {
         model,
         registry(&activity),
         RunOptions {
-            max_parallel_tools: 2,
             timeout: Duration::from_millis(50),
             ..Default::default()
         },
@@ -154,7 +253,7 @@ async fn concurrency_is_bounded_and_cancellation_retains_completed_results() {
     .unwrap();
     let report = agent.run(input()).await.unwrap();
     assert!(matches!(report.status, RunStatus::TimedOut));
-    assert_eq!(activity.peak.load(Ordering::SeqCst), 2);
+    assert_eq!(activity.peak.load(Ordering::SeqCst), 3);
     assert_eq!(activity.active.load(Ordering::SeqCst), 0);
     let pending = report.pending_turn.unwrap();
     assert_eq!(pending.attempted_tool_ids, ["a", "b", "c"]);
@@ -170,7 +269,7 @@ async fn concurrency_is_bounded_and_cancellation_retains_completed_results() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn host_can_force_serial_execution_even_for_concurrent_tools() {
+async fn tool_declared_sequential_calls_do_not_overlap() {
     let activity = Arc::new(Activity::default());
     let model = Arc::new(ScriptedModel::new(vec![
         vec![calls(&[
@@ -179,15 +278,15 @@ async fn host_can_force_serial_execution_even_for_concurrent_tools() {
         ])],
         vec![answer("done")],
     ]));
-    let agent = Agent::new(
-        model,
-        registry(&activity),
-        RunOptions {
-            max_parallel_tools: 1,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let mut tools = ToolRegistry::new();
+    tools
+        .register(Probe {
+            name: "read",
+            concurrency: ToolConcurrency::Sequential,
+            activity: activity.clone(),
+        })
+        .unwrap();
+    let agent = Agent::new(model, tools, RunOptions::default()).unwrap();
     assert!(matches!(
         agent.run(input()).await.unwrap().status,
         RunStatus::Completed
@@ -245,19 +344,4 @@ async fn scheduling_and_execution_share_one_validated_argument_instance() {
         RunStatus::Completed
     ));
     assert_eq!(DECODE_COUNT.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn invalid_concurrency_limits_fail_before_a_run_is_created() {
-    for limit in [0, 65, usize::MAX] {
-        let result = Agent::new(
-            Arc::new(ScriptedModel::new(vec![])),
-            ToolRegistry::new(),
-            RunOptions {
-                max_parallel_tools: limit,
-                ..Default::default()
-            },
-        );
-        assert!(matches!(result, Err(noemori_agent::Error::Config(_))));
-    }
 }

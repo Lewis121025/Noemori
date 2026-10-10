@@ -36,6 +36,9 @@ pub(super) struct Data {
     pub(super) run: Option<HostRunView>,
     pub(super) active: Option<Active>,
     pub(super) pending_note: Option<String>,
+    pub(super) pending_turn: Option<crate::runtime::PendingTurn>,
+    /// 未交给模型的真实用户消息索引；与已提交历史分离，避免插入旧节点之前。
+    pub(super) pending_inputs: Vec<usize>,
     pub(super) approvals: BTreeMap<String, Pending>,
     pub(super) terminals: BTreeMap<String, TerminalEntry>,
     pub(super) calls: BTreeMap<String, ToolCall>,
@@ -84,6 +87,8 @@ impl State {
                 run: None,
                 active: None,
                 pending_note: None,
+                pending_turn: None,
+                pending_inputs: Vec::new(),
                 approvals: BTreeMap::new(),
                 terminals: BTreeMap::new(),
                 calls: BTreeMap::new(),
@@ -103,8 +108,18 @@ impl State {
     }
     pub(super) fn snapshot(&self) -> HostSnapshot {
         let data = self.data.lock().expect("桌面会话锁被污染");
+        let mut run = data.run.clone();
+        if data
+            .active
+            .as_ref()
+            .is_some_and(|active| active.control.is_paused())
+            && let Some(run) = &mut run
+        {
+            run.status = HostRunStatus::Paused;
+        }
         let mut terminals: Vec<_> = data.terminals.values().collect();
         terminals.sort_by_key(|entry| entry.ordinal);
+        let turns = super::turns::visible_turns(&data, run.as_ref());
         HostSnapshot {
             ui: Default::default(),
             browser: Default::default(),
@@ -112,8 +127,8 @@ impl State {
             workspace: self.workspace.to_string_lossy().into_owned(),
             revision: data.revision,
             closed: self.closed.is_cancelled(),
-            run: data.run.clone(),
-            turns: super::turns::visible_turns(&data),
+            run,
+            turns,
             messages: visible_messages(&data.messages),
             terminals: terminals
                 .into_iter()
@@ -206,6 +221,14 @@ impl State {
                     HostApprovalRequest::Browser(_),
                     HostApprovalReply::Browser(_)
                 ) | (HostApprovalRequest::Ui(_), HostApprovalReply::Ui(_))
+                    | (
+                        HostApprovalRequest::BrowserCapability(_),
+                        HostApprovalReply::BrowserCapability(_)
+                    )
+                    | (
+                        HostApprovalRequest::UiLaunch(_),
+                        HostApprovalReply::UiLaunch(_)
+                    )
             ) {
                 return Err(Error::Config("审批决定与申请类型不符".into()));
             }
@@ -316,6 +339,33 @@ impl State {
         drop(data);
         self.notify();
     }
+}
+
+/// 从明确记录的用户消息索引恢复输入；索引必须有序、唯一且指向合法用户内容。
+/// 返回带原始媒体的消息；边界、角色或正文非法时拒绝，不根据展示文本猜测归属。
+pub(super) fn pending_inputs(
+    messages: &[HostMessage],
+    indices: &[usize],
+) -> Result<Vec<Message>, Error> {
+    if indices.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(Error::Protocol("待处理输入索引重复或无序".into()));
+    }
+    indices
+        .iter()
+        .map(|index| {
+            let source = messages
+                .get(*index)
+                .ok_or_else(|| Error::Protocol("待处理输入索引越界".into()))?;
+            let message = Message {
+                role: source.role,
+                content: source.content.clone(),
+                provider_data: None,
+            };
+            crate::runtime::RunControl::validate_input(&message)
+                .map_err(|error| Error::Protocol(error.to_string()))?;
+            Ok(message)
+        })
+        .collect()
 }
 
 /// 模型私有历史保留图片数据，界面投影不在每次状态变化时复制工具截图。

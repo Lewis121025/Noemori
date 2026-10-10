@@ -13,8 +13,6 @@ pub type AgentStream = Pin<Box<dyn Stream<Item = AgentEvent> + Send>>;
 /// 运行策略；每次模型请求都计入预算，包括重试。
 #[derive(Clone, Debug)]
 pub struct RunOptions {
-    /// 相邻且被宿主工具声明可并行的调用上限，范围为 1..=64；顺序工具始终形成屏障。
-    pub max_parallel_tools: usize,
     /// 整个运行允许调度的请求数，包含初次请求和重试；零表示不调度。
     pub max_model_calls: usize,
     /// 同一轮尚未产生事件时允许的重试次数，成功响应后重新计算。
@@ -28,7 +26,6 @@ pub struct RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
-            max_parallel_tools: 4,
             max_model_calls: 8,
             max_retries: 2,
             timeout: Duration::from_secs(300),
@@ -97,16 +94,13 @@ impl Agent {
     /// 返回不持有对话历史的 Agent，具体输入由后续的 run 或 stream 提供。
     ///
     /// # 错误
-    /// 超时、并发上限非法或模型不支持已注册工具时返回错误。
+    /// 超时非法或模型不支持已注册工具时返回错误。
     pub fn new(
         model: Arc<dyn Model>,
         tools: ToolRegistry,
         options: RunOptions,
     ) -> Result<Self, Error> {
         ExecutionContext::new(CancellationToken::new(), options.timeout)?;
-        if !(1..=64).contains(&options.max_parallel_tools) {
-            return Err(Error::Config("工具并发上限必须为 1..=64".into()));
-        }
         if !tools.definitions().is_empty() && !model.capabilities().tools {
             return Err(Error::Unsupported(
                 "Agent 注册了工具，但模型未声明工具能力".into(),
@@ -127,7 +121,7 @@ impl Agent {
     /// # 错误
     /// 输入不合法在启动前返回；启动后的失败保留在最终运行报告中。
     pub fn stream(&self, input: RunInput) -> Result<AgentStream, Error> {
-        self.prepare_stream(input, None)
+        self.prepare_stream(input, None, None)
     }
 
     /// 桌面宿主为同一轮提供补充通道；普通运行不创建或共享输入队列。
@@ -135,20 +129,47 @@ impl Agent {
         &self,
         input: RunInput,
         control: super::RunControl,
+        pending: Option<super::PendingTurn>,
     ) -> Result<AgentStream, Error> {
-        self.prepare_stream(input, Some(control))
+        self.prepare_stream(input, Some(control), pending)
     }
 
     fn prepare_stream(
         &self,
         input: RunInput,
         control: Option<super::RunControl>,
+        pending: Option<super::PendingTurn>,
     ) -> Result<AgentStream, Error> {
         self.validate_request(&input.messages, &input.generation)?;
+        if let Some(pending) = &pending {
+            pending.validate()?;
+            if let Some(response) = &pending.response {
+                let used: std::collections::BTreeSet<_> = input
+                    .messages
+                    .iter()
+                    .flat_map(|message| message.tool_calls())
+                    .map(|call| &call.id)
+                    .collect();
+                if response
+                    .message
+                    .tool_calls()
+                    .any(|call| used.contains(&call.id))
+                {
+                    return Err(Error::Protocol("恢复节点重复包含已经提交的工具调用".into()));
+                }
+            }
+        }
         let context =
             ExecutionContext::new(input.cancellation.child_token(), self.options.timeout)?;
         let lease = input.session.register(context.cancellation.clone())?;
-        Ok(runner::drive(self.clone(), input, context, lease, control))
+        Ok(runner::drive(
+            self.clone(),
+            input,
+            context,
+            lease,
+            control,
+            pending,
+        ))
     }
 
     /// 消费与 stream 相同的执行路径，返回完整运行报告。

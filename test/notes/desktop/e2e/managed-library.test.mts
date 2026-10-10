@@ -41,7 +41,7 @@ test("固定应用仓库接入旧库和文章历史，根目录与子目录都�
   ]);
   const executablePath: unknown = require("electron");
   if (typeof executablePath !== "string") throw new Error("缺少 Electron");
-  const launch = (root: string, visible: boolean) =>
+  const launch = (root: string) =>
     electron.launch({
       executablePath,
       args: [fileURLToPath(new URL("out/main/index.js", desktop)), `--user-data-dir=${state}`],
@@ -49,10 +49,10 @@ test("固定应用仓库接入旧库和文章历史，根目录与子目录都�
         ...process.env,
         ELECTRON_RENDERER_URL: "",
         NOEMORI_TEST_LIBRARY_ROOT: root,
-        NOEMORI_TEST_WINDOW: visible ? "visible" : "hidden",
+        NOEMORI_TEST_WINDOW: "hidden",
       },
     });
-  const previous = await launch(source, false);
+  const previous = await launch(source);
   let conversation: { id: string }, fork: { id: string };
   try {
     const page = await previous.firstWindow();
@@ -79,12 +79,11 @@ test("固定应用仓库接入旧库和文章历史，根目录与子目录都�
   await writeFile(join(source, path), note);
   const historyPath = join(source, ".noemori/agent/conversations", `${conversation.id}.json`);
   const originalHistory = await readFile(historyPath);
-  const app = await launch(library, true);
+  const app = await launch(library);
   try {
     await app.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0]!;
       window.setContentSize(1100, 760);
-      window.focus();
     });
     const page = await app.firstWindow();
     page.setDefaultTimeout(8000);
@@ -174,6 +173,17 @@ test("固定应用仓库接入旧库和文章历史，根目录与子目录都�
         .locator(".conversation-active")
         .evaluate((element) => getComputedStyle(element).animationName),
     ).toBe("none");
+    const forkActions = files.getByRole("button", { name: "推导与例子 的操作", exact: true });
+    await forkActions.focus();
+    await forkActions.press("Enter");
+    const conversationMenu = page.getByRole("menu", { name: "对话操作", exact: true });
+    await conversationMenu.waitFor();
+    await page.keyboard.press("End");
+    expect(await conversationMenu.getByRole("menuitem", { name: "删除对话…", exact: true })
+      .evaluate(element => element === document.activeElement)).toBe(true);
+    expect(await chat.getAttribute("aria-pressed")).toBe("true");
+    await page.keyboard.press("Escape");
+    expect(await forkActions.evaluate(element => element === document.activeElement)).toBe(true);
     await page.getByRole("button", { name: "工作区助手", exact: true }).click();
     await editor.click();
     await page.mouse.move(600, 700);
@@ -181,6 +191,20 @@ test("固定应用仓库接入旧库和文章历史，根目录与子目录都�
     if (captures) {
       await page.screenshot({ path: join(captures, "managed-library-workspace.png") });
       await sidebar.screenshot({ path: join(captures, "managed-library-sidebar.png") });
+      await row(`NNDL-Bilingual/${path}`).hover();
+      await sidebar.screenshot({ path: join(captures, "managed-library-hover.png") });
+      await row("研究资料").hover();
+      await files.getByRole("button", { name: "研究资料 的操作", exact: true }).click();
+      await menu.waitFor();
+      await page.screenshot({ path: join(captures, "managed-library-folder-menu.png") });
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => window.noemori.app.appearanceSet("light"));
+      await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+      await editor.click();
+      await page.mouse.move(600, 700);
+      await page.screenshot({ path: join(captures, "managed-library-light.png") });
+      await page.evaluate(() => window.noemori.app.appearanceSet("dark"));
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
     }
     await page.getByRole("separator", { name: "调整侧栏宽度", exact: true }).press("Home");
     await editor.click();

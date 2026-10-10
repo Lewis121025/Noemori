@@ -9,15 +9,15 @@ mod snapshot;
 pub use batch::{RenameBatchIssue, RenameBatchOutcome};
 mod source;
 
-use std::collections::{BTreeSet, HashMap};
 use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::Path;
 
+use crate::rename::journal::{FileChange, RenameJournal};
 use crate::storage::path::{path_to_slashes, resolve_in_root};
 use crate::storage::recovery::RecoveryStore;
-use crate::rename::journal::{FileChange, RenameJournal};
 use crate::storage::save::{read_optional, sync_parent};
 use crate::vault::{resolve_against, Inventory};
 use crate::{EntryMutation, Error, LinkKind, LinkRecord, Vault};
@@ -317,7 +317,9 @@ fn rewrite_file<'a>(
                     stem
                 }
             }
-            LinkKind::Markdown => crate::rename::rewrite::relative_markdown_url(&new_source, &new_target)?,
+            LinkKind::Markdown => {
+                crate::rename::rewrite::relative_markdown_url(&new_source, &new_target)?
+            }
         };
         let start = usize::try_from(link.start_byte)
             .map_err(|_| Error::Io(io::Error::other("链接起点溢出")))?;

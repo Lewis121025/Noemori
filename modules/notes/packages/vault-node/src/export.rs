@@ -40,7 +40,7 @@ impl NativeRuntime {
         &self,
         env: Env,
         id: String,
-        action: serde_json::Value,
+        #[napi(ts_arg_type = "unknown")] action: serde_json::Value,
         bytes: Option<Buffer>,
     ) -> Result<Object> {
         let bytes = bytes.map_or_else(Vec::new, |bytes| bytes.to_vec());

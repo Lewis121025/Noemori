@@ -204,7 +204,7 @@ test.each(["light", "dark"])(
       const efforts = page.getByRole("menu", { name: "对话推理强度", exact: true });
       expect(
         (await efforts.getByRole("menuitemradio").allTextContents()).map((text) => text.trim()),
-      ).toEqual(["服务商默认", "none", "low", "medium", "high", "xhigh", "max"]);
+      ).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
       if (captures)
         await efforts.screenshot({
           path: join(captures, `reasoning-${appearance}-${width}.png`),
@@ -219,7 +219,7 @@ test.each(["light", "dark"])(
       await efforts.waitFor({ state: "hidden" });
       expect(await effortTrigger.evaluate((node) => document.activeElement === node)).toBe(true);
       await effortTrigger.click();
-      await efforts.getByRole("menuitemradio", { name: "服务商默认", exact: true }).click();
+      await efforts.getByRole("menuitemradio", { name: "medium", exact: true }).click();
       await efforts.waitFor({ state: "hidden" });
       await expect
         .poll(
@@ -227,7 +227,11 @@ test.each(["light", "dark"])(
             (await page.evaluate((id) => window.noemori.agent.snapshot(id), conversation.id))
               .modelSelection,
         )
-        .toEqual({ providerId: conversation.modelSelection!.providerId, modelId: "gpt-6-sol" });
+        .toEqual({
+          providerId: conversation.modelSelection!.providerId,
+          modelId: "gpt-6-sol",
+          reasoningEffort: "medium",
+        });
     }
     await input.fill("第一行\n第二行\n第三行\n第四行\n第五行");
     const expanded = await input.boundingBox();

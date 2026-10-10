@@ -6,6 +6,11 @@ export function createAgentApiMock(): AgentApi {
     throw new Error("此阅读器测试没有启动 Agent 会话");
   };
   return {
+    uiInput: unavailable,
+    browserNavigate: unavailable,
+    browserView: async () => {},
+    browserDownloads: async () => [],
+    browserSaveDownload: unavailable,
     uiPreview: unavailable,
     browserInput: unavailable,
     browserChooseFiles: unavailable,
@@ -27,6 +32,9 @@ export function createAgentApiMock(): AgentApi {
     attachmentsFromLibrary: unavailable,
     attachmentPreview: unavailable,
     attachmentOpen: unavailable,
+    attachmentSave: unavailable,
+    contentPreview: unavailable,
+    contentSave: unavailable,
     list: async () => ({ items: [], issues: [] }),
     snapshot: unavailable,
     start: unavailable,

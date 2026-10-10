@@ -135,6 +135,10 @@ name = "ui_repl"
 path = "../../test/agent/ui/integration/repl.rs"
 
 [[test]]
+name = "ui_capabilities"
+path = "../../test/agent/ui/integration/capabilities.rs"
+
+[[test]]
 name = "ui_broker"
 path = "../../test/agent/ui/integration/broker.rs"
 
@@ -143,12 +147,20 @@ name = "ui_native"
 path = "../../test/agent/ui/integration/native.rs"
 
 [[test]]
+name = "ui_computer"
+path = "../../test/agent/ui/e2e/computer.rs"
+
+[[test]]
 name = "ui_files"
 path = "../../test/agent/ui/unit/files.rs"
 
 [[test]]
 name = "ui_geometry"
 path = "../../test/agent/ui/unit/geometry.rs"
+
+[[test]]
+name = "ui_observation"
+path = "../../test/agent/ui/unit/observation.rs"
 
 [[test]]
 name = "terminal_sandbox"

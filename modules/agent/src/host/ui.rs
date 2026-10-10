@@ -43,6 +43,58 @@ pub struct UiPreviewFrame {
 }
 
 impl DesktopSession {
+    /// 用户工具栏接管并导航当前会话；不创建模型请求，原生导航失败原样返回。
+    pub async fn browser_navigate(
+        &self,
+        command: crate::tool::browser::BrowserNavigation,
+    ) -> Result<(), Error> {
+        use crate::tool::{
+            Tool,
+            browser::{BrowserInput, BrowserNavigation},
+        };
+        self.browser_control(false).await?;
+        let inner = &self.0.0;
+        let browser = inner
+            .browser
+            .as_ref()
+            .ok_or_else(|| Error::Config("浏览器未启用".into()))?;
+        let context = ToolContext {
+            call_id: format!("browser-navigation:{}", uuid::Uuid::new_v4()),
+            execution: ExecutionContext::new(
+                inner.state.closed.child_token(),
+                Duration::from_secs(30),
+            )?,
+            session: inner.session.clone(),
+        };
+        if let BrowserNavigation::Open { url } | BrowserNavigation::Navigate { url, .. } = &command
+        {
+            let url = url::Url::parse(url).map_err(|_| Error::Config("浏览器地址无效".into()))?;
+            if !matches!(url.scheme(), "http" | "https")
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return Err(Error::Config("用户导航仅支持无凭据的 HTTP(S) 地址".into()));
+            }
+            browser
+                .execute(
+                    BrowserInput::AllowOrigin {
+                        origin: url.origin().ascii_serialization(),
+                    },
+                    context.clone(),
+                )
+                .await
+                .map_err(|error| Error::ToolInfrastructure(error.to_string()))?;
+        }
+        let result = browser
+            .execute(BrowserInput::HumanNavigate { command }, context)
+            .await
+            .map_err(|error| Error::ToolInfrastructure(error.to_string()))?;
+        if let Some(error) = result.error {
+            return Err(Error::ToolInfrastructure(error));
+        }
+        Ok(())
+    }
+
     /// 获取已有资源的独立画面，不启动模型、不覆盖模型观察、不写入历史。
     /// 页面、授权窗口或运行资源无效时返回错误。
     pub async fn ui_preview(&self, target: UiPreviewTarget) -> Result<UiPreviewFrame, Error> {
@@ -120,11 +172,56 @@ impl DesktopSession {
             }
         };
         image
-            .map(|image| UiPreviewFrame {
+            .map(|(image, input_token)| UiPreviewFrame {
                 image: Some(image.data_url()),
-                input_token: None,
+                input_token,
             })
             .ok_or_else(|| Error::ToolInfrastructure("预览未返回画面".into()))
+    }
+
+    /// 可信画面的人工输入仅作用于此前批准且已接管的原生窗口，失败不派发到其他目标。
+    pub async fn ui_input(
+        &self,
+        target: UiPreviewTarget,
+        token: String,
+        input: crate::tool::browser::BrowserHumanInput,
+    ) -> Result<(), Error> {
+        let UiPreviewTarget::Computer { app, window } = target else {
+            return Err(Error::Config("此输入入口只用于原生应用画面".into()));
+        };
+        let inner = &self.0.0;
+        inner.state.ensure_open()?;
+        let snapshot = inner.session.ui_snapshot();
+        let control = snapshot
+            .control
+            .ok_or_else(|| Error::Config("尚未批准原生窗口".into()))?;
+        if control.app != app
+            || control.window != window
+            || !snapshot.connections.iter().any(|connection| {
+                connection.backend == "computer" && connection.connected && connection.human
+            })
+        {
+            return Err(Error::Config("窗口或人工控制权已经变化".into()));
+        }
+        if token.is_empty()
+            || token.len() > 128
+            || matches!(
+                input,
+                crate::tool::browser::BrowserHumanInput::Dialog { .. }
+                    | crate::tool::browser::BrowserHumanInput::Files { .. }
+            )
+        {
+            return Err(Error::Config("原生人工输入无效".into()));
+        }
+        let ui = inner
+            .ui
+            .as_ref()
+            .ok_or_else(|| Error::Config("原生服务未启用".into()))?;
+        ui.preview_input(ToolContext {
+            call_id: format!("ui-input:{}", uuid::Uuid::new_v4()),
+            execution: ExecutionContext::new(inner.state.closed.child_token(), Duration::from_secs(10))?,
+            session: inner.session.clone(),
+        }, serde_json::json!({"action":"human_input","app":app,"window":window,"token":token,"input":input})).await.map_err(|error| Error::ToolInfrastructure(error.to_string()))
     }
 
     /// 将浮窗的人工输入交给当前会话浏览器；运行时只在 human 状态接受。
@@ -178,7 +275,7 @@ impl DesktopSession {
         .await
         .map_err(|e| Error::ToolInfrastructure(e.to_string()))
     }
-    /// 人工接管先中断并等待当前脚本；交还不启动新模型运行。
+    /// 人工接管暂停并结算当前脚本；交还后继续同一运行，不新增提示词。
     /// backend 为 managed、chrome、edge 或 computer；其他来源与未知窗口均拒绝。
     pub async fn ui_control(&self, backend: &str, resume: bool) -> Result<Value, Error> {
         if backend == "managed" {
@@ -199,14 +296,8 @@ impl DesktopSession {
         {
             return Err(Error::Config("请先停止当前运行，再交还控制".into()));
         }
-        if !resume
-            && let Some(run) = inner
-                .state
-                .snapshot()
-                .run
-                .filter(|run| run.status == super::HostRunStatus::Running)
-        {
-            self.interrupt(&run.id).await?;
+        if !resume {
+            self.pause().await?;
         }
         let ui = inner
             .ui
@@ -228,6 +319,13 @@ impl DesktopSession {
             .await
             .map_err(|e| Error::ToolInfrastructure(e.to_string()));
         inner.state.notify();
+        if resume
+            && result
+                .as_ref()
+                .is_ok_and(|result| result["outcome"] == "executed")
+        {
+            self.resume_active();
+        }
         result
     }
 }

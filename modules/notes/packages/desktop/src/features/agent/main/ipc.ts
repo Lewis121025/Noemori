@@ -1,5 +1,10 @@
 import { parseReferences } from "../shared/references";
-import { attachmentId, parseAttachmentIds, parseAttachmentUploads } from "../shared/attachments";
+import {
+  attachmentId,
+  parseAttachmentIds,
+  parseAttachmentUploads,
+  type AttachmentUpload,
+} from "../shared/attachments";
 import { libraryAttachmentUploads } from "./attachments";
 import { parseLibraryEntriesDrag } from "../../reader/shared/file-drag";
 import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
@@ -11,9 +16,10 @@ import {
   parseProviderUpdate,
 } from "../shared/providers";
 import { isEntryPath } from "../../reader/shared/file-browser";
-import { realpath, stat } from "node:fs/promises";
+import { realpath, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { parsePreviewTarget, parseBrowserHumanInput } from "../shared/preview";
+import { parseBrowserNavigation, parseBrowserPlacement } from "../shared/browser";
 /** 图片或文件可独立发送；纯文字空输入仍在 IPC 第一边界拒绝。 */
 function sentInput(value: unknown, attachments: unknown): { text: string; attachments: string[] } {
   const files = parseAttachmentIds(attachments);
@@ -58,21 +64,74 @@ export function registerAgentIpc(
       throw new Error("Agent 会话标识无效");
     return value;
   };
+  const saveContent = async (
+    event: IpcMainInvokeEvent,
+    file: AttachmentUpload,
+  ): Promise<boolean> => {
+    const service = own(event),
+      window = getWindow();
+    if (!window) throw new Error("主窗口不存在");
+    const chosen = await dialog.showSaveDialog(window, {
+      title: "保存文件",
+      defaultPath: file.name,
+      properties: ["showOverwriteConfirmation"],
+    });
+    if (chosen.canceled || !chosen.filePath) return false;
+    if (own(event) !== service) throw new Error("保存文件期间窗口已改变");
+    await writeFile(chosen.filePath, file.bytes);
+    return true;
+  };
   ipcMain.handle("agent.settingsGet", (event, session: unknown) =>
     own(event).settingsGet(id(session)),
   );
-  ipcMain.handle("agent.browserChooseFiles", async (event, session: unknown, page: unknown, token: unknown) => {
-    const service = own(event), owner = id(session), target = id(page), lease = id(token);
-    const chosen = await dialog.showOpenDialog({ title: "选择工作区中的文件", properties: ["openFile", "multiSelections"] });
-    if (own(event) !== service) throw new Error("窗口已改变");
-    await service.browserInput(owner, target, lease, { type: "files", paths: chosen.canceled ? [] : chosen.filePaths });
-  });
+  ipcMain.handle("agent.browserNavigate", (event, session: unknown, command: unknown) =>
+    own(event).browserNavigate(id(session), parseBrowserNavigation(command)),
+  );
+  ipcMain.handle("agent.browserView", (event, session: unknown, placement: unknown) =>
+    own(event).browserView(id(session), parseBrowserPlacement(placement)),
+  );
+  ipcMain.handle("agent.browserDownloads", (event, session: unknown) =>
+    own(event).browserDownloads(id(session)),
+  );
+  ipcMain.handle("agent.browserSaveDownload", (event, session: unknown, download: unknown) =>
+    own(event).browserSaveDownload(id(session), id(download)),
+  );
+  ipcMain.handle(
+    "agent.browserChooseFiles",
+    async (event, session: unknown, page: unknown, token: unknown) => {
+      const service = own(event),
+        owner = id(session),
+        target = id(page),
+        lease = id(token);
+      const chosen = await dialog.showOpenDialog({
+        title: "选择工作区中的文件",
+        properties: ["openFile", "multiSelections"],
+      });
+      if (own(event) !== service) throw new Error("窗口已改变");
+      await service.browserInput(owner, target, lease, {
+        type: "files",
+        paths: chosen.canceled ? [] : chosen.filePaths,
+      });
+    },
+  );
   ipcMain.handle("agent.uiSetup", (event) => own(event).uiSetup());
   ipcMain.handle("agent.uiPreview", (event, session: unknown, target: unknown) =>
     own(event).uiPreview(id(session), parsePreviewTarget(target)),
   );
-  ipcMain.handle("agent.browserInput", (event, session: unknown, page: unknown, token: unknown, input: unknown) =>
-    own(event).browserInput(id(session), id(page), id(token), parseBrowserHumanInput(input)),
+  ipcMain.handle(
+    "agent.uiInput",
+    (event, session: unknown, target: unknown, token: unknown, input: unknown) =>
+      own(event).uiInput(
+        id(session),
+        parsePreviewTarget(target),
+        id(token),
+        parseBrowserHumanInput(input),
+      ),
+  );
+  ipcMain.handle(
+    "agent.browserInput",
+    (event, session: unknown, page: unknown, token: unknown, input: unknown) =>
+      own(event).browserInput(id(session), id(page), id(token), parseBrowserHumanInput(input)),
   );
   ipcMain.handle("agent.uiPermissions", (event, session: unknown) =>
     own(event).uiPermissions(id(session)),
@@ -151,11 +210,16 @@ export function registerAgentIpc(
     return workspace;
   });
   ipcMain.handle("agent.attachmentsChoose", async (event, session: unknown) => {
-    const service = own(event), owner = id(session), window = getWindow();
+    const service = own(event),
+      owner = id(session),
+      window = getWindow();
     if (!window) throw new Error("主窗口不存在");
     const current = await service.snapshot(owner);
     if (current.archived) throw new Error("请先恢复已归档的对话");
-    const chosen = await dialog.showOpenDialog(window, { title: "添加附件", properties: ["openFile", "multiSelections"] });
+    const chosen = await dialog.showOpenDialog(window, {
+      title: "添加附件",
+      properties: ["openFile", "multiSelections"],
+    });
     if (chosen.canceled) return [];
     if (own(event) !== service) throw new Error("选择附件期间窗口已改变");
     return service.addAttachments(owner, chosen.filePaths);
@@ -163,17 +227,34 @@ export function registerAgentIpc(
   ipcMain.handle("agent.attachmentPreview", (event, session: unknown, file: unknown) =>
     own(event).attachmentPreview(id(session), attachmentId(file)),
   );
+  ipcMain.handle("agent.contentPreview", (event, session: unknown, reference: unknown) =>
+    own(event).contentPreview(id(session), text({ reference }, "reference")),
+  );
+  ipcMain.handle("agent.contentSave", (event, file: unknown) =>
+    saveContent(event, parseAttachmentUploads([file])[0]!),
+  );
+  ipcMain.handle("agent.attachmentSave", async (event, session: unknown, file: unknown) => {
+    const service = own(event);
+    const content = await service.attachmentContent(id(session), attachmentId(file));
+    if (own(event) !== service) throw new Error("保存附件期间窗口已改变");
+    return saveContent(event, content);
+  });
   ipcMain.handle("agent.attachmentsUpload", (event, session: unknown, files: unknown) =>
     own(event).addAttachments(id(session), parseAttachmentUploads(files)),
   );
-  ipcMain.handle("agent.attachmentsFromLibrary", async (event, session: unknown, value: unknown) => {
-    const service = own(event), owner = id(session), request = parseLibraryEntriesDrag(value);
-    const root = await requireVault(request.root);
-    const files = await libraryAttachmentUploads(root, request.entries);
-    await requireVault(root);
-    if (own(event) !== service) throw new Error("添加附件期间窗口已改变");
-    return service.addAttachments(owner, files);
-  });
+  ipcMain.handle(
+    "agent.attachmentsFromLibrary",
+    async (event, session: unknown, value: unknown) => {
+      const service = own(event),
+        owner = id(session),
+        request = parseLibraryEntriesDrag(value);
+      const root = await requireVault(request.root);
+      const files = await libraryAttachmentUploads(root, request.entries);
+      await requireVault(root);
+      if (own(event) !== service) throw new Error("添加附件期间窗口已改变");
+      return service.addAttachments(owner, files);
+    },
+  );
   ipcMain.handle("agent.attachmentOpen", async (event, session: unknown, file: unknown) => {
     const service = own(event);
     const path = await service.attachmentPath(id(session), attachmentId(file));
@@ -216,25 +297,65 @@ export function registerAgentIpc(
   });
   ipcMain.handle("agent.list", (event) => own(event).list());
   ipcMain.handle("agent.snapshot", (event, session: unknown) => own(event).snapshot(id(session)));
-  ipcMain.handle("agent.start", (event, session: unknown, value: unknown, references: unknown, attachments: unknown) => {
-    const input = sentInput(value, attachments);
-    return own(event).start(id(session), input.text, parseReferences(references), input.attachments);
-  });
+  ipcMain.handle(
+    "agent.start",
+    (event, session: unknown, value: unknown, references: unknown, attachments: unknown) => {
+      const input = sentInput(value, attachments);
+      return own(event).start(
+        id(session),
+        input.text,
+        parseReferences(references),
+        input.attachments,
+      );
+    },
+  );
   ipcMain.handle("agent.cancel", (event, session: unknown, run: unknown) =>
     own(event).cancel(id(session), id(run)),
   );
   ipcMain.handle("agent.resume", (event, session: unknown, run: unknown) =>
     own(event).resume(id(session), id(run)),
   );
-  ipcMain.handle("agent.steer", (event, session: unknown, run: unknown, value: unknown, references: unknown, attachments: unknown) => {
-    const input = sentInput(value, attachments);
-    return own(event).steer(id(session), id(run), input.text, parseReferences(references), input.attachments);
-  });
+  ipcMain.handle(
+    "agent.steer",
+    (
+      event,
+      session: unknown,
+      run: unknown,
+      value: unknown,
+      references: unknown,
+      attachments: unknown,
+    ) => {
+      const input = sentInput(value, attachments);
+      return own(event).steer(
+        id(session),
+        id(run),
+        input.text,
+        parseReferences(references),
+        input.attachments,
+      );
+    },
+  );
   ipcMain.handle("agent.queueGet", (event, session: unknown) => own(event).queueGet(id(session)));
-  ipcMain.handle("agent.queueAdd", (event, session: unknown, run: unknown, value: unknown, references: unknown, attachments: unknown) => {
-    const input = sentInput(value, attachments);
-    return own(event).queueAdd(id(session), id(run), input.text, parseReferences(references), input.attachments);
-  });
+  ipcMain.handle(
+    "agent.queueAdd",
+    (
+      event,
+      session: unknown,
+      run: unknown,
+      value: unknown,
+      references: unknown,
+      attachments: unknown,
+    ) => {
+      const input = sentInput(value, attachments);
+      return own(event).queueAdd(
+        id(session),
+        id(run),
+        input.text,
+        parseReferences(references),
+        input.attachments,
+      );
+    },
+  );
   ipcMain.handle("agent.queueRemove", (event, session: unknown, message: unknown) =>
     own(event).queueRemove(id(session), id(message)),
   );
@@ -255,11 +376,19 @@ export function registerAgentIpc(
     return own(event).archive(id(session), archived);
   });
   ipcMain.handle("agent.remove", (event, session: unknown) => own(event).remove(id(session)));
-  ipcMain.handle("agent.saveDraft", (event, session: unknown, draft: unknown, references: unknown, attachments: unknown) => {
-    if (typeof draft !== "string" || draft.length > 128 * 1024)
-      throw new Error("会话草稿无效或过长");
-    return own(event).saveDraft(id(session), draft, parseReferences(references), attachments === undefined ? undefined : parseAttachmentIds(attachments));
-  });
+  ipcMain.handle(
+    "agent.saveDraft",
+    (event, session: unknown, draft: unknown, references: unknown, attachments: unknown) => {
+      if (typeof draft !== "string" || draft.length > 128 * 1024)
+        throw new Error("会话草稿无效或过长");
+      return own(event).saveDraft(
+        id(session),
+        draft,
+        parseReferences(references),
+        attachments === undefined ? undefined : parseAttachmentIds(attachments),
+      );
+    },
+  );
   ipcMain.handle("agent.flush", (event) => own(event).flush());
   ipcMain.handle("agent.approve", (event, session: unknown, approval: unknown, reply: unknown) =>
     own(event).approve(id(session), id(approval), parseApprovalReply(reply)),

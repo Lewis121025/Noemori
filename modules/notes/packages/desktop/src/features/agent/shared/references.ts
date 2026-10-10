@@ -1,4 +1,8 @@
-import { MAX_SELECTED_CONTENT_BYTES, parseSelectedContent, type SelectedContent } from "../../reader/shared/selected-content";
+import {
+  MAX_SELECTED_CONTENT_BYTES,
+  parseSelectedContent,
+  type SelectedContent,
+} from "../../reader/shared/selected-content";
 import { record, text } from "./parse";
 
 /** 引用保存用户当时选中的原文；来源位置只用于导航，不授予文件访问权限。 */
@@ -49,7 +53,7 @@ export function addReference(
 }
 
 /**
- * 在原生模型文字边界序列化引用输入；纯文字保持既有协议与展示。
+ * 在原生模型文字边界序列化引用输入；保留标识开头的原文按文字转义。
  * @param input 用户要求，不修改空白或换行。
  * @param references 用户显式添加的引用。
  * @returns 作为用户消息传入的文字，引用内容仅作为 JSON 数据。
@@ -57,9 +61,11 @@ export function addReference(
  */
 export function referencedInput(input: string, references: AgentReference[] = []): string {
   const checked = parseReferences(references);
-  const result = checked.length
-    ? inputPrefix + JSON.stringify({ text: input, references: checked })
-    : input;
+  // 保留标识开头的原文也必须进入 text 字段，否则恢复时会被误认成引用信封。
+  const result =
+    checked.length || input.startsWith(inputPrefix)
+      ? inputPrefix + JSON.stringify({ text: input, references: checked })
+      : input;
   if (!input.trim() || new TextEncoder().encode(result).length > 128 * 1024)
     throw new Error("请填写消息；消息与引用合计不能超过 128 KiB");
   return result;
@@ -69,13 +75,17 @@ export function referencedInput(input: string, references: AgentReference[] = []
  * 将本应用序列化的用户消息恢复为正文和引用卡片，其他历史文字保持原样。
  * @param value 模型边界或历史中的用户消息。
  * @returns 正文及校验后的引用；无完整合法信封时返回原文字，不掩盖历史内容。
+ * @throws 不抛出；不完整或非法的信封保留原文。
  */
 export function readReferencedInput(value: string): { text: string; references: AgentReference[] } {
   if (value.startsWith(inputPrefix)) {
     try {
       const input = record(JSON.parse(value.slice(inputPrefix.length)));
       const references = parseReferences(input["references"]);
-      if (references.length) return { text: text(input, "text"), references };
+      const content = text(input, "text");
+      referencedInput(content, references);
+      if (references.length || content.startsWith(inputPrefix))
+        return { text: content, references };
     } catch {
       // 历史文字可能恰好包含相同前缀；不能因此丢掉用户原文或阻断整条对话。
     }

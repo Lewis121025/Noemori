@@ -3,8 +3,8 @@
 //! 待同步路径与正文在同一 `SQLite` 事务提交。短暂持有写事务，同步排名并建立
 //! 同版本只读快照后释放；确认失败可幂等重试，缺失索引可从正文完整重建。
 
-mod sources;
 pub(crate) mod lexical;
+mod sources;
 
 pub(crate) use sources::SourceQuery;
 
@@ -21,7 +21,8 @@ use tantivy::{
 };
 
 use crate::{
-    error::Error, search::cancellation::CancellableQuery, markdown::source_map::fold, SearchCancellation,
+    error::Error, markdown::source_map::fold, search::cancellation::CancellableQuery,
+    SearchCancellation,
 };
 
 /// 三字片段必须具有相邻位置，才能证明任意长度子串；默认 n-gram 的同位词语义不适用。
@@ -241,7 +242,8 @@ impl SearchIndex {
                 let title: String = row.get(1)?;
                 let body: String = row.get(2)?;
                 let mut document = TantivyDocument::new();
-                self.lexical.add(&mut document, conn, &path, &title, &body)?;
+                self.lexical
+                    .add(&mut document, conn, &path, &title, &body)?;
                 document.add_text(self.path, path);
                 document.add_u64(self.source, source);
                 document.add_text(self.title, fold(&title));
@@ -304,14 +306,32 @@ impl SearchSnapshot {
     }
 
     /// 精确身份键独立召回，不能因普通词法候选窗口不足而失去置顶资格。
-    pub(crate) fn identity_query(&self, text: &str, filter: Box<dyn Query>, token: &SearchCancellation) -> RankedQuery {
-        let query = Box::new(TermQuery::new(Term::from_field_text(self.lexical.1, &fold(text)), IndexRecordOption::Basic));
+    pub(crate) fn identity_query(
+        &self,
+        text: &str,
+        filter: Box<dyn Query>,
+        token: &SearchCancellation,
+    ) -> RankedQuery {
+        let query = Box::new(TermQuery::new(
+            Term::from_field_text(self.lexical.1, &fold(text)),
+            IndexRecordOption::Basic,
+        ));
         self.ranked(lexical::filtered(query, Some(filter)), token)
     }
 
     /// 在同一排名快照上召回完整词项；返回容错展开词供真实位置证据使用。
-    pub(crate) fn lexical_query(&self, words: &[String], fuzzy: bool, filter: Option<Box<dyn Query>>, token: &SearchCancellation) -> Result<(RankedQuery, Vec<String>), Error> {
-        let words = if fuzzy { self.lexical.expand(&self.searcher, words, token)? } else { words.to_vec() };
+    pub(crate) fn lexical_query(
+        &self,
+        words: &[String],
+        fuzzy: bool,
+        filter: Option<Box<dyn Query>>,
+        token: &SearchCancellation,
+    ) -> Result<(RankedQuery, Vec<String>), Error> {
+        let words = if fuzzy {
+            self.lexical.expand(&self.searcher, words, token)?
+        } else {
+            words.to_vec()
+        };
         let query = lexical::filtered(self.lexical.query(&words), filter);
         Ok((self.ranked(query, token), words))
     }

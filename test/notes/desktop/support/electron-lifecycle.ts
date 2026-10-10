@@ -24,7 +24,10 @@ beforeEach(() => {
       }
     }
     // 旧旅程的 fixture 根就是其应用仓库；新仓库旅程显式传入另一个根以验证迁移，所有测试都隔离用户 Documents。
-    const app = await launch({ ...options, env: { ...process.env, ...options?.env, ...(root ? { NOEMORI_TEST_LIBRARY_ROOT: options?.env?.["NOEMORI_TEST_LIBRARY_ROOT"] ?? root } : {}) } });
+    // 本机测试统一隐藏；Linux CI 仍由 Xvfb 映射窗口，不向用户桌面展示。
+    const mode = process.platform === "linux" ? (process.env["NOEMORI_TEST_WINDOW"] ?? "visible") : "hidden";
+    const timeout = options?.timeout ?? 15_000;
+    const app = await launch({ ...options, timeout, args: [...(options?.args ?? []), "--noerrdialogs"], env: { ...process.env, ...options?.env, NOEMORI_TEST_WINDOW: mode, ...(root ? { NOEMORI_TEST_LIBRARY_ROOT: options?.env?.["NOEMORI_TEST_LIBRARY_ROOT"] ?? root } : {}) } });
     const child = app.process();
     const close = app.close.bind(app);
     let closing: Promise<void> | null = null;
@@ -34,7 +37,23 @@ beforeEach(() => {
     };
     cleanup.push(finish);
     vi.spyOn(app, "close").mockImplementation(finish);
-    return app;
+    try {
+      await app.evaluate(({ dialog }) => {
+        // 系统选择器必须由具体旅程提供结果；遗漏模拟时报告错误，不能弹出真实窗口。
+        const unexpected = (name: string): never => { throw new Error(`后台测试必须模拟${name}，禁止打开系统弹窗`); };
+        dialog.showOpenDialog = async () => unexpected("文件选择");
+        dialog.showSaveDialog = async () => unexpected("文件保存");
+        dialog.showMessageBox = async () => unexpected("消息确认");
+        dialog.showErrorBox = () => unexpected("错误提示");
+      });
+      // 进程存在不代表应用启动成功；先交付主窗口就绪，再由具体旅程等待页面内容。
+      await app.firstWindow({ timeout });
+      return app;
+    } catch (error) {
+      try { await finish(); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], "桌面测试启动与进程回收均失败"); }
+      throw error;
+    }
   });
 });
 

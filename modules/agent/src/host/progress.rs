@@ -2,6 +2,21 @@ use super::HostMessage;
 use crate::{ContentPart, Role, llm::ModelEvent, runtime::PendingTurn};
 use serde_json::{Value, json};
 
+/// 活动检查点只补充当前未提交节点的观察；已闭合节点与用户补充已在真实历史中保存。
+pub(super) fn active_note(data: &super::state::Data) -> Option<String> {
+    let pending = data.pending_turn.as_ref()?;
+    if pending.response.is_some() {
+        return Some(pending_note(pending.clone()));
+    }
+    let from = data.active.as_ref().and_then(|active| active.draft)?;
+    let messages: Vec<_> = data.messages[from..]
+        .iter()
+        .filter(|message| message.role != Role::User)
+        .cloned()
+        .collect();
+    Some(observed_note(&messages, &pending.attempted_tool_ids))
+}
+
 /// 未闭合输出只作为观察记录续接，不伪造成可执行的工具往返或供应商签名消息。
 pub(super) fn pending_note(pending: PendingTurn) -> String {
     let content = if let Some(response) = pending.response {

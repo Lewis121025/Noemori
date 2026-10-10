@@ -22,8 +22,45 @@ struct Channel {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     buffer: Vec<u8>,
+    pending: Option<BrowserReceipt>,
 }
 impl Channel {
+    /// 宿主仍持有读写管道直到 closed；收齐迟到结果后才能终止 Node 和浏览器资源。
+    async fn close(
+        &mut self,
+        snapshot: &Arc<Mutex<BrowserSnapshot>>,
+        changed: &Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), String> {
+        self.send(json!({"kind":"close"})).await?;
+        loop {
+            let frame = self.next_result(snapshot, changed).await?;
+            if frame["kind"] == "closed" {
+                if let Some(mut pending) = self.pending.take() {
+                    pending.error = Some("关闭期间未收到动作回执，副作用未知，不得重放".into());
+                    record(snapshot, pending);
+                }
+                return Ok(());
+            }
+            if frame["kind"] == "ready" || frame["kind"] == "browser_start" {
+                continue;
+            }
+            if frame["kind"] != "result" {
+                return Err("浏览器关闭期间返回了意外控制帧".into());
+            }
+            if let Some(pending) = self.pending.as_ref() {
+                if frame["id"].as_str() != Some(&pending.call_id) {
+                    return Err("关闭期间的浏览器回执不属于当前动作".into());
+                }
+                let output: BrowserOutput = serde_json::from_value(frame["result"].clone())
+                    .map_err(|error| format!("关闭回执契约无效：{error}"))?;
+                let mut pending = self.pending.take().ok_or("关闭期间动作身份已丢失")?;
+                pending.outcome = output.outcome;
+                pending.error = output.error;
+                pending.steps = output.steps;
+                record(snapshot, pending);
+            }
+        }
+    }
     async fn next_result(
         &mut self,
         snapshot: &Arc<Mutex<BrowserSnapshot>>,
@@ -47,7 +84,13 @@ impl Channel {
             }
             let tabs = serde_json::from_value(frame["tabs"].clone())
                 .map_err(|error| format!("浏览器状态帧无效：{error}"))?;
-            snapshot.lock().expect("浏览器状态锁被污染").tabs = tabs;
+            let handoff = serde_json::from_value(frame["handoff"].clone())
+                .map_err(|error| format!("浏览器协助状态无效：{error}"))?;
+            {
+                let mut state = snapshot.lock().expect("浏览器状态锁被污染");
+                state.tabs = tabs;
+                state.handoff = handoff;
+            }
             changed();
         }
     }
@@ -107,16 +150,46 @@ pub(super) async fn run(
     finished: watch::Sender<Option<Result<(), String>>>,
 ) {
     let mut resources = Resources::default();
+    let mut channel = None;
     let result = tokio::select! {
         biased;
         () = cancellation.cancelled() => Ok(()),
-        result = drive(&config, &mut resources, &mut requests, &snapshot, &changed) => result,
+        result = drive(&config, &mut resources, &mut requests, &snapshot, &changed, &mut channel) => result,
     };
+    let protocol = if result.is_ok() {
+        if let Some(channel) = channel.as_mut() {
+            tokio::time::timeout(Duration::from_secs(12), channel.close(&snapshot, &changed))
+                .await
+                .map_err(|_| "浏览器关闭未在 12 秒内确认".to_owned())
+                .and_then(|result| result)
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    };
+    if let Some(channel) = channel.as_mut()
+        && let Some(mut pending) = channel.pending.take()
+    {
+        pending.error = Some(
+            protocol
+                .as_ref()
+                .err()
+                .cloned()
+                .unwrap_or_else(|| "关闭期间动作未确认，副作用未知，不得重放".into()),
+        );
+        record(&snapshot, pending);
+    }
     // 浏览器与 Node 都归 Resources；取消启动或丢弃正在执行的协议同样必须回收。
-    let cleanup = resources.cleanup().await;
+    let resources = resources.cleanup().await;
+    let cleanup = match (protocol, resources) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(protocol), Err(resources)) => Err(format!("{protocol}；{resources}")),
+    };
     {
         let mut state = snapshot.lock().expect("浏览器状态锁被污染");
-        state.status = if result.is_err() {
+        state.status = if result.is_err() || cleanup.is_err() {
             BrowserStatus::Failed
         } else {
             BrowserStatus::Closed
@@ -136,13 +209,15 @@ async fn drive(
     requests: &mut mpsc::Receiver<Request>,
     snapshot: &Arc<Mutex<BrowserSnapshot>>,
     changed: &Arc<dyn Fn() + Send + Sync>,
+    channel_slot: &mut Option<Channel>,
 ) -> Result<(), String> {
-    let mut channel = tokio::time::timeout(
+    tokio::time::timeout(
         Duration::from_secs(30),
-        start(config, resources, snapshot, changed),
+        start(config, resources, snapshot, changed, channel_slot),
     )
     .await
     .map_err(|_| "浏览器启动超过 30 秒")??;
+    let channel = channel_slot.as_mut().ok_or("浏览器控制管道未登记")?;
     snapshot.lock().expect("浏览器状态锁被污染").status = BrowserStatus::Ready;
     changed();
     let mut completed: HashMap<String, (Value, BrowserOutput)> = HashMap::new();
@@ -157,7 +232,7 @@ async fn drive(
             if request.context.check().is_err() || request.reply.is_closed() {
                 continue;
             }
-            let result = exchange(&mut channel, &request, action, snapshot, changed).await;
+            let result = exchange(channel, &request, action, snapshot, changed).await;
             let failure = result.as_ref().err().cloned();
             let _ = request.reply.send(result);
             if let Some(error) = failure {
@@ -180,12 +255,19 @@ async fn drive(
         if request.context.check().is_err() || request.reply.is_closed() {
             continue;
         }
-        snapshot.lock().expect("浏览器状态锁被污染").status = BrowserStatus::Busy;
-        changed();
-        let result = exchange(&mut channel, &request, action.clone(), snapshot, changed).await;
+        // 人工输入不能改变控制者；界面依据 human 保留页面与连续输入。
+        if !matches!(
+            request.action,
+            BrowserInput::HumanInput { .. } | BrowserInput::HumanNavigate { .. }
+        ) {
+            snapshot.lock().expect("浏览器状态锁被污染").status = BrowserStatus::Busy;
+            changed();
+        }
+        let result = exchange(channel, &request, action.clone(), snapshot, changed).await;
         let mut output = match result {
             Ok(output) => output,
             Err(error) => {
+                channel.pending = None;
                 record(
                     snapshot,
                     BrowserReceipt {
@@ -218,11 +300,13 @@ async fn drive(
                 BrowserStatus::Ready
             };
             state.tabs = output.tabs.clone();
+            state.handoff = output.handoff.clone();
             output.recent_operations = state.receipts.clone();
         }
         let mut retained = output.clone();
         retained.image = None;
         retained.observation = None;
+        retained.observation_update = None;
         retained.recent_operations.clear();
         completed.insert(request.id.clone(), (action, retained));
         changed();
@@ -244,7 +328,8 @@ async fn start(
     resources: &mut Resources,
     snapshot: &Arc<Mutex<BrowserSnapshot>>,
     changed: &Arc<dyn Fn() + Send + Sync>,
-) -> Result<Channel, String> {
+    channel_slot: &mut Option<Channel>,
+) -> Result<(), String> {
     let directory = resources.directory("noemori-browser-downloads-")?;
     let node = resources.spawn(config.node.as_os_str(), ProcessRole::Node, |command| {
         command
@@ -265,11 +350,13 @@ async fn start(
         .stdout()
         .take()
         .ok_or("浏览器运行时缺少输出管道")?;
-    let mut channel = Channel {
+    *channel_slot = Some(Channel {
         stdin,
         stdout: BufReader::new(stdout),
         buffer: Vec::new(),
-    };
+        pending: None,
+    });
+    let channel = channel_slot.as_mut().ok_or("浏览器控制管道未登记")?;
     channel.send(json!({"workspace":config.workspace,"download_directory":directory,"browser_path":config.browser,"private_origins":config.private_origins,"max_pages":12,"max_chars":24000,"max_elements":250,"max_download_bytes":33554432,"max_network_bytes":536870912})).await?;
     let start = channel.read().await?;
     if start["kind"] != "browser_start" {
@@ -282,16 +369,32 @@ async fn start(
         return Err("浏览器运行时试图更改宿主程序".into());
     }
     let proxy = start["proxy_url"].as_str().ok_or("缺少浏览器受控出口")?;
-    let (pid, endpoint) = resources
-        .browser_window(executable.as_ref(), proxy, config.headless)
-        .await?;
-    channel
-        .send(json!({"kind":"browser_ready","pid":pid,"endpoint":endpoint}))
-        .await?;
+    let lease = if let Some(host) = &config.embedded_host {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let response = client
+            .post(host)
+            .json(&json!({"proxy":proxy,"downloads":directory}))
+            .send()
+            .await
+            .map_err(|error| format!("内嵌浏览器连接失败：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("内嵌浏览器租约失败：{error}"))?;
+        let lease: Value = response.json().await.map_err(|error| error.to_string())?;
+        json!({"kind":"browser_ready","endpoint":lease["endpoint"],"embedded":true})
+    } else {
+        let (pid, endpoint) = resources
+            .browser_window(executable.as_ref(), proxy, config.headless)
+            .await?;
+        json!({"kind":"browser_ready","pid":pid,"endpoint":endpoint})
+    };
+    channel.send(lease).await?;
     if channel.next_result(snapshot, changed).await?["kind"] != "ready" {
         return Err("浏览器运行时未完成初始化".into());
     }
-    Ok(channel)
+    Ok(())
 }
 
 async fn exchange(
@@ -306,6 +409,15 @@ async fn exchange(
         .deadline
         .saturating_duration_since(tokio::time::Instant::now())
         .min(Duration::from_secs(30));
+    if !matches!(request.action, BrowserInput::Preview { .. }) {
+        channel.pending = Some(BrowserReceipt {
+            steps: Vec::new(),
+            call_id: request.id.clone(),
+            action: action["action"].as_str().unwrap_or_default().into(),
+            outcome: BrowserOutcome::Unknown,
+            error: None,
+        });
+    }
     channel.send(json!({"kind":"execute","id":request.id,"action":action,"timeout_ms":timeout.as_millis().max(1)})).await?;
     let frame = tokio::select! {
         biased;
@@ -332,6 +444,7 @@ async fn exchange(
     }
     let mut output: BrowserOutput = serde_json::from_value(frame["result"].clone())
         .map_err(|error| format!("浏览器结果契约无效：{error}"))?;
+    channel.pending = None;
     if let Some(image) = frame["result"].get("image") {
         if image["format"] != "jpeg" {
             return Err("浏览器截图格式无效".into());

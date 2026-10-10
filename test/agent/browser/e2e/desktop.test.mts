@@ -84,13 +84,14 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
       if (calls === 1)
         action = { action: "request_access", origin, reason: "操作用户指定的本机验收页面" };
       if (calls === 2) action = { action: "open", url: `${origin}/page` };
-      if (calls === 3) action = { action: "fill", ...element("姓名"), text: "验收用户" };
-      if (calls === 4) action = { action: "click", ...element("保存") };
-      if (calls === 5) {
+      if (calls === 3) action = { action: "scroll", page: pageId, observation: observation?.id, x: 0, y: 450 };
+      if (calls === 4) action = { action: "fill", ...element("姓名"), text: "验收用户" };
+      if (calls === 5) action = { action: "click", ...element("保存") };
+      if (calls === 6) {
         expect(observation?.text).toContain("已保存：验收用户");
         action = { action: "screenshot", page: pageId };
       }
-      if (calls === 6) {
+      if (calls === 7) {
         sawImage = request.messages.some(
           (message) =>
             Array.isArray(message.content) &&
@@ -98,9 +99,11 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
         );
         expect(sawImage).toBe(true);
       }
-      if (calls === 7) action = { action: "observe", page: pageId };
-      if (calls === 9) action = { action: "navigate", page: pageId, url: `${origin}/cancel` };
-      if (calls === 10)
+      if (calls === 8) action = { action: "handoff", completion: { page: pageId, until: { type: "text", text: "已保存：验收用户人工用户" } } };
+      if (calls === 9) action = { action: "observe", page: pageId };
+      if (calls === 10) expect(observation?.text).toContain("已保存：验收用户人工用户");
+      if (calls === 11) action = { action: "navigate", page: pageId, url: `${origin}/cancel` };
+      if (calls === 12)
         action = {
           action: "batch",
           page: pageId,
@@ -204,7 +207,9 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
         timeout: 30000,
       },
     )
-    .toBe("completed");
+    .not.toBe("running");
+  const initial = await page.evaluate(async () => window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id));
+  expect(initial.run, JSON.stringify({ calls, failures, browser: initial.browser, ui: initial.ui, last: initial.messages.at(-1) }).slice(0, 8000)).toMatchObject({ status: "completed" });
   expect(failures).toEqual([]);
   expect({
     calls,
@@ -214,88 +219,51 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
         (await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id))
           ?.browser,
     ),
-  }).toMatchObject({ calls: 6, sawImage: true });
-  expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
-    "阅读清单",
-  );
+  }).toMatchObject({ calls: 7, sawImage: true });
+  expect(await page.getByRole("region", { name: "会话浏览器" }).count()).toBe(0);
+  const panel = page.getByRole("dialog", { name: "浏览器协助" });
+  expect(await panel.count()).toBe(0);
+  await page.getByRole("textbox", { name: "Agent 用户任务" }).fill("需要用户验证后继续检查页面");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => page.evaluate(async () => (await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id)).run?.status), { timeout: 15000 }).toBe("paused");
+  await panel.waitFor();
+  expect(await panel.locator("button, nav, form").count()).toBe(0);
+  expect(await page.locator(".agent-preview").count()).toBe(0);
   const artifacts = process.env["NOEMORI_QUALITY_ARTIFACTS"];
   if (artifacts) {
     await mkdir(join(artifacts, "browser"), { recursive: true });
-    await page.screenshot({ path: join(artifacts, "browser", "desktop.png") });
+    const image = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0]!.capturePage()).toPNG().toString("base64"));
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(artifacts, "browser", "assistance.png"), Buffer.from(image, "base64"));
   }
-  await page.getByRole("button", { name: "接管浏览器", exact: true }).click();
-  await page.getByRole("button", { name: "交还助手", exact: true }).waitFor();
-  await expect.poll(() => page.evaluate(() =>
-    document.querySelector<HTMLImageElement>(".agent-preview img")?.naturalWidth
-      ? "ready" : document.querySelector(".agent-preview")?.textContent || "没有浮窗",
-  ), { timeout: 10000 }).toBe("ready");
-  await expect.poll(() => page.locator(".agent-preview img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-  const previewResult = await page.evaluate(async () => {
-    const session = (await window.noemori.agent.list()).items[0]!;
-    const state = await window.noemori.agent.snapshot(session.id);
-    return Promise.race([
-      window.noemori.agent.uiPreview(session.id, { backend: "managed", page: state.browser.tabs[0]!.id }).then((frame) => frame.image?.slice(0, 30)),
-      new Promise<string>((resolve) => setTimeout(() => resolve("预览请求超时"), 12000)),
-    ]);
-  });
-  expect(previewResult).toMatch(/^data:image\/jpeg;base64,/);
-  if (artifacts) {
-    await page.mouse.move(40, 60);
-    await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
-    await page.screenshot({ path: join(artifacts, "browser", "background-preview.png") });
-  }
-  const previewSize = await page.locator(".agent-preview").boundingBox();
-  expect(previewSize).not.toBeNull();
-  await page.mouse.move(previewSize!.x + previewSize!.width - 3, previewSize!.y + previewSize!.height - 3);
-  await page.mouse.down();
-  await page.mouse.move(previewSize!.x + previewSize!.width + 57, previewSize!.y + previewSize!.height + 27, { steps: 8 });
-  await page.mouse.up();
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.width).toBeGreaterThan(previewSize!.width);
-  const beforeDrag = await page.locator(".agent-preview").boundingBox();
-  const handle = await page.getByRole("button", { name: "拖动画面窗口", exact: true }).boundingBox();
-  expect(handle).not.toBeNull();
-  await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(handle!.x + handle!.width / 2 - 30, handle!.y + handle!.height / 2 + 40, { steps: 8 });
-  await page.mouse.up();
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.x).toBeCloseTo(beforeDrag!.x - 30, 0);
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.y).toBeCloseTo(beforeDrag!.y + 40, 0);
-  const resized = await page.locator(".agent-preview").boundingBox();
-  await page.getByRole("button", { name: "放大画面", exact: true }).click();
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.width).toBeGreaterThan(previewSize!.width);
-  await page.getByRole("button", { name: "恢复画面大小", exact: true }).click();
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.x).toBeCloseTo(resized!.x, 0);
-  await expect.poll(async () => (await page.locator(".agent-preview").boundingBox())!.y).toBeCloseTo(resized!.y, 0);
-  if (artifacts) {
-    await page.locator(".agent-preview").evaluate((node) => {
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement && node.contains(focused)) focused.blur();
-    });
-    await page.mouse.move(40, 60);
-    await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
-    await page.screenshot({ path: join(artifacts, "browser", "resized-preview.png") });
-  }
-  await page.locator(".agent-preview").hover();
-  await expect.poll(() => page.locator(".agent-preview footer").evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
-  await page.getByRole("button", { name: "关闭画面", exact: true }).click();
-  await page.getByRole("button", { name: "交还助手", exact: true }).click();
-  await page.getByRole("textbox", { name: "Agent 用户任务" }).fill("检查刚才的页面");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
-  await expect
-    .poll(
-      () =>
-        page.evaluate(async () => {
-          const session = await window.noemori.agent.snapshot(
-            (await window.noemori.agent.list()).items[0]!.id,
-          );
-          return (
-            session?.messages.filter((message) => message.role === "user").length === 2 &&
-            session.run?.status === "completed"
-          );
-        }),
-      { timeout: 15000 },
-    )
-    .toBe(true);
+  const before = await page.evaluate(async () => window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id));
+  const target = before.browser.tabs[0]!.native_target;
+  if (!target) throw new Error("Rust→Node→Electron 未交付真实页面身份");
+  const typed = await app.evaluate(async ({ webContents }, target) => {
+    for (const contents of webContents.getAllWebContents()) {
+      if (!contents.debugger.isAttached()) continue;
+      const { targetInfo } = await contents.debugger.sendCommand("Target.getTargetInfo");
+      if (targetInfo.targetId !== target) continue;
+      // 小窗改变页面可见高度；先滚动到表单，再按当前视口坐标输入。
+      await contents.executeJavaScript("document.querySelector('input').scrollIntoView({block:'center'})");
+      const positions: { input: { x: number; y: number }; button: { x: number; y: number } } = await contents.executeJavaScript(`(() => {
+        const point = (selector) => { const rect = document.querySelector(selector).getBoundingClientRect(); return {x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2)}; };
+        return { input: point('input'), button: point('button') };
+      })()`);
+      contents.focus();
+      for (const type of ["mouseDown", "mouseUp"] as const) contents.sendInputEvent({ type, ...positions.input, button: "left", clickCount: 1 });
+      await contents.insertText("人工用户");
+      for (const type of ["mouseDown", "mouseUp"] as const) contents.sendInputEvent({ type, ...positions.button, button: "left", clickCount: 1 });
+      return contents.executeJavaScript("document.querySelector('output').textContent");
+    }
+    throw new Error("真实网页未连接");
+  }, target);
+  expect(typed).toContain("已保存：验收用户人工用户");
+  await panel.waitFor({ state: "hidden" });
+  await expect.poll(() => page.evaluate(async () => {
+    const snapshot = await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id);
+    return { status: snapshot.run?.status, run: snapshot.run?.id, users: snapshot.messages.filter((message) => message.role === "user").length };
+  }), { timeout: 15000 }).toEqual({ status: "completed", run: before.run!.id, users: 2 });
   expect(failures).toEqual([]);
   await page
     .getByRole("textbox", { name: "Agent 用户任务" })
@@ -312,22 +280,12 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
       ),
     )
     .toBe("cancelled");
-  await expect
-    .poll(() => page.getByRole("region", { name: "会话浏览器" }).textContent(), { timeout: 15000 })
-    .toContain("步骤 1：填写 · 已执行");
-  expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
-    "步骤 2：点击 · 未执行",
-  );
-  expect(calls).toBe(10);
-  await page.getByRole("button", { name: "接管浏览器", exact: true }).click();
-  await page.getByRole("button", { name: "交还助手", exact: true }).waitFor();
-  expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
-    "步骤 1：填写 · 已执行",
-  );
-  expect(await page.getByRole("region", { name: "会话浏览器" }).textContent()).toContain(
-    "步骤 2：点击 · 未执行",
-  );
-  if (artifacts) await page.screenshot({ path: join(artifacts, "browser", "cancelled-batch.png") });
+  await expect.poll(() => page.evaluate(async () => {
+    const snapshot = await window.noemori.agent.snapshot((await window.noemori.agent.list()).items[0]!.id);
+    return snapshot.browser.receipts.findLast((receipt) => receipt.action === "batch")?.steps.map((step) => step.outcome);
+  }), { timeout: 15000 }).toEqual(["executed", "not_executed"]);
+  expect(calls).toBe(12);
+  expect(await panel.count()).toBe(0);
   await page.getByRole("button", { name: "对话操作", exact: true }).click();
   await page.getByRole("button", { name: "删除对话", exact: true }).click();
   await page
@@ -335,7 +293,7 @@ test("桌面浏览器从来源审批到表单操作、视觉回传与人工接�
     .getByRole("button", { name: "删除对话", exact: true })
     .click();
   await expect
-    .poll(() => page.evaluate(async () => (await window.noemori.agent.list()).items.length))
-    .toBe(0);
+    .poll(() => page.evaluate(async () => (await window.noemori.agent.list()).items.map((item) => (item.id))), { timeout: 15000 })
+    .toEqual([]);
   await app.close();
 }, 60000);

@@ -6,9 +6,8 @@
     AgentApproval,
     AgentConversation,
     AgentConversationInfo,
-    ApprovalReply,
   } from "../shared/api";
-  import { canResumeRun } from "../shared/run-actions";
+  import { canResumeRun, isActiveRun } from "../shared/run-actions";
   import ForkConversationDialog from "./ForkConversationDialog.svelte";
   import ConversationRelations from "./ConversationRelations.svelte";
   import ConversationMessages from "./ConversationMessages.svelte";
@@ -18,11 +17,21 @@
   import ConversationTerminal from "./ConversationTerminal.svelte";
   import ReferenceCards from "./ReferenceCards.svelte";
   import AttachmentCards from "./AttachmentCards.svelte";
-  import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, type AgentAttachment } from "../shared/attachments";
-  import { addReference, parseReferences, REFERENCE_MIME, type AgentReference } from "../shared/references";
+  import {
+    MAX_ATTACHMENT_BYTES,
+    MAX_ATTACHMENTS,
+    type AgentAttachment,
+  } from "../shared/attachments";
+  import {
+    addReference,
+    parseReferences,
+    REFERENCE_MIME,
+    type AgentReference,
+  } from "../shared/references";
   import QueuedMessages from "./QueuedMessages.svelte";
   import { newConversationQueue } from "../shared/queue";
   import AgentBrowser from "./AgentBrowser.svelte";
+  import { parseApprovalReply } from "../shared/parse";
   import AgentUi from "./AgentUi.svelte";
   import { createCompositionGuard } from "../../reader/shared/composition";
   import { LIBRARY_ENTRIES_MIME, parseLibraryEntriesDrag } from "../../reader/shared/file-drag";
@@ -96,6 +105,7 @@
     ...new Set(items.flatMap((item) => (item.workspace ? [item.workspace] : []))),
   ]);
   const statusLabels = {
+    paused: "等待你操作",
     running: "正在处理",
     completed: "已完成",
     cancelled: "已中断",
@@ -160,15 +170,26 @@
     draftTimer = undefined;
     const item = current;
     const encoded = JSON.stringify(references);
-    const fileIds = attachments.map((file) => file.id), filesKey = JSON.stringify(fileIds);
-    if (!item || (prompt === savedDraft && encoded === savedReferences && filesKey === savedAttachmentIds)) return;
+    const fileIds = attachments.map((file) => file.id),
+      filesKey = JSON.stringify(fileIds);
+    if (
+      !item ||
+      (prompt === savedDraft && encoded === savedReferences && filesKey === savedAttachmentIds)
+    )
+      return;
     const value = prompt;
     const quoted = $state.snapshot(references);
     if (attachmentImports.get(item.id) === "importing") await api.saveDraft(item.id, value, quoted);
-    else if (fileIds.length || savedAttachmentIds !== "[]") await api.saveDraft(item.id, value, quoted, fileIds);
+    else if (fileIds.length || savedAttachmentIds !== "[]")
+      await api.saveDraft(item.id, value, quoted, fileIds);
     else if (quoted.length) await api.saveDraft(item.id, value, quoted);
     else await api.saveDraft(item.id, value);
-    if (current?.id === item.id && prompt === value && JSON.stringify(references) === encoded && JSON.stringify(attachments.map((file) => file.id)) === filesKey) {
+    if (
+      current?.id === item.id &&
+      prompt === value &&
+      JSON.stringify(references) === encoded &&
+      JSON.stringify(attachments.map((file) => file.id)) === filesKey
+    ) {
       savedDraft = value;
       savedReferences = encoded;
       savedAttachmentIds = filesKey;
@@ -293,9 +314,10 @@
     const value = prompt;
     const quoted = $state.snapshot(references);
     const quotedKey = JSON.stringify(quoted);
-    const fileIds = attachments.map((file) => file.id), filesKey = JSON.stringify(fileIds);
+    const fileIds = attachments.map((file) => file.id),
+      filesKey = JSON.stringify(fileIds);
     const run = item?.run;
-    const running = run?.status === "running";
+    const running = isActiveRun(run);
     if (
       !item ||
       item.archived ||
@@ -328,7 +350,12 @@
         else if (quoted.length) await api.start(item.id, value, quoted);
         else await api.start(item.id, value);
       }
-      if (selected === item.id && prompt === value && JSON.stringify(references) === quotedKey && JSON.stringify(attachments.map((file) => file.id)) === filesKey) {
+      if (
+        selected === item.id &&
+        prompt === value &&
+        JSON.stringify(references) === quotedKey &&
+        JSON.stringify(attachments.map((file) => file.id)) === filesKey
+      ) {
         prompt = "";
         savedDraft = "";
         references = [];
@@ -389,19 +416,25 @@
   function acceptsDrop(transfer: DataTransfer | null): boolean {
     return Boolean(
       transfer &&
-      (transfer.types.includes("Files") || transfer.types.includes(LIBRARY_ENTRIES_MIME) || transfer.types.includes(REFERENCE_MIME) || transfer.types.includes("text/plain")),
+      (transfer.types.includes("Files") ||
+        transfer.types.includes(LIBRARY_ENTRIES_MIME) ||
+        transfer.types.includes(REFERENCE_MIME) ||
+        transfer.types.includes("text/plain")),
     );
   }
   function enterComposerDrop(event: DragEvent): void {
     if (!acceptsDrop(event.dataTransfer) || sending || loading || uploading) return;
     event.preventDefault();
-    draggingFiles = Boolean(event.dataTransfer?.types.some((type) => type === "Files" || type === LIBRARY_ENTRIES_MIME));
+    draggingFiles = Boolean(
+      event.dataTransfer?.types.some((type) => type === "Files" || type === LIBRARY_ENTRIES_MIME),
+    );
     dragDepth += 1;
   }
   function overComposerDrop(event: DragEvent): void {
     if (!acceptsDrop(event.dataTransfer)) return;
     event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = sending || loading || uploading ? "none" : "copy";
+    if (event.dataTransfer)
+      event.dataTransfer.dropEffect = sending || loading || uploading ? "none" : "copy";
   }
   async function dropIntoComposer(event: DragEvent): Promise<void> {
     dragDepth = 0;
@@ -432,7 +465,9 @@
   }
 
   /** 导入回执只作用于捕获的会话；主进程已保存副本，离开后由该会话自行恢复草稿。 */
-  async function receiveAttachments(select: (id: string) => Promise<AgentAttachment[]>): Promise<void> {
+  async function receiveAttachments(
+    select: (id: string) => Promise<AgentAttachment[]>,
+  ): Promise<void> {
     const item = current;
     if (!item || item.archived || loading || sending || attachmentImports.has(item.id)) return;
     attachmentImports.set(item.id, "saving");
@@ -447,7 +482,12 @@
       attachmentImports.set(item.id, "saving");
       await flushDraft();
       if (current?.id === item.id) referenceNotice = `已添加 ${files.length} 个附件`;
-      if (current?.id === item.id && (document.activeElement === document.body || document.activeElement?.matches(".composer textarea, .composer-attachment"))) focusComposer(item.id);
+      if (
+        current?.id === item.id &&
+        (document.activeElement === document.body ||
+          document.activeElement?.matches(".composer textarea, .composer-attachment"))
+      )
+        focusComposer(item.id);
     } catch (cause) {
       reportFor(item.id, cause);
     } finally {
@@ -458,7 +498,12 @@
     await receiveAttachments(async (id) => {
       if (files.length > MAX_ATTACHMENTS || files.some((file) => file.size > MAX_ATTACHMENT_BYTES))
         throw new Error("一次最多八个附件，每个不能超过 25 MiB");
-      const data = await Promise.all(files.map(async (file) => ({ name: file.name || "粘贴图片.png", bytes: new Uint8Array(await file.arrayBuffer()) })));
+      const data = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name || "粘贴图片.png",
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        })),
+      );
       return api.attachmentsUpload(id, data);
     });
   }
@@ -518,12 +563,12 @@
     if (!current || approving) return;
     const id = current.id;
     approving = true;
-    const reply: ApprovalReply = {
-      type: approval.request.type,
-      decision:
-        choice === "deny" ? { decision: choice, details: "用户拒绝" } : { decision: choice },
-    };
     try {
+      const reply = parseApprovalReply({
+        type: approval.request.type,
+        decision:
+          choice === "deny" ? { decision: choice, details: "用户拒绝" } : { decision: choice },
+      });
       await api.approve(id, approval.id, reply);
       await refresh(id);
     } catch (cause) {
@@ -637,12 +682,21 @@
   }
 </script>
 
-<svelte:window ondragend={() => (dragDepth = 0)} onkeydown={(event) => {
-  if ((event.ctrlKey || event.metaKey) && event.code === "Backquote" && current && event.target instanceof Node && panelElement.contains(event.target)) {
-    event.preventDefault();
-    void toggleTerminal();
-  }
-}} />
+<svelte:window
+  ondragend={() => (dragDepth = 0)}
+  onkeydown={(event) => {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.code === "Backquote" &&
+      current &&
+      event.target instanceof Node &&
+      panelElement.contains(event.target)
+    ) {
+      event.preventDefault();
+      void toggleTerminal();
+    }
+  }}
+/>
 
 <aside class="agent-panel" aria-label="工作区助手" bind:this={panelElement}>
   <main class="conversation-main">
@@ -721,8 +775,7 @@
         title="关闭助手"
         disabled={closing}
         onclick={() => void closePanel()}
-        ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg
-        ></button
+        ><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg></button
       >
     </header>
     <div class="conversation-content" aria-busy={loading}>
@@ -806,7 +859,11 @@
             {openLink}
             {approving}
             onApprove={(approval, choice) => void decision(approval, choice)}
-            onSuggest={!prompt.trim() && !attachments.length && !loading && !sending && !current.archived
+            onSuggest={!prompt.trim() &&
+            !attachments.length &&
+            !loading &&
+            !sending &&
+            !current.archived
               ? (value) => {
                   prompt = value;
                   draftChanged();
@@ -814,7 +871,7 @@
                 }
               : undefined}
           />{/key}
-        {#if current.run && current.run.status !== "completed" && current.run.status !== "running"}<div
+        {#if current.run && current.run.status !== "completed" && !isActiveRun(current.run)}<div
             class="run-notice"
           >
             <strong>{statusLabels[current.run.status]}</strong>{#if current.run.error}<span
@@ -834,15 +891,13 @@
               >
             {/if}
           </div>{/if}
-        {#if current.browser.status !== "idle"}<div class="browser-region">
-            {#key current.id}<AgentBrowser
-                {api}
-                session={current.id}
-                browser={current.browser}
-              />{/key}
-          </div>{/if}
-        <!-- 运行时就绪本身没有可操作内容；控制栏保留实际任务、连接、异常和用户主动打开的设置。 -->
-        {#if uiSettingsShown || current.ui.status === "busy" || current.ui.status === "failed" || current.ui.error || current.ui.control || current.ui.connections.length || current.ui.receipts.length}<div
+        {#key current.id}<AgentBrowser
+            {api}
+            session={current.id}
+            browser={current.browser}
+          />{/key}
+        <!-- 后台工具进度由消息承载；连接设置只随外接资源或用户主动打开显示。 -->
+        {#if uiSettingsShown || current.ui.control || current.ui.connections.length}<div
             class="browser-region"
           >
             {#key current.id}<AgentUi
@@ -882,11 +937,26 @@
               void send();
             }}
           >
-            <ReferenceCards {references} disabled={sending || loading} onRemove={removeReference} {...onOpenReference ? { onOpen: onOpenReference } : {}} />
-            {#key current.id}<AttachmentCards {api} session={current.id} files={attachments} disabled={sending || loading || uploading} onRemove={removeAttachment} />{/key}
+            <ReferenceCards
+              {references}
+              disabled={sending || loading}
+              onRemove={removeReference}
+              {...onOpenReference ? { onOpen: onOpenReference } : {}}
+            />
+            {#key current.id}<AttachmentCards
+                {api}
+                session={current.id}
+                files={attachments}
+                disabled={sending || loading || uploading}
+                onRemove={removeAttachment}
+              />{/key}
             <span class="reference-notice" role="status">{referenceNotice}</span>
             {#if uploading}<span class="attachment-status" role="status">正在添加附件…</span>{/if}
-            {#if dragDepth > 0}<div class="reference-drop" aria-hidden="true"><strong>{draggingFiles ? "松开即可添加附件" : "松开即可添加引用"}</strong><span>{draggingFiles ? "保留原文件 · 可预览和移除" : "添加到当前对话"}</span></div>{/if}
+            {#if dragDepth > 0}<div class="reference-drop" aria-hidden="true">
+                <strong>{draggingFiles ? "松开即可添加附件" : "松开即可添加引用"}</strong><span
+                  >{draggingFiles ? "保留原文件 · 可预览和移除" : "添加到当前对话"}</span
+                >
+              </div>{/if}
             <textarea
               bind:value={prompt}
               aria-label="Agent 用户任务"
@@ -914,14 +984,21 @@
               }}
             ></textarea>
             <div class="composer-actions">
-              <button class="reader-button composer-attachment" type="button" aria-label="添加附件" title="添加文件或图片" disabled={loading || sending || uploading} onclick={() => void receiveAttachments((id) => api.attachmentsChoose(id))}>
+              <button
+                class="reader-button composer-attachment"
+                type="button"
+                aria-label="添加附件"
+                title="添加文件或图片"
+                disabled={loading || sending || uploading}
+                onclick={() => void receiveAttachments((id) => api.attachmentsChoose(id))}
+              >
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
               </button>
               {#key current.id}<ConversationModel
                   {api}
                   conversationId={current.id}
                   selection={current.modelSelection}
-                  running={current.run?.status === "running"}
+                  running={isActiveRun(current.run)}
                   bind:available={modelAvailable}
                   catalogVersion={modelCatalogVersion}
                   configure={() => onConfigure?.()}
@@ -929,36 +1006,59 @@
                     if (!current) return;
                     refreshVersion += 1;
                     current.modelSelection = selection;
-                    if (current.run?.status !== "running") current.model = selection.modelId;
+                    if (!isActiveRun(current.run)) current.model = selection.modelId;
                   }}
                 />{/key}
-              {#if current.run?.status === "running"}<div class="running-actions">
-                <button class="supplement" type="button" aria-label="补充当前任务"
-                  title="补充当前任务 · Cmd/Ctrl+Enter · 当前操作结束后接收"
-                  disabled={loading || sending || uploading || stoppingIds.includes(current.id) || (!prompt.trim() && !attachments.length)}
-                  onclick={() => void send("steer")}>补充</button>
-                <button class="reader-button primary composer-send" type="submit" aria-label="排队追问"
-                  title="Enter 排队，当前任务完成后发送"
-                  disabled={loading || sending || uploading || stoppingIds.includes(current.id) || (!prompt.trim() && !attachments.length)}>
-                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h8M4 10h8M4 15h5M15 11v6m-3-3 3 3 3-3" /></svg>
-                </button>
-                <button
-                  class="reader-button composer-send"
-                  type="button"
-                  aria-label={stoppingIds.includes(current.id) ? "正在停止…" : "停止生成"}
-                  title="停止生成"
-                  disabled={stoppingIds.includes(current.id)}
-                  onclick={() => void interruptRun()}
-                  ><svg viewBox="0 0 20 20" aria-hidden="true"
-                    ><rect x="6" y="6" width="8" height="8" rx="1" /></svg
-                  ></button
-                ></div>
+              {#if isActiveRun(current.run)}<div class="running-actions">
+                  <button
+                    class="supplement"
+                    type="button"
+                    aria-label="补充当前任务"
+                    title="补充当前任务 · Cmd/Ctrl+Enter · 当前操作结束后接收"
+                    disabled={loading ||
+                      sending ||
+                      uploading ||
+                      stoppingIds.includes(current.id) ||
+                      (!prompt.trim() && !attachments.length)}
+                    onclick={() => void send("steer")}>补充</button
+                  >
+                  <button
+                    class="reader-button primary composer-send"
+                    type="submit"
+                    aria-label="排队追问"
+                    title="Enter 排队，当前任务完成后发送"
+                    disabled={loading ||
+                      sending ||
+                      uploading ||
+                      stoppingIds.includes(current.id) ||
+                      (!prompt.trim() && !attachments.length)}
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true"
+                      ><path d="M4 5h8M4 10h8M4 15h5M15 11v6m-3-3 3 3 3-3" /></svg
+                    >
+                  </button>
+                  <button
+                    class="reader-button composer-send"
+                    type="button"
+                    aria-label={stoppingIds.includes(current.id) ? "正在停止…" : "停止生成"}
+                    title="停止生成"
+                    disabled={stoppingIds.includes(current.id)}
+                    onclick={() => void interruptRun()}
+                    ><svg viewBox="0 0 20 20" aria-hidden="true"
+                      ><rect x="6" y="6" width="8" height="8" rx="1" /></svg
+                    ></button
+                  >
+                </div>
               {:else}<button
                   class="reader-button primary composer-send"
                   type="submit"
                   aria-label={sending ? "正在发送…" : "发送"}
                   title="Enter 发送 · Shift+Enter 换行"
-                  disabled={!modelAvailable || loading || sending || uploading || (!prompt.trim() && !attachments.length)}
+                  disabled={!modelAvailable ||
+                    loading ||
+                    sending ||
+                    uploading ||
+                    (!prompt.trim() && !attachments.length)}
                   ><svg viewBox="0 0 20 20" aria-hidden="true"
                     ><path d="M10 15V5m-5 5 5-5 5 5" /></svg
                   ></button
@@ -966,7 +1066,7 @@
             </div>
           </form>
           <p class="composer-hint" id={`${panelId}-composer-hint`}>
-            {current.run?.status === "running"
+            {isActiveRun(current.run)
               ? "Enter 排队 · Cmd/Ctrl + Enter 补充当前任务"
               : !modelAvailable
                 ? "选择模型后即可发送"
@@ -1081,6 +1181,7 @@
     --radius-panel: 14px;
     --conversation-inset: 20px;
     --conversation-width: 44rem;
+    --font-interface: "Inter Variable", "Noto Sans SC Variable", sans-serif;
     --glass-sheen: none;
     --glass-solid: var(--surface);
     --glass-overlay: var(--surface);
@@ -1096,7 +1197,7 @@
     min-width: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: "Inter Variable", "Noto Sans SC Variable", sans-serif;
+    font-family: var(--font-interface);
   }
   .conversation-content {
     display: flex;
@@ -1191,8 +1292,16 @@
     background: var(--selected);
     box-shadow: none;
   }
-  .composer-attachment { width: 28px; height: 28px; }
-  .attachment-status { display: block; margin-bottom: 6px; font-size: 11px; color: var(--muted); }
+  .composer-attachment {
+    width: 28px;
+    height: 28px;
+  }
+  .attachment-status {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
   .agent-panel svg {
     width: 16px;
     height: 16px;
@@ -1281,7 +1390,9 @@
     padding: 12px 10px 9px;
     flex-shrink: 0;
     box-shadow: 0 2px 10px var(--shadow);
-    transition: border-color 160ms ease, box-shadow 160ms ease;
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease;
   }
   .composer:hover {
     border-color: color-mix(in srgb, var(--accent) 16%, var(--border));
@@ -1323,10 +1434,30 @@
     flex-wrap: wrap;
     margin-top: 4px;
   }
-  .running-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-  .supplement { border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; padding: 5px 7px; cursor: pointer; }
-  .supplement:hover { background: var(--selected); color: var(--fg); }
-  .supplement:disabled { opacity: 0.45; cursor: default; }
+  .running-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+  }
+  .supplement {
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    padding: 5px 7px;
+    cursor: pointer;
+  }
+  .supplement:hover {
+    background: var(--selected);
+    color: var(--fg);
+  }
+  .supplement:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
   .composer-hint {
     position: absolute;
     width: 1px;

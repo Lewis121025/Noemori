@@ -1,8 +1,8 @@
 //! 在暂存与正式替换之间注入真实磁盘变化，验证分组持久化不能放宽版本校验。
 
 use super::{apply_rename, install_version, stage_version};
-use crate::storage::recovery::RecoveryStore;
 use crate::rename::journal::{FileChange, RenameJournal};
+use crate::storage::recovery::RecoveryStore;
 use crate::Error;
 use std::collections::BTreeSet;
 use std::fs;

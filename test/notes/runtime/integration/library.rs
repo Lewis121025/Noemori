@@ -4,6 +4,131 @@ use serde_json::json;
 use std::fs;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn migration_receipts_resume_before_and_after_directory_publication() {
+    for published in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("资料");
+        let root = directory.path().join("Noemori");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::write(source.join("笔记.md"), "原始资料").unwrap();
+        noemori_runtime::session::SessionStore::new(data.path())
+            .patch_reader(&json!({
+                "vaultRoot": source,
+                "documents": {
+                    "panes": [{"currentPath": "笔记.md"}],
+                    "active": 0,
+                    "split": false,
+                },
+            }))
+            .unwrap();
+        let migration = json!({
+            "source": source,
+            "root": root,
+            "path": "资料",
+            "marker": ".noemori-migration-fixture",
+        });
+        let receipt = data.path().join("library-migration.json");
+        fs::write(&receipt, serde_json::to_vec(&migration).unwrap()).unwrap();
+        if published {
+            fs::create_dir(root.join("资料")).unwrap();
+            fs::write(root.join("资料/笔记.md"), "已发布副本").unwrap();
+            fs::write(
+                root.join("资料/.noemori-migration-fixture"),
+                serde_json::to_vec(&migration).unwrap(),
+            )
+            .unwrap();
+        }
+        let runtime = Runtime::new(data.path().into(), |_| {});
+        let request = root.to_str().unwrap().to_owned();
+        let restored = runtime
+            .write(false, move |state| {
+                state.restore_library(&request, &OperationControl::default())
+            })
+            .wait()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored["imported"]["path"], "资料");
+        assert_eq!(
+            restored["documents"]["panes"][0]["currentPath"],
+            "资料/笔记.md"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("资料/笔记.md")).unwrap(),
+            if published {
+                "已发布副本"
+            } else {
+                "原始资料"
+            }
+        );
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        assert!(!receipt.exists());
+        assert_eq!(
+            fs::read_to_string(source.join("笔记.md")).unwrap(),
+            "原始资料"
+        );
+        runtime.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mismatched_published_migration_keeps_receipt_source_and_target() {
+    let data = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("资料");
+    let root = directory.path().join("Noemori");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir_all(root.join("资料")).unwrap();
+    fs::write(source.join("笔记.md"), "原始资料").unwrap();
+    fs::write(root.join("资料/笔记.md"), "目标资料").unwrap();
+    let sessions = noemori_runtime::session::SessionStore::new(data.path());
+    sessions
+        .patch_reader(&json!({"vaultRoot": source}))
+        .unwrap();
+    let migration = json!({
+        "source": source,
+        "root": root,
+        "path": "资料",
+        "marker": ".noemori-migration-fixture",
+    });
+    let receipt = data.path().join("library-migration.json");
+    let bytes = serde_json::to_vec(&migration).unwrap();
+    fs::write(&receipt, &bytes).unwrap();
+    let mut marker = migration.clone();
+    marker["source"] = json!("/other");
+    fs::write(
+        root.join("资料/.noemori-migration-fixture"),
+        serde_json::to_vec(&marker).unwrap(),
+    )
+    .unwrap();
+    let runtime = Runtime::new(data.path().into(), |_| {});
+    let request = root.to_str().unwrap().to_owned();
+    let error = runtime
+        .write(false, move |state| {
+            state.restore_library(&request, &OperationControl::default())
+        })
+        .wait()
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("迁移副本归属不一致"));
+    assert_eq!(fs::read(&receipt).unwrap(), bytes);
+    assert_eq!(sessions.load()["reader"]["vaultRoot"], json!(source));
+    assert_eq!(
+        fs::read_to_string(source.join("笔记.md")).unwrap(),
+        "原始资料"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("资料/笔记.md")).unwrap(),
+        "目标资料"
+    );
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn first_launch_creates_the_application_library() {
     let data = tempfile::tempdir().unwrap();
     let directory = tempfile::tempdir().unwrap();
@@ -169,12 +294,10 @@ async fn imports_keep_multiple_directories_and_create_unique_copies() {
             .unwrap()
             .unwrap();
         assert_eq!(imported["path"], suffix);
-        assert!(
-            std::path::Path::new(&root)
-                .join(suffix)
-                .join("空目录")
-                .is_dir()
-        );
+        assert!(std::path::Path::new(&root)
+            .join(suffix)
+            .join("空目录")
+            .is_dir());
         assert_eq!(
             fs::read_to_string(std::path::Path::new(&root).join(suffix).join("笔记.md")).unwrap(),
             "完整副本"
@@ -214,31 +337,27 @@ async fn cancellation_and_invalid_destinations_leave_no_partial_import() {
     assert!(control.cancel());
     let request = root.clone();
     let from = source.to_str().unwrap().to_owned();
-    assert!(
-        runtime
-            .write(true, move |state| state
-                .import_directory(&request, &from, "", &control))
-            .wait()
-            .await
-            .unwrap()
-            .unwrap()
-            .is_null()
-    );
+    assert!(runtime
+        .write(true, move |state| state
+            .import_directory(&request, &from, "", &control))
+        .wait()
+        .await
+        .unwrap()
+        .unwrap()
+        .is_null());
     let request = root.clone();
     let from = source.to_str().unwrap().to_owned();
-    assert!(
-        runtime
-            .write(true, move |state| state.import_directory(
-                &request,
-                &from,
-                "../外部",
-                &OperationControl::default()
-            ))
-            .wait()
-            .await
-            .unwrap()
-            .is_err()
-    );
+    assert!(runtime
+        .write(true, move |state| state.import_directory(
+            &request,
+            &from,
+            "../外部",
+            &OperationControl::default()
+        ))
+        .wait()
+        .await
+        .unwrap()
+        .is_err());
     assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
     runtime.shutdown().await.unwrap();
 }
@@ -297,19 +416,17 @@ async fn import_into_a_child_preserves_modification_time_and_rejects_stale_roots
         modified
     );
     let from = source.to_str().unwrap().to_owned();
-    assert!(
-        runtime
-            .write(true, move |state| state.import_directory(
-                "/other",
-                &from,
-                "",
-                &OperationControl::default()
-            ))
-            .wait()
-            .await
-            .unwrap()
-            .is_err()
-    );
+    assert!(runtime
+        .write(true, move |state| state.import_directory(
+            "/other",
+            &from,
+            "",
+            &OperationControl::default()
+        ))
+        .wait()
+        .await
+        .unwrap()
+        .is_err());
     runtime.shutdown().await.unwrap();
 }
 
@@ -340,34 +457,30 @@ async fn symbolic_links_and_recursive_sources_fail_without_publishing() {
         .unwrap();
     let request = root.clone();
     let from = source.to_str().unwrap().to_owned();
-    assert!(
-        runtime
-            .write(true, move |state| state.import_directory(
-                &request,
-                &from,
-                "",
-                &OperationControl::default()
-            ))
-            .wait()
-            .await
-            .unwrap()
-            .is_err()
-    );
+    assert!(runtime
+        .write(true, move |state| state.import_directory(
+            &request,
+            &from,
+            "",
+            &OperationControl::default()
+        ))
+        .wait()
+        .await
+        .unwrap()
+        .is_err());
     let request = root.clone();
     let from = directory.path().to_str().unwrap().to_owned();
-    assert!(
-        runtime
-            .write(true, move |state| state.import_directory(
-                &request,
-                &from,
-                "",
-                &OperationControl::default()
-            ))
-            .wait()
-            .await
-            .unwrap()
-            .is_err()
-    );
+    assert!(runtime
+        .write(true, move |state| state.import_directory(
+            &request,
+            &from,
+            "",
+            &OperationControl::default()
+        ))
+        .wait()
+        .await
+        .unwrap()
+        .is_err());
     assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
     runtime.shutdown().await.unwrap();
 }

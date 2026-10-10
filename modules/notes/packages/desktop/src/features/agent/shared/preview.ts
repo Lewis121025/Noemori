@@ -8,6 +8,31 @@ function text(item: Record<string, unknown>, key: string, limit: number): string
   return value;
 }
 
+/** 将 contain 图片中的点击映射到原始像素；留白和无效尺寸返回 null，不向后端派发。 */
+export function previewImagePoint(
+  bounds: { left: number; top: number; width: number; height: number },
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+): { x: number; y: number } | null {
+  if (
+    ![bounds.left, bounds.top, bounds.width, bounds.height, width, height, x, y].every(
+      Number.isFinite,
+    ) ||
+    width <= 0 ||
+    height <= 0 ||
+    bounds.width <= 0 ||
+    bounds.height <= 0
+  )
+    return null;
+  const scale = Math.min(bounds.width / width, bounds.height / height);
+  const left = bounds.left + (bounds.width - width * scale) / 2;
+  const top = bounds.top + (bounds.height - height * scale) / 2;
+  const point = { x: Math.floor((x - left) / scale), y: Math.floor((y - top) / scale) };
+  return point.x < 0 || point.y < 0 || point.x >= width || point.y >= height ? null : point;
+}
+
 /** 从 IPC 输入建立独立目标值；未知后端或超限身份在访问会话前拒绝。 */
 export function parsePreviewTarget(value: unknown): UiPreviewTarget {
   const item = record(value);
@@ -37,6 +62,20 @@ export function parsePreviewFrame(value: unknown): UiPreviewFrame {
 export function parseBrowserHumanInput(value: unknown): BrowserHumanInput {
   const item = record(value);
   const type = item["type"];
+  function coordinate(key: string, min = 0, max = 4096): number {
+    const value = item[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max)
+      throw new Error("预览坐标无效");
+    return value;
+  }
+  if (type === "drag")
+    return {
+      type,
+      from_x: coordinate("from_x"),
+      from_y: coordinate("from_y"),
+      to_x: coordinate("to_x"),
+      to_y: coordinate("to_y"),
+    };
   if (type === "dialog") {
     if (typeof item["accept"] !== "boolean") throw new Error("对话框回应无效");
     const prompt = item["text"];
@@ -52,22 +91,35 @@ export function parseBrowserHumanInput(value: unknown): BrowserHumanInput {
   if (type === "key") return { type, key: text(item, "key", 100) };
   if (type === "text") return { type, text: text(item, "text", 16384) };
   if (type === "pointer" || type === "scroll") {
-    const x = item["x"],
-      y = item["y"];
     const min = type === "pointer" ? 0 : -10000;
     const max = type === "pointer" ? 4096 : 10000;
+    const x = coordinate("x", min, max),
+      y = coordinate("y", min, max);
+    if (type === "scroll")
+      return {
+        type,
+        x,
+        y,
+        ...(item["at_x"] === undefined && item["at_y"] === undefined
+          ? {}
+          : { at_x: coordinate("at_x"), at_y: coordinate("at_y") }),
+      };
+    const button = item["button"];
+    if (button !== undefined && button !== "left" && button !== "right" && button !== "middle")
+      throw new Error("预览鼠标按钮无效");
+    const clicks = item["clicks"];
     if (
-      typeof x !== "number" ||
-      typeof y !== "number" ||
-      !Number.isFinite(x) ||
-      !Number.isFinite(y) ||
-      x < min ||
-      y < min ||
-      x > max ||
-      y > max
+      clicks !== undefined &&
+      (typeof clicks !== "number" || !Number.isSafeInteger(clicks) || clicks < 1 || clicks > 3)
     )
-      throw new Error("预览坐标无效");
-    return { type, x, y };
+      throw new Error("预览点击次数无效");
+    return {
+      type,
+      x,
+      y,
+      ...(button === undefined ? {} : { button }),
+      ...(clicks === undefined ? {} : { clicks }),
+    };
   }
   throw new Error("预览输入类型无效");
 }

@@ -249,7 +249,7 @@ impl StreamState {
         let delta = delta
             .as_object()
             .ok_or_else(|| Error::Protocol("Chat 增量必须是对象".into()))?;
-        validate_assistant_role(delta.get("role"))?;
+        validate_model_role(delta.get("role"), "assistant")?;
         let mut events = Vec::new();
         for (key, value) in delta {
             if value.is_null() {

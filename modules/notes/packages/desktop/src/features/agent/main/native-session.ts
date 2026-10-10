@@ -13,6 +13,7 @@ import { record, text } from "../shared/parse";
  * @param model 激活时的模型配置；后续每轮由主进程提供最新配置。
  * @param changed 原生状态变化通知，不携带认证或模型私有载荷。
  * @param attachmentDirectory 本对话已发布附件的只读目录；未发送草稿不在授权范围。
+ * @param embeddedHost 当前窗口网页的私有租约入口；省略时启动独立浏览器。
  * @returns 尚未开始生成的原生会话。
  * @throws 目录、运行资产、配置或权限无效时拒绝创建。
  */
@@ -24,6 +25,7 @@ export function createNativeSession(
   changed: () => void,
   label = "工作区助手",
   attachmentDirectory?: string,
+  embeddedHost?: string,
 ): NativeAgentSession {
   const root = realpathSync(workspace);
   const readable_paths = [
@@ -64,8 +66,9 @@ export function createNativeSession(
         node: process.execPath,
         worker: join(directory, "browser", "main.js"),
         executable,
-        // 浏览器画面由会话浮窗展示，运行与弹窗均不占用用户桌面焦点。
+        // 桌面通过租约共用窗口内网页；独立宿主仍使用后台浏览器。
         headless: true,
+        ...(embeddedHost ? { embedded_host: embeddedHost } : {}),
       },
       permission_store: join(userData, "permissions.json"),
       readable_paths,

@@ -90,6 +90,26 @@
 .app[data-reading-palette] .file-sidebar {
   box-shadow: var(--glass-rim), var(--glass-shadow);
 }
+/* 目录以内容层级为主，去掉玻璃高光；黑白配色使用中性灰，避免绿灰底色抢夺正文注意力。 */
+.app[data-reading-palette] .file-sidebar:not(.right) {
+  --glass-sheen: none;
+  --glass-rim: 0 0 0 transparent;
+  --glass-filter: none;
+  --radius-panel: 8px;
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.app[data-reading-palette="monochrome"] .file-sidebar:not(.right) {
+  --glass-solid: light-dark(#f6f6f7, #202123);
+  --glass-fill: var(--glass-solid);
+  --glass-overlay: light-dark(#ffffff, #28292c);
+  --fg: light-dark(#323438, #e2e3e6);
+  --muted: light-dark(#6e7279, #9b9ea6);
+  --border: light-dark(rgb(35 38 45 / 10%), rgb(225 228 238 / 10%));
+  --glass-edge: var(--border);
+  --selected: light-dark(rgb(35 38 45 / 5%), rgb(225 228 238 / 6%));
+  --accent: light-dark(#50545d, #c9ccd4);
+}
 .app[data-reading-palette] :is(.file-sidebar .list, .agent-panel, .article-source) {
   background: transparent;
 }

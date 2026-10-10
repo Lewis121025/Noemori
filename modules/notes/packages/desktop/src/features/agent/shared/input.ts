@@ -31,7 +31,7 @@ const note =
  * @param references 选中的原文引用。
  * @param attachments 本轮冻结的附件描述。
  * @param directory 当前对话已发布附件的工具可读目录，分叉后重新绑定。
- * @returns 有界用户消息；没有文件资料时保持旧文字与引用协议。
+ * @returns 有界用户消息；资料与原文分开编码，保留标识开头的原文也包装为文字。
  * @throws 资料无效、空输入或序列化超过 128 KiB 时拒绝。
  */
 export function conversationInput(
@@ -43,7 +43,14 @@ export function conversationInput(
   const quoted = parseReferences(references),
     files = parseAttachments(attachments);
   if (files.length > MAX_ATTACHMENTS) throw new Error("最多添加八个附件");
-  if (!files.length && directory === null) return referencedInput(input, quoted);
+  // 原文中的保留标识没有资料归属；只解码发布者显式创建的最外层信封。
+  if (
+    !files.length &&
+    directory === null &&
+    !input.startsWith(prefix) &&
+    !input.startsWith(legacyPrefix)
+  )
+    return referencedInput(input, quoted);
   if (
     (!input.trim() && !files.length) ||
     (directory !== null && (!directory.startsWith("/") || directory.includes("\u0000")))

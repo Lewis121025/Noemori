@@ -227,7 +227,12 @@ function mapPhrase(
             : node.type === "delete"
               ? "strike"
               : "highlight";
-      return mapPhrasing(node.children, definitions, documentSchema.mark(name).addToSet(marks), table);
+      return mapPhrasing(
+        node.children,
+        definitions,
+        documentSchema.mark(name).addToSet(marks),
+        table,
+      );
     }
     case "comment":
       return [documentSchema.node("comment_inline", { source: node.value }).mark(marks)];

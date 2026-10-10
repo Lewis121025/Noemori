@@ -49,7 +49,9 @@ fn missing_file_reads_as_empty_and_round_trips() {
     // 书签目录是点目录：不出现在文件树与文件列表里。
     assert!(root.path().join(".noemori/bookmarks.json").is_file());
     let entries = vault.list_entries().expect("目录");
-    assert!(entries.iter().all(|entry| !entry.path.starts_with(".noemori")));
+    assert!(entries
+        .iter()
+        .all(|entry| !entry.path.starts_with(".noemori")));
 }
 
 #[test]

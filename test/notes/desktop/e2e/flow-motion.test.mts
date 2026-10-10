@@ -9,7 +9,7 @@ import { _electron as electron, type Page } from "playwright-core";
 const desktop = new URL("../../../../modules/notes/packages/desktop/", import.meta.url);
 const require = createRequire(new URL("package.json", desktop));
 
-async function launch(t: TestContext) {
+async function launch(t: TestContext, debugDragRegions = false) {
   const root = await mkdtemp(join(tmpdir(), "noemori-flow-test-"));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const vault = join(root, "vault");
@@ -39,7 +39,13 @@ async function launch(t: TestContext) {
       "--no-sandbox",
     ],
     env: Object.fromEntries(
-      Object.entries({ ...process.env, NOEMORI_TEST_LIBRARY_ROOT: library }).filter(
+      Object.entries({
+        ...process.env,
+        NOEMORI_TEST_LIBRARY_ROOT: library,
+        ...(debugDragRegions
+          ? { ELECTRON_DEBUG_DRAGGABLE_REGIONS: "1", ELECTRON_ENABLE_LOGGING: "1" }
+          : {}),
+      }).filter(
         (entry): entry is [string, string] =>
           entry[1] !== undefined && entry[0] !== "ELECTRON_RENDERER_URL",
       ),
@@ -371,6 +377,122 @@ test("表格对齐底色移动且减少动态效果立即对齐，预览与取�
   }
 });
 
+// 当前只有 macOS 使用自绘标题栏；其他平台的系统窗框会忽略应用声明的拖动区域。
+test.skipIf(process.platform !== "darwin")("顶栏内容与伪元素的增删和移动不改变 Electron 原生命中区域", async (t) => {
+  const { app, page } = await launch(t, true);
+  let output = "";
+  const record = (chunk: Buffer) => (output += chunk.toString());
+  const stderr = app.process().stderr;
+  if (!stderr) throw new Error("缺少 Electron 原生拖动区域诊断输出");
+  stderr.on("data", record);
+  try {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    for (const stage of ["baseline", "append", "move", "remove"] as const) {
+      const offset = output.length;
+      await page.evaluate((stage) => {
+        const toolbar = document.querySelector(".window-toolbar");
+        const group = toolbar?.querySelector(".window-actions");
+        const button = group?.querySelector(".agent-entry");
+        if (!toolbar || !group || !button) throw new Error("缺少顶栏 Agent 入口");
+        if (stage === "baseline") {
+          // 在按钮内部添加已被排除的小区域，强制原生端回报，避免把没有日志误判为成功。
+          const witness = document.createElement("div");
+          witness.id = "drag-region-witness";
+          witness.style.cssText =
+            "position:absolute;width:1px;height:1px;pointer-events:none;app-region:no-drag";
+          button.append(witness);
+        } else if (stage === "append") {
+          const decoration = document.createElement("div");
+          decoration.id = "drag-region-decoration";
+          decoration.style.cssText =
+            "position:absolute;inset:-6px;pointer-events:none;opacity:0;z-index:-1";
+          group.append(decoration);
+          const style = document.createElement("style");
+          style.id = "drag-region-pseudo";
+          style.textContent =
+            '.window-toolbar::after { content: ""; position: absolute; inset: -6px; pointer-events: none; opacity: 0; }';
+          document.head.append(style);
+        } else if (stage === "move") {
+          const decoration = document.getElementById("drag-region-decoration");
+          if (!decoration) throw new Error("缺少拖动区域测试装饰");
+          decoration.style.transform = "translateX(-80px) scale(1.3)";
+        } else {
+          document.getElementById("drag-region-decoration")?.remove();
+          document.getElementById("drag-region-pseudo")?.remove();
+        }
+        const witness = document.getElementById("drag-region-witness");
+        if (!witness) throw new Error("缺少原生区域回报触发器");
+        witness.style.width = `${["baseline", "append", "move", "remove"].indexOf(stage) + 1}px`;
+      }, stage);
+      const updates = () => output
+        .slice(offset)
+        .split("\n")
+        .slice(0, -1)
+        .filter((line) => line.includes("hit-test region computed"));
+      await expect.poll(() => updates().length).toBeGreaterThan(0);
+      for (const update of updates())
+        expect(update, `${stage} 不得改变原生可拖动区域的任何一点`).toContain(
+          "identical to previous region",
+        );
+    }
+  } finally {
+    stderr.off("data", record);
+    await app.close();
+  }
+});
+
+test("顶栏 Agent 与文件栏的悬停装饰不进入原生拖动区域，图标和文字均可切换侧栏", async (t) => {
+  const { app, page } = await launch(t);
+  try {
+    const toolbar = page.locator(".window-toolbar");
+    expect(
+      await toolbar.evaluate((node) => getComputedStyle(node).getPropertyValue("app-region")),
+    ).toBe("drag");
+    const toggles = [
+      {
+        button: toolbar.getByRole("button", { name: "工作区助手", exact: true }),
+        group: toolbar.locator(".window-actions"),
+        sidebar: page.locator(".file-sidebar.right"),
+      },
+      {
+        button: toolbar.getByRole("button", { name: "显示或隐藏文件栏", exact: true }),
+        group: toolbar.locator(".window-navigation"),
+        sidebar: page.locator(".file-sidebar:not(.right)"),
+      },
+    ];
+    for (const { button, group, sidebar } of toggles) {
+      for (const target of [button.locator("svg"), button.locator("span"), button]) {
+        if (!(await target.count())) continue;
+        await target.hover();
+        await expect.poll(() => group.getAttribute("data-hover-visible")).toBe("");
+        expect(
+          await group.evaluate((node) => getComputedStyle(node).getPropertyValue("app-region")),
+        ).toBe("none");
+        expect(
+          await button.evaluate((node) => getComputedStyle(node).getPropertyValue("app-region")),
+        ).toBe("no-drag");
+        // CDP 点击绕过系统标题栏命中；光斑必须不产生区域，既不覆盖按钮，也不扣掉空白拖动区。
+        expect(
+          await group.locator(".pointer-highlight, .pointer-highlight > *").evaluateAll((nodes) =>
+            nodes.map((node) => ({
+              region: getComputedStyle(node).getPropertyValue("app-region"),
+              pointer: getComputedStyle(node).pointerEvents,
+            })),
+          ),
+        ).toEqual(Array.from({ length: 3 }, () => ({ region: "none", pointer: "none" })));
+        const expanded = (await button.getAttribute("aria-expanded")) === "true";
+        await target.click();
+        await expect.poll(() => button.getAttribute("aria-expanded")).toBe(String(!expanded));
+        await expect
+          .poll(() => sidebar.evaluate((node) => node.hasAttribute("hidden")))
+          .toBe(expanded);
+      }
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 test("光标在控件内移动和急转时首帧跟随，键盘与减少动态效果立即接管", async (t) => {
   const { app, page, vault, source } = await launch(t);
   try {
@@ -533,14 +655,18 @@ test("文件大纲指示底色接续反向操作，拖动分隔条可取消并�
       Number.parseFloat(getComputedStyle(node, "::before").translate),
     );
     await page.getByRole("button", { name: "文章大纲", exact: true }).click();
+    // 按钮颜色过渡可先于底色启动，只有伪元素动画能证明导航底色已接续。
     await page.waitForFunction(() =>
       document
         .querySelector(".panel-switch")
         ?.getAnimations({ subtree: true })
-        .some((motion) => motion.effect?.getTiming().duration !== 0),
+        .some((motion) =>
+          motion.effect instanceof KeyframeEffect && motion.effect.pseudoElement === "::before"),
     );
     const interrupted = await tabs.evaluate((node) => {
       for (const motion of node.getAnimations({ subtree: true })) {
+        if (!(motion.effect instanceof KeyframeEffect) || motion.effect.pseudoElement !== "::before")
+          continue;
         motion.pause();
         motion.currentTime = 75;
         motion.id = "interrupted-tab";
@@ -553,10 +679,13 @@ test("文件大纲指示底色接续反向操作，拖动分隔条可取消并�
       document
         .querySelector(".panel-switch")
         ?.getAnimations({ subtree: true })
-        .some((motion) => motion.id !== "interrupted-tab"),
+        .some((motion) => motion.id !== "interrupted-tab" &&
+          motion.effect instanceof KeyframeEffect && motion.effect.pseudoElement === "::before"),
     );
     const resumed = await tabs.evaluate((node) => {
       for (const motion of node.getAnimations({ subtree: true })) {
+        if (!(motion.effect instanceof KeyframeEffect) || motion.effect.pseudoElement !== "::before")
+          continue;
         motion.pause();
         motion.currentTime = 0;
       }

@@ -15,16 +15,18 @@
 
 pub(crate) mod cancellation;
 mod evidence;
+pub(crate) mod hybrid;
 mod occurrences;
 mod plan;
-pub(crate) mod hybrid;
 pub(crate) mod semantic;
 
 #[cfg(test)]
 #[path = "../../../../../test/notes/vault/performance/search/phases.rs"]
 mod performance;
 
-pub(crate) use occurrences::{execute as execute_matches_page, execute_with_identity as execute_matches_identity};
+pub(crate) use occurrences::{
+    execute as execute_matches_page, execute_with_identity as execute_matches_identity,
+};
 
 use std::collections::HashMap;
 use std::fmt::Write as _;

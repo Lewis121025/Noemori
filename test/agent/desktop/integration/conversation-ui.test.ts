@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentPanel from "../../../../modules/notes/packages/desktop/src/features/agent/renderer/AgentPanel.svelte";
 import type {
@@ -597,7 +597,7 @@ it("输入区切换模型与推理强度只针对当前对话，不覆盖草稿�
   const effort = target.querySelector('[aria-label="对话推理强度"]')!;
   expect(
     [...effort.querySelectorAll('[role="menuitemradio"]')].map((item) => item.textContent?.trim()),
-  ).toEqual(["服务商默认", "low", "high"]);
+  ).toEqual(["low", "high"]);
   button("high", effort).click();
   await vi.waitFor(() =>
     expect(api.modelSelect).toHaveBeenLastCalledWith("甲", {
@@ -623,10 +623,11 @@ it("输入区切换模型与推理强度只针对当前对话，不覆盖草稿�
     providerId: "provider",
     modelId: "fixture",
   });
-  await openEfforts();
-  expect(
-    target.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent?.trim(),
-  ).toBe("服务商默认");
+  await vi.waitFor(() => {
+    flushSync();
+    expect(button("选择对话模型").textContent).toContain("fixture");
+    expect(target.querySelector('[aria-label="选择推理强度"]')).toBeNull();
+  });
 });
 
 it("选择回执迟到时不能覆盖已经切换到的对话或草稿", async () => {
@@ -717,7 +718,7 @@ it("模型浮层聚焦搜索、说明无结果，并支持方向键选择和 Esc
   expect(api.modelSelect).not.toHaveBeenCalled();
 });
 
-it("输入区不提供内置工具开关，浏览器与应用状态随实际任务自动显示", async () => {
+it("输入区不提供内置工具开关，后台浏览器仅在人工协助时显示小窗", async () => {
   expect(target.querySelector('[aria-label="对话工具"]')).toBeNull();
   expect(target.querySelector(".tools-menu")).toBeNull();
   expect(target.querySelector('[aria-label="浏览器与应用控制"]')).toBeNull();
@@ -725,7 +726,7 @@ it("输入区不提供内置工具开关，浏览器与应用状态随实际任�
   notify("甲");
   await vi.waitFor(() => {
     flushSync();
-    expect(target.querySelector('[aria-label="浏览器与应用控制"]')).not.toBeNull();
+    expect(target.querySelector('[aria-label="浏览器与应用控制"]')).toBeNull();
   });
   records[0]!.ui.status = "ready";
   notify("甲");
@@ -746,7 +747,14 @@ it("输入区不提供内置工具开关，浏览器与应用状态随实际任�
   notify("乙");
   await vi.waitFor(() => {
     flushSync();
-    expect(target.querySelector('[aria-label="会话浏览器"]')).not.toBeNull();
+    expect(target.querySelector('[aria-label="会话浏览器"]')).toBeNull();
+    expect(document.querySelector('[aria-label="浏览器协助"]')).toBeNull();
+  });
+  records[1]!.browser.status = "human";
+  notify("乙");
+  await vi.waitFor(() => {
+    flushSync();
+    expect(document.querySelector('[aria-label="浏览器协助"]')).not.toBeNull();
   });
 });
 
@@ -1134,6 +1142,49 @@ it("新轮次运行时，历史缺失结果的调用不能重新显示为等待�
   notify("甲");
   await vi.waitFor(() => { flushSync(); expect(target.querySelectorAll(".tool-state")).toHaveLength(2); });
   expect([...target.querySelectorAll(".tool-state")].map((node) => node.textContent)).toEqual(["未返回结果", "等待结果"]);
+});
+
+it("展开工具保留阅读位置，详情增长和后续回复不拉走页面，回到最新后恢复跟随", async () => {
+  await unmount(panel);
+  const resize = new Map<Element, () => void>();
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private callback: () => void) {}
+    observe(element: Element): void { resize.set(element, this.callback); }
+    disconnect(): void {}
+  });
+  try {
+    records[0]!.messages = [
+      { role: "assistant", content: [{ type: "tool_call", value: { id: "read", name: "terminal", arguments: { action: "exec", cmd: "cat README.md" } } }] },
+      { role: "tool", content: [{ type: "tool_result", value: { call_id: "read", name: "terminal", output: "完整资料", is_error: false } }] },
+    ];
+    panel = mount(AgentPanel, { target, props: { api, close: () => {}, openLink: async () => {} } });
+    await selected("甲");
+    const viewport = target.querySelector<HTMLElement>(".messages")!;
+    let height = 500;
+    Object.defineProperties(viewport, { scrollHeight: { configurable: true, get: () => height }, clientHeight: { configurable: true, value: 400 } });
+    viewport.scrollTop = 100;
+    viewport.dispatchEvent(new Event("scroll"));
+    const tool = target.querySelector<HTMLDetailsElement>(".tool-call")!;
+    tool.querySelector<HTMLElement>("summary")!.click();
+    flushSync();
+    expect(tool.open).toBe(true);
+    height = 900;
+    resize.get(target.querySelector(".message-column")!)!();
+    await tick();
+    expect(viewport.scrollTop).toBe(100);
+    records[0]!.revision += 1;
+    records[0]!.messages.push({ role: "assistant", content: [{ type: "text", value: "后续回复" }] });
+    notify("甲");
+    await vi.waitFor(() => expect(target.textContent).toContain("后续回复"));
+    expect(viewport.scrollTop).toBe(100);
+    button("↓ 回到最新消息").click();
+    flushSync();
+    expect(viewport.scrollTop).toBe(900);
+    height = 1200;
+    resize.get(target.querySelector(".message-column")!)!();
+    await tick();
+    expect(viewport.scrollTop).toBe(1200);
+  } finally { vi.unstubAllGlobals(); }
 });
 
 it("阅读历史时流式更新保留滚动位置，回到最新后恢复跟随", async () => {

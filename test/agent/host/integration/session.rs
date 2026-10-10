@@ -1,10 +1,13 @@
 #![cfg(any(target_os = "macos", target_os = "linux"))]
+mod attachments;
 #[path = "../../support/model.rs"]
 mod model;
+mod pause;
 mod recovery;
-mod attachments;
+mod resume;
 mod steering;
 mod terminal_order;
+mod ui_capabilities;
 use noemori_agent::{
     host::{DesktopSession, DesktopSessionOptions, HostApprovalReply, HostRunStatus},
     llm::ModelEvent,
@@ -714,7 +717,7 @@ async fn continuing_after_interrupt_preserves_unfinished_streamed_text() {
     )
     .unwrap();
     branch.restore(live_branch).unwrap();
-    branch.start("在分支上继续".into()).unwrap();
+    branch.resume(&run).unwrap();
     wait(&branch, |view| {
         view.run
             .as_ref()
@@ -726,8 +729,12 @@ async fn continuing_after_interrupt_preserves_unfinished_streamed_text() {
         let history = &requests[0].messages;
         noemori_agent::validate_history(history).unwrap();
         let observed = serde_json::to_string(history).unwrap();
-        assert_eq!(observed.matches("已解释第一点，第二点尚未完成").count(), 1);
+        assert_eq!(observed.matches("已解释第一点，第二点尚未完成").count(), 0);
         assert_eq!(observed.matches("committed-observation").count(), 2);
+        assert_eq!(
+            serde_json::to_value(history).unwrap(),
+            serde_json::to_value(&model.0.lock().unwrap()[1].messages).unwrap()
+        );
         assert_eq!(host.snapshot().run.unwrap().status, HostRunStatus::Running);
     }
     branch.close().await.unwrap();

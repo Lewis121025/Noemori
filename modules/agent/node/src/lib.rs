@@ -10,8 +10,8 @@ use serde::Deserialize;
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -54,6 +54,8 @@ struct BrowserOptions {
     executable: Option<PathBuf>,
     #[serde(default)]
     headless: bool,
+    #[serde(default)]
+    embedded_host: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -141,6 +143,7 @@ impl NativeAgentSession {
                     browser: browser.executable,
                     workspace: options.workspace.clone(),
                     headless: browser.headless,
+                    embedded_host: browser.embedded_host,
                     private_origins: Vec::new(),
                 });
         options.ui_label = config.ui_label;
@@ -168,22 +171,47 @@ impl NativeAgentSession {
         serde_json::to_string(&self.inner.snapshot()).map_err(to_napi)
     }
 
+    /// 用户工具栏导航真实网页；有限动作校验失败或页面失效时拒绝，不发送模型请求。
+    #[napi]
+    pub async fn browser_navigate(&self, command: String) -> Result<()> {
+        if command.len() > 16384 { return Err(Error::from_reason("浏览器导航输入超限")); }
+        self.inner.browser_navigate(serde_json::from_str(&command).map_err(to_napi)?).await.map_err(to_napi)
+    }
+
+    /// 转发已接管原生画面的人工输入；目标、凭据或输入无效时拒绝，不授予模型权限。
+    #[napi]
+    pub async fn ui_input(&self, target: String, token: String, input: String) -> Result<()> {
+        if target.len() > 2048 || token.len() > 128 || input.len() > 65536 { return Err(Error::from_reason("原生画面输入超限")); }
+        self.inner.ui_input(serde_json::from_str(&target).map_err(to_napi)?, token, serde_json::from_str(&input).map_err(to_napi)?).await.map_err(to_napi)
+    }
+
     /// 读取当前会话浮窗画面；参数必须是固定目标结构，返回画面和输入凭据的 JSON 或错误。
     #[napi]
     pub async fn ui_preview(&self, target: String) -> Result<String> {
-        if target.len() > 2048 { return Err(Error::from_reason("预览目标超限")); }
-        let frame = self.inner.ui_preview(serde_json::from_str(&target).map_err(to_napi)?).await.map_err(to_napi)?;
+        if target.len() > 2048 {
+            return Err(Error::from_reason("预览目标超限"));
+        }
+        let frame = self
+            .inner
+            .ui_preview(serde_json::from_str(&target).map_err(to_napi)?)
+            .await
+            .map_err(to_napi)?;
         serde_json::to_string(&frame).map_err(to_napi)
     }
 
     /// 转发用户接管后的有界浏览器输入；无效目标或控制状态使 Promise 拒绝。
     #[napi]
     pub async fn browser_input(&self, page: String, token: String, input: String) -> Result<()> {
-        if page.len() > 128 || token.is_empty() || token.len() > 128 || input.len() > 65536 { return Err(Error::from_reason("人工输入超限")); }
-        self.inner.browser_input(page, token, serde_json::from_str(&input).map_err(to_napi)?).await.map_err(to_napi)
+        if page.len() > 128 || token.is_empty() || token.len() > 128 || input.len() > 65536 {
+            return Err(Error::from_reason("人工输入超限"));
+        }
+        self.inner
+            .browser_input(page, token, serde_json::from_str(&input).map_err(to_napi)?)
+            .await
+            .map_err(to_napi)
     }
 
-    /// 可信主进程切换 UI 控制权；不会自动启动或恢复模型生成。
+    /// 可信主进程切换 UI 控制权；接管暂停节点，交还确认后恢复同一运行。
     /// 后端、窗口身份、运行状态或确认回执无效时拒绝 Promise。
     #[napi]
     pub async fn ui_control(&self, backend: String, resume: bool) -> Result<String> {
@@ -248,6 +276,25 @@ impl NativeAgentSession {
         context: Option<String>,
     ) -> Result<String> {
         self.start_configured_with_attachments(configuration, binding, text, context, None)
+    }
+
+    /// 恢复指定节点，不新增用户消息或文章上下文；暂停态保留原编号，终态恢复创建新编号。
+    /// configuration 为有界模型 JSON，binding 为连接归属；失效运行、非法节点或配置会拒绝。
+    #[napi]
+    pub fn resume_configured(
+        &self,
+        run_id: String,
+        configuration: String,
+        binding: String,
+    ) -> Result<String> {
+        if configuration.len() > MAX_CONFIGURATION_BYTES {
+            return Err(Error::from_reason("模型配置超过 1 MiB"));
+        }
+        let settings: model::Settings = serde_json::from_str(&configuration).map_err(to_napi)?;
+        let model = settings.build().map_err(Error::from_reason)?;
+        self.inner
+            .resume_configured(&run_id, model, binding)
+            .map_err(to_napi)
     }
 
     /// 附件使用独立桥接入口，旧二进制缺少该方法会明确拒绝，不会忽略额外参数而伪报成功。

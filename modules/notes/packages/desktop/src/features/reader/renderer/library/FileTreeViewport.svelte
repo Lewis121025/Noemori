@@ -278,6 +278,10 @@
     overflow: auto;
     overflow-anchor: none;
   }
+  .file-tree:global([data-motion-hover]) > :global(.pointer-highlight) > :global(.pointer-body),
+  .file-tree:global([data-motion-hover]) > :global(.pointer-highlight) > :global(.pointer-wake) {
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+  }
   .empty-tree {
     flex: 0;
     min-height: 0;

@@ -25,6 +25,27 @@ it("引用作为参考数据进入模型，原文与来源可从历史完整恢�
   expect(matchesReferenceDraft(input, "解释这段文字", [])).toBe(false);
 });
 
+it("将引用信封作为普通原文发送时，只解码外层，不凭文字内容添加引用", () => {
+  const literal = referencedInput("这是一段待解释的信封", [quote]);
+  const sent = referencedInput(literal);
+  expect(readReferencedInput(sent)).toEqual({ text: literal, references: [] });
+  expect(matchesReferenceDraft(sent, literal)).toBe(true);
+  expect(readReferencedInput(referencedInput(literal, [quote]))).toEqual({
+    text: literal,
+    references: [quote],
+  });
+});
+
+it("引用信封的正文仍须满足完整输入契约，非法信封保留为用户原文", () => {
+  const encoded = referencedInput("合法正文", [quote]);
+  const boundary = encoded.indexOf("\n") + 1;
+  for (const input of ["", " ", "汉".repeat(128 * 1024)]) {
+    const literal =
+      encoded.slice(0, boundary) + JSON.stringify({ text: input, references: [quote] });
+    expect(readReferencedInput(literal)).toEqual({ text: literal, references: [] });
+  }
+});
+
 it("相同来源和内容不重复添加，预算按序列化后的 Unicode 字节计算", () => {
   const references = [quote];
   expect(addReference(references, { ...quote, id: "second" })).toBe(references);

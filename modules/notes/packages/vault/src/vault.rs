@@ -15,10 +15,10 @@ use crate::error::Error;
 use crate::index::{self, DerivedRows, FileRow, HeadingRecord};
 use crate::links::link::LinkRecord;
 use crate::links::mention::{self, MentionKind, MentionRecord, Mentions};
-use crate::storage::path::{path_to_slashes, resolve_in_root};
 use crate::markdown::scan;
 use crate::opening::{access, report};
 use crate::search::{SearchHit, SearchQuery};
+use crate::storage::path::{path_to_slashes, resolve_in_root};
 use crate::{OpenObserver, OpenPhase};
 
 /// 已打开的笔记库。
@@ -105,7 +105,8 @@ impl Vault {
         fs::create_dir_all(&index_dir)?;
         report(observer, OpenPhase::Recovering, 0, None)?;
         let _operation = lock_open_operation(&index_dir, observer)?;
-        let recovery = crate::storage::recovery::RecoveryStore::open(&index_dir.join("recovery.sqlite"))?;
+        let recovery =
+            crate::storage::recovery::RecoveryStore::open(&index_dir.join("recovery.sqlite"))?;
         crate::rename::recover_pending(&root, &recovery)?;
         let conn = index::open_connection(&index_dir.join("index.sqlite"))?;
         let search_index = crate::index::fulltext::SearchIndex::open(&index_dir)?;
@@ -729,11 +730,16 @@ impl Vault {
     ///
     /// # Errors
     /// 取消、数据库或排名索引失败时保留 pending，后续查询仍会重新同步。
-    pub fn publish_search_index(&self, cancellation: &crate::SearchCancellation) -> Result<(), Error> {
+    pub fn publish_search_index(
+        &self,
+        cancellation: &crate::SearchCancellation,
+    ) -> Result<(), Error> {
         let conn = self.lock_conn()?;
         cancellation.check()?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
-        self.search_index.lock()
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
+        self.search_index
+            .lock()
             .map_err(|_| Error::Io(io::Error::other("排名索引锁已失效")))?
             .synchronize(&tx, cancellation, &mut |_, _| Ok(()))?;
         tx.commit()?;
@@ -1251,7 +1257,10 @@ fn identity_inventory(
         aliases.remove(path);
     }
     for (path, rows) in derived {
-        aliases.insert(path.clone(), crate::links::identity::alias_keys(&rows.attributes));
+        aliases.insert(
+            path.clone(),
+            crate::links::identity::alias_keys(&rows.attributes),
+        );
     }
     let extras = crate::links::identity::extras_from_files(file_rows, aliases);
     Inventory::with_extra(files.to_vec(), &extras)
@@ -1393,7 +1402,10 @@ fn wiki_link_text(mention_text: &str, target: &str, inventory: &Inventory) -> St
     if mention_text == display {
         format!("[[{encoded}]]")
     } else {
-        format!("[[{encoded}|{}]]", crate::markdown::wiki::encode_text(mention_text))
+        format!(
+            "[[{encoded}|{}]]",
+            crate::markdown::wiki::encode_text(mention_text)
+        )
     }
 }
 

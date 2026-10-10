@@ -169,6 +169,32 @@ it("模型归属由实际连接决定，改名和添加未选模型保留签名�
   expect((await selected(settings))!.binding).not.toBe(routed);
 });
 
+it.each<ProviderUpdate["protocol"]>([
+  "openai-responses",
+  "anthropic",
+  "vertex-anthropic",
+  "gemini",
+  "ollama",
+  "bedrock",
+])("相同地址与模型切换到 %s 仍更新历史归属", async (protocol) => {
+  const { store: settings } = await store({ onTestFinished });
+  const saved = (
+    await settings.save({
+      ...provider("同一连接"),
+      address: { type: "endpoint", url: "https://example.com/model" },
+      models: [newProviderModel("fixture")],
+    })
+  ).providers[0]!;
+  const prior = (await selected(settings))!;
+  await settings.save({ ...saved, protocol, authentication: null });
+  const switched = (await selected(settings))!;
+  expect(switched.settings.protocol).toBe(protocol);
+  expect(switched.settings.endpoint).toBe(prior.settings.endpoint);
+  expect(switched.settings.model).toBe(prior.settings.model);
+  expect(switched.binding).not.toBe(prior.binding);
+  expect((await selected(settings))!.binding).toBe(switched.binding);
+});
+
 it.each(["描述不一致", "空认证材料"])("磁盘认证%s在派发模型前被拒绝", async (reason) => {
   const { store: settings, directory } = await store({ onTestFinished });
   await settings.save(provider("账号"));

@@ -1,3 +1,9 @@
+import { parseHandoff, type HandoffRequest, type HandoffState } from "./handoff.js";
+import { parseSemanticAction, type SemanticAction } from "./semantic.js";
+import { isExtensionAction, parseExtensionAction, type BrowserExtensionAction } from "./extensions.js";
+
+import type { ObservationPolicy, ObservationRequest, ObservationUpdate } from "./observation-update.js";
+
 /** 批量步骤只操作已经观察到的表单控件；不包含导航、脚本或权限操作。 */
 export type BrowserStep =
   | { action: "click"; ref: string }
@@ -6,7 +12,10 @@ export type BrowserStep =
   | { action: "check"; ref: string; checked: boolean };
 
 /** 浏览器动作只引用宿主分配的页面与观察；总 JSON 限 1 MiB，超限作为可纠正的输入错误拒绝。 */
-export type BrowserAction =
+export type BrowserAction = (
+  | BrowserExtensionAction
+  | SemanticAction
+  | { action: "human_navigate"; command: BrowserNavigation }
   | { action: "preview"; page: string }
   | { action: "human_input"; page: string; token: string; input: BrowserHumanInput }
   | { action: "allow_origin"; origin: string }
@@ -17,7 +26,7 @@ export type BrowserAction =
   | { action: "forward"; page: string }
   | { action: "reload"; page: string }
   | { action: "close"; page: string }
-  | { action: "observe"; page: string }
+  | ({ action: "observe"; page: string } & ObservationRequest)
   | { action: "read"; page: string; offset: number }
   | { action: "find"; page: string; text: string; exact?: boolean }
   | { action: "choose_files"; page: string; paths: string[] }
@@ -54,15 +63,28 @@ export type BrowserAction =
   | { action: "await_download"; page: string }
   | { action: "invalidate" }
   | { action: "save_download"; id: string; path: string }
-  | { action: "handoff" }
-  | { action: "resume" };
+  | { action: "handoff"; completion?: HandoffRequest }
+  | { action: "takeover" }
+  | { action: "resume" }
+) & { observation_mode?: ObservationPolicy };
+
+/** 用户地址栏与标签页的导航命令，不包含脚本或权限操作。 */
+export type BrowserNavigation = Extract<BrowserAction, { action: "open" | "navigate" | "back" | "forward" | "reload" | "close" }>;
 
 /** 可信预览窗口的人工输入；只在用户接管期间接受，不共享模型观察。 */
 export type BrowserHumanInput =
   | { type: "dialog"; accept: boolean; text?: string }
   | { type: "files"; paths: string[] }
-  | { type: "pointer"; x: number; y: number }
-  | { type: "scroll"; x: number; y: number }
+  | {
+      type: "pointer";
+      x: number;
+      y: number;
+      button?: "left" | "right" | "middle";
+      /** 连续点击编号；每条人工输入只发送一次按下与释放。 */
+      clicks?: number;
+    }
+  | { type: "drag"; from_x: number; from_y: number; to_x: number; to_y: number }
+  | { type: "scroll"; x: number; y: number; at_x?: number; at_y?: number }
   | { type: "key"; key: string }
   | { type: "text"; text: string };
 
@@ -70,8 +92,16 @@ export type BrowserHumanInput =
 export function parseHumanInput(value: unknown): BrowserHumanInput {
   const input = record(value);
   const type = text(input, "type", 16);
-  if (type === "pointer" || type === "scroll")
-    return { type, x: number(input, "x", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000), y: number(input, "y", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000) };
+  if (type === "drag") return { type, from_x: number(input, "from_x", 0, 4096), from_y: number(input, "from_y", 0, 4096), to_x: number(input, "to_x", 0, 4096), to_y: number(input, "to_y", 0, 4096) };
+  if (type === "pointer" || type === "scroll") {
+    const point = { x: number(input, "x", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000), y: number(input, "y", type === "pointer" ? 0 : -10000, type === "pointer" ? 4096 : 10000) };
+    if (type === "scroll") return { type, ...point, ...(input.at_x === undefined && input.at_y === undefined ? {} : { at_x: number(input, "at_x", 0, 4096), at_y: number(input, "at_y", 0, 4096) }) };
+    const button = input.button;
+    if (button !== undefined && button !== "left" && button !== "right" && button !== "middle") throw new Error("人工鼠标按钮无效");
+    const clicks = input.clicks;
+    if (clicks !== undefined && (typeof clicks !== "number" || !Number.isSafeInteger(clicks) || clicks < 1 || clicks > 3)) throw new Error("人工点击次数无效");
+    return { type, ...point, ...(button === undefined ? {} : { button }), ...(clicks === undefined ? {} : { clicks }) };
+  }
   if (type === "dialog") return { type, accept: boolean(input, "accept"), ...(input.text === undefined ? {} : { text: text(input, "text", 16384) }) };
   if (type === "files") return { type, paths: strings(input, "paths") };
   if (type === "key") return { type, key: text(input, "key", 100) };
@@ -92,6 +122,7 @@ export type BrowserSettings = {
 /** 页面元数据不暴露 Cookie、调试连接或浏览器对象。 */
 export type TabState = {
   id: string;
+  native_target?: string;
   url: string;
   title: string;
   crashed: boolean;
@@ -117,6 +148,9 @@ export type Observation = {
 
 /** 工具结果区分未执行、执行后观察与副作用未知；未知结果不得自动重放。 */
 export type BrowserResult = {
+  handoff?: HandoffState | null;
+  page?: string;
+  extensions?: Record<string, unknown>;
   input_token?: string;
   steps?: {
     index: number;
@@ -129,10 +163,12 @@ export type BrowserResult = {
   tabs: TabState[];
   mode: "agent" | "human";
   observation?: Observation;
+  observation_update?: ObservationUpdate;
   image?: { format: "jpeg"; data: string };
   downloads?: DownloadState[];
   saved_path?: string;
   text_page?: { text: string; offset: number; next_offset: number | null; total_chars: number };
+  locator_result?: Record<string, unknown>;
 };
 
 /** 下载完成只表示已经落入私有暂存区，显式保存才写入工作区。 */
@@ -194,16 +230,39 @@ function strings(input: Record<string, unknown>, key: string): string[] {
  */
 export function parseAction(value: unknown): BrowserAction {
   const input = record(value);
+  const result = parseActionFields(input);
+  if ((input.mode !== undefined || input.baseline !== undefined) && result.action !== "observe")
+    throw new Error("mode 和 baseline 仅用于显式 observe");
+  if (input.observation_mode === undefined) return result;
+  const policy = input.observation_mode;
+  if (policy !== "full" && policy !== "delta" && policy !== "none")
+    throw new Error("动作后观察模式必须是 full、delta 或 none");
+  if (!["open", "navigate", "back", "forward", "reload", "find", "wait", "choose_files", "click", "fill", "select", "check", "hover", "press", "type", "scroll", "pointer", "drag", "batch", "dialog", "upload", "locator", "webmcp_call", "webmcp_invoke"].includes(result.action))
+    throw new Error("该动作不支持动作后观察模式");
+  return { ...result, observation_mode: policy };
+}
+
+function parseActionFields(input: Record<string, unknown>): BrowserAction {
   // 与 Rust 输入契约一致；聚合超限属于普通动作错误，不能摧毁当前登录态和标签页。
   if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 1024 * 1024)
     throw new Error("浏览器动作 JSON 超过 1 MiB，请拆分批量步骤或缩短输入");
   const action = text(input, "action", 32);
   switch (action) {
+    case "human_navigate": {
+      const command = parseAction(input.command);
+      if (!["open", "navigate", "back", "forward", "reload", "close"].includes(command.action))
+        throw new Error("用户导航动作无效");
+      if (command.action === "open" || command.action === "navigate" || command.action === "back" || command.action === "forward" || command.action === "reload" || command.action === "close")
+        return { action, command };
+      throw new Error("用户导航动作无效");
+    }
+    case "handoff":
+      return { action, ...(input.completion === undefined ? {} : { completion: parseHandoff(input.completion) }) };
     case "allow_origin":
       return { action, origin: text(input, "origin") };
     case "tabs":
     case "downloads":
-    case "handoff":
+    case "takeover":
     case "resume":
     case "invalidate":
       return { action };
@@ -213,6 +272,7 @@ export function parseAction(value: unknown): BrowserAction {
       return { action, id: text(input, "id", 128), path: text(input, "path") };
   }
   const page = text(input, "page", 128);
+  if (isExtensionAction(action)) return parseExtensionAction(input, page);
   switch (action) {
     case "human_input":
       return { action, page, token: text(input, "token", 128), input: parseHumanInput(input.input) };
@@ -222,17 +282,26 @@ export function parseAction(value: unknown): BrowserAction {
     case "forward":
     case "reload":
     case "close":
-    case "observe":
     case "screenshot":
     case "preview":
     case "arm_download":
     case "await_download":
       return { action, page };
+    case "observe": {
+      const mode = input.mode;
+      if (mode !== undefined && mode !== "full" && mode !== "delta")
+        throw new Error("观察模式必须是 full 或 delta");
+      const baseline = input.baseline === undefined ? undefined : text(input, "baseline", 128);
+      if (baseline === "") throw new Error("观察基线不能为空");
+      return { action, page, ...(mode === undefined ? {} : { mode }), ...(baseline === undefined ? {} : { baseline }) };
+    }
     case "read": {
       const offset = input.offset === undefined ? 0 : number(input, "offset", 0, 10_000_000);
       if (!Number.isSafeInteger(offset)) throw new Error("正文偏移必须为整数");
       return { action, page, offset };
     }
+    case "locator":
+      return parseSemanticAction(input, page);
     case "find":
       return {
         action,

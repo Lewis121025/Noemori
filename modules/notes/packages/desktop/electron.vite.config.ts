@@ -1,12 +1,17 @@
 import { readdirSync, readFileSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import type { Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+import desktopPackage from "./package.json";
 
-const mathjaxWoffDir = resolve("node_modules/@mathjax/mathjax-newcm-font/chtml/woff2");
+// 构建可由仓库根或桌面目录发起；入口、资源和运行依赖都必须归属当前配置所在项目。
+const desktopRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const runtimeDependencies = Object.keys(desktopPackage.dependencies);
+const mathjaxWoffDir = resolve(desktopRoot, "node_modules/@mathjax/mathjax-newcm-font/chtml/woff2");
 const mathjaxWoffPublic = "mathjax-fonts/woff2";
 const require = createRequire(import.meta.url);
 
@@ -59,14 +64,15 @@ function mathjaxWoffPlugin(): Plugin {
 
 export default defineConfig({
   main: {
+    root: desktopRoot,
     plugins: [
-      externalizeDepsPlugin(),
+      externalizeDepsPlugin({ include: runtimeDependencies }),
       {
         name: "bundled-agent",
         writeBundle() {
           cpSync(
             join(require.resolve("@noemori/agent-node/package.json"), "../runtime"),
-            resolve("out/main/agent"),
+            resolve(desktopRoot, "out/main/agent"),
             { recursive: true },
           );
         },
@@ -74,18 +80,25 @@ export default defineConfig({
       {
         name: "bundled-pandoc",
         writeBundle() {
-          cpSync(resolve(".cache/pandoc-3.12/bundle"), resolve("out/main/pandoc"), {
-            recursive: true,
-          });
+          cpSync(
+            resolve(desktopRoot, ".cache/pandoc-3.12/bundle"),
+            resolve(desktopRoot, "out/main/pandoc"),
+            {
+              recursive: true,
+            },
+          );
         },
       },
     ],
     build: {
       rollupOptions: {
         input: {
-          index: resolve("src/main/index.ts"),
-          "whiteboard-worker": resolve("src/features/reader/main/whiteboard-worker.ts"),
-          "export-worker": resolve("src/features/reader/main/export/worker.ts"),
+          index: resolve(desktopRoot, "src/main/index.ts"),
+          "whiteboard-worker": resolve(
+            desktopRoot,
+            "src/features/reader/main/whiteboard-worker.ts",
+          ),
+          "export-worker": resolve(desktopRoot, "src/features/reader/main/export/worker.ts"),
         },
       },
     },
@@ -94,7 +107,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    root: desktopRoot,
+    plugins: [externalizeDepsPlugin({ include: runtimeDependencies })],
     build: {
       rollupOptions: {
         output: {
@@ -105,23 +119,24 @@ export default defineConfig({
     },
   },
   renderer: {
+    root: resolve(desktopRoot, "src/renderer"),
     build: {
       // 字体按独立文件加载，避免小分片被内联为现有 font-src 不允许的 data URL。
       assetsInlineLimit: (path) => (/\.(woff2?|ttf|otf)$/i.test(path) ? false : undefined),
       rollupOptions: {
         input: {
-          index: resolve("src/renderer/index.html"),
-          export: resolve("src/renderer/export.html"),
+          index: resolve(desktopRoot, "src/renderer/index.html"),
+          export: resolve(desktopRoot, "src/renderer/export.html"),
         },
       },
     },
     resolve: {
       alias: {
-        "@app": resolve("src/renderer"),
-        "@reader": resolve("src/features/reader"),
-        "@shared": resolve("src/shared"),
-        "#js": resolve("node_modules/@mathjax/src/mjs"),
-        "#default-font": resolve("node_modules/@mathjax/mathjax-newcm-font/mjs"),
+        "@app": resolve(desktopRoot, "src/renderer"),
+        "@reader": resolve(desktopRoot, "src/features/reader"),
+        "@shared": resolve(desktopRoot, "src/shared"),
+        "#js": resolve(desktopRoot, "node_modules/@mathjax/src/mjs"),
+        "#default-font": resolve(desktopRoot, "node_modules/@mathjax/mathjax-newcm-font/mjs"),
       },
     },
     plugins: [
@@ -131,12 +146,12 @@ export default defineConfig({
       viteStaticCopy({
         targets: [
           ...["cmaps", "standard_fonts", "wasm", "iccs"].map((directory) => ({
-            src: resolve(`node_modules/pdfjs-dist/${directory}`),
+            src: resolve(desktopRoot, `node_modules/pdfjs-dist/${directory}`),
             dest: "pdfjs",
           })),
           // 离线字体的版权与许可随构建一起分发。
           ...["lora", "newsreader", "inter", "noto-serif-sc", "noto-sans-sc"].map((font) => ({
-            src: resolve(`node_modules/@fontsource-variable/${font}/LICENSE`),
+            src: resolve(desktopRoot, `node_modules/@fontsource-variable/${font}/LICENSE`),
             dest: "font-licenses",
             rename: `${font}-OFL.txt`,
           })),

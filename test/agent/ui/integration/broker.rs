@@ -47,6 +47,55 @@ fn connect(broker: &UiBroker, session: &str) -> std::os::unix::net::UnixStream {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn human_window_input_survives_handoff_without_granting_model_control() {
+    let root = tempfile::tempdir().unwrap();
+    let broker = UiBroker::open(root.path().into(), "a".repeat(32), Arc::new(|| {})).unwrap();
+    broker.register("owner", "原生窗口任务");
+    let config: ConnectionConfig =
+        serde_json::from_slice(&std::fs::read(broker.configuration_path()).unwrap()).unwrap();
+    let mut stream = std::os::unix::net::UnixStream::connect(config.socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    wire::write_message(&mut stream, &json!({"type":"hello","version":1,"backend":"computer","token":config.token,"name":"测试应用"})).unwrap();
+    assert_eq!(wire::read_message(&mut stream).unwrap()["type"], "welcome");
+    let reply = std::thread::spawn(move || {
+        for action in ["handoff", "human_input"] {
+            let frame = wire::read_message(&mut stream).unwrap();
+            assert_eq!(frame["session"], "owner");
+            assert_eq!(frame["action"]["action"], action);
+            if action == "human_input" {
+                assert_eq!(frame["action"]["token"], "human-frame");
+                assert_eq!(frame["action"]["window"], "approved-window");
+            }
+            wire::write_message(&mut stream, &json!({"type":"result","id":frame["id"],"value":{"outcome":"executed","mode":"human"}})).unwrap();
+        }
+    });
+    let context = ExecutionContext::new(CancellationToken::new(), Duration::from_secs(2)).unwrap();
+    broker
+        .execute("owner", "computer", json!({"action":"handoff"}), &context)
+        .await
+        .unwrap();
+    assert!(
+        broker
+            .connections("owner")
+            .iter()
+            .any(|connection| connection.human)
+    );
+    assert!(broker.execute("owner", "computer", json!({"action":"pointer","app":"approved-app","window":"approved-window","x":20,"y":30}), &context).await.is_err());
+    let result = broker.execute("owner", "computer", json!({"action":"human_input","app":"approved-app","window":"approved-window","token":"human-frame","input":{"type":"pointer","x":20,"y":30}}), &context).await.unwrap();
+    assert_eq!(result["outcome"], "executed");
+    reply.join().unwrap();
+    assert!(
+        serde_json::from_value::<noemori_agent::tool::ui::computer::ComputerInput>(
+            json!({"action":"human_input"})
+        )
+        .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn paired_requests_are_scoped_and_disconnect_does_not_keep_authority() {
     let root = tempfile::tempdir().unwrap();
     let broker = UiBroker::open(root.path().into(), "a".repeat(32), Arc::new(|| {})).unwrap();

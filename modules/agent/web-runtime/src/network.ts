@@ -160,15 +160,12 @@ class NetworkState {
       socket.destroy();
       return;
     }
-    this.track(socket);
+    this.retain(socket);
+    // 浏览器端断开表示调用方取消连接；它只触发回收，读取失败由上游或响应转发报告。
+    socket.on("error", () => socket.destroy());
   }
   track(socket: Socket, incoming = false): Socket {
-    if (this.closed) {
-      socket.destroy();
-      throw new Error("浏览器网络出口已关闭");
-    }
-    this.sockets.add(socket);
-    socket.once("close", () => this.sockets.delete(socket));
+    this.retain(socket);
     socket.on("error", (error: Error) => this.errors.add(`浏览器网络失败：${error.message}`));
     if (incoming)
       socket.on("data", (chunk: Buffer) => {
@@ -179,6 +176,14 @@ class NetworkState {
         }
       });
     return socket;
+  }
+  private retain(socket: Socket): void {
+    if (this.closed) {
+      socket.destroy();
+      throw new Error("浏览器网络出口已关闭");
+    }
+    this.sockets.add(socket);
+    socket.once("close", () => this.sockets.delete(socket));
   }
   close(): void {
     this.closed = true;

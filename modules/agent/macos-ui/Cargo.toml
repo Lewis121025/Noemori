@@ -36,3 +36,19 @@ path = "src/main.rs"
 [[test]]
 name = "input_routing"
 path = "../../../test/agent/ui/unit/input-routing.rs"
+
+[[test]]
+name = "text_selection"
+path = "../../../test/agent/ui/unit/text-selection.rs"
+
+[[test]]
+name = "clipboard"
+path = "../../../test/agent/ui/integration/clipboard.rs"
+
+[[test]]
+name = "paste_lifecycle"
+path = "../../../test/agent/ui/unit/paste-lifecycle.rs"
+
+[[test]]
+name = "observation"
+path = "../../../test/agent/ui/unit/observation.rs"

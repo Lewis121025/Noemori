@@ -327,7 +327,7 @@ export declare class NativeRuntime {
   /** 保存门禁后准备导出；控制句柄不经过磁盘任务队列。 */
   exportPrepare(root: string, id: string, paths: Array<string> | undefined | null, hidden: boolean, control: NativeControl): Promise<unknown>
   /** 原生校验动作和路径；动作不会作为通用文件系统能力暴露给页面。 */
-  exportAction(id: string, action: any, bytes?: Buffer | undefined | null): Promise<unknown>
+  exportAction(id: string, action: unknown, bytes?: Buffer | undefined | null): Promise<unknown>
   /**
    * 读取文件原始字节。
    *

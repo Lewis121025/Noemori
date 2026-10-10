@@ -59,18 +59,36 @@ pub struct JsVaultEvent {
 impl NativeRuntime {
     /// 启动固定应用仓库；旧单目录会话以副本接入，草稿与阅读路径由 Rust 迁移。
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn vault_library_restore(&self, env: Env, root: String, control: &NativeControl) -> Result<Object> {
+    pub fn vault_library_restore(
+        &self,
+        env: Env,
+        root: String,
+        control: &NativeControl,
+    ) -> Result<Object> {
         let control = control.inner.clone();
         self.inner.register_control(&control);
-        self.write(env, false, move |state| state.restore_library(&root, &control).map_err(to_napi))
+        self.write(env, false, move |state| {
+            state.restore_library(&root, &control).map_err(to_napi)
+        })
     }
 
     /// 在当前仓库的指定父目录导入完整副本；取消返回 null，错误或警告保留提交边界。
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn directory_import(&self, env: Env, root: String, source: String, parent: String, control: &NativeControl) -> Result<Object> {
+    pub fn directory_import(
+        &self,
+        env: Env,
+        root: String,
+        source: String,
+        parent: String,
+        control: &NativeControl,
+    ) -> Result<Object> {
         let control = control.inner.clone();
         self.inner.register_control(&control);
-        self.write(env, true, move |state| state.import_directory(&root, &source, &parent, &control).map_err(to_napi))
+        self.write(env, true, move |state| {
+            state
+                .import_directory(&root, &source, &parent, &control)
+                .map_err(to_napi)
+        })
     }
 
     /// 准备候选库并原子切换；取消返回 null，失败保留旧库。

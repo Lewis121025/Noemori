@@ -60,14 +60,36 @@ impl ManagedProcess {
             Ok(()) => Ok(()),
             Err(error) if stopped(&error) => Ok(()),
             Err(error) => {
-                // Node 不拥有浏览器子进程；macOS 在检查与发信号之间退出时可能返回 EPERM。
-                // 只有确实回收到这个子进程时才接受该竞态，仍存活的进程继续报告原始错误。
+                // Node 不拥有浏览器子进程，已交付退出状态后不再按进程组发送信号。
                 if matches!(self.role, ProcessRole::Node)
                     && matches!(self.child.try_wait(), Ok(Some(_)))
                 {
                     self.reaped = true;
                     Ok(())
                 } else {
+                    #[cfg(target_os = "macos")]
+                    if error.raw_os_error() == Some(nix::libc::EPERM) {
+                        let pid = self
+                            .child
+                            .id()
+                            .and_then(|pid| i32::try_from(pid).ok())
+                            .ok_or_else(|| {
+                                format!(
+                                    "{}进程组终止失败：{error}；缺少有效进程组标识",
+                                    self.role.name()
+                                )
+                            })?;
+                        let exited = crate::process::group_has_no_live_members(
+                            nix::unistd::Pid::from_raw(pid),
+                        )
+                        .map_err(|reason| {
+                            format!("{}进程组终止失败：{error}；{reason}", self.role.name())
+                        })?;
+                        // 信号失败只在整组均已退出时可接受；回收状态仍由后续 wait 确认。
+                        if exited {
+                            return Ok(());
+                        }
+                    }
                     Err(format!("{}进程组终止失败：{error}", self.role.name()))
                 }
             }
@@ -181,6 +203,8 @@ impl Resources {
                     "--disable-crash-reporter",
                     "--disable-quic",
                     "--disable-features=HttpsUpgrades,BlockOriginHeaderModificationOnRedirect",
+                    // 只在宿主独占浏览器启用真实 WebMCP；工具调用仍需当前文档的独立审批。
+                    "--enable-blink-features=WebMCP",
                     "--disable-extensions",
                     "--disable-default-apps",
                     "--disable-sync",
@@ -349,3 +373,7 @@ impl Drop for Resources {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "../../../../../test/agent/web/integration/process.rs"]
+mod tests;

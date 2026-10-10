@@ -75,6 +75,8 @@ impl TerminalApprover for Gate {
             HostApprovalReply::Terminal(decision) => Ok(decision),
             HostApprovalReply::Network(_)
             | HostApprovalReply::Browser(_)
+            | HostApprovalReply::BrowserCapability(_)
+            | HostApprovalReply::UiLaunch(_)
             | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
         }
     }
@@ -93,6 +95,8 @@ impl TerminalNetworkApprover for Gate {
             HostApprovalReply::Network(decision) => Ok(decision),
             HostApprovalReply::Terminal(_)
             | HostApprovalReply::Browser(_)
+            | HostApprovalReply::BrowserCapability(_)
+            | HostApprovalReply::UiLaunch(_)
             | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
         }
     }
@@ -112,6 +116,8 @@ impl crate::tool::browser::BrowserApprover for Gate {
             HostApprovalReply::Browser(decision) => Ok(decision),
             HostApprovalReply::Terminal(_)
             | HostApprovalReply::Network(_)
+            | HostApprovalReply::BrowserCapability(_)
+            | HostApprovalReply::UiLaunch(_)
             | HostApprovalReply::Ui(_) => Err("审批类型不符".into()),
         }
     }
@@ -126,6 +132,40 @@ impl crate::tool::ui::computer::UiApprover for Gate {
     ) -> Result<crate::tool::ui::computer::UiAccessDecision, String> {
         match self.wait(HostApprovalRequest::Ui(request), context).await? {
             HostApprovalReply::Ui(decision) => Ok(decision),
+            _ => Err("审批类型不符".into()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::tool::ui::BrowserCapabilityApprover for Gate {
+    async fn approve(
+        &self,
+        request: crate::tool::ui::BrowserCapabilityRequest,
+        context: ExecutionContext,
+    ) -> Result<crate::tool::ui::BrowserCapabilityDecision, String> {
+        match self
+            .wait(HostApprovalRequest::BrowserCapability(request), context)
+            .await?
+        {
+            HostApprovalReply::BrowserCapability(decision) => Ok(decision),
+            _ => Err("审批类型不符".into()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::tool::ui::computer::UiLaunchApprover for Gate {
+    async fn approve(
+        &self,
+        request: crate::tool::ui::computer::UiLaunchRequest,
+        context: ExecutionContext,
+    ) -> Result<crate::tool::ui::computer::UiLaunchDecision, String> {
+        match self
+            .wait(HostApprovalRequest::UiLaunch(request), context)
+            .await?
+        {
+            HostApprovalReply::UiLaunch(decision) => Ok(decision),
             _ => Err("审批类型不符".into()),
         }
     }

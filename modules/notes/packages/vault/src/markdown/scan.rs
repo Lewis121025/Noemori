@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-use crate::markdown::frontmatter;
 use crate::links::link::{LinkKind, LinkRecord};
+use crate::markdown::frontmatter;
 use crate::markdown::source_map::{SourceMap, TextKind};
 use crate::markdown::tag;
 
@@ -159,7 +159,9 @@ fn parse_tree_strict(source: &str) -> Result<Node, markdown::message::Message> {
 /// 只建立导出所需的身份键，不生成全文索引、出链和源码映射。
 /// # Errors
 /// 严格语法树解析失败时传播错误；标题和别名语义与完整索引相同。
-pub(crate) fn scan_identity_strict(source: &str) -> Result<Vec<String>, markdown::message::Message> {
+pub(crate) fn scan_identity_strict(
+    source: &str,
+) -> Result<Vec<String>, markdown::message::Message> {
     let tree = parse_tree_strict(source)?;
     let mut title = None;
     let mut yaml = None;

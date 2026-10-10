@@ -1,5 +1,7 @@
+mod item;
+
 use super::*;
-use crate::ToolCall;
+use item::OutputItem;
 
 pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Value, Error> {
     let mut input = Vec::new();
@@ -9,7 +11,7 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
                 .as_array()
                 .ok_or_else(|| Error::Protocol("Responses 续轮数据必须是输出项数组".into()))?
             {
-                input.push(input_item(item)?);
+                input.push(OutputItem::decode(item)?.into_input()?);
             }
             continue;
         }
@@ -49,98 +51,12 @@ pub(super) fn request(config: &ModelConfig, request: &ModelRequest) -> Result<Va
     Ok(body)
 }
 
-/// 普通回复转成输入文本，省略生成元数据；推理项保持原样以满足签名续轮契约。
-fn input_item(item: &Value) -> Result<Value, Error> {
-    match string(item, "type")? {
-        "message" => {
-            let mut content = Vec::new();
-            for part in array(item, "content")? {
-                let text = match string(part, "type")? {
-                    "output_text" => string(part, "text")?,
-                    "refusal" => string(part, "refusal")?,
-                    other => {
-                        return Err(Error::Unsupported(format!("Responses 内容类型：{other}")));
-                    }
-                };
-                content.push(json!({"type":"input_text", "text":text}));
-            }
-            let mut message = json!({"role":"assistant", "content":content});
-            // 阶段标记区分过程说明与最终回答，是续轮语义而非生成状态。
-            if let Some(phase) = item.get("phase") {
-                message["phase"] = phase.clone();
-            }
-            Ok(message)
-        }
-        "function_call" => {
-            let mut call = item.clone();
-            call.as_object_mut()
-                .ok_or_else(|| Error::Protocol("Responses 工具调用必须是对象".into()))?
-                .retain(|key, _| {
-                    matches!(
-                        key.as_str(),
-                        "type"
-                            | "call_id"
-                            | "name"
-                            | "arguments"
-                            | "namespace"
-                            | "async"
-                            | "caller"
-                    )
-                });
-            Ok(call)
-        }
-        "reasoning" => Ok(item.clone()),
-        other => Err(Error::Unsupported(format!("Responses 输出项：{other}"))),
-    }
-}
-
 pub(super) fn response(config: &ModelConfig, body: Value) -> Result<ModelResponse, Error> {
     let output = array(&body, "output")?;
     let interrupted = body["status"] == "incomplete";
     let mut content = Vec::new();
     for item in output {
-        match string(item, "type")? {
-            "message" => {
-                for part in array(item, "content")? {
-                    match string(part, "type")? {
-                        "output_text" => {
-                            content.push(ContentPart::Text(string(part, "text")?.into()))
-                        }
-                        "refusal" => {
-                            content.push(ContentPart::Text(string(part, "refusal")?.into()))
-                        }
-                        other => {
-                            return Err(Error::Unsupported(format!("Responses 内容类型：{other}")));
-                        }
-                    }
-                }
-            }
-            "function_call" => {
-                let Some(arguments) = complete_arguments(
-                    item.get("arguments")
-                        .ok_or_else(|| Error::Protocol("工具缺少参数".into()))?,
-                    interrupted,
-                )?
-                else {
-                    continue;
-                };
-                content.push(ContentPart::ToolCall(ToolCall {
-                    id: string(item, "call_id")?.into(),
-                    name: string(item, "name")?.into(),
-                    arguments,
-                }));
-            }
-            "reasoning" => {
-                if let Some(summary) = item["summary"].as_array() {
-                    for part in summary {
-                        if let Some(text) = part["text"].as_str() {
-                            content.push(ContentPart::Reasoning(text.into()));
-                        }
-                    }
-                }
-            }
-            other => return Err(Error::Unsupported(format!("Responses 输出项：{other}"))),
-        }
+        content.extend(OutputItem::decode(item)?.content(interrupted)?);
     }
     let status = string(&body, "status")?;
     let reason = match status {

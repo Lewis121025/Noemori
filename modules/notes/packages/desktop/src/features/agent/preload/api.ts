@@ -21,6 +21,11 @@ export function createAgentApi(): AgentApi {
       }
     });
   return {
+    uiInput: (id, target, token, input) => invoke("agent.uiInput", id, target, token, input),
+    browserNavigate: (id, command) => invoke("agent.browserNavigate", id, command),
+    browserView: (id, placement) => invoke("agent.browserView", id, placement),
+    browserDownloads: (id) => invoke("agent.browserDownloads", id),
+    browserSaveDownload: (id, download) => invoke("agent.browserSaveDownload", id, download),
     uiPreview: (id, target) => invoke("agent.uiPreview", id, target),
     browserChooseFiles: (id, page, token) => invoke("agent.browserChooseFiles", id, page, token),
     browserInput: (id, page, token, input) => invoke("agent.browserInput", id, page, token, input),
@@ -37,6 +42,9 @@ export function createAgentApi(): AgentApi {
     attachmentsFromLibrary: (id, source) => invoke("agent.attachmentsFromLibrary", id, source),
     attachmentPreview: (id, file) => invoke("agent.attachmentPreview", id, file),
     attachmentOpen: (id, file) => invoke("agent.attachmentOpen", id, file),
+    attachmentSave: (id, file) => invoke("agent.attachmentSave", id, file),
+    contentPreview: (id, reference) => invoke("agent.contentPreview", id, reference),
+    contentSave: (file) => invoke("agent.contentSave", file),
     create: (workspace, title) => invoke("agent.create", workspace, title),
     attachVault: (root) => invoke("agent.attachVault", root),
     createArticle: (request) => invoke("agent.createArticle", request),
@@ -44,12 +52,15 @@ export function createAgentApi(): AgentApi {
     fork: (id, request) => invoke("agent.fork", id, request),
     list: () => invoke("agent.list"),
     snapshot: (id) => invoke("agent.snapshot", id),
-    start: (id, text, references, attachments) => invoke("agent.start", id, text, references, attachments),
+    start: (id, text, references, attachments) =>
+      invoke("agent.start", id, text, references, attachments),
     cancel: (id, runId) => invoke("agent.cancel", id, runId),
     resume: (id, runId) => invoke("agent.resume", id, runId),
-    steer: (id, runId, text, references, attachments) => invoke("agent.steer", id, runId, text, references, attachments),
+    steer: (id, runId, text, references, attachments) =>
+      invoke("agent.steer", id, runId, text, references, attachments),
     queueGet: (id) => invoke("agent.queueGet", id),
-    queueAdd: (id, runId, text, references, attachments) => invoke("agent.queueAdd", id, runId, text, references, attachments),
+    queueAdd: (id, runId, text, references, attachments) =>
+      invoke("agent.queueAdd", id, runId, text, references, attachments),
     queueRemove: (id, messageId) => invoke("agent.queueRemove", id, messageId),
     queuePause: (id, paused) => invoke("agent.queuePause", id, paused),
     browserControl: (id, resume) => invoke("agent.browserControl", id, resume),
@@ -59,7 +70,8 @@ export function createAgentApi(): AgentApi {
     rename: (id, title) => invoke("agent.rename", id, title),
     archive: (id, archived) => invoke("agent.archive", id, archived),
     remove: (id) => invoke("agent.remove", id),
-    saveDraft: (id, draft, references, attachments) => invoke("agent.saveDraft", id, draft, references, attachments),
+    saveDraft: (id, draft, references, attachments) =>
+      invoke("agent.saveDraft", id, draft, references, attachments),
     flush: () => invoke("agent.flush"),
     approve: (id, approval, reply) => invoke("agent.approve", id, approval, reply),
     terminalRead: (id, terminal, offset) => invoke("agent.terminalRead", id, terminal, offset),

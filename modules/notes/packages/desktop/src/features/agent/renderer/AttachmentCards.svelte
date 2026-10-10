@@ -2,18 +2,22 @@
   import { onDestroy, tick } from "svelte";
   import type { AgentApi } from "../shared/api";
   import type { AgentAttachment, AttachmentPreview } from "../shared/attachments";
+  import PreviewContent from "./PreviewContent.svelte";
+  import ContentCard from "./ContentCard.svelte";
   let {
     api,
     session,
     files,
     disabled = false,
     onRemove,
+    onInspect,
   }: {
     api: AgentApi;
     session: string;
     files: AgentAttachment[];
     disabled?: boolean;
     onRemove?: (id: string) => void;
+    onInspect?: (() => void) | undefined;
   } = $props();
   let selected = $state<AgentAttachment | null>(null);
   let preview = $state<AttachmentPreview | null>(null);
@@ -35,6 +39,7 @@
         : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
   async function show(file: AgentAttachment): Promise<void> {
+    onInspect?.();
     const request = ++version,
       owner = session;
     selected = file;
@@ -81,7 +86,13 @@
   }
 </script>
 
-{#if files.length}<ul class="attachments" aria-label={onRemove ? "消息附件" : "已发送附件"}>
+{#if files.length && !onRemove}{#each files as file (file.id)}<ContentCard
+      source={{ type: "attachment", id: file.id, name: file.name }}
+      {api}
+      {session}
+      {onInspect}
+    />{/each}
+{:else if files.length}<ul class="attachments" aria-label="消息附件">
     {#each files as file (file.id)}<li>
         <button
           class="file"
@@ -121,10 +132,7 @@
       <button type="button" aria-label="关闭附件预览" onclick={() => dialog.close()}>×</button>
     </header>
     {#if loading}<p role="status">正在读取附件…</p>
-    {:else if preview?.type === "image"}<img src={preview.url} alt={selected.name} />
-    {:else if preview?.type === "text"}<pre>{preview.text || "文件为空"}</pre>
-      {#if preview.truncated}<p>预览显示前 128 KB，Agent 仍可读取完整文件。</p>{/if}
-    {:else if preview?.type === "file"}<p>可在系统应用中查看这个文件。</p>{/if}
+    {:else if preview}<PreviewContent {preview} name={selected.name} {api} {onInspect} />{/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <footer>
       <button type="button" disabled={opening || loading} onclick={() => void open()}
@@ -258,22 +266,6 @@
     font-size: 12px;
     line-height: 1.7;
     overflow-wrap: anywhere;
-  }
-  img {
-    display: block;
-    margin: 16px auto;
-    max-width: 100%;
-    max-height: 60dvh;
-    object-fit: contain;
-  }
-  pre {
-    max-height: 55dvh;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    line-height: 1.7;
-    user-select: text;
   }
   footer {
     display: flex;

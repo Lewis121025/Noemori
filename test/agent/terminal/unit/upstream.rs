@@ -357,7 +357,23 @@ async fn https_upstream_verifies_custom_roots_and_hostname_without_changing_syst
         ("localhost", false, false),
         ("127.0.0.1", true, false),
     ] {
-        let (listener, port) = server().await;
+        // 与客户端使用同一个主机解析结果，避免依赖另一地址族恰好没有监听器。
+        let listener = TcpListener::bind((host, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // 另一地址族的相同端口属于其他服务时，localhost 也必须连接本测试的 TLS 服务。
+        let other_family = if host == "localhost" {
+            let other_ip = match listener.local_addr().unwrap().ip() {
+                IpAddr::V4(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                IpAddr::V6(_) => IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            };
+            Some(
+                TcpListener::bind(SocketAddr::new(other_ip, port))
+                    .await
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
         let mut proxy = TerminalUpstreamProxy::new(&format!("https://{host}:{port}")).unwrap();
         if trusted {
             proxy = proxy.with_trusted_roots(vec![root.der().to_vec()]).unwrap();
@@ -375,16 +391,30 @@ async fn https_upstream_verifies_custom_roots_and_hostname_without_changing_syst
         .unwrap();
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         let remote = async {
-            let (peer, _) = listener.accept().await.unwrap();
+            let (peer, _) = if let Some(other) = &other_family {
+                tokio::select! {
+                    accepted = listener.accept() => accepted.unwrap(),
+                    accepted = other.accept() => {
+                        accepted.unwrap();
+                        panic!("localhost 连接到了另一地址族的无关服务");
+                    }
+                }
+            } else {
+                listener.accept().await.unwrap()
+            };
             let result = acceptor.accept(peer).await;
-            if let Ok(mut tls) = result
-                && success
-            {
+            if success {
+                // 缓冲响应，确保夹具显式完成传输，不依赖 TLS write_all 恰好直接写入内核。
+                let mut tls = BufStream::new(result.unwrap());
                 let header = read_header(&mut tls).await;
                 assert!(header.starts_with(b"CONNECT 192.0.2.1:443 HTTP/1.1\r\n"));
                 tls.write_all(b"HTTP/1.1 200 OK\r\n\r\n\x00\xffearly")
                     .await
                     .unwrap();
+                tls.flush().await.unwrap();
+                tls.shutdown().await.unwrap();
+            } else {
+                assert!(result.is_err(), "客户端拒绝证书后，服务器握手也必须结束");
             }
         };
         tokio::time::timeout(Duration::from_secs(5), async {

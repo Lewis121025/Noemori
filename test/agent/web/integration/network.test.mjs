@@ -94,3 +94,56 @@ test("网络预算耗尽后到达的新连接被关闭，不能让辅助进程�
     await new Promise((resolve) => proxy.close(resolve));
   }
 });
+
+test("浏览器取消隧道只释放连接，上游重置仍报告真实读取失败", async () => {
+  for (const source of ["browser", "upstream"]) {
+    let upstream;
+    let accept;
+    const accepted = new Promise((resolve) => {
+      accept = resolve;
+    });
+    const server = net.createServer((socket) => {
+      upstream = socket;
+      socket.on("error", () => socket.destroy());
+      accept(socket);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const destination = `127.0.0.1:${server.address().port}`;
+    const gateway = await createGateway(undefined, 1024 * 1024, [`https://${destination}`]);
+    let client;
+    try {
+      const url = new URL(gateway.url);
+      client = await new Promise((resolve, reject) => {
+        const request = http.request({
+          hostname: url.hostname,
+          port: url.port,
+          method: "CONNECT",
+          path: destination,
+        });
+        request.once("error", reject);
+        request.once("connect", (response, socket) => {
+          assert.equal(response.statusCode, 200);
+          socket.on("error", () => socket.destroy());
+          resolve(socket);
+        });
+        request.end();
+      });
+      await accepted;
+      const clientClosed = new Promise((resolve) => client.once("close", resolve));
+      const upstreamClosed = new Promise((resolve) => upstream.once("close", resolve));
+      (source === "browser" ? client : upstream).resetAndDestroy();
+      await Promise.all([clientClosed, upstreamClosed]);
+    } finally {
+      client?.destroy();
+      upstream?.destroy();
+      // 关闭出口会等待网关所有连接的 close，诊断断言不能先于错误事件交付。
+      try {
+        await gateway.close();
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
+    if (source === "browser") assert.deepEqual([...gateway.errors], []);
+    else assert.match([...gateway.errors].join("；"), /ECONNRESET/);
+  }
+});

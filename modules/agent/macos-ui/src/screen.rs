@@ -73,10 +73,10 @@ fn error(pointer: *mut NSError) -> String {
         .unwrap_or_else(|| "截图服务没有返回图像".into())
 }
 
-/// 根据 PID、标题和范围唯一关联窗口；返回实际图像尺寸与源范围，失败、取消或超时返回诊断。
+/// 根据 AX 提供的真实编号和 PID 关联窗口；返回实际图像尺寸与逻辑窗口范围，失败、取消或超时返回诊断。
 pub(crate) fn capture(
     pid: i32,
-    title: String,
+    window_id: u32,
     bounds: Bounds,
     cancel: impl Fn() -> bool,
 ) -> Result<Captured, String> {
@@ -113,24 +113,15 @@ pub(crate) fn capture(
                         window
                             .owningApplication()
                             .is_some_and(|app| app.processID() == pid)
-                            && window.title().map(|v| v.to_string()).unwrap_or_default() == title
-                            && {
-                                let frame = window.frame();
-                                (frame.origin.x - bounds.x).abs() < 2.0
-                                    && (frame.origin.y - bounds.y).abs() < 2.0
-                                    && (frame.size.width - bounds.width).abs() < 2.0
-                                    && (frame.size.height - bounds.height).abs() < 2.0
-                            }
+                            && window.windowID() == window_id
                     }
                 })
                 .collect();
             if candidates.len() != 1 {
-                let _ = sender.send(Err(
-                    "无法唯一关联 AX 与截图窗口，请重新观察；不会猜测其他窗口".into(),
-                ));
+                let _ = sender.send(Err("目标 AX 窗口已不在截图快照中，请重新观察".into()));
                 return;
             }
-            // SAFETY: 选中的窗口具有唯一进程、标题和范围匹配；filter 保留该窗口。
+            // SAFETY: 选中的窗口具有唯一编号与进程匹配；filter 保留该窗口。
             let (filter, config, number) = unsafe {
                 (
                     SCContentFilter::initWithDesktopIndependentWindow(
@@ -141,14 +132,10 @@ pub(crate) fn capture(
                     candidates[0].windowID(),
                 )
             };
-            // SAFETY: filter 与唯一窗口均在当前回调保留；只读取真实像素比例和范围。
-            let (pixel_scale, frame) = unsafe { (filter.pointPixelScale(), candidates[0].frame()) };
-            let capture_bounds = Bounds {
-                x: frame.origin.x,
-                y: frame.origin.y,
-                width: frame.size.width,
-                height: frame.size.height,
-            };
+            // 台前调度会把 SCWindow.frame 缩为桌面缩略图；独立窗口截图和输入使用 AX 的逻辑范围。
+            // SAFETY: filter 保留当前唯一窗口，像素比例由系统提供。
+            let pixel_scale = unsafe { filter.pointPixelScale() };
+            let capture_bounds = bounds;
             if !pixel_scale.is_finite()
                 || pixel_scale <= 0.0
                 || capture_bounds.width <= 0.0
